@@ -1,8 +1,15 @@
 # ============================================================================
 # RUST LIBRARY BUILDER - Nix-based SDLC for crates.io Rust libraries
 # ============================================================================
-# Build verification, dev shells, check-all, publish, and regenerate apps.
-# No Docker, no push, no deploy — libraries don't need them.
+# Build verification, dev shells, and lifecycle apps.
+# No Docker, no deploy — libraries publish to crates.io.
+#
+# Apps:
+#   check-all  — cargo fmt + clippy + test
+#   bump       — version bump (patch|minor|major), regenerate, git commit + tag
+#   publish    — cargo publish
+#   release    — bump + publish in one step
+#   regenerate — regenerate Cargo.nix from Cargo.lock
 #
 # Usage in library flake.nix:
 #   let rustLibrary = import "${substrate}/lib/rust-library.nix" {
@@ -65,6 +72,7 @@ in {
     pkgs.fenixRustToolchain
     pkgs.rust-analyzer
     pkgs.cargo-watch
+    pkgs.cargo-edit
   ];
 
   defaultDevEnvVars = {
@@ -104,6 +112,50 @@ in {
       '');
     };
 
+    bump = {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${name}-bump" ''
+        set -euo pipefail
+
+        BUMP_TYPE="''${1:-patch}"
+        case "$BUMP_TYPE" in
+          major|minor|patch) ;;
+          *)
+            echo "Usage: nix run .#bump -- {major|minor|patch}"
+            echo ""
+            echo "Bumps version in Cargo.toml, regenerates Cargo.nix, commits, and tags."
+            exit 1
+            ;;
+        esac
+
+        OLD_VERSION=$(${pkgs.fenixRustToolchain}/bin/cargo metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
+        echo "Current version: $OLD_VERSION"
+        echo ""
+
+        echo "==> cargo set-version --bump $BUMP_TYPE"
+        ${pkgs.cargo-edit}/bin/cargo set-version --bump "$BUMP_TYPE"
+        NEW_VERSION=$(${pkgs.fenixRustToolchain}/bin/cargo metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
+        echo ""
+
+        echo "==> Regenerating Cargo.nix..."
+        ${crate2nix}/bin/crate2nix generate
+        echo ""
+
+        # Update Cargo.lock
+        ${pkgs.fenixRustToolchain}/bin/cargo check --quiet 2>/dev/null || true
+
+        ${pkgs.git}/bin/git add Cargo.toml Cargo.lock Cargo.nix
+        ${pkgs.git}/bin/git commit -m "release: ${name} v$NEW_VERSION"
+        ${pkgs.git}/bin/git tag "v$NEW_VERSION"
+
+        echo "Bumped $OLD_VERSION -> $NEW_VERSION"
+        echo ""
+        echo "Next steps:"
+        echo "  git push && git push --tags"
+        echo "  nix run .#publish"
+      '');
+    };
+
     publish = {
       type = "app";
       program = toString (pkgs.writeShellScript "${name}-publish" ''
@@ -132,6 +184,62 @@ in {
           echo ""
           echo "Published successfully."
         fi
+      '');
+    };
+
+    release = {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${name}-release" ''
+        set -euo pipefail
+
+        BUMP_TYPE="''${1:-patch}"
+        case "$BUMP_TYPE" in
+          major|minor|patch) ;;
+          *)
+            echo "Usage: nix run .#release -- {major|minor|patch}"
+            echo ""
+            echo "Bumps version, publishes, and pushes in one step."
+            exit 1
+            ;;
+        esac
+
+        if [ -z "''${CARGO_REGISTRY_TOKEN:-}" ]; then
+          echo "Error: CARGO_REGISTRY_TOKEN is not set."
+          echo "Set it via: export CARGO_REGISTRY_TOKEN=<your-token>"
+          exit 1
+        fi
+
+        OLD_VERSION=$(${pkgs.fenixRustToolchain}/bin/cargo metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
+        echo "Current version: $OLD_VERSION"
+        echo ""
+
+        # Bump
+        echo "==> cargo set-version --bump $BUMP_TYPE"
+        ${pkgs.cargo-edit}/bin/cargo set-version --bump "$BUMP_TYPE"
+        NEW_VERSION=$(${pkgs.fenixRustToolchain}/bin/cargo metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
+        echo ""
+
+        echo "==> Regenerating Cargo.nix..."
+        ${crate2nix}/bin/crate2nix generate
+        ${pkgs.fenixRustToolchain}/bin/cargo check --quiet 2>/dev/null || true
+        ${pkgs.git}/bin/git add Cargo.toml Cargo.lock Cargo.nix
+        ${pkgs.git}/bin/git commit -m "release: ${name} v$NEW_VERSION"
+        ${pkgs.git}/bin/git tag "v$NEW_VERSION"
+        echo "Bumped $OLD_VERSION -> $NEW_VERSION"
+        echo ""
+
+        # Publish
+        echo "==> cargo publish"
+        ${pkgs.fenixRustToolchain}/bin/cargo publish
+        echo ""
+
+        # Push
+        echo "==> git push && git push --tags"
+        ${pkgs.git}/bin/git push
+        ${pkgs.git}/bin/git push --tags
+        echo ""
+
+        echo "Released ${name} v$NEW_VERSION"
       '');
     };
 
