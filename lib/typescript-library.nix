@@ -1,9 +1,9 @@
 # ============================================================================
 # TYPESCRIPT LIBRARY BUILDER - Nix-based SDLC for TypeScript libraries
 # ============================================================================
-# Build verification, dev shells, and check-all apps.
+# Build verification, dev shells, check-all, and publish apps.
 # Uses dream2nix for dependency resolution from package-lock.json.
-# No Docker, no push, no deploy — libraries don't need them.
+# No Docker, no deploy — libraries publish to npm.
 #
 # Usage in library flake.nix:
 #   let tsLibrary = import "${substrate}/lib/typescript-library.nix" {
@@ -15,6 +15,7 @@
 #   }
 #
 # This returns: { packages, devShells, apps }
+# Apps: check-all (lint + typecheck + test), publish (build + npm publish)
 {
   nixpkgs,
   system,
@@ -115,6 +116,41 @@ in {
         echo ""
 
         echo "All checks passed."
+      '');
+    };
+
+    publish = {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${name}-publish" ''
+        set -euo pipefail
+
+        DRY_RUN=false
+        for arg in "$@"; do
+          case "$arg" in
+            --dry-run) DRY_RUN=true ;;
+          esac
+        done
+
+        echo "==> npm run ${buildScript}"
+        npm run ${buildScript}
+        echo ""
+
+        if [ "$DRY_RUN" = "true" ]; then
+          echo "Dry run: validating ${name} for npm..."
+          npm publish --access public --dry-run
+          echo ""
+          echo "Dry run passed. Ready to publish."
+        else
+          if [ -z "''${NPM_TOKEN:-}" ]; then
+            echo "Error: NPM_TOKEN is not set."
+            echo "Set it via: export NPM_TOKEN=<your-token>"
+            exit 1
+          fi
+          echo "Publishing ${name} to npm..."
+          npm publish --access public
+          echo ""
+          echo "Published successfully."
+        fi
       '');
     };
   };
