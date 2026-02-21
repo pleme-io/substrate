@@ -227,4 +227,11 @@ in rec {
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
   # Usage: import "${substrate}/lib/rust-library.nix" { inherit system nixpkgs; nixLib = substrate; crate2nix = inputs.crate2nix; };
   rustLibraryBuilder = ./rust-library.nix;
+
+  # ============================================================================
+  # TYPESCRIPT LIBRARY BUILDER (from typescript-library.nix)
+  # ============================================================================
+  # Standalone module for TypeScript library SDLC (build, check-all, devShell).
+  # Usage: import "${substrate}/lib/typescript-library.nix" { inherit system nixpkgs dream2nix; };
+  typescriptLibraryBuilder = ./typescript-library.nix;
 }
