@@ -220,4 +220,11 @@ in rec {
   # Creates a Rust overlay using latest stable from fenix (1.90+)
   # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkRustOverlay { inherit fenix system; }) ]; };
   inherit (rustOverlayModule) mkRustOverlay getRustToolchain;
+
+  # ============================================================================
+  # RUST LIBRARY BUILDER (from rust-library.nix)
+  # ============================================================================
+  # Standalone module for crates.io Rust library SDLC (build, check, publish).
+  # Usage: import "${substrate}/lib/rust-library.nix" { inherit system nixpkgs; nixLib = substrate; crate2nix = inputs.crate2nix; };
+  rustLibraryBuilder = ./rust-library.nix;
 }
