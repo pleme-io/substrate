@@ -144,17 +144,6 @@ rec {
       forge = forge;
     };
 
-    # Push test Docker image to GHCR (for Kenshi TestGates)
-    # Only available when dockerImage-test is provided
-    push-test-image = if dockerImage-test != null then mkImagePushApp {
-      inherit serviceName ghcrToken;
-      imagePath = dockerImage-test;
-      registry = testRegistry;
-      imageSuffix = "-test";
-      imageLabel = "TEST";
-      forge = forge;
-    } else null;
-
     # Deploy to Kubernetes via GitOps
     deploy = {
       type = "app";
@@ -480,6 +469,17 @@ rec {
         echo ""
         echo "✅ Created migration files in ./migrations/"
       '');
+    };
+  } // pkgs.lib.optionalAttrs (dockerImage-test != null) {
+    # Push test Docker image to GHCR (for Kenshi TestGates)
+    # Only available when dockerImage-test is provided
+    push-test-image = mkImagePushApp {
+      inherit serviceName ghcrToken;
+      imagePath = dockerImage-test;
+      registry = testRegistry;
+      imageSuffix = "-test";
+      imageLabel = "TEST";
+      forge = forge;
     };
   };
 }
