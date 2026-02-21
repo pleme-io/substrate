@@ -50,10 +50,8 @@ rec {
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       ] ++ env;
       ExposedPorts = builtins.listToAttrs (
-        map (portName: {
-          name = "${toString ports.${portName}}/tcp";
-          value = {};
-        }) (builtins.attrNames ports)
+        builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
+          (pkgs.lib.unique (builtins.attrValues ports))
       );
       Labels = {
         "org.opencontainers.image.title" = name;

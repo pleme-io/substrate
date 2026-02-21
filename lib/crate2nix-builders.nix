@@ -269,11 +269,10 @@
     contents = with pkgs; [cacert curl serviceBinary openssl];
     config = {
       Cmd = ["${serviceBinary}/bin/${serviceName}"];
-      ExposedPorts = {
-        "${toString ports.graphql}/tcp" = {};
-        "${toString ports.health}/tcp" = {};
-        "${toString ports.metrics}/tcp" = {};
-      };
+      ExposedPorts = builtins.listToAttrs (
+        builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
+          (pkgs.lib.unique [ ports.graphql ports.health ports.metrics ])
+      );
       Env = [
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
         "LD_LIBRARY_PATH=${pkgs.openssl.out}/lib"
