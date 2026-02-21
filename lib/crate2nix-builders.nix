@@ -101,7 +101,7 @@
       buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override {
         defaultCrateOverrides = pkgs.defaultCrateOverrides // {
           # Add build inputs for crates that need them
-          "${serviceName}-service" = oldAttrs: {
+          "${packageName}" = oldAttrs: {
             inherit buildInputs;
             nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [pkg-config cmake perl git]);
             OPENSSL_DIR = "${pkgs.openssl.dev}";
@@ -123,7 +123,7 @@
 
     # Get the service crate - same approach as production
     serviceCrate = if project ? workspaceMembers
-      then project.workspaceMembers."${serviceName}-service"
+      then project.workspaceMembers."${packageName}"
       else project.rootCrate;
 
     # Build the service with tests - crate2nix builds test binaries alongside the main binary
@@ -216,6 +216,7 @@
     nativeBuildInputs ? [],
     crateOverrides ? {},
     enableAwsSdk ? false,
+    packageName ? "${serviceName}-service",  # Crate name in workspace (standalone: just serviceName)
   }: let
     muslTarget = if architecture == "arm64" then "aarch64-unknown-linux-musl" else "x86_64-unknown-linux-musl";
     crossPkgs = if enableAwsSdk then (if architecture == "arm64" then pkgs.pkgsCross.aarch64-multiplatform-musl else pkgs.pkgsCross.musl64) else pkgs;
@@ -242,7 +243,7 @@
         # Setting GIT_SHA via builtins.getEnv would bust the entire crate cache on every commit.
         # Instead, GIT_SHA is passed at runtime via the Docker image's Env config.
         # The Rust code reads it via std::env::var("GIT_SHA") at runtime.
-        "${serviceName}-service" = oldAttrs: {
+        "${packageName}" = oldAttrs: {
           inherit buildInputs;
           nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [cmake perl git]);
           PROTOC = if builtins.any (p: p.pname or "" == "protobuf") nativeBuildInputs then "${pkgs.protobuf}/bin/protoc" else null;
@@ -261,7 +262,7 @@
       } // crateOverrides;
     };
 
-    serviceBinary = if project ? workspaceMembers then project.workspaceMembers."${serviceName}-service".build else project.rootCrate.build;
+    serviceBinary = if project ? workspaceMembers then project.workspaceMembers."${packageName}".build else project.rootCrate.build;
   in pkgs.dockerTools.buildLayeredImage {
     name = "${serviceName}-service";
     inherit tag architecture;

@@ -62,7 +62,7 @@ rec {
     dockerImage-arm64 ? null,
     dockerImage-test ? null,  # Test image for Kenshi TestGates
     architectures ? ["amd64" "arm64"],
-    productName,  # Required: product identifier (e.g., "myapp")
+    productName ? null,  # Product identifier (e.g., "myapp") — null for standalone repos
     productConfig ? {},  # Product configuration from deploy.yaml (parsed in rust-services.nix)
     # Relative path from repo root to service directory.
     # Used at runtime with `git rev-parse --show-toplevel` for actual working dir paths.
@@ -70,18 +70,22 @@ rec {
     serviceDirRelative ? "services/rust/${serviceName}",
     namespace,  # Required: K8s namespace (e.g., "${productName}-staging")
     cluster ? "staging",  # Target cluster name
-    registryBase,  # Required: registry base URL (e.g., "ghcr.io/myorg")
+    registryBase ? null,  # Registry base URL (e.g., "ghcr.io/myorg") — null when registry is set
+    registry ? null,  # Explicit registry override (e.g., "ghcr.io/pleme-io/shinka")
     atticToken ? defaultAtticToken,
     ghcrToken ? defaultGhcrToken,
     forge,
     crate2nix,
     nixHooks ? null,  # Optional: Nix hooks package for attic-push-hook
   }: let
-    # Registry with service name
-    registry = "${registryBase}/${productName}-${serviceName}";
+    # Compute effective registry: explicit override > product-based derivation
+    effectiveRegistry = if registry != null then registry
+      else if productName != null && registryBase != null
+        then "${registryBase}/${productName}-${serviceName}"
+      else throw "mkCrate2nixServiceApps: either 'registry' or both 'productName'+'registryBase' required";
 
     # Test image registry (same pattern but with -test suffix)
-    testRegistry = "${registryBase}/${productName}-${serviceName}-test";
+    testRegistry = "${effectiveRegistry}-test";
 
     # Determine BUILD_ARM64 environment variable based on architectures list
     buildArm64EnvValue = if builtins.elem "arm64" architectures then "auto" else "no";
@@ -125,7 +129,7 @@ rec {
           --service ${serviceName} \
           --service-dir "${serviceDirPath}" \
           --repo-root "${repoRootPath}" \
-          --registry ${registry}
+          --registry ${effectiveRegistry}
       '');
     };
 
@@ -136,7 +140,7 @@ rec {
     in mkImagePushApp {
       inherit serviceName ghcrToken;
       imagePath = imageAmd64;
-      inherit registry;
+      registry = effectiveRegistry;
       forge = forge;
     };
 
@@ -161,7 +165,7 @@ rec {
           --service ${serviceName} \
           --service-dir "${serviceDirPath}" \
           --repo-root "${repoRootPath}" \
-          --registry ${registry} \
+          --registry ${effectiveRegistry} \
           --namespace ${namespace} \
           --watch
       '');
@@ -210,7 +214,7 @@ rec {
           --service ${serviceName} \
           --service-dir "$(${pkgs.git}/bin/git rev-parse --show-toplevel)/${serviceDirRelative}" \
           --repo-root "$(${pkgs.git}/bin/git rev-parse --show-toplevel)" \
-          --registry ${registry} \
+          --registry ${effectiveRegistry} \
           --image-path ${imageAmd64} \
           "$@"
       '');
@@ -465,9 +469,9 @@ rec {
         cd "$ACTUAL_SERVICE_DIR"
 
         if [ -z "''${1:-}" ]; then
-          echo "Usage: nix run .#migrate-add:${productName}:${serviceName} -- <migration_name>"
+          echo "Usage: nix run .#migrate-add${if productName != null then ":${productName}" else ""}:${serviceName} -- <migration_name>"
           echo ""
-          echo "Example: nix run .#migrate-add:${productName}:${serviceName} -- add_users_table"
+          echo "Example: nix run .#migrate-add${if productName != null then ":${productName}" else ""}:${serviceName} -- add_users_table"
           exit 1
         fi
 

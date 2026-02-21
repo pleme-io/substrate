@@ -63,9 +63,12 @@ in {
     health = 8081;
     metrics = 9090;
   },
-  productName,  # Required: product identifier (e.g., "myapp")
-  registryBase,  # Required: registry base URL (e.g., "ghcr.io/myorg")
-  namespace ? "${productName}-staging",
+  productName ? null,  # Product identifier — null for standalone repos
+  registryBase ? null,  # Registry base URL — null when registry is set
+  registry ? null,  # Explicit registry override (e.g., "ghcr.io/pleme-io/shinka")
+  packageName ? (if productName != null then "${serviceName}-service" else serviceName),  # Crate name
+  namespace ? (if productName != null then "${productName}-staging" else "${serviceName}-system"),
+  serviceDirRelative ? (if productName != null then "services/rust/${serviceName}" else "."),
   cluster ? "staging",  # Target cluster for deployment
   architectures ? ["amd64" "arm64"],  # Supported architectures: amd64, arm64
 }: let
@@ -89,14 +92,14 @@ in {
   hasArch = arch: builtins.elem arch architectures;
 
   dockerImage-amd64 = if hasArch "amd64" then serviceLib.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName;
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
     architecture = "amd64";
   } else null;
 
   dockerImage-arm64 = if hasArch "arm64" then serviceLib.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName;
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
     architecture = "arm64";
@@ -145,7 +148,7 @@ in {
   # Apps call `nix build --system x86_64-linux` directly (no nix→shell→nix pattern)
   # Remote builders configured in /etc/nix/machines handle cross-compilation transparently
   apps = serviceLib.mkCrate2nixServiceApps {
-    inherit serviceName src repoRoot productName namespace cluster registryBase crate2nix dockerImage-amd64 dockerImage-arm64 architectures nixHooks;
+    inherit serviceName src repoRoot productName namespace cluster registryBase registry serviceDirRelative crate2nix dockerImage-amd64 dockerImage-arm64 architectures nixHooks;
     forge = forge;
   } // {
     # Add rust-version app for easy version verification
