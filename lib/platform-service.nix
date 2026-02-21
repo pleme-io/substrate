@@ -1,5 +1,5 @@
 # Platform Service Builder - Generic builder for platform infrastructure services
-# Reusable abstraction for Shinka, Releases, Pangea, and future platform services
+# Reusable abstraction for platform infrastructure services
 #
 # This module provides parameterized functions that:
 # - Build Rust binaries from Cargo.nix using crate2nix
@@ -8,9 +8,10 @@
 #
 # Usage:
 #   mkPlatformService {
-#     name = "shinka";
-#     description = "GitOps-native database migration operator";
-#     src = ./pkgs/platform/shinka;
+#     name = "my-service";
+#     description = "My platform service";
+#     src = ./pkgs/platform/my-service;
+#     githubOrg = "myorg";
 #     ports = { health = 8080; };
 #   }
 { pkgs, crate2nix, forgeCmd, defaultGhcrToken }:

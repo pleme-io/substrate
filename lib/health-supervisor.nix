@@ -22,6 +22,8 @@
       craneLib = (pkgs.crane.mkLib pkgs).overrideToolchain (
         pkgs.fenix.fromToolchainFile {
           file = healthSupervisorSrc + "/rust-toolchain.toml";
+          # SHA256 of the toolchain archive — update when rust-toolchain.toml changes.
+          # Compute with: nix-prefetch-url --unpack <toolchain-url>
           sha256 = "sha256-SXRtAuO4IqnOQq5yGo+Ojxwxc/FRlKEpgwfVzwbLRV4=";
         }
       );
