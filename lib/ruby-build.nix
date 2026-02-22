@@ -168,6 +168,30 @@ in rec {
   };
 
   # ============================================================================
+  # GEM BUMP APP (Bump gem version via forge)
+  # ============================================================================
+  # Create an app that bumps the version in lib/*/version.rb
+  #
+  # srcDir: Path to the Ruby project directory
+  # name: Name of the gem
+  # level: patch (default), minor, or major
+  #
+  mkRubyGemBumpApp = {
+    srcDir,
+    name,
+    level ? "patch",
+  }: {
+    type = "app";
+    program = toString (writeShellScript "gem-bump-${name}" ''
+      set -euo pipefail
+      exec ${forgeCmd} gem bump \
+        --working-dir "${srcDir}" \
+        --name "${name}" \
+        --level "${level}"
+    '');
+  };
+
+  # ============================================================================
   # GEM BUILD APP (Build .gem file via forge)
   # ============================================================================
   # Create an app that builds a .gem file from a gemspec using forge
@@ -222,6 +246,7 @@ in rec {
     name,
   }: {
     regen = mkRubyRegenApp { inherit srcDir name; };
+    "gem:bump" = mkRubyGemBumpApp { inherit srcDir name; };
     "gem:build" = mkRubyGemBuildApp { inherit srcDir name; };
     "gem:push" = mkRubyGemPushApp { inherit srcDir name; };
     "gem:release" = {

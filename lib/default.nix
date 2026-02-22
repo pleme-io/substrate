@@ -281,6 +281,7 @@ in rec {
     mkRubyRegenApp
     mkRubyPushApp
     mkRubyServiceApps
+    mkRubyGemBumpApp
     mkRubyGemBuildApp
     mkRubyGemPushApp
     mkRubyGemApps;
