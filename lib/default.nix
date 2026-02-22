@@ -12,6 +12,7 @@
 #   - service-helpers.nix: Docker compose, test runners, dev shell, checks
 #   - environment-apps.nix: Environment-aware deployment apps (staging + production)
 #   - image-release.nix: Generic multi-arch OCI image release (skopeo-based)
+#   - helm-build.nix: Helm chart lint, package, push, release apps
 {
   pkgs,
   forge ? null,
@@ -73,6 +74,9 @@
 
   # Generic multi-arch image release (no forge dependency — pure skopeo)
   imageReleaseModule = import ./image-release.nix { inherit pkgs; };
+
+  # Helm chart build helpers (lint, package, push, release)
+  helmBuildModule = import ./helm-build.nix { inherit pkgs; };
 
   # mkProductSdlcApps: configurable SDLC app factory.
   # Accepts { backendDir, infraServices } — all optional with sensible defaults.
@@ -234,4 +238,34 @@ in rec {
   # Standalone module for TypeScript library SDLC (build, check-all, devShell).
   # Usage: import "${substrate}/lib/typescript-library.nix" { inherit system nixpkgs dream2nix; };
   typescriptLibraryBuilder = ./typescript-library.nix;
+
+  # ============================================================================
+  # HELM CHART BUILD HELPERS (from helm-build.nix)
+  # ============================================================================
+  # Lint, package, push, and release Helm charts to OCI registries.
+  # Use mkHelmSdlcApps for a single chart, mkHelmAllApps for multiple.
+  #
+  # Example (single chart):
+  #   apps = substrateLib.mkHelmSdlcApps {
+  #     name = "pleme-microservice";
+  #     chartDir = ./charts/pleme-microservice;
+  #     libChartDir = ./charts/pleme-lib;
+  #   };
+  #
+  # Example (all charts):
+  #   apps = substrateLib.mkHelmAllApps {
+  #     libChartDir = ./charts/pleme-lib;
+  #     charts = [
+  #       { name = "pleme-microservice"; chartDir = ./charts/pleme-microservice; }
+  #       { name = "pleme-worker"; chartDir = ./charts/pleme-worker; }
+  #     ];
+  #   };
+  inherit (helmBuildModule)
+    mkHelmLintApp
+    mkHelmPackageApp
+    mkHelmPushApp
+    mkHelmReleaseApp
+    mkHelmTemplateApp
+    mkHelmSdlcApps
+    mkHelmAllApps;
 }
