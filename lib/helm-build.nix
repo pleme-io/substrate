@@ -320,15 +320,14 @@ in
             if ! helm lint "$TMPDIR/${chart.name}"; then
               echo "FAIL: ${chart.name} lint"
               FAILED=1
-              rm -rf "$TMPDIR"
-              continue 2>/dev/null || true
+            else
+              echo "--- Package ---"
+              helm package "$TMPDIR/${chart.name}" --destination "$OUTPUT_DIR"
+              echo "--- Push ---"
+              CHART_TGZ=$(find "$OUTPUT_DIR" -name '${chart.name}-*.tgz' | sort -V | tail -1)
+              helm push "$CHART_TGZ" "$REGISTRY"
+              echo "DONE: ${chart.name}"
             fi
-            echo "--- Package ---"
-            helm package "$TMPDIR/${chart.name}" --destination "$OUTPUT_DIR"
-            echo "--- Push ---"
-            CHART_TGZ=$(find "$OUTPUT_DIR" -name '${chart.name}-*.tgz' | sort -V | tail -1)
-            helm push "$CHART_TGZ" "$REGISTRY"
-            echo "DONE: ${chart.name}"
             rm -rf "$TMPDIR"
           '') charts}
           exit $FAILED
