@@ -240,6 +240,17 @@ in rec {
   typescriptLibraryBuilder = ./typescript-library.nix;
 
   # ============================================================================
+  # HOME-MANAGER SERVICE HELPERS (standalone import — no pkgs/system needed)
+  # ============================================================================
+  # Reusable patterns for daemon + MCP tool services (zoekt-mcp, codesearch, etc.).
+  # Unlike other substrate exports, this is a standalone file path — consumers
+  # import it directly with `{ lib }` since it only needs nixpkgs lib functions.
+  #
+  # Usage:
+  #   hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
+  hmServiceHelpers = ./hm-service-helpers.nix;
+
+  # ============================================================================
   # HELM CHART BUILD HELPERS (from helm-build.nix)
   # ============================================================================
   # Lint, package, push, and release Helm charts to OCI registries.
