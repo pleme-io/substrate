@@ -12,6 +12,7 @@
 #   - service-helpers.nix: Docker compose, test runners, dev shell, checks
 #   - environment-apps.nix: Environment-aware deployment apps (staging + production)
 #   - image-release.nix: Generic multi-arch OCI image release (skopeo-based)
+#   - ruby-build.nix: Ruby gem/service builders (Docker image, regen, push, release)
 #   - helm-build.nix: Helm chart lint, package, push, release apps
 {
   pkgs,
@@ -74,6 +75,12 @@
 
   # Generic multi-arch image release (no forge dependency — pure skopeo)
   imageReleaseModule = import ./image-release.nix { inherit pkgs; };
+
+  # Ruby gem/service builders (Docker image, regen, push, release)
+  rubyBuildModule = import ./ruby-build.nix {
+    inherit pkgs forgeCmd;
+    inherit (configModule) defaultGhcrToken;
+  };
 
   # Helm chart build helpers (lint, package, push, release)
   helmBuildModule = import ./helm-build.nix { inherit pkgs; };
@@ -249,6 +256,31 @@ in rec {
   # Usage:
   #   hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
   hmServiceHelpers = ./hm-service-helpers.nix;
+
+  # ============================================================================
+  # RUBY BUILD HELPERS (from ruby-build.nix)
+  # ============================================================================
+  # Build Docker images, regenerate gemset.nix, push/release Ruby services.
+  #
+  # Example (full service with Docker image):
+  #   apps = substrateLib.mkRubyServiceApps {
+  #     srcDir = self;
+  #     imageOutput = "dockerImage";
+  #     registry = "ghcr.io/myorg/my-ruby-app";
+  #     name = "my-ruby-app";
+  #   };
+  #   # Adds: regen:my-ruby-app, push:my-ruby-app, release:my-ruby-app
+  #
+  # Example (gem library — regen only):
+  #   apps.regen = substrateLib.mkRubyRegenApp {
+  #     srcDir = self;
+  #     name = "my-gem";
+  #   };
+  inherit (rubyBuildModule)
+    mkRubyDockerImage
+    mkRubyRegenApp
+    mkRubyPushApp
+    mkRubyServiceApps;
 
   # ============================================================================
   # HELM CHART BUILD HELPERS (from helm-build.nix)
