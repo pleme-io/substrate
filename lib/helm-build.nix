@@ -7,10 +7,12 @@
 #   mkHelmPushApp       - Push a packaged chart to OCI registry
 #   mkHelmReleaseApp    - Full lifecycle: lint → package → push
 #   mkHelmTemplateApp   - Render templates for debugging
+#   mkHelmBumpApp       - Version bump library chart + update all dependents
 #   mkHelmSdlcApps      - Complete SDLC: lint, package, push, release, template per chart
-#   mkHelmAllApps       - Aggregate apps across multiple charts
+#   mkHelmAllApps       - Aggregate apps across multiple charts (includes bump)
 {
   pkgs,
+  forgeCmd ? "forge",
 }:
 let
   helm = pkgs.kubernetes-helm;
@@ -155,6 +157,28 @@ in
       '';
     };
 
+  # Version bump a library chart and update all dependent Chart.yaml files.
+  # Delegates to `forge helm bump` for the actual work.
+  #
+  # Usage: nix run .#bump -- {major|minor|patch}
+  #
+  # Args:
+  #   libChartName: Name of the library chart directory (e.g., "pleme-lib")
+  #   chartsDir:    Relative path from repo root to charts/ directory (default: "charts")
+  mkHelmBumpApp = {
+    libChartName ? "pleme-lib",
+    chartsDir ? "charts",
+  }: {
+    type = "app";
+    program = toString (pkgs.writeShellScript "helm-bump" ''
+      set -euo pipefail
+      exec ${forgeCmd} helm bump \
+        --charts-dir "${chartsDir}" \
+        --lib-chart-name "${libChartName}" \
+        --level "''${1:-patch}"
+    '');
+  };
+
   # Complete SDLC apps for a single chart
   # Returns: { lint, package, push, release, template }
   mkHelmSdlcApps = {
@@ -164,7 +188,7 @@ in
     registry ? "oci://ghcr.io/pleme-io/charts",
   }:
     let
-      inherit (import ./helm-build.nix { inherit pkgs; })
+      inherit (import ./helm-build.nix { inherit pkgs forgeCmd; })
         mkHelmLintApp mkHelmPackageApp mkHelmPushApp mkHelmReleaseApp mkHelmTemplateApp;
     in {
       lint = mkHelmLintApp { inherit name chartDir libChartDir; };
@@ -177,10 +201,12 @@ in
   # Aggregate apps across multiple charts
   # charts: list of { name, chartDir, libChartDir? }
   # Returns flake apps attrset with lint:<name>, package:<name>, push:<name>,
-  #   release:<name>, template, plus aggregate lint/package/push/release
+  #   release:<name>, template, bump, plus aggregate lint/package/push/release
   mkHelmAllApps = {
     charts,
     libChartDir ? null,
+    libChartName ? "pleme-lib",
+    chartsDir ? "charts",
     registry ? "oci://ghcr.io/pleme-io/charts",
   }:
     let
@@ -190,7 +216,7 @@ in
       # Per-chart apps
       perChartApps = lib.foldl' (acc: chart:
         let
-          sdlc = import ./helm-build.nix { inherit pkgs; };
+          sdlc = import ./helm-build.nix { inherit pkgs forgeCmd; };
           apps = sdlc.mkHelmSdlcApps {
             inherit (chart) name chartDir;
             libChartDir = chart.libChartDir or libChartDir;
@@ -332,11 +358,16 @@ in
         '';
       };
 
+      bumpApp = (import ./helm-build.nix { inherit pkgs forgeCmd; }).mkHelmBumpApp {
+        inherit libChartName chartsDir;
+      };
+
     in perChartApps // {
       lint = { type = "app"; program = "${lintAll}/bin/helm-lint-all"; };
       package = { type = "app"; program = "${packageAll}/bin/helm-package-all"; };
       push = { type = "app"; program = "${pushAll}/bin/helm-push-all"; };
       release = { type = "app"; program = "${releaseAll}/bin/helm-release-all"; };
       template = { type = "app"; program = "${templateApp}/bin/helm-template"; };
+      bump = bumpApp;
     };
 }

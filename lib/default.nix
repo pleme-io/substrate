@@ -82,8 +82,8 @@
     inherit (configModule) defaultGhcrToken;
   };
 
-  # Helm chart build helpers (lint, package, push, release)
-  helmBuildModule = import ./helm-build.nix { inherit pkgs; };
+  # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
+  helmBuildModule = import ./helm-build.nix { inherit pkgs forgeCmd; };
 
   # mkProductSdlcApps: configurable SDLC app factory.
   # Accepts { backendDir, infraServices } — all optional with sensible defaults.
@@ -313,6 +313,7 @@ in rec {
     mkHelmPushApp
     mkHelmReleaseApp
     mkHelmTemplateApp
+    mkHelmBumpApp
     mkHelmSdlcApps
     mkHelmAllApps;
 }
