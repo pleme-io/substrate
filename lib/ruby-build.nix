@@ -168,108 +168,44 @@ in rec {
   };
 
   # ============================================================================
-  # GEM BUILD APP (Build .gem file from gemspec)
+  # GEM BUILD APP (Build .gem file via forge)
   # ============================================================================
-  # Create an app that builds a .gem file from a gemspec
+  # Create an app that builds a .gem file from a gemspec using forge
   #
   # srcDir: Path to the Ruby project directory
   # name: Name of the gem (must match *.gemspec basename)
-  # ruby: Ruby interpreter to use (from ruby-nix)
   #
   mkRubyGemBuildApp = {
     srcDir,
     name,
-    ruby,
   }: {
     type = "app";
     program = toString (writeShellScript "gem-build-${name}" ''
       set -euo pipefail
-
-      SRC_DIR="${srcDir}"
-
-      if [ ! -d "$SRC_DIR" ]; then
-        echo "Error: Source directory not found at $SRC_DIR"
-        exit 1
-      fi
-
-      echo "Building gem ${name}..."
-      cd "$SRC_DIR"
-
-      # Clean any previous .gem files
-      rm -f *.gem
-
-      # Build the gem
-      ${ruby}/bin/gem build ${name}.gemspec
-
-      GEM_FILE=$(ls -1 ${name}-*.gem 2>/dev/null | head -1)
-      if [ -z "$GEM_FILE" ]; then
-        echo "Error: gem build did not produce a .gem file"
-        exit 1
-      fi
-
-      echo ""
-      echo "Built: $GEM_FILE"
+      exec ${forgeCmd} gem build \
+        --working-dir "${srcDir}" \
+        --name "${name}"
     '');
   };
 
   # ============================================================================
-  # GEM PUSH APP (Build and push gem to RubyGems.org)
+  # GEM PUSH APP (Build and push gem to RubyGems.org via forge)
   # ============================================================================
-  # Create an app that builds and pushes a gem to rubygems.org
+  # Create an app that builds and pushes a gem using forge
   #
   # srcDir: Path to the Ruby project directory
   # name: Name of the gem (must match *.gemspec basename)
-  # ruby: Ruby interpreter to use (from ruby-nix)
   #
   mkRubyGemPushApp = {
     srcDir,
     name,
-    ruby,
   }: {
     type = "app";
     program = toString (writeShellScript "gem-push-${name}" ''
       set -euo pipefail
-
-      # Resolve API key — prefer env var, fallback to file
-      export GEM_HOST_API_KEY="''${GEM_HOST_API_KEY:-$(cat "$HOME/.config/rubygems/api-key" 2>/dev/null || true)}"
-
-      if [ -z "$GEM_HOST_API_KEY" ]; then
-        echo "Error: GEM_HOST_API_KEY not set and ~/.config/rubygems/api-key not found"
-        echo "Set the env var or add the key via sops in pleme-io/nix"
-        exit 1
-      fi
-
-      SRC_DIR="${srcDir}"
-
-      if [ ! -d "$SRC_DIR" ]; then
-        echo "Error: Source directory not found at $SRC_DIR"
-        exit 1
-      fi
-
-      echo "Building and pushing gem ${name}..."
-      cd "$SRC_DIR"
-
-      # Clean any previous .gem files
-      rm -f *.gem
-
-      # Build the gem
-      echo "Step 1/2: Building gem..."
-      ${ruby}/bin/gem build ${name}.gemspec
-
-      GEM_FILE=$(ls -1 ${name}-*.gem 2>/dev/null | head -1)
-      if [ -z "$GEM_FILE" ]; then
-        echo "Error: gem build did not produce a .gem file"
-        exit 1
-      fi
-      echo "Built: $GEM_FILE"
-      echo ""
-
-      # Push to RubyGems.org
-      echo "Step 2/2: Pushing to RubyGems.org..."
-      ${ruby}/bin/gem push "$GEM_FILE"
-
-      echo ""
-      echo "Published: $GEM_FILE"
+      exec ${forgeCmd} gem push \
+        --working-dir "${srcDir}" \
+        --name "${name}"
     '');
   };
 
@@ -280,16 +216,14 @@ in rec {
   #
   # srcDir: Path to the Ruby project directory
   # name: Name of the gem
-  # ruby: Ruby interpreter
   #
   mkRubyGemApps = {
     srcDir,
     name,
-    ruby,
   }: {
     regen = mkRubyRegenApp { inherit srcDir name; };
-    "gem:build" = mkRubyGemBuildApp { inherit srcDir name ruby; };
-    "gem:push" = mkRubyGemPushApp { inherit srcDir name ruby; };
+    "gem:build" = mkRubyGemBuildApp { inherit srcDir name; };
+    "gem:push" = mkRubyGemPushApp { inherit srcDir name; };
     "gem:release" = {
       type = "app";
       program = toString (writeShellScript "gem-release-${name}" ''
@@ -301,7 +235,7 @@ in rec {
         nix run .#regen
         echo ""
 
-        # Build and push
+        # Build and push via forge
         nix run .#gem:push
         echo ""
 
