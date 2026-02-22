@@ -28,18 +28,19 @@
   # ============================================================================
   # CROSS-PLATFORM BUILD ARCHITECTURE
   # ============================================================================
-  # CRITICAL: This follows the hard rule: NEVER call nix from tools invoked by Nix apps
+  # Docker images are built with Linux-targeted pkgs (x86_64-linux, aarch64-linux)
+  # regardless of the host platform. On macOS, Nix delegates realization to remote
+  # builders (nix-rosetta-builder or /etc/nix/machines) transparently.
   #
   # Architecture:
-  #   1. Packages are ALWAYS defined for their target platforms (x86_64-linux, aarch64-linux)
-  #   2. Apps call `nix build --system x86_64-linux .#dockerImage` DIRECTLY
-  #   3. Nix's remote builders (/etc/nix/machines) handle cross-compilation transparently
-  #   4. Tools like forge handle push/deploy but NEVER call nix build
+  #   1. Host pkgs (aarch64-darwin etc.) are used for devShells, apps, CLI tools
+  #   2. Docker images use targetPkgs imported with the target Linux system
+  #   3. buildRustCrate with Linux pkgs targets the correct rustcTarget (ELF binary)
+  #   4. dockerTools.buildLayeredImage with Linux pkgs creates correct Linux images
+  #   5. Pre-evaluated image derivations in release apps are always Linux derivations
   #
-  # This avoids the nix→shell→nix anti-pattern that causes:
-  #   - "Exec format error" on Darwin
-  #   - "attribute does not exist" evaluation failures
-  #   - Circular dependency issues
+  # This fixes the "exec format error" caused by embedding Darwin binaries in
+  # Docker images labeled as amd64.
 
   # Native pkgs with Rust overlay
   pkgs = import nixpkgs {
@@ -72,38 +73,39 @@ in {
   cluster ? "staging",  # Target cluster for deployment
   architectures ? ["amd64" "arm64"],  # Supported architectures: amd64, arm64
 }: let
-  # Service lib - uses native pkgs
+  # Service lib - uses native (host) pkgs for apps, devShells, etc.
   serviceLib = import ./default.nix {
     inherit pkgs system crate2nix forge;
   };
 
-  # Build inputs
+  # Build inputs (host pkgs — for devShell and host-side tools)
   defaultBuildInputs = with pkgs; [openssl postgresql sqlite];
   allBuildInputs = defaultBuildInputs ++ buildInputs;
   defaultNativeBuildInputs = with pkgs; [pkg-config cmake perl];
   allNativeBuildInputs = defaultNativeBuildInputs ++ nativeBuildInputs;
 
-  # Build Docker images for requested architectures
-  # These are defined based on the architectures parameter
-  # When called with --system x86_64-linux, Nix uses remote builders transparently
-  # This is the correct pattern - no platform-specific conditionals in packages
-
   # Helper to check if architecture is enabled
   hasArch = arch: builtins.elem arch architectures;
 
-  dockerImage-amd64 = if hasArch "amd64" then serviceLib.mkCrate2nixDockerImage {
+  # Docker images MUST contain Linux ELF binaries, not host-platform binaries.
+  # On non-Linux hosts (macOS), Nix delegates building to remote builders
+  # (nix-rosetta-builder or configured Linux builders in /etc/nix/machines).
+  mkDockerImage = arch: let
+    targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
+    targetPkgs = import nixpkgs {
+      system = targetSystem;
+      overlays = [ nixLib.overlays.${targetSystem}.rust ];
+    };
+    builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
+  in builders.mkCrate2nixDockerImage {
     inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName;
-    buildInputs = allBuildInputs;
-    nativeBuildInputs = allNativeBuildInputs;
-    architecture = "amd64";
-  } else null;
+    buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
+    nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
+    architecture = arch;
+  };
 
-  dockerImage-arm64 = if hasArch "arm64" then serviceLib.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName;
-    buildInputs = allBuildInputs;
-    nativeBuildInputs = allNativeBuildInputs;
-    architecture = "arm64";
-  } else null;
+  dockerImage-amd64 = if hasArch "amd64" then mkDockerImage "amd64" else null;
+  dockerImage-arm64 = if hasArch "arm64" then mkDockerImage "arm64" else null;
 
   # Standard development environment variables
   # Automatically derives database name and user from serviceName
