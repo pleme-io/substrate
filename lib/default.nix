@@ -280,7 +280,10 @@ in rec {
     mkRubyDockerImage
     mkRubyRegenApp
     mkRubyPushApp
-    mkRubyServiceApps;
+    mkRubyServiceApps
+    mkRubyGemBuildApp
+    mkRubyGemPushApp
+    mkRubyGemApps;
 
   # ============================================================================
   # HELM CHART BUILD HELPERS (from helm-build.nix)
