@@ -24,6 +24,12 @@
   # Import Rust overlay module (always available, doesn't need fenix at import time)
   rustOverlayModule = import ./rust-overlay.nix;
 
+  # Import Go overlay module (builds Go from upstream source)
+  goOverlayModule = import ./go-overlay.nix;
+
+  # Import Zig overlay module (prebuilt compiler + from-source zls)
+  zigOverlayModule = import ./zig-overlay.nix;
+
   # Helper to get forge command
   forgeCmd = if forge != null
     then "${forge}/bin/forge"
@@ -233,6 +239,47 @@ in rec {
   inherit (rustOverlayModule) mkRustOverlay getRustToolchain;
 
   # ============================================================================
+  # GO OVERLAY (from go-overlay.nix)
+  # ============================================================================
+  # Builds Go from upstream source (go.dev) with NixOS-compatibility patches.
+  # Full independence from nixpkgs Go version — single source of truth.
+  # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkGoOverlay {}) ]; };
+  inherit (goOverlayModule) mkGoOverlay getGoToolchain;
+
+  # ============================================================================
+  # ZIG OVERLAY (from zig-overlay.nix)
+  # ============================================================================
+  # Prebuilt Zig compiler from ziglang.org + zls built from source.
+  # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkZigOverlay {}) ]; };
+  inherit (zigOverlayModule) mkZigOverlay;
+
+  # ============================================================================
+  # ZIG OVERLAY MODULE (standalone import path)
+  # ============================================================================
+  # For consumers that need the Zig overlay as a standalone flake overlay.
+  # Usage: overlays = [ (import "${substrate}/lib/zig-overlay.nix").mkZigOverlay {} ];
+  zigOverlay = ./zig-overlay.nix;
+
+  # ============================================================================
+  # GO OVERLAY MODULE (standalone import path)
+  # ============================================================================
+  # For consumers that need the Go overlay as a standalone flake overlay.
+  # Usage: overlays = [ (import "${substrate}/lib/go-overlay.nix").mkGoOverlay {} ];
+  goOverlay = ./go-overlay.nix;
+
+  # ============================================================================
+  # GO TOOL BUILDER (standalone import path)
+  # ============================================================================
+  # Reusable pattern for building Go CLI tools from upstream source.
+  # Wraps buildGoModule with version ldflags injection, shell completions, and
+  # standard meta attributes.
+  #
+  # Usage:
+  #   goToolBuilder = import "${substrate}/lib/go-tool.nix";
+  #   myTool = goToolBuilder.mkGoTool pkgs { pname = "my-tool"; ... };
+  goToolBuilder = ./go-tool.nix;
+
+  # ============================================================================
   # RUST LIBRARY BUILDER (from rust-library.nix)
   # ============================================================================
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
@@ -256,6 +303,16 @@ in rec {
   # Usage:
   #   hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
   hmServiceHelpers = ./hm-service-helpers.nix;
+
+  # ============================================================================
+  # NIXOS SERVICE HELPERS (standalone import — no pkgs/system needed)
+  # ============================================================================
+  # Reusable patterns for NixOS modules: systemd services, firewall rules,
+  # kernel configuration, kubeconfig setup, and VM tests.
+  #
+  # Usage:
+  #   nixosHelpers = import "${substrate}/lib/nixos-service-helpers.nix" { lib = nixpkgs.lib; };
+  nixosServiceHelpers = ./nixos-service-helpers.nix;
 
   # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
