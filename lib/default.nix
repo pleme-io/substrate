@@ -117,6 +117,21 @@ in rec {
     allRuntimeTools;
 
   # ============================================================================
+  # DARWIN BUILD HELPERS (from darwin.nix)
+  # ============================================================================
+  # Standard macOS SDK dependencies for Rust crates using TLS/networking.
+  # Returns empty list on non-Darwin. Handles both old and new nixpkgs.
+  #
+  # Usage (instantiated):
+  #   buildInputs = substrateLib.mkDarwinBuildInputs pkgs;
+  #
+  # Usage (standalone):
+  #   darwinHelpers = import "${substrate}/lib/darwin.nix";
+  #   buildInputs = darwinHelpers.mkDarwinBuildInputs pkgs;
+  inherit ((import ./darwin.nix)) mkDarwinBuildInputs;
+  darwinHelpers = ./darwin.nix;
+
+  # ============================================================================
   # HEALTH SUPERVISOR BUILDER (from health-supervisor.nix)
   # ============================================================================
   inherit (healthSupervisorModule) mkHealthSupervisor;
@@ -299,6 +314,49 @@ in rec {
   goMonorepoBuilder = ./go-monorepo.nix;
 
   # ============================================================================
+  # GO MONOREPO BINARY BUILDER (standalone import path)
+  # ============================================================================
+  # Builds a single binary from a Go monorepo source (extends mkGoMonorepoSource).
+  # Wraps buildGoModule with per-binary metadata: pname, description, homepage,
+  # optional shell completions.
+  #
+  # Usage:
+  #   mkGoMonorepoBinary = (import "${substrate}/lib/go-monorepo-binary.nix").mkGoMonorepoBinary;
+  #   kubelet = mkGoMonorepoBinary pkgs k8sSrc {
+  #     pname = "kubelet";
+  #     description = "Kubernetes node agent";
+  #   };
+  goMonorepoBinaryBuilder = ./go-monorepo-binary.nix;
+
+  # ============================================================================
+  # VERSIONED OVERLAY GENERATOR (standalone import path)
+  # ============================================================================
+  # Generates versioned overlay entries for N tracks × M components, plus
+  # default and latest aliases. Eliminates cartesian-product boilerplate.
+  #
+  # Usage:
+  #   mkVersionedOverlay = (import "${substrate}/lib/versioned-overlay.nix").mkVersionedOverlay;
+  #   entries = mkVersionedOverlay {
+  #     lib = nixpkgs.lib;
+  #     tracks = [ "1.30" "1.34" "1.35" ];
+  #     defaultTrack = "1.34"; latestTrack = "1.35";
+  #     components = { kubelet = { src = k8sPkgs; }; };
+  #   };
+  versionedOverlay = ./versioned-overlay.nix;
+
+  # ============================================================================
+  # RUST SERVICE FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Rust service.
+  # Wraps rust-service.nix + eachSystem + homeManagerModules + nixosModules + overlays.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/rust-service-flake.nix" {
+  #     inherit nixpkgs substrate forge crate2nix;
+  #   }) { inherit self; serviceName = "hanabi"; registry = "ghcr.io/pleme-io/hanabi"; };
+  rustServiceFlakeBuilder = ./rust-service-flake.nix;
+
+  # ============================================================================
   # RUST LIBRARY BUILDER (from rust-library.nix)
   # ============================================================================
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
@@ -311,6 +369,18 @@ in rec {
   # Standalone module for TypeScript library SDLC (build, check-all, devShell).
   # Usage: import "${substrate}/lib/typescript-library.nix" { inherit system nixpkgs dream2nix; };
   typescriptLibraryBuilder = ./typescript-library.nix;
+
+  # ============================================================================
+  # TYPESCRIPT LIBRARY FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a TypeScript library.
+  # Wraps typescript-library.nix + eachSystem for zero-boilerplate consumer flakes.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/typescript-library-flake.nix" {
+  #     inherit nixpkgs dream2nix substrate;
+  #   }) { inherit self; name = "pleme-ui-components"; };
+  typescriptLibraryFlakeBuilder = ./typescript-library-flake.nix;
 
   # ============================================================================
   # HOME-MANAGER SERVICE HELPERS (standalone import — no pkgs/system needed)
@@ -348,6 +418,31 @@ in rec {
   #     (testHelpers.mkTest "my-test" (1 + 1 == 2) "math works")
   #   ];
   testHelpers = ./test-helpers.nix;
+
+  # ============================================================================
+  # RUBY GEM BUILDER (standalone import path)
+  # ============================================================================
+  # Per-system Ruby gem builder (follows rust-library.nix pattern).
+  # Takes system-level deps, returns a function that produces { devShells, apps }.
+  #
+  # Usage:
+  #   rubyGem = import "${substrate}/lib/ruby-gem.nix" {
+  #     inherit nixpkgs system ruby-nix substrate forge;
+  #   };
+  #   outputs = rubyGem { inherit self; name = "pangea-core"; };
+  rubyGemBuilder = ./ruby-gem.nix;
+
+  # ============================================================================
+  # RUBY GEM FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Ruby gem library.
+  # Wraps ruby-gem.nix + eachSystem for zero-boilerplate consumer flakes.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/ruby-gem-flake.nix" {
+  #     inherit nixpkgs ruby-nix flake-utils substrate forge;
+  #   }) { inherit self; name = "pangea-core"; };
+  rubyGemFlakeBuilder = ./ruby-gem-flake.nix;
 
   # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)

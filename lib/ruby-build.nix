@@ -234,6 +234,27 @@ in rec {
   };
 
   # ============================================================================
+  # GEM TEST APP (Run tests via forge)
+  # ============================================================================
+  # Create an app that runs the gem's test suite
+  #
+  # srcDir: Path to the Ruby project directory
+  # name: Name of the gem
+  #
+  mkRubyGemTestApp = {
+    srcDir,
+    name,
+  }: {
+    type = "app";
+    program = toString (writeShellScript "test-${name}" ''
+      set -euo pipefail
+      exec ${forgeCmd} gem test \
+        --working-dir "${srcDir}" \
+        --name "${name}"
+    '');
+  };
+
+  # ============================================================================
   # GEM SDLC APPS (Full regen/build/push/release set for gems)
   # ============================================================================
   # Create the complete app set for a Ruby gem library
@@ -245,6 +266,7 @@ in rec {
     srcDir,
     name,
   }: {
+    test = mkRubyGemTestApp { inherit srcDir name; };
     regen = mkRubyRegenApp { inherit srcDir name; };
     "gem:bump" = mkRubyGemBumpApp { inherit srcDir name; };
     "gem:build" = mkRubyGemBuildApp { inherit srcDir name; };
