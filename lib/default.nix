@@ -280,6 +280,25 @@ in rec {
   goToolBuilder = ./go-tool.nix;
 
   # ============================================================================
+  # GO MONOREPO SOURCE FACTORY (standalone import path)
+  # ============================================================================
+  # Shared source + ldflags for Go projects that produce multiple binaries
+  # from a single repository (e.g., kubernetes/kubernetes → kubelet, kubeadm,
+  # kube-apiserver, kube-controller-manager, kube-scheduler, kube-proxy).
+  #
+  # Extends the Go toolchain story: mkGoTool builds one tool from one repo,
+  # mkGoMonorepoSource provides the shared source for multiple binaries.
+  #
+  # Usage:
+  #   mkGoMonorepoSource = (import "${substrate}/lib/go-monorepo.nix").mkGoMonorepoSource;
+  #   k8sSrc = mkGoMonorepoSource pkgs {
+  #     owner = "kubernetes"; repo = "kubernetes";
+  #     version = "1.34.3"; srcHash = "sha256-...";
+  #     versionPackage = "k8s.io/component-base/version";
+  #   };
+  goMonorepoBuilder = ./go-monorepo.nix;
+
+  # ============================================================================
   # RUST LIBRARY BUILDER (from rust-library.nix)
   # ============================================================================
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
@@ -313,6 +332,22 @@ in rec {
   # Usage:
   #   nixosHelpers = import "${substrate}/lib/nixos-service-helpers.nix" { lib = nixpkgs.lib; };
   nixosServiceHelpers = ./nixos-service-helpers.nix;
+
+  # ============================================================================
+  # TEST HELPERS (standalone import — no pkgs/system needed)
+  # ============================================================================
+  # Pure Nix evaluation test infrastructure for NixOS and home-manager modules.
+  # Tests run as pure Nix evaluation — no VMs, no builds, instant results.
+  #
+  # Provides: mkTest, runTests, mkNixOSModuleStubs, evalNixOSModule,
+  #           mkProfileEvalCheck
+  #
+  # Usage:
+  #   testHelpers = import "${substrate}/lib/test-helpers.nix" { lib = nixpkgs.lib; };
+  #   tests.unit = testHelpers.runTests [
+  #     (testHelpers.mkTest "my-test" (1 + 1 == 2) "math works")
+  #   ];
+  testHelpers = ./test-helpers.nix;
 
   # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
