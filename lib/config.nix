@@ -69,6 +69,10 @@ rec {
       package = pkgs.bun;
       binary = "bun";
     };
+    regctl = {
+      package = pkgs.regclient;
+      binary = "regctl";
+    };
   };
 
   # Generate environment variable exports for runtime tools
@@ -85,7 +89,7 @@ rec {
       pkgs.lib.concatMapStringsSep "\n" mkExport tools;
 
   # Common tool sets for different use cases
-  deploymentTools = ["skopeo" "attic" "git"];
+  deploymentTools = ["skopeo" "attic" "git" "regctl"];
   kubernetesTools = ["kubectl" "flux"];
   allRuntimeTools = builtins.attrNames runtimeTools;
 }

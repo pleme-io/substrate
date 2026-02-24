@@ -51,6 +51,16 @@ in rec {
       ${pkgs.skopeo}/bin/skopeo copy docker-archive:${image} docker://${registry}:${arch}-$SHORT_SHA
       ${pkgs.skopeo}/bin/skopeo copy docker-archive:${image} docker://${registry}:${arch}-latest
     '';
+
+    # Create OCI manifest index when multiple architectures are pushed
+    mkManifestIndex = let
+      archRefs = map (sys: "--ref ${registry}:${archTag.${sys}}-$SHORT_SHA") systems;
+    in pkgs.lib.optionalString (builtins.length systems > 1) ''
+      echo "==> Creating multi-arch manifest index"
+      ${pkgs.regclient}/bin/regctl index create ${registry}:$SHORT_SHA ${builtins.concatStringsSep " " archRefs}
+      ${pkgs.regclient}/bin/regctl index create ${registry}:latest ${builtins.concatStringsSep " " archRefs}
+      echo "==> Manifest index: ${registry}:$SHORT_SHA"
+    '';
   in {
     type = "app";
     program = toString (pkgs.writeShellScript "release-${name}" ''
@@ -58,6 +68,7 @@ in rec {
       SHORT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
       echo "==> Releasing ${registry}"
       ${builtins.concatStringsSep "\n" (map pushArch systems)}
+      ${mkManifestIndex}
       echo "==> Done: ${registry}"
     '');
   };
