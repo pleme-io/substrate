@@ -268,7 +268,7 @@
     inherit tag architecture;
     contents = with pkgs; [cacert curl serviceBinary openssl];
     config = {
-      Cmd = ["${serviceBinary}/bin/${serviceName}"];
+      Entrypoint = ["${serviceBinary}/bin/${serviceName}"];
       ExposedPorts = builtins.listToAttrs (
         builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
           (pkgs.lib.unique [ ports.graphql ports.health ports.metrics ])
