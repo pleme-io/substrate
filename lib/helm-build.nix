@@ -40,6 +40,7 @@ in
   }: {
     lint = pkgs.writeShellScript "helm-lint-${name}" ''
       set -euo pipefail
+      export PATH="${helm}/bin:$PATH"
       exec ${forgeCmd} helm lint \
         --chart-dir "${chartDir}" \
         ${if libChartDir != null then "--lib-chart-dir \"${libChartDir}\"" else ""}
@@ -47,6 +48,7 @@ in
 
     release = pkgs.writeShellScript "helm-release-${name}" ''
       set -euo pipefail
+      export PATH="${helm}/bin:$PATH"
       exec ${forgeCmd} helm release \
         --chart-dir "${chartDir}" \
         --registry "${registry}" \
@@ -107,6 +109,7 @@ in
       # Aggregate lint-all (forge discovers charts in directory)
       lintAllScript = pkgs.writeShellScript "helm-lint-all" ''
         set -euo pipefail
+        export PATH="${helm}/bin:$PATH"
         REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
         exec ${forgeCmd} helm lint-all \
           --charts-dir "$REPO_ROOT/${chartsDir}" \
@@ -117,6 +120,7 @@ in
       # Aggregate release-all (forge discovers + lint + package + push)
       releaseAllScript = pkgs.writeShellScript "helm-release-all" ''
         set -euo pipefail
+        export PATH="${helm}/bin:$PATH"
         REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
         exec ${forgeCmd} helm release-all \
           --charts-dir "$REPO_ROOT/${chartsDir}" \
