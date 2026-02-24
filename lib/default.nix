@@ -445,6 +445,32 @@ in rec {
   rubyGemFlakeBuilder = ./ruby-gem-flake.nix;
 
   # ============================================================================
+  # PANGEA INFRASTRUCTURE BUILDER (standalone import path)
+  # ============================================================================
+  # Per-system Pangea infrastructure project builder (follows ruby-gem.nix pattern).
+  # Takes system-level deps, returns a function that produces { devShells, apps }.
+  # Apps: validate, plan, apply, destroy, init, test, drift, regen.
+  #
+  # Usage:
+  #   pangeaInfra = import "${substrate}/lib/pangea-infra.nix" {
+  #     inherit nixpkgs system ruby-nix substrate forge;
+  #   };
+  #   outputs = pangeaInfra { inherit self; name = "my-infra"; };
+  pangeaInfraBuilder = ./pangea-infra.nix;
+
+  # ============================================================================
+  # PANGEA INFRASTRUCTURE FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Pangea infrastructure project.
+  # Wraps pangea-infra.nix + eachSystem for zero-boilerplate consumer flakes.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/pangea-infra-flake.nix" {
+  #     inherit nixpkgs ruby-nix flake-utils substrate forge;
+  #   }) { inherit self; name = "my-infra"; };
+  pangeaInfraFlakeBuilder = ./pangea-infra-flake.nix;
+
+  # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
   # ============================================================================
   # Build Docker images, regenerate gemset.nix, push/release Ruby services.
