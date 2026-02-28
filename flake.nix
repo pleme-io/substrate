@@ -3,7 +3,7 @@
   description = "substrate - Reusable Nix build patterns for service deployment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
     crate2nix = {
       url = "github:nix-community/crate2nix";
