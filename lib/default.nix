@@ -276,6 +276,19 @@ in rec {
   zigOverlay = ./zig-overlay.nix;
 
   # ============================================================================
+  # ZIG TOOL RELEASE BUILDER (standalone import path)
+  # ============================================================================
+  # Cross-platform Zig CLI tool builds + GitHub releases.
+  # Uses Zig's built-in cross-compilation — all targets built on host.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/zig-tool-release-flake.nix" {
+  #     inherit nixpkgs;
+  #   }) { toolName = "z9s"; src = self; repo = "drzln/z9s"; };
+  zigToolReleaseBuilder = ./zig-tool-release.nix;
+  zigToolReleaseFlakeBuilder = ./zig-tool-release-flake.nix;
+
+  # ============================================================================
   # GO OVERLAY MODULE (standalone import path)
   # ============================================================================
   # For consumers that need the Go overlay as a standalone flake overlay.
@@ -362,6 +375,20 @@ in rec {
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
   # Usage: import "${substrate}/lib/rust-library.nix" { inherit system nixpkgs; nixLib = substrate; crate2nix = inputs.crate2nix; };
   rustLibraryBuilder = ./rust-library.nix;
+
+  # ============================================================================
+  # RUST TOOL RELEASE BUILDER (standalone import path)
+  # ============================================================================
+  # Cross-platform CLI tool builds + GitHub releases.
+  # Builds for 4 targets: aarch64-apple-darwin, x86_64-apple-darwin,
+  # x86_64-unknown-linux-musl, aarch64-unknown-linux-musl.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/rust-tool-release-flake.nix" {
+  #     inherit nixpkgs crate2nix flake-utils;
+  #   }) { toolName = "kindling"; src = self; repo = "pleme-io/kindling"; };
+  rustToolReleaseBuilder = ./rust-tool-release.nix;
+  rustToolReleaseFlakeBuilder = ./rust-tool-release-flake.nix;
 
   # ============================================================================
   # TYPESCRIPT LIBRARY BUILDER (from typescript-library.nix)

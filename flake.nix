@@ -44,6 +44,10 @@
       }
     )
     // {
+      # Standalone import paths for consumer flakes
+      rustToolReleaseFlakeBuilder = ./lib/rust-tool-release-flake.nix;
+      zigToolReleaseFlakeBuilder = ./lib/zig-tool-release-flake.nix;
+
       # Also expose library for non-system-specific usage
       libFor = {
         pkgs,
