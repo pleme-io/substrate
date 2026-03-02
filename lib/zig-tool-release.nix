@@ -120,46 +120,17 @@ let
 
   releaseApp = releaseHelpers.mkReleaseApp {
     inherit hostPkgs toolName repo;
-    versionCmd = "${hostPkgs.gnused}/bin/sed -n 's/.*\\.version *= *\"\\(.*\\)\".*/\\1/p' build.zig.zon | head -1";
-    versionFile = "build.zig.zon";
+    language = "zig";
   };
 
   bumpApp = releaseHelpers.mkBumpApp {
     inherit hostPkgs toolName;
-    bumpScript = ''
-      # Read current version
-      CURRENT=$(${hostPkgs.gnused}/bin/sed -n 's/.*\.version *= *"\(.*\)".*/\1/p' build.zig.zon | head -1)
-      IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-
-      case "$LEVEL" in
-        major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-        minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-        patch) PATCH=$((PATCH + 1)) ;;
-      esac
-
-      NEW_VERSION="$MAJOR.$MINOR.$PATCH"
-
-      echo "Bumping $CURRENT -> $NEW_VERSION"
-      ${hostPkgs.gnused}/bin/sed -i "s/\.version *= *\"$CURRENT\"/\.version = \"$NEW_VERSION\"/" build.zig.zon
-
-      echo ""
-      echo "Bumped to v$NEW_VERSION"
-      echo ""
-      echo "Review and commit:"
-      echo "  git add build.zig.zon"
-      echo "  git commit -m 'chore: bump to v$NEW_VERSION'"
-    '';
+    language = "zig";
   };
 
   checkAllApp = releaseHelpers.mkCheckAllApp {
     inherit hostPkgs toolName;
-    checkScript = ''
-      export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/.zig-cache
-      echo "-> zig build (debug)"
-      ${hostPkgs.zigToolchain}/bin/zig build
-      echo "-> zig build test"
-      ${hostPkgs.zigToolchain}/bin/zig build test 2>/dev/null || echo "(no tests defined)"
-    '';
+    language = "zig";
   };
 in {
   packages = lib.mapAttrs' (releaseName: binary: {
