@@ -30,6 +30,9 @@
   # Import Zig overlay module (prebuilt compiler + from-source zls)
   zigOverlayModule = import ./zig-overlay.nix;
 
+  # Import Swift overlay module (prebuilt Swift 6 from swift.org, Darwin-only)
+  swiftOverlayModule = import ./swift-overlay.nix;
+
   # Helper to get forge command
   forgeCmd = if forge != null
     then "${forge}/bin/forge"
@@ -267,6 +270,20 @@ in rec {
   # Prebuilt Zig compiler from ziglang.org + zls built from source.
   # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkZigOverlay {}) ]; };
   inherit (zigOverlayModule) mkZigOverlay;
+
+  # ============================================================================
+  # SWIFT OVERLAY (from swift-overlay.nix)
+  # ============================================================================
+  # Prebuilt Swift 6 toolchain from swift.org (Darwin-only).
+  # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkSwiftOverlay {}) ]; };
+  inherit (swiftOverlayModule) mkSwiftOverlay;
+
+  # ============================================================================
+  # SWIFT OVERLAY MODULE (standalone import path)
+  # ============================================================================
+  # For consumers that need the Swift overlay as a standalone flake overlay.
+  # Usage: overlays = [ (import "${substrate}/lib/swift-overlay.nix").mkSwiftOverlay {} ];
+  swiftOverlay = ./swift-overlay.nix;
 
   # ============================================================================
   # ZIG OVERLAY MODULE (standalone import path)
