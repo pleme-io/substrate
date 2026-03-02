@@ -31,7 +31,7 @@
 }: let
   pkgs = import nixpkgs {
     inherit system;
-    overlays = [ nixLib.overlays.${system}.rust ];
+    overlays = [ nixLib.rustOverlays.${system}.rust ];
   };
 in {
   name,

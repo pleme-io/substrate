@@ -45,7 +45,7 @@
   # Native pkgs with Rust overlay
   pkgs = import nixpkgs {
     inherit system;
-    overlays = [ nixLib.overlays.${system}.rust ];
+    overlays = [ nixLib.rustOverlays.${system}.rust ];
   };
 in {
   serviceName,
@@ -94,7 +94,7 @@ in {
     targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
     targetPkgs = import nixpkgs {
       system = targetSystem;
-      overlays = [ nixLib.overlays.${targetSystem}.rust ];
+      overlays = [ nixLib.rustOverlays.${targetSystem}.rust ];
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {

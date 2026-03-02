@@ -34,7 +34,7 @@
 
       flake = {
         # Per-system library and overlay exports
-        # Consumers access as: substrate.lib.${system}, substrate.overlays.${system}.rust
+        # Consumers access as: substrate.lib.${system}, substrate.rustOverlays.${system}.rust
         lib = eachSystem (system: let
           rustOverlay = import ./lib/rust-overlay.nix;
           pkgs = import nixpkgs {
@@ -46,7 +46,10 @@
           fenix = fenix.packages.${system};
         });
 
-        overlays = eachSystem (system: {
+        # NOTE: Named `rustOverlays` (not `overlays`) because flake-parts reserves
+        # `flake.overlays` for nixpkgs overlay functions (final: prev: { ... }).
+        # Per-system attrsets like this would fail the overlay type check.
+        rustOverlays = eachSystem (system: {
           rust = (import ./lib/rust-overlay.nix).mkRustOverlay { inherit fenix system; };
         });
 
