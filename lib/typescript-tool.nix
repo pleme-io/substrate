@@ -265,22 +265,17 @@ rec {
         inherit name src plemeLinker parentTsconfig cliEntry binName workspaceRoot;
       };
 
-  # Create a regeneration app for TypeScript projects
+  # Create a regeneration app for TypeScript projects.
+  # Delegates to `forge typescript regenerate`.
   mkTypescriptRegenApp = {
     name,
     plemeLinker,
     projectDirs,
   }:
-    pkgs.writeShellScript "regen-${name}" (
-      pkgs.lib.concatMapStringsSep "\n\n" (dir: ''
-        echo "Regenerating deps.nix for ${dir}..."
-        ${plemeLinker}/bin/pleme-linker resolve --project ${dir}
-      '')
-      projectDirs
-      + ''
-
-        echo ""
-        echo "Done! Now rebuild with: nix build"
-      ''
-    );
+    pkgs.writeShellScript "regen-${name}" ''
+      set -euo pipefail
+      export PATH="${plemeLinker}/bin:$PATH"
+      exec ${pkgs.forge or "forge"}/bin/forge typescript regenerate \
+        ${pkgs.lib.concatMapStringsSep " " (dir: "--project ${dir}") projectDirs}
+    '';
 }

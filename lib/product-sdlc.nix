@@ -211,14 +211,9 @@ in rec {
     set -euo pipefail
     ${repoRootExpr}
     ${backendDirExpr}
-    cd "$BACKEND_DIR"
-    export RUST_TEST_THREADS=''${RUST_TEST_THREADS:-4}
-    export RUST_BACKTRACE=1
-    if command -v cargo-nextest &> /dev/null; then
-      cargo nextest run --profile ci "$@"
-    else
-      cargo test --no-fail-fast "$@"
-    fi
+    exec ${forgeCmd} test-ci \
+      --working-dir "$BACKEND_DIR" \
+      --threads ''${RUST_TEST_THREADS:-4}
   '';
 
   # Run tests with coverage
@@ -226,13 +221,9 @@ in rec {
     set -euo pipefail
     ${repoRootExpr}
     ${backendDirExpr}
-    cd "$BACKEND_DIR"
-    if ! command -v cargo-tarpaulin &> /dev/null; then
-      echo "Installing cargo-tarpaulin..."
-      cargo install cargo-tarpaulin
-    fi
-    cargo tarpaulin --out Html --out Lcov --output-dir target/coverage "$@"
-    echo "Coverage report: target/coverage/tarpaulin-report.html"
+    exec ${forgeCmd} test-coverage \
+      --working-dir "$BACKEND_DIR" \
+      --format html
   '';
 
   # Run benchmarks
@@ -252,25 +243,23 @@ in rec {
     set -euo pipefail
     ${repoRootExpr}
     ${backendDirExpr}
-    cd "$BACKEND_DIR"
-    docker compose up -d ${infraServicesStr}
-    echo "Infrastructure ready!"
+    exec ${forgeCmd} infra up \
+      --working-dir "$BACKEND_DIR" \
+      ${pkgs.lib.concatMapStringsSep " " (s: "--services ${s}") infraServices}
   '';
 
   "infra:down" = mkForgeApp "product-infra-down" ''
     set -euo pipefail
     ${repoRootExpr}
     ${backendDirExpr}
-    cd "$BACKEND_DIR"
-    docker compose down
+    exec ${forgeCmd} infra down --working-dir "$BACKEND_DIR"
   '';
 
   "infra:clean" = mkForgeApp "product-infra-clean" ''
     set -euo pipefail
     ${repoRootExpr}
     ${backendDirExpr}
-    cd "$BACKEND_DIR"
-    docker compose down -v
+    exec ${forgeCmd} infra clean --working-dir "$BACKEND_DIR"
   '';
 
   # ============================================================================

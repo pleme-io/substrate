@@ -42,20 +42,12 @@
     platforms ? pkgs.lib.platforms.linux,
   }: let
     lib = pkgs.lib;
+    completionsHelper = import ./completions.nix;
 
-    # Shell completion support (reuses logic from go-tool.nix)
-    needsInstallShellFiles = completions != null && (completions.install or false);
-    completionBuildInputs = lib.optional needsInstallShellFiles pkgs.installShellFiles;
-
-    completionScript = if completions == null || !(completions.install or false) then ""
-      else if completions ? command then let
-        cmd = completions.command;
-      in ''
-        installShellCompletion --cmd ${cmd} \
-          --bash <($out/bin/${cmd} completion bash) \
-          --zsh <($out/bin/${cmd} completion zsh)
-      ''
-      else "";
+    # Shell completion support (via completions.nix — includes fish support)
+    completionAttrs = completionsHelper.mkCompletionAttrs pkgs {
+      inherit pname completions;
+    };
 
   in pkgs.buildGoModule {
     inherit pname subPackages;
@@ -65,9 +57,9 @@
     ldflags = monoSrc.ldflags;
     doCheck = false;
 
-    nativeBuildInputs = completionBuildInputs ++ nativeBuildInputs;
+    nativeBuildInputs = completionAttrs.nativeBuildInputs ++ nativeBuildInputs;
 
-    postInstall = completionScript + postInstall;
+    postInstall = completionAttrs.postInstallScript + postInstall;
 
     meta = {
       inherit description platforms;

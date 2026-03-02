@@ -76,6 +76,7 @@
     platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
+    completionsHelper = import ./completions.nix;
 
     # Build ldflags: explicit ldflags take priority, otherwise construct from versionLdflags
     effectiveLdflags =
@@ -84,35 +85,19 @@
         ["-s" "-w"] ++ (lib.mapAttrsToList (key: val: "-X ${key}=${val}") versionLdflags)
       else ["-s" "-w"];
 
-    # Shell completion support
-    needsInstallShellFiles = completions != null && (completions.install or false);
-    completionBuildInputs = lib.optional needsInstallShellFiles pkgs.installShellFiles;
-
-    completionScript = if completions == null || !(completions.install or false) then ""
-      else if completions ? command then let
-        cmd = completions.command;
-      in ''
-        installShellCompletion --cmd ${cmd} \
-          --bash <($out/bin/${cmd} completion bash) \
-          --zsh <($out/bin/${cmd} completion zsh) \
-          --fish <($out/bin/${cmd} completion fish)
-      ''
-      else if completions ? fromSource then ''
-        installShellCompletion --cmd ${pname} \
-          ${lib.optionalString (builtins.pathExists "${src}/${completions.fromSource}/bash") "--bash ${src}/${completions.fromSource}/*.bash"} \
-          ${lib.optionalString (builtins.pathExists "${src}/${completions.fromSource}/zsh") "--zsh ${src}/${completions.fromSource}/*.zsh"} \
-          ${lib.optionalString (builtins.pathExists "${src}/${completions.fromSource}/fish") "--fish ${src}/${completions.fromSource}/*.fish"}
-      ''
-      else "";
+    # Shell completion support (via completions.nix)
+    completionAttrs = completionsHelper.mkCompletionAttrs pkgs {
+      inherit pname completions src;
+    };
 
   in pkgs.buildGoModule ({
     inherit pname version src vendorHash proxyVendor doCheck tags;
 
-    nativeBuildInputs = completionBuildInputs ++ extraBuildInputs;
+    nativeBuildInputs = completionAttrs.nativeBuildInputs ++ extraBuildInputs;
 
     ldflags = effectiveLdflags;
 
-    postInstall = completionScript + extraPostInstall;
+    postInstall = completionAttrs.postInstallScript + extraPostInstall;
 
     meta = {
       inherit description license platforms;

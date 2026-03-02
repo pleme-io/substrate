@@ -49,22 +49,20 @@ in rec {
       pkgs.coreutils
     ] ++ extraContents;
 
-    config = {
+    config = let dockerHelpers = import ./docker-helpers.nix; in {
       Cmd = if cmd != null then cmd else [ "${rubyPackage}/bin/${baseNameOf name}" ];
       WorkingDir = workingDir;
       Env = [
-        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        (dockerHelpers.mkSslEnv pkgs)
         "DRY_TYPES_WARNINGS=false"
       ] ++ env;
       ExposedPorts = exposedPorts;
     };
 
-    extraCommands = ''
+    extraCommands = let dockerHelpers = import ./docker-helpers.nix; in ''
       mkdir -p tmp
       chmod 1777 tmp
-      mkdir -p etc
-      echo "app:x:1000:1000::/:/bin/false" > etc/passwd
-      echo "app:x:1000:" > etc/group
+      ${dockerHelpers.mkAppUserSetup}
     '';
   };
 

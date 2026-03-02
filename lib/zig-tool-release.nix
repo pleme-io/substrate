@@ -114,101 +114,19 @@ let
   };
 
   # ============================================================================
-  # APPS
+  # APPS (via release-helpers.nix)
   # ============================================================================
+  releaseHelpers = import ./release-helpers.nix;
 
-  releaseApp = {
-    type = "app";
-    program = toString (hostPkgs.writeShellScript "${toolName}-release" ''
-      set -euo pipefail
-
-      DRY_RUN=false
-      for arg in "$@"; do
-        case "$arg" in
-          --dry-run) DRY_RUN=true ;;
-        esac
-      done
-
-      # Read version from build.zig.zon
-      VERSION=$(${hostPkgs.gnused}/bin/sed -n 's/.*\.version *= *"\(.*\)".*/\1/p' build.zig.zon | head -1)
-      if [ -z "$VERSION" ]; then
-        echo "ERROR: Could not read version from build.zig.zon"
-        exit 1
-      fi
-      TAG="v$VERSION"
-      echo "Building ${toolName} $TAG for all targets..."
-
-      # Validate
-      if [ "$DRY_RUN" = false ]; then
-        if ! ${hostPkgs.git}/bin/git diff --quiet HEAD 2>/dev/null; then
-          echo "ERROR: Uncommitted changes. Commit or stash first."
-          exit 1
-        fi
-        if ${hostPkgs.git}/bin/git rev-parse "$TAG" >/dev/null 2>&1; then
-          echo "ERROR: Tag $TAG already exists."
-          exit 1
-        fi
-      fi
-
-      TMPDIR=$(mktemp -d)
-      trap "rm -rf $TMPDIR" EXIT
-
-      TARGETS=(
-        "${toolName}-aarch64-apple-darwin"
-        "${toolName}-x86_64-apple-darwin"
-        "${toolName}-x86_64-unknown-linux-musl"
-        "${toolName}-aarch64-unknown-linux-musl"
-      )
-
-      for target in "''${TARGETS[@]}"; do
-        echo "Building $target..."
-        STORE_PATH=$(nix build ".#$target" --no-link --print-out-paths 2>&1)
-        cp "$STORE_PATH/bin/${toolName}" "$TMPDIR/$target"
-        chmod +x "$TMPDIR/$target"
-        echo "  -> $TMPDIR/$target"
-      done
-
-      echo ""
-      echo "All targets built successfully."
-
-      if [ "$DRY_RUN" = true ]; then
-        echo ""
-        echo "[DRY RUN] Would create tag $TAG and upload:"
-        for target in "''${TARGETS[@]}"; do
-          echo "  $target"
-        done
-        echo ""
-        echo "Binaries available in: $TMPDIR"
-        trap - EXIT
-        exit 0
-      fi
-
-      echo "Creating tag $TAG..."
-      ${hostPkgs.git}/bin/git tag -a "$TAG" -m "Release $TAG"
-      ${hostPkgs.git}/bin/git push origin "$TAG"
-
-      echo "Creating GitHub release..."
-      ${hostPkgs.gh}/bin/gh release create "$TAG" \
-        --repo "${repo}" \
-        --generate-notes \
-        "''${TARGETS[@]/#/$TMPDIR/}"
-
-      echo ""
-      echo "Release $TAG published to https://github.com/${repo}/releases/tag/$TAG"
-    '');
+  releaseApp = releaseHelpers.mkReleaseApp {
+    inherit hostPkgs toolName repo;
+    versionCmd = "${hostPkgs.gnused}/bin/sed -n 's/.*\\.version *= *\"\\(.*\\)\".*/\\1/p' build.zig.zon | head -1";
+    versionFile = "build.zig.zon";
   };
 
-  bumpApp = {
-    type = "app";
-    program = toString (hostPkgs.writeShellScript "${toolName}-bump" ''
-      set -euo pipefail
-
-      LEVEL="''${1:-patch}"
-      case "$LEVEL" in
-        major|minor|patch) ;;
-        *) echo "Usage: nix run .#bump -- {major|minor|patch}"; exit 1 ;;
-      esac
-
+  bumpApp = releaseHelpers.mkBumpApp {
+    inherit hostPkgs toolName;
+    bumpScript = ''
       # Read current version
       CURRENT=$(${hostPkgs.gnused}/bin/sed -n 's/.*\.version *= *"\(.*\)".*/\1/p' build.zig.zon | head -1)
       IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
@@ -230,21 +148,18 @@ let
       echo "Review and commit:"
       echo "  git add build.zig.zon"
       echo "  git commit -m 'chore: bump to v$NEW_VERSION'"
-    '');
+    '';
   };
 
-  checkAllApp = {
-    type = "app";
-    program = toString (hostPkgs.writeShellScript "${toolName}-check-all" ''
-      set -euo pipefail
+  checkAllApp = releaseHelpers.mkCheckAllApp {
+    inherit hostPkgs toolName;
+    checkScript = ''
       export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/.zig-cache
-      echo "Checking ${toolName}..."
       echo "-> zig build (debug)"
       ${hostPkgs.zigToolchain}/bin/zig build
       echo "-> zig build test"
       ${hostPkgs.zigToolchain}/bin/zig build test 2>/dev/null || echo "(no tests defined)"
-      echo "All checks passed."
-    '');
+    '';
   };
 in {
   packages = lib.mapAttrs' (releaseName: binary: {

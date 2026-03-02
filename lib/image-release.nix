@@ -43,33 +43,21 @@ in rec {
     mkImage,
     systems ? linuxSystems,
   }: let
-    pushArch = targetSystem: let
-      image = mkImage targetSystem;
-      arch = archTag.${targetSystem};
-    in ''
-      echo "==> Pushing ${registry}:${arch}-$SHORT_SHA"
-      ${pkgs.skopeo}/bin/skopeo copy docker-archive:${image} docker://${registry}:${arch}-$SHORT_SHA
-      ${pkgs.skopeo}/bin/skopeo copy docker-archive:${image} docker://${registry}:${arch}-latest
-    '';
-
-    # Create OCI manifest index when multiple architectures are pushed
-    mkManifestIndex = let
-      archRefs = map (sys: "--ref ${registry}:${archTag.${sys}}-$SHORT_SHA") systems;
-    in pkgs.lib.optionalString (builtins.length systems > 1) ''
-      echo "==> Creating multi-arch manifest index"
-      ${pkgs.regclient}/bin/regctl index create ${registry}:$SHORT_SHA ${builtins.concatStringsSep " " archRefs}
-      ${pkgs.regclient}/bin/regctl index create ${registry}:latest ${builtins.concatStringsSep " " archRefs}
-      echo "==> Manifest index: ${registry}:$SHORT_SHA"
-    '';
+    # Resolve image derivation paths at Nix eval time for forge to use
+    imageArgs = builtins.concatStringsSep " " (map (sys: let
+      image = mkImage sys;
+      arch = archTag.${sys};
+    in "--${arch}-image ${image}") systems);
   in {
     type = "app";
     program = toString (pkgs.writeShellScript "release-${name}" ''
       set -euo pipefail
-      SHORT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
-      echo "==> Releasing ${registry}"
-      ${builtins.concatStringsSep "\n" (map pushArch systems)}
-      ${mkManifestIndex}
-      echo "==> Done: ${registry}"
+      export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
+      export REGCTL_BIN="${pkgs.regclient}/bin/regctl"
+      exec ${pkgs.forge or "forge"}/bin/forge image-release \
+        --name "${name}" \
+        --registry "${registry}" \
+        ${imageArgs}
     '');
   };
 

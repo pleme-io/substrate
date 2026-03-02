@@ -186,11 +186,11 @@
         cp -r ${serviceBuild}/bin/* app/bin/ 2>/dev/null || true
       fi
     '';
-    config = {
+    config = let dockerHelpers = import ./docker-helpers.nix; in {
       Entrypoint = [ "${testRunnerBin}" ];
       Cmd = [];
       Env = [
-        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        (dockerHelpers.mkSslEnv pkgs)
         "RUST_LOG=info"
         "RUST_BACKTRACE=1"
       ];
@@ -267,14 +267,14 @@
     name = "${serviceName}-service";
     inherit tag architecture;
     contents = with pkgs; [cacert curl serviceBinary openssl];
-    config = {
+    config = let dockerHelpers = import ./docker-helpers.nix; in {
       Entrypoint = ["${serviceBinary}/bin/${serviceName}"];
       ExposedPorts = builtins.listToAttrs (
         builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
           (pkgs.lib.unique [ ports.graphql ports.health ports.metrics ])
       );
       Env = [
-        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        (dockerHelpers.mkSslEnv pkgs)
         "LD_LIBRARY_PATH=${pkgs.openssl.out}/lib"
         "RUST_LOG=info"
         "PORT=${toString ports.graphql}"

@@ -22,14 +22,13 @@
 } @ args:
 let
   libArgs = builtins.removeAttrs args ["self" "systems"];
-  eachSystem = f: nixpkgs.lib.genAttrs systems f;
-  mkOutputs = system:
+  flakeWrapper = import ./flake-wrapper.nix { inherit nixpkgs; };
+
+  mkPerSystem = system:
     (import ./typescript-library.nix {
       inherit system nixpkgs dream2nix;
     }) (libArgs // { src = self; });
 in
-{
-  packages = eachSystem (system: (mkOutputs system).packages);
-  devShells = eachSystem (system: (mkOutputs system).devShells);
-  apps = eachSystem (system: (mkOutputs system).apps);
-}
+  flakeWrapper.mkFlakeOutputs {
+    inherit systems mkPerSystem;
+  }

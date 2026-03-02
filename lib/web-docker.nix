@@ -31,15 +31,9 @@
         busybox
       ];
 
-      fakeRootCommands = ''
-        mkdir -p etc
-        echo 'root:x:0:0:System administrator:/root:/bin/sh' > etc/passwd
-        echo 'web:x:101:101:web:/app:/sbin/nologin' >> etc/passwd
-        echo 'root:x:0:' > etc/group
-        echo 'web:x:101:' >> etc/group
-      '';
+      fakeRootCommands = (import ./docker-helpers.nix).mkWebUserSetup;
 
-      extraCommands = ''
+      extraCommands = let dockerHelpers = import ./docker-helpers.nix; in ''
         mkdir -p app/static
         cp -r ${builtApp}/* app/static/
         ${
@@ -47,9 +41,8 @@
           then ''cp ${envConfigPath} app/static/env.js''
           else ""
         }
-        mkdir -p var/log run tmp
         chmod -R 755 app/static
-        chmod -R 777 var/log run tmp
+        ${dockerHelpers.mkTmpDirs}
       '';
 
       config = {
@@ -59,7 +52,7 @@
           "8080/tcp" = {};
         };
         Env = [
-          "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+          (import ./docker-helpers.nix).mkSslEnv pkgs
           "NODE_ENV=production"
         ];
         WorkingDir = "/app/static";

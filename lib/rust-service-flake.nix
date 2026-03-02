@@ -28,14 +28,12 @@
   ...
 } @ args:
 let
-  # Extract args that are NOT for rust-service.nix
   serviceArgs = builtins.removeAttrs args [
     "self" "systems" "moduleDir" "nixosModuleFile"
   ];
+  flakeWrapper = import ./flake-wrapper.nix { inherit nixpkgs; };
 
-  eachSystem = f: nixpkgs.lib.genAttrs systems f;
-
-  mkOutputs = system: let
+  mkPerSystem = system: let
     rustService = import ./rust-service.nix {
       inherit system nixpkgs;
       nixLib = substrate;
@@ -44,21 +42,20 @@ let
     };
   in rustService (serviceArgs // { src = self; });
 in
-{
-  packages = eachSystem (system: (mkOutputs system).packages);
-  devShells = eachSystem (system: (mkOutputs system).devShells);
-  apps = eachSystem (system: (mkOutputs system).apps);
-}
-// (if moduleDir != null then {
-  homeManagerModules.default = import (self + "/module") {
-    hmHelpers = import ./hm-service-helpers.nix { lib = nixpkgs.lib; };
-  };
-} else {})
-// (if nixosModuleFile != null then {
-  nixosModules.default = import (self + "/module/nixos.nix");
-} else {})
-// {
-  overlays.default = final: prev: {
-    ${serviceName} = self.packages.${final.system}.default;
-  };
-}
+  flakeWrapper.mkFlakeOutputs {
+    inherit systems mkPerSystem;
+    extraOutputs =
+      (if moduleDir != null then {
+        homeManagerModules.default = import (self + "/module") {
+          hmHelpers = import ./hm-service-helpers.nix { lib = nixpkgs.lib; };
+        };
+      } else {})
+      // (if nixosModuleFile != null then {
+        nixosModules.default = import (self + "/module/nixos.nix");
+      } else {})
+      // {
+        overlays.default = final: prev: {
+          ${serviceName} = self.packages.${final.system}.default;
+        };
+      };
+  }

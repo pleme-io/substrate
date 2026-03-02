@@ -24,22 +24,19 @@
 } @ args:
 let
   toolArgs = builtins.removeAttrs args [ "systems" ];
+  flakeWrapper = import ./flake-wrapper.nix { inherit nixpkgs; };
 
-  eachSystem = f: nixpkgs.lib.genAttrs systems f;
-
-  mkOutputs = system: let
+  mkPerSystem = system: let
     zigTool = import ./zig-tool-release.nix {
       inherit system nixpkgs;
     };
   in zigTool toolArgs;
 in
-{
-  packages = eachSystem (system: (mkOutputs system).packages);
-  devShells = eachSystem (system: (mkOutputs system).devShells);
-  apps = eachSystem (system: (mkOutputs system).apps);
-}
-// {
-  overlays.default = final: prev: {
-    ${toolArgs.toolName} = (mkOutputs final.system).packages.default;
-  };
-}
+  flakeWrapper.mkFlakeOutputs {
+    inherit systems mkPerSystem;
+    extraOutputs = {
+      overlays.default = final: prev: {
+        ${toolArgs.toolName} = (mkPerSystem final.system).packages.default;
+      };
+    };
+  }
