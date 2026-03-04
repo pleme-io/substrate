@@ -211,7 +211,11 @@
     migrationsPath ? src + "/migrations",
     architecture ? "amd64",
     tag ? "latest",
-    ports ? { graphql = 8080; health = 8081; metrics = 9090; },
+    # Service type: "graphql" (default) or "rest" — determines main port key and env vars
+    serviceType ? "graphql",
+    # Ports: GraphQL services use `ports.graphql`, REST services use `ports.http`
+    ports ? (if serviceType == "rest" then { http = 8080; health = 8081; metrics = 9090; }
+            else { graphql = 8080; health = 8081; metrics = 9090; }),
     buildInputs ? [],
     nativeBuildInputs ? [],
     crateOverrides ? {},
@@ -263,28 +267,39 @@
     };
 
     serviceBinary = if project ? workspaceMembers then project.workspaceMembers."${packageName}".build else project.rootCrate.build;
+
+    # Resolve the main service port from the appropriate key based on service type
+    mainPort = if serviceType == "rest" then ports.http or 8080
+               else ports.graphql or 8080;
+
+    # Service-type-specific env vars
+    serviceTypeEnvVars =
+      if serviceType == "rest" then [
+        "PORT=${toString mainPort}"
+        "HTTP_PORT=${toString mainPort}"
+      ] else [
+        "PORT=${toString mainPort}"
+        "GRAPHQL_PORT=${toString mainPort}"
+      ];
   in pkgs.dockerTools.buildLayeredImage {
     name = "${serviceName}-service";
     inherit tag architecture;
-    contents = with pkgs; [cacert curl serviceBinary openssl];
+    contents = with pkgs; [cacert serviceBinary];
     config = let dockerHelpers = import ./docker-helpers.nix; in {
       Entrypoint = ["${serviceBinary}/bin/${serviceName}"];
       ExposedPorts = builtins.listToAttrs (
         builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
-          (pkgs.lib.unique [ ports.graphql ports.health ports.metrics ])
+          (pkgs.lib.unique [ mainPort ports.health ports.metrics ])
       );
       Env = [
         (dockerHelpers.mkSslEnv pkgs)
-        "LD_LIBRARY_PATH=${pkgs.openssl.out}/lib"
         "RUST_LOG=info"
-        "PORT=${toString ports.graphql}"
         "HEALTH_PORT=${toString ports.health}"
-        "GRAPHQL_PORT=${toString ports.graphql}"
         # GIT_SHA is set at deployment time via Kubernetes env vars or docker run -e
         # Default to "nix-build" to indicate this is a Nix-built image
         # The actual git SHA should be injected by the release pipeline
         "GIT_SHA=nix-build"
-      ];
+      ] ++ serviceTypeEnvVars;
       WorkingDir = "/app";
       User = "65534:65534";
     };

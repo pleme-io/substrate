@@ -59,11 +59,17 @@ in {
   repoRoot ? src,  # Repository root (for monorepo: pass the repo root, not the service dir)
   migrationsPath ? src + "/migrations",
   cargoNix ? src + "/Cargo.nix",
-  ports ? {
+  # Service type: "graphql" (default) or "rest" — controls port naming and env vars in Docker image
+  serviceType ? "graphql",
+  ports ? (if serviceType == "rest" then {
+    http = 8080;
+    health = 8081;
+    metrics = 9090;
+  } else {
     graphql = 8080;
     health = 8081;
     metrics = 9090;
-  },
+  }),
   productName ? null,  # Product identifier — null for standalone repos
   registryBase ? null,  # Registry base URL — null when registry is set
   registry ? null,  # Explicit registry override (e.g., "ghcr.io/pleme-io/shinka")
@@ -98,7 +104,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;
