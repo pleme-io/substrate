@@ -16,6 +16,7 @@
   crate2nix,
   flake-utils,
   fenix ? null,
+  devenv ? null,
 }:
 {
   toolName,
@@ -28,7 +29,7 @@ let
 
   mkPerSystem = system: let
     rustTool = import ./rust-tool-release.nix {
-      inherit system nixpkgs;
+      inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
       fenix = if fenix != null then fenix else null;
     };

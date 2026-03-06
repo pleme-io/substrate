@@ -97,6 +97,16 @@
   # Standalone Rust dev environment builder
   rustDevenvModule = import ./rust-devenv.nix { inherit pkgs; };
 
+  # Devenv module paths for consumer repos
+  devenvModulePaths = {
+    rust = ./devenv/rust.nix;
+    rust-service = ./devenv/rust-service.nix;
+    rust-tool = ./devenv/rust-tool.nix;
+    rust-library = ./devenv/rust-library.nix;
+    web = ./devenv/web.nix;
+    nix = ./devenv/nix.nix;
+  };
+
   # mkProductSdlcApps: configurable SDLC app factory.
   # Accepts { backendDir, infraServices } — all optional with sensible defaults.
   mkProductSdlcApps = import ./product-sdlc.nix {
@@ -592,4 +602,16 @@ in rec {
   #     extraPackages = [ pkgs.protobuf ];
   #   };
   inherit (rustDevenvModule) mkRustDevShell;
+
+  # ============================================================================
+  # DEVENV MODULE PATHS (from lib/devenv/)
+  # ============================================================================
+  # Import paths for devenv modules. Use with devenv.lib.mkShell or
+  # devenv.shells.default.imports in flake-parts consumers.
+  #
+  # Example:
+  #   devenv.lib.mkShell {
+  #     modules = [ (import substrateLib.devenvModulePaths.rust-service) ];
+  #   };
+  inherit devenvModulePaths;
 }

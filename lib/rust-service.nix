@@ -24,6 +24,7 @@
   crate2nix,
   forge,
   nixHooks ? null,  # Optional: Nix hooks package for post-build-hook support
+  devenv ? null,    # Optional: devenv flake input for enhanced dev shells
 }: let
   # ============================================================================
   # CROSS-PLATFORM BUILD ARCHITECTURE
@@ -146,7 +147,20 @@ in {
     { default = if dockerImage-amd64 != null then dockerImage-amd64 else dockerImage-arm64; };
 
   # Development shell with all dependencies
-  devShells.default = pkgs.mkShell ({
+  devShells.default = if devenv != null then
+    devenv.lib.mkShell {
+      inputs = { inherit nixpkgs; inherit devenv; };
+      inherit pkgs;
+      modules = [
+        (import ./devenv/rust-service.nix)
+        ({ lib, ... }: {
+          env = builtins.mapAttrs (_: v: lib.mkDefault v) allDevEnvVars;
+          packages = extraDevInputs ++ [ crate2nix ];
+        })
+      ];
+    }
+  else
+    pkgs.mkShell ({
       buildInputs = allBuildInputs ++ devTools ++ extraDevInputs ++ [ crate2nix ];
       nativeBuildInputs = allNativeBuildInputs;
     }

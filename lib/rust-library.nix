@@ -28,6 +28,7 @@
   system,
   nixLib,
   crate2nix,
+  devenv ? null,
 }: let
   pkgs = import nixpkgs {
     inherit system;
@@ -83,10 +84,23 @@ in {
 in {
   packages.default = libraryBuild;
 
-  devShells.default = pkgs.mkShell ({
-    buildInputs = allBuildInputs ++ devTools ++ extraDevInputs ++ [ crate2nix ];
-    nativeBuildInputs = allNativeBuildInputs;
-  } // allDevEnvVars);
+  devShells.default = if devenv != null then
+    devenv.lib.mkShell {
+      inputs = { inherit nixpkgs; inherit devenv; };
+      inherit pkgs;
+      modules = [
+        (import ./devenv/rust-library.nix)
+        ({ lib, ... }: {
+          env = builtins.mapAttrs (_: v: lib.mkDefault v) allDevEnvVars;
+          packages = extraDevInputs ++ [ crate2nix ];
+        })
+      ];
+    }
+  else
+    pkgs.mkShell ({
+      buildInputs = allBuildInputs ++ devTools ++ extraDevInputs ++ [ crate2nix ];
+      nativeBuildInputs = allNativeBuildInputs;
+    } // allDevEnvVars);
 
   apps = {
     check-all = {

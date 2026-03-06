@@ -16,6 +16,7 @@
   substrate,
   forge,
   crate2nix,
+  devenv ? null,
 }:
 {
   self,
@@ -35,7 +36,7 @@ let
 
   mkPerSystem = system: let
     rustService = import ./rust-service.nix {
-      inherit system nixpkgs;
+      inherit system nixpkgs devenv;
       nixLib = substrate;
       crate2nix = crate2nix.packages.${system}.default;
       forge = forge.packages.${system}.default;

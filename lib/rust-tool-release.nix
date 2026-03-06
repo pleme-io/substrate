@@ -23,6 +23,7 @@
   system,
   crate2nix,
   fenix ? null,
+  devenv ? null,
 }: let
   darwinHelpers = import ./darwin.nix;
   rustOverlay = import ./rust-overlay.nix;
@@ -153,13 +154,25 @@ in {
     ${toolName} = nativeBinary;
   };
 
-  devShells.default = hostPkgs.mkShell {
-    buildInputs = devTools ++ [
-      hostPkgs.rust-analyzer
-      crate2nix
-    ] ++ buildInputs
-      ++ (darwinHelpers.mkDarwinBuildInputs hostPkgs);
-  };
+  devShells.default = if devenv != null then
+    devenv.lib.mkShell {
+      inputs = { inherit nixpkgs; inherit devenv; };
+      pkgs = hostPkgs;
+      modules = [
+        (import ./devenv/rust-tool.nix)
+        ({ ... }: {
+          packages = [ crate2nix ] ++ buildInputs;
+        })
+      ];
+    }
+  else
+    hostPkgs.mkShell {
+      buildInputs = devTools ++ [
+        hostPkgs.rust-analyzer
+        crate2nix
+      ] ++ buildInputs
+        ++ (darwinHelpers.mkDarwinBuildInputs hostPkgs);
+    };
 
   apps = {
     default = {

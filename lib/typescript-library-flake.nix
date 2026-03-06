@@ -13,6 +13,7 @@
   nixpkgs,
   dream2nix,
   substrate,
+  devenv ? null,
 }:
 {
   name,
@@ -26,7 +27,7 @@ let
 
   mkPerSystem = system:
     (import ./typescript-library.nix {
-      inherit system nixpkgs dream2nix;
+      inherit system nixpkgs dream2nix devenv;
     }) (libArgs // { src = self; });
 in
   flakeWrapper.mkFlakeOutputs {

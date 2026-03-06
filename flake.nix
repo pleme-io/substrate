@@ -33,6 +33,17 @@
       inherit systems;
 
       flake = {
+        # Devenv modules for consumer repos
+        # Import these in devenv.shells.default.imports or devenv.lib.mkShell modules
+        devenvModules = {
+          rust = ./lib/devenv/rust.nix;
+          rust-service = ./lib/devenv/rust-service.nix;
+          rust-tool = ./lib/devenv/rust-tool.nix;
+          rust-library = ./lib/devenv/rust-library.nix;
+          web = ./lib/devenv/web.nix;
+          nix = ./lib/devenv/nix.nix;
+        };
+
         # Per-system library and overlay exports
         # Consumers access as: substrate.lib.${system}, substrate.rustOverlays.${system}.rust
         lib = eachSystem (system: let

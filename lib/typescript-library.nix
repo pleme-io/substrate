@@ -25,6 +25,7 @@
   nixpkgs,
   system,
   dream2nix,
+  devenv ? null,
 }: let
   pkgs = import nixpkgs { inherit system; };
 in {
@@ -92,13 +93,25 @@ in {
 in {
   packages.default = libraryBuild;
 
-  devShells.default = pkgs.mkShell {
-    name = "${name}-dev";
-    buildInputs = [
-      nodeVersion
-      pkgs.biome
-    ] ++ extraDevInputs;
-  };
+  devShells.default = if devenv != null then
+    devenv.lib.mkShell {
+      inputs = { inherit nixpkgs; inherit devenv; };
+      inherit pkgs;
+      modules = [
+        (import ./devenv/web.nix)
+        ({ ... }: {
+          packages = [ pkgs.biome ] ++ extraDevInputs;
+        })
+      ];
+    }
+  else
+    pkgs.mkShell {
+      name = "${name}-dev";
+      buildInputs = [
+        nodeVersion
+        pkgs.biome
+      ] ++ extraDevInputs;
+    };
 
   apps = {
     check-all = {
