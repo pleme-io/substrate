@@ -94,6 +94,9 @@
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
   helmBuildModule = import ./helm-build.nix { inherit pkgs forgeCmd; };
 
+  # Standalone Rust dev environment builder
+  rustDevenvModule = import ./rust-devenv.nix { inherit pkgs; };
+
   # mkProductSdlcApps: configurable SDLC app factory.
   # Accepts { backendDir, infraServices } — all optional with sensible defaults.
   mkProductSdlcApps = import ./product-sdlc.nix {
@@ -573,4 +576,20 @@ in rec {
     mkHelmBumpApp
     mkHelmSdlcApps
     mkHelmAllApps;
+
+  # ============================================================================
+  # RUST DEV ENVIRONMENT (from rust-devenv.nix)
+  # ============================================================================
+  # Standalone Rust devShell builder with optional tool sets.
+  # Use when you need a dev environment without the full rust-service.nix pipeline.
+  #
+  # Requires substrate rust overlay applied to pkgs (for fenixRustToolchain).
+  #
+  # Example:
+  #   devShells.default = substrateLib.mkRustDevShell {
+  #     withSqlite = true;
+  #     withHelm = true;
+  #     extraPackages = [ pkgs.protobuf ];
+  #   };
+  inherit (rustDevenvModule) mkRustDevShell;
 }
