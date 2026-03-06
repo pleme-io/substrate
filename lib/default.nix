@@ -82,8 +82,8 @@
     inherit (serviceHelpersModule) mkServiceApps;
   };
 
-  # Generic multi-arch image release (no forge dependency — pure skopeo)
-  imageReleaseModule = import ./image-release.nix { inherit pkgs; };
+  # Generic multi-arch image release (uses forge CLI for push orchestration)
+  imageReleaseModule = import ./image-release.nix { inherit pkgs forgeCmd; };
 
   # Ruby gem/service builders (Docker image, regen, push, release)
   rubyBuildModule = import ./ruby-build.nix {

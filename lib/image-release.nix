@@ -16,7 +16,7 @@
 #     k8s   = { registry = "ghcr.io/myorg/my-k8s";   mkImage = system: mkProfile "k8s" system; };
 #   };
 #   # Produces: release:debug, release:k8s, release (all)
-{ pkgs }:
+{ pkgs, forgeCmd ? "forge" }:
 
 let
   linuxSystems = ["x86_64-linux" "aarch64-linux"];
@@ -54,7 +54,7 @@ in rec {
       set -euo pipefail
       export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
       export REGCTL_BIN="${pkgs.regclient}/bin/regctl"
-      exec ${pkgs.forge or "forge"}/bin/forge image-release \
+      exec ${forgeCmd} image-release \
         --name "${name}" \
         --registry "${registry}" \
         ${imageArgs}
