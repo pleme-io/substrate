@@ -17,7 +17,7 @@
 #     cliEntry = "cli.js";
 #     binName = "curupira-mcp";
 #   }
-{ pkgs }:
+{ pkgs, forgeCmd ? "forge" }:
 
 rec {
   # Build pleme-linker tool from source
@@ -275,7 +275,7 @@ rec {
     pkgs.writeShellScript "regen-${name}" ''
       set -euo pipefail
       export PATH="${plemeLinker}/bin:$PATH"
-      exec ${pkgs.forge or "forge"}/bin/forge typescript regenerate \
+      exec ${forgeCmd} typescript regenerate \
         ${pkgs.lib.concatMapStringsSep " " (dir: "--project ${dir}") projectDirs}
     '';
 }

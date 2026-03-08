@@ -17,6 +17,7 @@
   flake-utils,
   fenix ? null,
   devenv ? null,
+  forge ? null,
 }:
 {
   toolName,
@@ -32,6 +33,7 @@ let
       inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
       fenix = if fenix != null then fenix else null;
+      forge = if forge != null then forge.packages.${system}.default else null;
     };
   in rustTool toolArgs;
 in

@@ -24,6 +24,7 @@
   crate2nix,
   fenix ? null,
   devenv ? null,
+  forge ? null,
 }: let
   darwinHelpers = import ./darwin.nix;
   rustOverlay = import ./rust-overlay.nix;
@@ -108,15 +109,21 @@ let
   # ============================================================================
   # APPS (via release-helpers.nix)
   # ============================================================================
+  # Resolve forge command — avoid hostPkgs.forge which collides with a removed
+  # nixpkgs alias (throws instead of returning missing).
+  forgeCmd = if forge != null
+    then "${forge}/bin/forge"
+    else "forge";
+
   releaseHelpers = import ./release-helpers.nix;
 
   releaseApp = releaseHelpers.mkReleaseApp {
-    inherit hostPkgs toolName repo;
+    inherit hostPkgs toolName repo forgeCmd;
     language = "rust";
   };
 
   bumpApp = releaseHelpers.mkBumpApp {
-    inherit hostPkgs toolName;
+    inherit hostPkgs toolName forgeCmd;
     language = "rust";
   };
 
@@ -125,12 +132,12 @@ let
     type = "app";
     program = toString (hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
       set -euo pipefail
-      exec ${hostPkgs.forge or "forge"}/bin/forge tool regenerate --language rust
+      exec ${forgeCmd} tool regenerate --language rust
     '');
   };
 
   checkAllApp = releaseHelpers.mkCheckAllApp {
-    inherit hostPkgs toolName;
+    inherit hostPkgs toolName forgeCmd;
     language = "rust";
   };
 

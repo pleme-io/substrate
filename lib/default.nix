@@ -41,7 +41,7 @@
   # Import modular components
   configModule = import ./config.nix { inherit pkgs; };
   healthSupervisorModule = import ./health-supervisor.nix { inherit pkgs; };
-  typescriptToolModule = import ./typescript-tool.nix { inherit pkgs; };
+  typescriptToolModule = import ./typescript-tool.nix { inherit pkgs forgeCmd; };
 
   # Web build helpers
   webBuildModule = import ./web-build.nix { inherit pkgs; };
