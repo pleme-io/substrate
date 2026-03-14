@@ -142,7 +142,7 @@ let
   };
 
   lockPlatformApp = releaseHelpers.mkLockPlatformApp {
-    inherit hostPkgs toolName;
+    inherit hostPkgs toolName forgeCmd;
     language = "rust";
   };
 

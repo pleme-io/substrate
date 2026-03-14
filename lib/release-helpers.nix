@@ -58,52 +58,16 @@
   #
   # Run on each target platform to certify cross-platform builds.
   # The lock file is committed to the repo as proof of platform support.
-  mkLockPlatformApp = { hostPkgs, toolName, language ? "rust", ... }: let
+  mkLockPlatformApp = { hostPkgs, toolName, language ? "rust", forgeCmd ? "forge", ... }: let
     platform = hostPkgs.stdenv.hostPlatform.system;
-    nix = "${hostPkgs.nix}/bin/nix";
-    git = "${hostPkgs.git}/bin/git";
-    jq = "${hostPkgs.jq}/bin/jq";
   in {
     type = "app";
     program = toString (hostPkgs.writeShellScript "${toolName}-lock-platform" ''
       set -euo pipefail
-
-      PLATFORM="${platform}"
-      REV="$(${git} rev-parse HEAD 2>/dev/null || echo "unknown")"
-      DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-      echo "=== Locking $PLATFORM for ${toolName} ==="
-
-      echo "[1/3] Building..."
-      STORE_PATH="$(${nix} build --print-out-paths 2>/dev/null)" || {
-        echo "FAIL: nix build failed on $PLATFORM"; exit 1;
-      }
-      echo "  -> $STORE_PATH"
-
-      echo "[2/3] Testing..."
-      ${if language == "rust" then ''
-        cargo test --quiet || { echo "FAIL: cargo test failed on $PLATFORM"; exit 1; }
-      '' else if language == "zig" then ''
-        zig build test || { echo "FAIL: zig build test failed on $PLATFORM"; exit 1; }
-      '' else ''
-        echo "  (no test runner for ${language})"
-      ''}
-      echo "  -> pass"
-
-      echo "[3/3] Writing lock..."
-      mkdir -p locks
-      ${jq} -n \
-        --arg tool "${toolName}" \
-        --arg platform "$PLATFORM" \
-        --arg rev "$REV" \
-        --arg date "$DATE" \
-        --arg store_path "$STORE_PATH" \
-        --arg tests "pass" \
-        '{tool: $tool, platform: $platform, rev: $rev, date: $date, store_path: $store_path, tests: $tests}' \
-        > "locks/$PLATFORM.json"
-
-      echo "=== $PLATFORM locked ==="
-      cat "locks/$PLATFORM.json"
+      exec ${forgeCmd} tool lock \
+        --name "${toolName}" \
+        --language "${language}" \
+        --platform "${platform}"
     '');
   };
 }
