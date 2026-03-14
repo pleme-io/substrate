@@ -604,6 +604,52 @@ in rec {
   inherit (rustDevenvModule) mkRustDevShell;
 
   # ============================================================================
+  # GO LIBRARY CHECK BUILDER (standalone import path)
+  # ============================================================================
+  # Verifies a Go library compiles without producing a binary.
+  # For external SDK repos where you want build verification as a Nix derivation.
+  #
+  # Usage:
+  #   goLibCheckBuilder = import "${substrate}/lib/go-library-check.nix";
+  #   sdk-check = goLibCheckBuilder.mkGoLibraryCheck pkgs {
+  #     pname = "my-sdk"; version = "1.0"; src = ...; vendorHash = "sha256-...";
+  #   };
+  goLibraryCheckBuilder = ./go-library-check.nix;
+
+  # Instantiated version (requires pkgs from substrate)
+  inherit ((import ./go-library-check.nix)) mkGoLibraryCheck mkGoLibraryCheckOverlay;
+
+  # ============================================================================
+  # PYTHON PACKAGE BUILDER (standalone import path)
+  # ============================================================================
+  # Reusable pattern for building Python packages from external source.
+  # Wraps buildPythonPackage with common conventions for external SDKs.
+  #
+  # Usage:
+  #   pythonPkgBuilder = import "${substrate}/lib/python-package.nix";
+  #   sdk = pythonPkgBuilder.mkPythonPackage pkgs {
+  #     pname = "my-sdk"; version = "1.0"; src = ...;
+  #     propagatedBuildInputs = with pkgs.python3Packages; [ requests ];
+  #   };
+  pythonPackageBuilder = ./python-package.nix;
+
+  inherit ((import ./python-package.nix)) mkPythonPackage mkPythonPackageOverlay;
+
+  # ============================================================================
+  # SOURCE REGISTRY (standalone import path)
+  # ============================================================================
+  # Centralized, pinned source registry from GitHub repos.
+  # Single place to track versions, revisions, and hashes for external repos.
+  #
+  # Usage:
+  #   mkSourceRegistry = import "${substrate}/lib/source-registry.nix";
+  #   sources = mkSourceRegistry {
+  #     inherit (pkgs) fetchFromGitHub;
+  #     repos = { cli = { owner = "org"; repo = "cli"; rev = "abc"; hash = "sha256-..."; }; };
+  #   };
+  sourceRegistryBuilder = ./source-registry.nix;
+
+  # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)
   # ============================================================================
   # Import paths for devenv modules. Use with devenv.lib.mkShell or
