@@ -72,6 +72,7 @@ in {
   repo,
   cargoNix ? src + "/Cargo.nix",
   buildInputs ? [],
+  nativeBuildInputs ? [],
   crateOverrides ? {},
   ...
 }:
@@ -88,6 +89,8 @@ let
           buildInputs = (attrs.buildInputs or [])
             ++ buildInputs
             ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
+          nativeBuildInputs = (attrs.nativeBuildInputs or [])
+            ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
         };
       } // crateOverrides;
     };
