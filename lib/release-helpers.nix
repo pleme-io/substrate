@@ -49,4 +49,25 @@
         --language "${language}"
     '');
   };
+
+  # Build a lock-platform app that verifies the build on the current platform
+  # and writes a JSON lock file certifying the result.
+  #
+  # Usage: nix run .#lock-platform
+  # Output: locks/<platform>.json
+  #
+  # Run on each target platform to certify cross-platform builds.
+  # The lock file is committed to the repo as proof of platform support.
+  mkLockPlatformApp = { hostPkgs, toolName, language ? "rust", forgeCmd ? "forge", ... }: let
+    platform = hostPkgs.stdenv.hostPlatform.system;
+  in {
+    type = "app";
+    program = toString (hostPkgs.writeShellScript "${toolName}-lock-platform" ''
+      set -euo pipefail
+      exec ${forgeCmd} tool lock \
+        --name "${toolName}" \
+        --language "${language}" \
+        --platform "${platform}"
+    '');
+  };
 }

@@ -141,6 +141,11 @@ let
     language = "rust";
   };
 
+  lockPlatformApp = releaseHelpers.mkLockPlatformApp {
+    inherit hostPkgs toolName;
+    language = "rust";
+  };
+
   # Dev tools for devShell
   devTools = if fenix != null then [
     hostPkgs.fenixRustToolchain
@@ -190,5 +195,6 @@ in {
     bump = bumpApp;
     regenerate-cargo-nix = regenerateApp;
     check-all = checkAllApp;
+    lock-platform = lockPlatformApp;
   };
 }
