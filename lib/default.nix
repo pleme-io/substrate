@@ -650,6 +650,21 @@ in rec {
   sourceRegistryBuilder = ./source-registry.nix;
 
   # ============================================================================
+  # SKILL DEPLOYMENT HELPERS (standalone import path)
+  # ============================================================================
+  # Auto-discovery and deployment of Claude Code skills from a skills/ directory.
+  # Any repo with a skills/ dir can use this to deploy SKILL.md files to
+  # ~/.claude/skills/{name}/SKILL.md via home-manager.
+  #
+  # Usage:
+  #   skillHelpers = import "${substrate}/lib/hm-skill-helpers.nix" { lib = nixpkgs.lib; };
+  #   options.myModule.skills = skillHelpers.mkSkillOptions;
+  #   config = mkIf cfg.skills.enable (skillHelpers.mkSkillConfig {
+  #     skillsDir = ../skills;
+  #   });
+  hmSkillHelpers = ./hm-skill-helpers.nix;
+
+  # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)
   # ============================================================================
   # Import paths for devenv modules. Use with devenv.lib.mkShell or
