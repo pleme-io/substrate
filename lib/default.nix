@@ -636,6 +636,53 @@ in rec {
   inherit ((import ./python-package.nix)) mkPythonPackage mkPythonPackageOverlay;
 
   # ============================================================================
+  # JAVA MAVEN PACKAGE BUILDER (standalone import path)
+  # ============================================================================
+  # Reusable pattern for building Java packages from Maven-based source.
+  # Wraps maven.buildMavenPackage with common conventions for external SDKs.
+  #
+  # Usage:
+  #   javaMavenBuilder = import "${substrate}/lib/java-maven.nix";
+  #   sdk = javaMavenBuilder.mkJavaMavenPackage pkgs {
+  #     pname = "akeyless-java"; version = "4.3.0"; src = ...;
+  #     mvnHash = "sha256-...";
+  #   };
+  javaMavenBuilder = ./java-maven.nix;
+
+  inherit ((import ./java-maven.nix)) mkJavaMavenPackage mkJavaMavenPackageOverlay;
+
+  # ============================================================================
+  # .NET PACKAGE BUILDER (standalone import path)
+  # ============================================================================
+  # Reusable pattern for building .NET/C# packages from source.
+  # Wraps buildDotnetModule with common conventions for external SDKs.
+  #
+  # Usage:
+  #   dotnetBuilder = import "${substrate}/lib/dotnet-build.nix";
+  #   sdk = dotnetBuilder.mkDotnetPackage pkgs {
+  #     pname = "akeyless-csharp"; version = "4.3.0"; src = ...;
+  #     nugetDeps = ./deps.json;
+  #   };
+  dotnetBuilder = ./dotnet-build.nix;
+
+  inherit ((import ./dotnet-build.nix)) mkDotnetPackage mkDotnetPackageOverlay;
+
+  # ============================================================================
+  # TERRAFORM MODULE BUILDER (standalone import path)
+  # ============================================================================
+  # Validates Terraform modules (init + validate + fmt check + tflint).
+  # Produces a derivation that succeeds only if the module is valid.
+  #
+  # Usage:
+  #   tfBuilder = import "${substrate}/lib/terraform-module.nix";
+  #   check = tfBuilder.mkTerraformModuleCheck pkgs {
+  #     pname = "my-tf-module"; version = "1.0"; src = ./.;
+  #   };
+  terraformModuleBuilder = ./terraform-module.nix;
+
+  inherit ((import ./terraform-module.nix)) mkTerraformModuleCheck mkTerraformDevShell mkTerraformModuleCheckOverlay;
+
+  # ============================================================================
   # SOURCE REGISTRY (standalone import path)
   # ============================================================================
   # Centralized, pinned source registry from GitHub repos.
@@ -663,6 +710,35 @@ in rec {
   #     skillsDir = ../skills;
   #   });
   hmSkillHelpers = ./hm-skill-helpers.nix;
+
+  # ============================================================================
+  # MCP SERVER DEPLOYMENT HELPERS (standalone import path)
+  # ============================================================================
+  # Reusable patterns for AI coding agent MCP server management.
+  # Provides option types (mcpServerOpts, agentOpts), wrapper script generation,
+  # server resolution, per-agent filtering, and config deployment.
+  #
+  # Usage:
+  #   mcpHelpers = import "${substrate}/lib/hm-mcp-helpers.nix" { lib = nixpkgs.lib; };
+  #   options.mcp.servers = mkOption {
+  #     type = types.attrsOf (types.submodule mcpHelpers.mcpServerOpts);
+  #   };
+  hmMcpHelpers = ./hm-mcp-helpers.nix;
+
+  # ============================================================================
+  # TYPED CONFIGURATION HELPERS (standalone import path)
+  # ============================================================================
+  # Reusable patterns for generating config files (JSON/YAML) from typed
+  # Nix options. Provides conditional attribute builders (optAttr, optList,
+  # optNested) and config file deployment helpers.
+  #
+  # Usage:
+  #   configHelpers = import "${substrate}/lib/hm-typed-config-helpers.nix" { lib = nixpkgs.lib; };
+  #   home.file = configHelpers.mkJsonConfig {
+  #     path = ".config/app/config.json";
+  #     config = { theme = "nord"; };
+  #   };
+  hmTypedConfigHelpers = ./hm-typed-config-helpers.nix;
 
   # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)
