@@ -23,7 +23,9 @@ let
     if server.package != null
     then "${server.package}/bin/${server.command}"
     else server.command;
-in {
+# rec needed: mkResolvedServers→mkMcpWrapper, mkMcpJson→mkFilterForAgent,
+# mkMcpAgentConfigs→mkMcpJson
+in rec {
   # ─── MCP Server Option Type ────────────────────────────────────────
   # Submodule for defining an MCP server: command, args, credentials, etc.
   #
