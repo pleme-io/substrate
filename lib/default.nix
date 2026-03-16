@@ -14,6 +14,8 @@
 #   - image-release.nix: Generic multi-arch OCI image release (skopeo-based)
 #   - ruby-build.nix: Ruby gem/service builders (Docker image, regen, push, release)
 #   - helm-build.nix: Helm chart lint, package, push, release apps
+#   - pulumi-provider.nix: Pulumi provider SDK generation (5 languages from schema.json)
+#   - ansible-collection.nix: Ansible Galaxy collection packaging and publishing
 {
   pkgs,
   forge ? null,
@@ -796,6 +798,37 @@ in rec {
   #     config = { theme = "nord"; };
   #   };
   hmTypedConfigHelpers = ./hm-typed-config-helpers.nix;
+
+  # ============================================================================
+  # PULUMI PROVIDER BUILDER (standalone import path)
+  # ============================================================================
+  # Generate multi-language SDKs from a Pulumi schema.json.
+  # Produces TypeScript, Python, Go, C#, and Java packages using
+  # `pulumi package gen-sdk`.
+  #
+  # Usage:
+  #   pulumiBuilder = import "${substrate}/lib/pulumi-provider.nix";
+  #   outputs = pulumiBuilder.mkPulumiProvider pkgs {
+  #     name = "akeyless"; version = "0.1.0"; schema = ./schema.json;
+  #   };
+  pulumiProviderBuilder = ./pulumi-provider.nix;
+
+  inherit ((import ./pulumi-provider.nix)) mkPulumiProvider;
+
+  # ============================================================================
+  # ANSIBLE COLLECTION BUILDER (standalone import path)
+  # ============================================================================
+  # Package generated Ansible modules into a Galaxy collection with build,
+  # install, publish, lint, check-all, and bump apps.
+  #
+  # Usage:
+  #   ansibleBuilder = import "${substrate}/lib/ansible-collection.nix";
+  #   outputs = ansibleBuilder.mkAnsibleCollection pkgs {
+  #     namespace = "pleme"; name = "akeyless"; version = "0.1.0"; src = ./.;
+  #   };
+  ansibleCollectionBuilder = ./ansible-collection.nix;
+
+  inherit ((import ./ansible-collection.nix)) mkAnsibleCollection;
 
   # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)
