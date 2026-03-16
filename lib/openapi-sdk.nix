@@ -25,7 +25,24 @@
 #     language = "python";
 #   };
 #
-# Supported languages: go, python, javascript, java, ruby, csharp, rust, typescript
+# Supported generators (40+):
+#
+# Client SDKs:
+#   go, python, javascript, typescript, java, ruby, csharp, rust,
+#   kotlin, swift, dart, php, perl, elixir, scala, haskell, c, cpp,
+#   lua, r, ocaml, clojure, elm, powershell, bash
+#
+# TypeScript variants:
+#   typescript (fetch), typescript-axios, typescript-node, typescript-angular
+#
+# Server stubs:
+#   go-server, python-fastapi, rust-axum, spring, kotlin-spring
+#
+# Schema generators:
+#   graphql-schema, protobuf-schema, mysql-schema, postgresql-schema
+#
+# Documentation:
+#   markdown, html, asciidoc, plantuml
 #
 # Returns: a derivation containing the generated SDK source.
 # For Rust specifically, use openapi-rust-sdk.nix which has deeper Cargo.toml integration.
@@ -113,6 +130,234 @@ let
         packageVersion = version;
         library = "reqwest";
       };
+    };
+
+    # ── Additional client languages ────────────────────────────────
+    kotlin = {
+      generator = "kotlin";
+      properties = {
+        groupId = "io.${packageName}";
+        artifactId = packageName;
+        artifactVersion = version;
+        library = "jvm-okhttp4";
+        dateLibrary = "java8";
+      };
+    };
+    swift = {
+      generator = "swift6";
+      properties = {
+        projectName = packageName;
+        podVersion = version;
+      };
+    };
+    dart = {
+      generator = "dart";
+      properties = {
+        pubName = packageName;
+        pubVersion = version;
+      };
+    };
+    php = {
+      generator = "php";
+      properties = {
+        packageName = packageName;
+        artifactVersion = version;
+        invokerPackage = packageName;
+      };
+    };
+    perl = {
+      generator = "perl";
+      properties = {
+        moduleName = packageName;
+        moduleVersion = version;
+      };
+    };
+    elixir = {
+      generator = "elixir";
+      properties = {
+        packageName = packageName;
+        invokerPackage = packageName;
+      };
+    };
+    scala = {
+      generator = "scala-sttp";
+      properties = {
+        groupId = "io.${packageName}";
+        artifactId = packageName;
+        artifactVersion = version;
+      };
+    };
+    haskell = {
+      generator = "haskell-http-client";
+      properties = {
+        cabalPackage = packageName;
+        cabalVersion = version;
+      };
+    };
+    c = {
+      generator = "c";
+      properties = {
+        projectName = packageName;
+      };
+    };
+    cpp = {
+      generator = "cpp-restsdk";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    lua = {
+      generator = "lua";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    r = {
+      generator = "r";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    ocaml = {
+      generator = "ocaml";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    clojure = {
+      generator = "clojure";
+      properties = {
+        projectName = packageName;
+        projectVersion = version;
+      };
+    };
+    elm = {
+      generator = "elm";
+      properties = {
+        elmPrefixCustomTypeVariants = "true";
+      };
+    };
+    powershell = {
+      generator = "powershell";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    bash = {
+      generator = "bash";
+      properties = {
+        scriptName = packageName;
+      };
+    };
+
+    # ── TypeScript variants ────────────────────────────────────────
+    typescript-axios = {
+      generator = "typescript-axios";
+      properties = {
+        npmName = packageName;
+        npmVersion = version;
+        supportsES6 = "true";
+      };
+    };
+    typescript-node = {
+      generator = "typescript-node";
+      properties = {
+        npmName = packageName;
+        npmVersion = version;
+      };
+    };
+    typescript-angular = {
+      generator = "typescript-angular";
+      properties = {
+        npmName = packageName;
+        npmVersion = version;
+        ngVersion = "18";
+      };
+    };
+
+    # ── Server generators ──────────────────────────────────────────
+    go-server = {
+      generator = "go-server";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    python-fastapi = {
+      generator = "python-fastapi";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    rust-axum = {
+      generator = "rust-axum";
+      properties = {
+        packageName = packageName;
+        packageVersion = version;
+      };
+    };
+    spring = {
+      generator = "spring";
+      properties = {
+        groupId = "io.${packageName}";
+        artifactId = packageName;
+        artifactVersion = version;
+        useSpringBoot3 = "true";
+      };
+    };
+    kotlin-spring = {
+      generator = "kotlin-spring";
+      properties = {
+        groupId = "io.${packageName}";
+        artifactId = packageName;
+        artifactVersion = version;
+      };
+    };
+
+    # ── Schema generators ──────────────────────────────────────────
+    graphql-schema = {
+      generator = "graphql-schema";
+      properties = {};
+    };
+    protobuf-schema = {
+      generator = "protobuf-schema";
+      properties = {};
+    };
+    mysql-schema = {
+      generator = "mysql-schema";
+      properties = {
+        defaultDatabaseName = packageName;
+      };
+    };
+    postgresql-schema = {
+      generator = "postgresql-schema";
+      properties = {
+        defaultDatabaseName = packageName;
+      };
+    };
+
+    # ── Documentation generators ───────────────────────────────────
+    markdown = {
+      generator = "markdown";
+      properties = {};
+    };
+    html = {
+      generator = "html2";
+      properties = {};
+    };
+    asciidoc = {
+      generator = "asciidoc";
+      properties = {};
+    };
+    plantuml = {
+      generator = "plantuml";
+      properties = {};
     };
   };
 
