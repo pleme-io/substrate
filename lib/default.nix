@@ -659,6 +659,21 @@ in rec {
   inherit ((import ./python-uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
 
   # ============================================================================
+  # GITHUB ACTION BUILDER (standalone import path)
+  # ============================================================================
+  # Builds GitHub Actions that use @vercel/ncc to bundle into dist/.
+  # Handles npm install → ncc build → copy dist/ + action.yml.
+  #
+  # Usage:
+  #   actionBuilder = import "${substrate}/lib/github-action.nix";
+  #   action = actionBuilder.mkGitHubAction pkgs {
+  #     pname = "my-action"; src = ./.; npmDepsHash = "sha256-...";
+  #   };
+  githubActionBuilder = ./github-action.nix;
+
+  inherit ((import ./github-action.nix)) mkGitHubAction mkGitHubActionOverlay;
+
+  # ============================================================================
   # JAVA MAVEN PACKAGE BUILDER (standalone import path)
   # ============================================================================
   # Reusable pattern for building Java packages from Maven-based source.

@@ -28,11 +28,16 @@
 #   go + library  → mkGoLibraryCheck
 #   typescript + package → mkTypescriptPackage (via pleme-linker)
 #   npm + package → buildNpmPackage
+#   npm + action  → mkGitHubAction (ncc bundle + action.yml)
 #   java + package → mkJavaMavenPackage
 #   csharp + package → mkDotnetPackage
-#   python + package → mkPythonPackage
+#   python + package → mkUvPythonPackage
 #   terraform + check → mkTerraformModuleCheck
 #   * + devShell  → mkShellNoCC with language-appropriate tools
+#
+# CGo support:
+#   Pass cDeps = ["openssl" "libgit2"] and cNativeDeps = ["pkg-config" "cmake"]
+#   to automatically add C library dependencies to Go/Rust builds.
 {
   nixpkgs,
   flake-utils,
@@ -83,9 +88,16 @@
   # Terraform-specific
   moduleDir ? ".",
 
+  # GitHub Action specific
+  entryPoint ? "src/index.js",
+  actionYml ? "action.yml",
+  nodeOptions ? null,
+
+  # CGo / native C library deps (string names resolved via pkgs)
+  cDeps ? [],            # e.g., ["openssl" "libgit2"] → pkgs.openssl, pkgs.libgit2
+  cNativeDeps ? [],      # e.g., ["pkg-config" "cmake"] → pkgs.pkg-config, pkgs.cmake
+
   # General
-  extraBuildInputs ? [],
-  extraNativeBuildInputs ? [],
   extraDevPackages ? [],
   extraAttrs ? {},
 }:
@@ -134,17 +146,21 @@ flake-utils.lib.eachDefaultSystem (system: let
     platforms = lib.platforms.all;
   } // lib.optionalAttrs (homepage != null) { inherit homepage; };
 
+  # ── Resolved C deps (string names → pkgs) ─────────────────────────
+  resolvedCDeps = map (name: pkgs.${name}) cDeps;
+  resolvedCNativeDeps = map (name: pkgs.${name}) cNativeDeps;
+
   # ── Builder dispatch ───────────────────────────────────────────────
 
   goToolBuilder = import ./go-tool.nix;
   goLibCheckBuilder = import ./go-library-check.nix;
-  pythonPkgBuilder = import ./python-package.nix;
   uvPythonBuilder = import ./python-uv.nix;
   javaMavenBuilder = import ./java-maven.nix;
   dotnetPkgBuilder = import ./dotnet-build.nix;
   terraformBuilder = import ./terraform-module.nix;
+  actionBuilder = import ./github-action.nix;
 
-  # Go tool
+  # Go tool (with optional CGo deps)
   goToolPkg = goToolBuilder.mkGoTool pkgs ({
     inherit pname version proxyVendor tags;
     src = self;
@@ -156,14 +172,22 @@ flake-utils.lib.eachDefaultSystem (system: let
   // lib.optionalAttrs (subPackages != null) { inherit subPackages; }
   // lib.optionalAttrs (ldflags != null) { inherit ldflags; }
   // lib.optionalAttrs (versionLdflags != {}) { inherit versionLdflags; }
+  // lib.optionalAttrs (resolvedCDeps != []) { extraBuildInputs = resolvedCDeps ++ resolvedCNativeDeps; }
   // extraAttrs);
 
-  # Go library check
+  # Go library check (with optional CGo deps)
   goLibCheck = goLibCheckBuilder.mkGoLibraryCheck pkgs ({
     inherit pname version proxyVendor;
     src = self;
     vendorHash = vendorHash;
-  } // extraAttrs);
+  }
+  // lib.optionalAttrs (resolvedCDeps != [] || resolvedCNativeDeps != []) {
+    extraAttrs = {
+      buildInputs = resolvedCDeps;
+      nativeBuildInputs = resolvedCNativeDeps;
+    };
+  }
+  // extraAttrs);
 
   # npm package
   npmPkg = pkgs.buildNpmPackage ({
@@ -176,6 +200,20 @@ flake-utils.lib.eachDefaultSystem (system: let
   // lib.optionalAttrs (npmFlags != []) { inherit npmFlags; }
   // lib.optionalAttrs (npmBuildScript != null) { npmBuildScript = npmBuildScript; }
   // lib.optionalAttrs (sourceRoot != null) { inherit sourceRoot; }
+  // lib.optionalAttrs (nodeOptions != null) { NODE_OPTIONS = nodeOptions; }
+  // extraAttrs);
+
+  # GitHub Action (ncc bundle + action.yml)
+  actionPkg = actionBuilder.mkGitHubAction pkgs ({
+    inherit pname version npmDepsHash entryPoint actionYml;
+    src = self;
+    npmBuildScript = if npmBuildScript != null then npmBuildScript else "package";
+    description = description;
+    homepage = homepage;
+    license = effectiveLicense;
+  }
+  // lib.optionalAttrs (npmFlags != []) { inherit npmFlags; }
+  // lib.optionalAttrs (nodeOptions != null) { inherit nodeOptions; }
   // extraAttrs);
 
   # TypeScript package via pleme-linker
@@ -244,6 +282,7 @@ flake-utils.lib.eachDefaultSystem (system: let
     else if language == "go" && builder == "tool" then { packages.default = goToolPkg; }
     else if language == "go" && builder == "library" then { checks.default = goLibCheck; }
     else if language == "npm" && builder == "package" then { packages.default = npmPkg; }
+    else if language == "npm" && builder == "action" then { packages.default = actionPkg; }
     else if language == "typescript" && builder == "package" && tsPkg != null then { packages.default = tsPkg; }
     else if language == "java" && builder == "package" then { packages.default = javaPkg; }
     else if language == "csharp" && builder == "package" then { packages.default = dotnetPkg; }
