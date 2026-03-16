@@ -697,6 +697,25 @@ in rec {
   sourceRegistryBuilder = ./source-registry.nix;
 
   # ============================================================================
+  # UNIVERSAL REPO FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Single abstraction for all repo types. Eliminates flake.nix boilerplate.
+  # Maps (language, builder) to the correct substrate pattern and devShell.
+  #
+  # Usage:
+  #   outputs = inputs: (import "${inputs.substrate}/lib/repo-flake.nix" {
+  #     inherit (inputs) nixpkgs flake-utils;
+  #   }) {
+  #     self = inputs.self;
+  #     language = "go";
+  #     builder = "tool";
+  #     pname = "my-tool";
+  #     vendorHash = "sha256-...";
+  #     description = "My Go tool";
+  #   };
+  repoFlakeBuilder = ./repo-flake.nix;
+
+  # ============================================================================
   # SKILL DEPLOYMENT HELPERS (standalone import path)
   # ============================================================================
   # Auto-discovery and deployment of Claude Code skills from a skills/ directory.
