@@ -277,18 +277,19 @@ flake-utils.lib.eachDefaultSystem (system: let
 
   # ── Output assembly ────────────────────────────────────────────────
 
-  buildOutput =
-    if builder == "devShell" then {}
-    else if language == "go" && builder == "tool" then { packages.default = goToolPkg; }
-    else if language == "go" && builder == "library" then { checks.default = goLibCheck; }
-    else if language == "npm" && builder == "package" then { packages.default = npmPkg; }
-    else if language == "npm" && builder == "action" then { packages.default = actionPkg; }
-    else if language == "typescript" && builder == "package" && tsPkg != null then { packages.default = tsPkg; }
-    else if language == "java" && builder == "package" then { packages.default = javaPkg; }
-    else if language == "csharp" && builder == "package" then { packages.default = dotnetPkg; }
-    else if language == "python" && builder == "package" then { packages.default = pythonPkg; }
-    else if language == "terraform" && builder == "check" then { checks.default = terraformCheck; }
-    else {};
+  buildOutput = let
+    dispatch = {
+      "go:tool" = { packages.default = goToolPkg; };
+      "go:library" = { checks.default = goLibCheck; };
+      "npm:package" = { packages.default = npmPkg; };
+      "npm:action" = { packages.default = actionPkg; };
+      "typescript:package" = if tsPkg != null then { packages.default = tsPkg; } else {};
+      "java:package" = { packages.default = javaPkg; };
+      "csharp:package" = { packages.default = dotnetPkg; };
+      "python:package" = { packages.default = pythonPkg; };
+      "terraform:check" = { checks.default = terraformCheck; };
+    };
+  in dispatch."${language}:${builder}" or {};
 
   # ── Lifecycle apps (nix run .#<app>) ─────────────────────────────
   # Standard SDLC commands available via `nix run` for every repo.
@@ -354,7 +355,7 @@ flake-utils.lib.eachDefaultSystem (system: let
 
 in buildOutput // {
   devShells.default = pkgs.mkShellNoCC {
-    packages = devPackages ++ extraDevPackages;
+    packages = devPackages ++ (map (p: if builtins.isString p then pkgs.${p} else p) extraDevPackages);
   };
   apps = lifecycleApps;
 })

@@ -66,7 +66,7 @@
       runHook preInstall
       mkdir -p $out
       cp -r dist $out/dist
-      cp ${actionYml} $out/ 2>/dev/null || true
+      cp ${actionYml} $out/
       ${lib.concatMapStringsSep "\n" (f: "cp -r ${f} $out/ 2>/dev/null || true") extraFiles}
       runHook postInstall
     '';
