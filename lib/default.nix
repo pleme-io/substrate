@@ -636,6 +636,29 @@ in rec {
   inherit ((import ./python-package.nix)) mkPythonPackage mkPythonPackageOverlay;
 
   # ============================================================================
+  # PYTHON UV BUILDER (standalone import path)
+  # ============================================================================
+  # Modern Python package builder using UV and pyproject.toml.
+  # Default builder for Python projects. Uses pyproject.toml format with
+  # configurable build backend (setuptools, hatchling, flit-core, etc.).
+  # Also provides mkUvDevShell for Python + UV development environments.
+  #
+  # Usage (package):
+  #   uvPythonBuilder = import "${substrate}/lib/python-uv.nix";
+  #   pkg = uvPythonBuilder.mkUvPythonPackage pkgs {
+  #     pname = "my-pkg"; version = "1.0"; src = ...;
+  #     propagatedBuildInputs = with pkgs.python3Packages; [ requests ];
+  #   };
+  #
+  # Usage (dev shell):
+  #   devShells.default = uvPythonBuilder.mkUvDevShell pkgs {
+  #     extraPackages = [ pkgs.postgresql ];
+  #   };
+  uvPythonBuilder = ./python-uv.nix;
+
+  inherit ((import ./python-uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
+
+  # ============================================================================
   # JAVA MAVEN PACKAGE BUILDER (standalone import path)
   # ============================================================================
   # Reusable pattern for building Java packages from Maven-based source.

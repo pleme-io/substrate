@@ -139,6 +139,7 @@ flake-utils.lib.eachDefaultSystem (system: let
   goToolBuilder = import ./go-tool.nix;
   goLibCheckBuilder = import ./go-library-check.nix;
   pythonPkgBuilder = import ./python-package.nix;
+  uvPythonBuilder = import ./python-uv.nix;
   javaMavenBuilder = import ./java-maven.nix;
   dotnetPkgBuilder = import ./dotnet-build.nix;
   terraformBuilder = import ./terraform-module.nix;
@@ -213,8 +214,8 @@ flake-utils.lib.eachDefaultSystem (system: let
   // lib.optionalAttrs (projectFile != null) { inherit projectFile; }
   // extraAttrs);
 
-  # Python package
-  pythonPkg = pythonPkgBuilder.mkPythonPackage pkgs ({
+  # Python package (UV-based pyproject.toml builder — default)
+  pythonPkg = uvPythonBuilder.mkUvPythonPackage pkgs ({
     inherit pname version;
     src = self;
     description = description;
