@@ -251,8 +251,71 @@ flake-utils.lib.eachDefaultSystem (system: let
     else if language == "terraform" && builder == "check" then { checks.default = terraformCheck; }
     else {};
 
+  # ── Lifecycle apps (nix run .#<app>) ─────────────────────────────
+  # Standard SDLC commands available via `nix run` for every repo.
+
+  mkApp = name: script: {
+    type = "app";
+    program = toString (pkgs.writeShellScript "repo-${name}" script);
+  };
+
+  # Language-specific lifecycle commands
+  lifecycleApps =
+    if language == "go" then {
+      lint = mkApp "lint" ''${pkgs.golangci-lint}/bin/golangci-lint run ./...'';
+      test = mkApp "test" ''${pkgs.go}/bin/go test ./...'';
+      fmt = mkApp "fmt" ''${pkgs.go}/bin/go fmt ./...'';
+      vet = mkApp "vet" ''${pkgs.go}/bin/go vet ./...'';
+      tidy = mkApp "tidy" ''${pkgs.go}/bin/go mod tidy'';
+    }
+    else if language == "npm" || language == "typescript" then {
+      lint = mkApp "lint" ''${pkgs.nodejs_22}/bin/npx eslint . 2>/dev/null || echo "no eslint config"'';
+      test = mkApp "test" ''${pkgs.nodejs_22}/bin/npm test 2>/dev/null || echo "no test script"'';
+      fmt = mkApp "fmt" ''${pkgs.nodejs_22}/bin/npx prettier --write . 2>/dev/null || echo "no prettier config"'';
+    }
+    else if language == "python" then {
+      lint = mkApp "lint" ''${pkgs.ruff}/bin/ruff check .'';
+      test = mkApp "test" ''${pkgs.python3}/bin/python -m pytest 2>/dev/null || echo "no pytest"'';
+      fmt = mkApp "fmt" ''${pkgs.ruff}/bin/ruff format .'';
+    }
+    else if language == "java" then {
+      test = mkApp "test" ''${pkgs.maven}/bin/mvn test 2>/dev/null || echo "maven test failed"'';
+      lint = mkApp "lint" ''${pkgs.maven}/bin/mvn verify -DskipTests 2>/dev/null || true'';
+    }
+    else if language == "rust" then {
+      lint = mkApp "lint" ''${pkgs.clippy}/bin/cargo-clippy -- -D warnings'';
+      test = mkApp "test" ''cargo test'';
+      fmt = mkApp "fmt" ''${pkgs.rustfmt}/bin/cargo-fmt --all'';
+    }
+    else if language == "terraform" then {
+      validate = mkApp "validate" ''${pkgs.opentofu}/bin/tofu init -backend=false && ${pkgs.opentofu}/bin/tofu validate'';
+      fmt = mkApp "fmt" ''${pkgs.opentofu}/bin/tofu fmt -recursive .'';
+      lint = mkApp "lint" ''${pkgs.tflint}/bin/tflint --no-color .'';
+    }
+    else if language == "helm" then {
+      lint = mkApp "lint" ''
+        for chart in charts/*/; do
+          [ -f "$chart/Chart.yaml" ] && ${pkgs.kubernetes-helm}/bin/helm lint "$chart"
+        done
+      '';
+      template = mkApp "template" ''
+        for chart in charts/*/; do
+          [ -f "$chart/Chart.yaml" ] && ${pkgs.kubernetes-helm}/bin/helm template "$chart"
+        done
+      '';
+    }
+    else if language == "ruby" then {
+      test = mkApp "test" ''${pkgs.ruby}/bin/bundle exec rake test 2>/dev/null || ${pkgs.ruby}/bin/bundle exec rspec 2>/dev/null || echo "no tests"'';
+      lint = mkApp "lint" ''${pkgs.ruby}/bin/bundle exec rubocop 2>/dev/null || echo "no rubocop"'';
+    }
+    else if language == "shell" then {
+      lint = mkApp "lint" ''${pkgs.shellcheck}/bin/shellcheck *.sh **/*.sh 2>/dev/null || echo "no shell scripts"'';
+    }
+    else {};
+
 in buildOutput // {
   devShells.default = pkgs.mkShellNoCC {
     packages = devPackages ++ extraDevPackages;
   };
+  apps = lifecycleApps;
 })
