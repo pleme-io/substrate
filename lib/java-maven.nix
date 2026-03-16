@@ -26,7 +26,6 @@
   #
   # Optional attrs:
   #   jdk             — JDK package (default: pkgs.jdk17)
-  #   maven           — Maven package (default: pkgs.maven)
   #   mvnParameters   — extra Maven CLI parameters (default: "-DskipTests")
   #   mvnFetchExtraArgs — extra args for dependency fetch phase
   #   buildOffline    — build in offline mode after fetching deps (default: true)
@@ -43,7 +42,6 @@
     src,
     mvnHash,
     jdk ? pkgs.jdk17,
-    maven ? pkgs.maven,
     mvnParameters ? "-DskipTests",
     mvnFetchExtraArgs ? {},
     buildOffline ? true,
@@ -54,6 +52,7 @@
     description ? "${pname} - Java package",
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
+    platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
 
@@ -64,6 +63,7 @@
         install -Dm644 "$jarPath" "$out/share/java/${pname}.jar"
       else
         # Fallback: install all JARs from target/
+        echo "Primary JAR not found at $jarPath, falling back to target/*.jar"
         find target -maxdepth 1 -name "*.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" \
           -exec install -Dm644 {} "$out/share/java/" \;
       fi
@@ -72,15 +72,14 @@
   in pkgs.maven.buildMavenPackage ({
     inherit pname version src mvnHash;
     inherit buildOffline doCheck;
+    inherit mvnParameters;
 
     nativeBuildInputs = [ jdk ];
-
-    mvnParameters = mvnParameters;
 
     installPhase = if installPhase != null then installPhase else defaultInstallPhase;
 
     meta = {
-      inherit description license;
+      inherit description license platforms;
     } // lib.optionalAttrs (homepage != null) { inherit homepage; };
   }
   // lib.optionalAttrs (mvnFetchExtraArgs != {}) { inherit mvnFetchExtraArgs; }

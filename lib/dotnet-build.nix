@@ -42,27 +42,31 @@
     nugetDeps,
     dotnet-sdk ? pkgs.dotnet-sdk_8,
     dotnet-runtime ? pkgs.dotnet-runtime_8,
+    # Path to .csproj or .sln file. When null, buildDotnetModule auto-detects
+    # by searching for a single .sln or .csproj in the source root.
     projectFile ? null,
     executables ? [],
+    nativeBuildInputs ? [],
     selfContainedBuild ? false,
     doCheck ? false,
     extraAttrs ? {},
     description ? "${pname} - .NET package",
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
+    platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
   in pkgs.buildDotnetModule ({
     inherit pname version src nugetDeps;
     inherit dotnet-sdk dotnet-runtime;
     inherit selfContainedBuild doCheck;
+    inherit executables nativeBuildInputs;
 
     meta = {
-      inherit description license;
+      inherit description license platforms;
     } // lib.optionalAttrs (homepage != null) { inherit homepage; };
   }
   // lib.optionalAttrs (projectFile != null) { inherit projectFile; }
-  // lib.optionalAttrs (executables != []) { inherit executables; }
   // extraAttrs);
 
   # Create an overlay of .NET packages from a definitions attrset.

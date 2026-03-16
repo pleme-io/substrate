@@ -46,11 +46,12 @@
     description ? "${pname} - Terraform module",
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
+    platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
+    tfBin = lib.getExe terraform;
   in pkgs.stdenv.mkDerivation ({
-    name = "${pname}-check-${version}";
-    inherit src;
+    inherit pname version src;
 
     nativeBuildInputs = [ terraform ]
       ++ lib.optional doLint tflint;
@@ -59,33 +60,36 @@
     dontBuild = true;
 
     checkPhase = ''
-      cd ${moduleDir}
+      cd "${moduleDir}"
 
       echo "==> terraform fmt -check"
-      ${terraform}/bin/tofu fmt -check -recursive -diff . || true
+      ${tfBin} fmt -check -recursive -diff .
 
+      # init may fail in the Nix sandbox because providers cannot be downloaded
       echo "==> terraform init -backend=false"
-      ${terraform}/bin/tofu init -backend=false -input=false 2>/dev/null || true
+      ${tfBin} init -backend=false -input=false 2>/dev/null || true
 
       echo "==> terraform validate"
-      ${terraform}/bin/tofu validate || true
+      ${tfBin} validate
     '' + lib.optionalString doLint ''
 
       echo "==> tflint"
-      ${tflint}/bin/tflint --no-color . || true
+      ${lib.getExe tflint} --no-color .
     '';
 
     doCheck = true;
 
     installPhase = ''
       mkdir -p $out
-      cp -r ${moduleDir}/*.tf $out/ 2>/dev/null || true
-      cp -r ${moduleDir}/*.tfvars $out/ 2>/dev/null || true
+      if compgen -G "${moduleDir}"/*.tf > /dev/null; then
+        cp -r "${moduleDir}"/*.tf $out/
+      fi
+      cp -r "${moduleDir}"/*.tfvars $out/ 2>/dev/null || true
       echo "${pname} ${version}" > $out/.validated
     '';
 
     meta = {
-      inherit description license;
+      inherit description license platforms;
     } // lib.optionalAttrs (homepage != null) { inherit homepage; };
   } // extraAttrs);
 
@@ -93,16 +97,21 @@
   #
   # Optional attrs:
   #   terraform       — Terraform/OpenTofu package
+  #   tflint          — TFLint package (null to omit)
+  #   terraform-docs  — terraform-docs package (null to omit)
   #   extraPackages   — additional packages for the shell
   mkTerraformDevShell = pkgs: {
     terraform ? pkgs.opentofu,
+    tflint ? pkgs.tflint,
+    terraform-docs ? pkgs.terraform-docs,
     extraPackages ? [],
-  }: pkgs.mkShellNoCC {
-    packages = [
-      terraform
-      pkgs.tflint
-      pkgs.terraform-docs
-    ] ++ extraPackages;
+  }: let
+    lib = pkgs.lib;
+  in pkgs.mkShellNoCC {
+    packages = [ terraform ]
+      ++ lib.optional (tflint != null) tflint
+      ++ lib.optional (terraform-docs != null) terraform-docs
+      ++ extraPackages;
   };
 
   # Create an overlay of Terraform module checks.
