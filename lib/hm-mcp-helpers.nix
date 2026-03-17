@@ -81,6 +81,12 @@ in rec {
         default = [];
         description = "Restrict to these agents. Empty list = deploy to all agents.";
       };
+
+      scopes = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = "Restrict to these profile scopes. Empty list = all scopes.";
+      };
     };
   };
 
@@ -185,6 +191,18 @@ in rec {
     filterAttrs (sname: _:
       let srv = serverDefs.${sname}; in
       srv.agents == [] || elem agentName srv.agents
+    ) resolvedServers;
+
+  # ─── Per-Scope Filtering ──────────────────────────────────────
+  # Filters resolved servers for a specific scope/profile. Servers with
+  # empty scopes list are included in all scopes.
+  #
+  # Example:
+  #   plemeServers = mcpHelpers.mkFilterForScope cfg.mcp.servers resolved "pleme";
+  mkFilterForScope = serverDefs: resolvedServers: scopeName:
+    filterAttrs (sname: _:
+      let srv = serverDefs.${sname}; in
+      srv.scopes == [] || elem scopeName srv.scopes
     ) resolvedServers;
 
   # ─── MCP JSON Config ───────────────────────────────────────────────
