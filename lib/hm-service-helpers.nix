@@ -103,13 +103,14 @@ with lib;
     args ? [],
     env ? {},
     envFiles ? {},
+    enable ? true,
     package ? null,
     description ? "",
     scopes ? [],
     agents ? [],
   }: {
     blackmatter.components.anvil.mcp.servers.${name} = {
-      inherit command args env envFiles description scopes agents;
+      inherit command args env envFiles description scopes agents enable;
     } // optionalAttrs (package != null) { inherit package; };
   };
 
