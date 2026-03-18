@@ -46,12 +46,20 @@ with lib;
       type = types.attrs;
       default = {};
       internal = true;
-      description = "Generated MCP server attrset — consumed by claude module, not set by users";
+      description = "DEPRECATED: use mkAnvilRegistration. Generated MCP server attrset.";
+    };
+
+    scopes = mkOption {
+      type = types.listOf types.str;
+      default = [];
+      description = "Anvil scopes — controls which agent profiles receive this server. Empty = all profiles.";
     };
   };
 
-  # ─── MCP server entry value ──────────────────────────────────────────
+  # ─── MCP server entry value (DEPRECATED — use mkAnvilRegistration) ───
   # Builds the standard stdio MCP entry attrset.
+  # Kept for backward compatibility. New services should use
+  # mkAnvilRegistration to self-register with blackmatter-anvil.
   #
   # Example:
   #   hmHelpers.mkMcpServerEntry {
@@ -69,6 +77,40 @@ with lib;
     inherit args;
   } // optionalAttrs (env != {}) {
     inherit env;
+  };
+
+  # ─── Anvil self-registration ────────────────────────────────────────
+  # Generates config that writes an MCP server definition to anvil.
+  # Used by service modules to register with blackmatter-anvil when
+  # mcp.enable = true, eliminating the need for manual bridge code.
+  #
+  # Returns a config attrset: { blackmatter.components.anvil.mcp.servers.<name> = { ... }; }
+  #
+  # Requires blackmatter-anvil module to be loaded (standard for all
+  # pleme-io deployments via darwinConfigurations sharedModules).
+  #
+  # Example:
+  #   config = mkIf mcpCfg.enable (mkAnvilRegistration {
+  #     name = "zoekt";
+  #     command = "zoekt-mcp";
+  #     package = mcpCfg.package;
+  #     env.ZOEKT_URL = "http://localhost:6070";
+  #     scopes = mcpCfg.scopes;
+  #   });
+  mkAnvilRegistration = {
+    name,
+    command,
+    args ? [],
+    env ? {},
+    envFiles ? {},
+    package ? null,
+    description ? "",
+    scopes ? [],
+    agents ? [],
+  }: {
+    blackmatter.components.anvil.mcp.servers.${name} = {
+      inherit command args env envFiles description scopes agents;
+    } // optionalAttrs (package != null) { inherit package; };
   };
 
   # ─── Darwin launchd service (persistent, KeepAlive) ───────────────────

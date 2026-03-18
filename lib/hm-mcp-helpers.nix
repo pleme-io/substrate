@@ -2,8 +2,14 @@
 #
 # Reusable patterns for AI coding agent MCP server management.
 # Provides option types, wrapper script generation, server resolution,
-# and per-agent filtering. Used by blackmatter-anvil and any module
-# that manages MCP servers for AI coding agents.
+# per-agent/scope filtering, and context wrapper generation.
+#
+# Used by: blackmatter-anvil, blackmatter-claude (via generatedServers)
+#
+# Agent Categories:
+#   1. mcpjson  — anvil writes config file (Cursor, OpenCode, Windsurf, Rovo Dev, VS Code)
+#   2. claude   — agent reads anvil.generatedServers, deep-merges own config (Claude Code)
+#   3. context  — anvil.contexts generates wrapper binaries (claude-pleme, claude-akeyless)
 #
 # Usage (in flake.nix):
 #   homeManagerModules.default = import ./module {
@@ -13,8 +19,6 @@
 # Usage (in module/default.nix):
 #   { mcpHelpers }: { lib, config, pkgs, ... }:
 #   let inherit (mcpHelpers) mcpServerOpts agentOpts mkMcpWrapper mkResolvedServers; in { ... }
-#
-# Used by: blackmatter-anvil, blackmatter-claude (via generatedServers)
 { lib }:
 with lib;
 let
@@ -204,6 +208,82 @@ in rec {
       let srv = serverDefs.${sname}; in
       srv.scopes == [] || elem scopeName srv.scopes
     ) resolvedServers;
+
+  # ─── Combined Agent + Scope Filtering ────────────────────────────
+  # Applies both agent and scope filters (intersection). Use this when
+  # you need servers matching a specific agent AND scope simultaneously.
+  #
+  # Example:
+  #   servers = mcpHelpers.mkFilterForAgentAndScope cfg.mcp.servers resolved "claude" "pleme";
+  mkFilterForAgentAndScope = serverDefs: resolvedServers: agentName: scopeName:
+    filterAttrs (sname: _:
+      let srv = serverDefs.${sname}; in
+      (srv.agents == [] || elem agentName srv.agents) &&
+      (srv.scopes == [] || elem scopeName srv.scopes)
+    ) resolvedServers;
+
+  # ─── Context Wrapper Generator ──────────────────────────────────
+  # Generates a shell wrapper binary for an org context + agent pair.
+  # The wrapper sets WORKSPACE, filters MCP by scope, handles auth,
+  # and execs the target binary with settings + MCP config flags.
+  #
+  # Used by blackmatter-anvil's contexts option to generate binaries
+  # like claude-pleme, claude-akeyless.
+  #
+  # Example:
+  #   pkg = mcpHelpers.mkContextWrapper pkgs {
+  #     ctxName = "pleme"; scope = "pleme"; ctxEnv = {};
+  #     agentName = "claude"; agent = { targetBin = "claude"; settings = { ... }; ... };
+  #     serverDefs = cfg.mcp.servers; resolvedServers = resolved;
+  #   };
+  mkContextWrapper = pkgs: {
+    ctxName, scope, ctxEnv ? {},
+    agentName, agent,
+    serverDefs, resolvedServers,
+  }: let
+    scopedServers = mkFilterForAgentAndScope serverDefs resolvedServers agentName scope;
+
+    settingsJson = pkgs.writeText "${agentName}-${ctxName}-settings.json"
+      (builtins.toJSON agent.settings);
+
+    mcpJson = pkgs.writeText "${agentName}-${ctxName}-mcp.json"
+      (builtins.toJSON { mcpServers = scopedServers; });
+
+    authExports = concatStringsSep "\n" (
+      (optional (agent.auth.apiKeyFile or null != null) ''
+        key_file=${escapeShellArg agent.auth.apiKeyFile}
+        if [ -f "$key_file" ]; then
+          export ANTHROPIC_API_KEY="$(cat "$key_file")"
+        fi
+      '')
+      ++ (mapAttrsToList (k: v: ''export ${k}=${escapeShellArg v}'') (agent.auth.env or {}))
+    );
+
+    envExports = concatStringsSep "\n"
+      (mapAttrsToList (k: v: ''export ${k}=${escapeShellArg v}'') ctxEnv);
+
+    unsetExports = concatStringsSep "\n"
+      (map (v: "unset ${v}") (agent.unsetEnv or []));
+
+    configDirSetup = optionalString ((agent.configDir or null) != null) ''
+      export CLAUDE_CONFIG_DIR=${escapeShellArg agent.configDir}
+      mkdir -p "$CLAUDE_CONFIG_DIR"
+    '';
+
+    extraArgsStr = concatStringsSep " " (map escapeShellArg (agent.extraArgs or []));
+  in
+    pkgs.writeShellScriptBin "${agentName}-${ctxName}" ''
+      export WORKSPACE=${escapeShellArg ctxName}
+      ${envExports}
+      ${configDirSetup}
+      ${authExports}
+      ${unsetExports}
+      exec ${agent.targetBin} \
+        --settings ${settingsJson} \
+        --mcp-config ${mcpJson} \
+        ${extraArgsStr} \
+        "$@"
+    '';
 
   # ─── MCP JSON Config ───────────────────────────────────────────────
   # Generates a standard MCP JSON config string for an agent.
