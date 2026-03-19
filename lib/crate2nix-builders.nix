@@ -266,7 +266,18 @@
       } // crateOverrides;
     };
 
-    serviceBinary = if project ? workspaceMembers then project.workspaceMembers."${packageName}".build else project.rootCrate.build;
+    serviceBinary =
+      if project ? workspaceMembers then
+        if project.workspaceMembers ? "${packageName}" then
+          project.workspaceMembers."${packageName}".build
+        else
+          builtins.throw ''
+            substrate: packageName "${packageName}" not found in Cargo workspace members.
+            Available members: ${builtins.concatStringsSep ", " (builtins.attrNames project.workspaceMembers)}
+            Hint: packageName must match the `name` field in Cargo.toml exactly.
+          ''
+      else
+        project.rootCrate.build;
 
     # Resolve the main service port from the appropriate key based on service type
     mainPort = if serviceType == "rest" then ports.http or 8080
