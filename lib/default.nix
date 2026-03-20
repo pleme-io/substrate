@@ -533,6 +533,40 @@ in rec {
   pangeaInfraFlakeBuilder = ./infra/pangea-infra-flake.nix;
 
   # ============================================================================
+  # GATED PANGEA WORKSPACE BUILDER (standalone import path)
+  # ============================================================================
+  # Wraps pangea-workspace.nix with RSpec test gates. Infrastructure is NEVER
+  # instantiated without passing the full test suite.
+  #
+  # Usage:
+  #   mkGatedPangeaWorkspace = import "${substrate}/lib/infra/gated-pangea-workspace.nix" {
+  #     inherit pkgs; pangea = ...; ruby = pkgs.ruby_3_3;
+  #   };
+  #   workspace = mkGatedPangeaWorkspace {
+  #     name = "k3s-dev"; architecture = "k3s_cluster_iam";
+  #     architecturesSrc = inputs.pangea-architectures;
+  #   };
+  gatedPangeaWorkspaceBuilder = ./infra/gated-pangea-workspace.nix;
+
+  # ============================================================================
+  # INFRASTRUCTURE SDLC (standalone import path)
+  # ============================================================================
+  # Complete lifecycle apps for gated Pangea workspaces. Encapsulates the full
+  # cycle: rspec → plan → apply → inspec → destroy as reusable nix apps.
+  #
+  # Usage:
+  #   mkInfraSdlc = import "${substrate}/lib/infra/infra-sdlc.nix" {
+  #     inherit pkgs; pangea = ...; ruby = pkgs.ruby_3_3;
+  #   };
+  #   apps = mkInfraSdlc {
+  #     name = "k3s-dev"; architecture = "k3s_cluster_iam";
+  #     architecturesSrc = inputs.pangea-architectures;
+  #   };
+  #   # Gets: cycle, cycle-destroy, drift, validate, test, plan, apply, verify,
+  #   #        deploy, plan-ungated, apply-ungated, destroy, show, status, ...
+  infraSdlcBuilder = ./infra/infra-sdlc.nix;
+
+  # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
   # ============================================================================
   # Build Docker images, regenerate gemset.nix, push/release Ruby services.
