@@ -52,10 +52,8 @@ let
     type = "app";
     program = toString (writeShellScript "test-${name}" ''
       set -euo pipefail
-      export PATH="${pkgs.lib.makeBinPath [env ruby]}:$PATH"
+      export PATH="${env}/bin:${ruby}/bin:$PATH"
       export RUBYLIB="${self}/lib:''${RUBYLIB:-}"
-      export GEM_HOME="${env}/${ruby.gemPath}"
-      export GEM_PATH="${env}/${ruby.gemPath}"
       export DRY_TYPES_WARNINGS=false
       cd "${self}"
       exec bundle exec rspec --format documentation
