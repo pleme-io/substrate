@@ -44,6 +44,23 @@ let
     forgeCmd = "${forge.packages.${system}.default}/bin/forge";
     defaultGhcrToken = "";
   };
+
+  writeShellScript = pkgs.writeShellScript;
+
+  # Test app that uses nix Ruby + gems (not system Ruby)
+  testApp = {
+    type = "app";
+    program = toString (writeShellScript "test-${name}" ''
+      set -euo pipefail
+      export PATH="${pkgs.lib.makeBinPath [env ruby]}:$PATH"
+      export RUBYLIB="${self}/lib:''${RUBYLIB:-}"
+      export GEM_HOME="${env}/${ruby.gemPath}"
+      export GEM_PATH="${env}/${ruby.gemPath}"
+      export DRY_TYPES_WARNINGS=false
+      cd "${self}"
+      exec bundle exec rspec --format documentation
+    '');
+  };
 in
 {
   devShells.default = pkgs.mkShell {
@@ -58,5 +75,8 @@ in
   apps = rubyBuild.mkRubyGemApps {
     srcDir = self;
     inherit name;
+  } // {
+    # Override test to use nix Ruby environment directly
+    test = testApp;
   };
 }
