@@ -1,21 +1,24 @@
 # Substrate - Reusable Nix Build Patterns
 # Provides parameterized functions for building, testing, and deploying services
 #
-# Modules:
-#   - config.nix: Tokens, secrets, runtime tools
-#   - health-supervisor.nix: Health supervisor builder
-#   - typescript-tool.nix: TypeScript tool builders
-#   - web-build.nix: Vite build helpers, dream2nix, dev shell
-#   - web-docker.nix: Web Docker image builder & deployment apps
-#   - crate2nix-builders.nix: crate2nix project/tool/docker builders
-#   - crate2nix-apps.nix: crate2nix service apps (build/push/deploy/release)
-#   - service-helpers.nix: Docker compose, test runners, dev shell, checks
-#   - environment-apps.nix: Environment-aware deployment apps (staging + production)
-#   - image-release.nix: Generic multi-arch OCI image release (skopeo-based)
-#   - ruby-build.nix: Ruby gem/service builders (Docker image, regen, push, release)
-#   - helm-build.nix: Helm chart lint, package, push, release apps
-#   - pulumi-provider.nix: Pulumi provider SDK generation (5 languages from schema.json)
-#   - ansible-collection.nix: Ansible Galaxy collection packaging and publishing
+# Module Organization:
+#   build/       — Language-specific build patterns
+#     rust/      — overlay, library, service-flake, tool-release, devenv, crate2nix
+#     go/        — overlay, tool, monorepo, monorepo-binary, library-check
+#     zig/       — overlay, tool-release, tool-release-flake
+#     swift/     — overlay
+#     typescript/ — tool, library, library-flake
+#     ruby/      — build, gem, gem-flake
+#     python/    — package, uv
+#     dotnet/    — build
+#     java/      — maven
+#     wasm/      — build
+#     web/       — build, docker, github-action
+#   service/     — Service lifecycle (helpers, environment-apps, product-sdlc, image-release, helm-build, health-supervisor)
+#   hm/          — home-manager integration (service-helpers, skill-helpers, mcp-helpers, typed-config-helpers, nixos-service-helpers)
+#   infra/       — IaC patterns (pangea-infra, terraform-module, pulumi-provider, ansible-collection)
+#   codegen/     — Code generation (source-registry)
+#   util/        — Shared utilities (config, darwin, test-helpers, versioned-overlay, repo-flake, monorepo-parts)
 {
   pkgs,
   forge ? null,
@@ -24,16 +27,16 @@
   fenix ? null,
 }: let
   # Import Rust overlay module (always available, doesn't need fenix at import time)
-  rustOverlayModule = import ./rust-overlay.nix;
+  rustOverlayModule = import ./build/rust/overlay.nix;
 
   # Import Go overlay module (builds Go from upstream source)
-  goOverlayModule = import ./go-overlay.nix;
+  goOverlayModule = import ./build/go/overlay.nix;
 
   # Import Zig overlay module (prebuilt compiler + from-source zls)
-  zigOverlayModule = import ./zig-overlay.nix;
+  zigOverlayModule = import ./build/zig/overlay.nix;
 
   # Import Swift overlay module (prebuilt Swift 6 from swift.org, Darwin-only)
-  swiftOverlayModule = import ./swift-overlay.nix;
+  swiftOverlayModule = import ./build/swift/overlay.nix;
 
   # Helper to get forge command
   forgeCmd = if forge != null
@@ -41,43 +44,43 @@
     else "forge";
 
   # Import modular components
-  configModule = import ./config.nix { inherit pkgs; };
-  healthSupervisorModule = import ./health-supervisor.nix { inherit pkgs; };
-  typescriptToolModule = import ./typescript-tool.nix { inherit pkgs forgeCmd; };
+  configModule = import ./util/config.nix { inherit pkgs; };
+  healthSupervisorModule = import ./service/health-supervisor.nix { inherit pkgs; };
+  typescriptToolModule = import ./build/typescript/tool.nix { inherit pkgs forgeCmd; };
 
   # Web build helpers
-  webBuildModule = import ./web-build.nix { inherit pkgs; };
+  webBuildModule = import ./build/web/build.nix { inherit pkgs; };
 
   # WASM build helpers (Yew/Rust WASM applications)
   wasmBuildModule = if fenix != null && crate2nix != null
-    then import ./wasm-build.nix { inherit pkgs fenix crate2nix; }
+    then import ./build/wasm/build.nix { inherit pkgs fenix crate2nix; }
     else {};
 
   # Web docker and deployment (needs config for tokens)
-  webDockerModule = import ./web-docker.nix {
+  webDockerModule = import ./build/web/docker.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken;
   };
 
   # Crate2nix builders
-  crate2nixBuildersModule = import ./crate2nix-builders.nix {
+  crate2nixBuildersModule = import ./build/rust/crate2nix-builders.nix {
     inherit pkgs crate2nix;
   };
 
   # Crate2nix service apps
-  crate2nixAppsModule = import ./crate2nix-apps.nix {
+  crate2nixAppsModule = import ./build/rust/crate2nix-apps.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken mkRuntimeToolsEnv deploymentTools kubernetesTools;
   };
 
   # Service helpers (docker compose, test runners, etc.)
-  serviceHelpersModule = import ./service-helpers.nix {
+  serviceHelpersModule = import ./service/helpers.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken;
   };
 
   # Environment-aware deployment apps
-  environmentAppsModule = import ./environment-apps.nix {
+  environmentAppsModule = import ./service/environment-apps.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken;
     inherit (webDockerModule) mkWebDeploymentApps;
@@ -85,19 +88,19 @@
   };
 
   # Generic multi-arch image release (uses forge CLI for push orchestration)
-  imageReleaseModule = import ./image-release.nix { inherit pkgs forgeCmd; };
+  imageReleaseModule = import ./service/image-release.nix { inherit pkgs forgeCmd; };
 
   # Ruby gem/service builders (Docker image, regen, push, release)
-  rubyBuildModule = import ./ruby-build.nix {
+  rubyBuildModule = import ./build/ruby/build.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultGhcrToken;
   };
 
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
-  helmBuildModule = import ./helm-build.nix { inherit pkgs forgeCmd; };
+  helmBuildModule = import ./service/helm-build.nix { inherit pkgs forgeCmd; };
 
   # Standalone Rust dev environment builder
-  rustDevenvModule = import ./rust-devenv.nix { inherit pkgs; };
+  rustDevenvModule = import ./build/rust/devenv.nix { inherit pkgs; };
 
   # Devenv module paths for consumer repos
   devenvModulePaths = {
@@ -111,7 +114,7 @@
 
   # mkProductSdlcApps: configurable SDLC app factory.
   # Accepts { backendDir, infraServices } — all optional with sensible defaults.
-  mkProductSdlcApps = import ./product-sdlc.nix {
+  mkProductSdlcApps = import ./service/product-sdlc.nix {
     inherit pkgs forgeCmd;
   };
 
@@ -146,8 +149,8 @@ in rec {
   # Usage (standalone):
   #   darwinHelpers = import "${substrate}/lib/darwin.nix";
   #   buildInputs = darwinHelpers.mkDarwinBuildInputs pkgs;
-  inherit ((import ./darwin.nix)) mkDarwinBuildInputs;
-  darwinHelpers = ./darwin.nix;
+  inherit ((import ./util/darwin.nix)) mkDarwinBuildInputs;
+  darwinHelpers = ./util/darwin.nix;
 
   # ============================================================================
   # HEALTH SUPERVISOR BUILDER (from health-supervisor.nix)
@@ -298,14 +301,14 @@ in rec {
   # ============================================================================
   # For consumers that need the Swift overlay as a standalone flake overlay.
   # Usage: overlays = [ (import "${substrate}/lib/swift-overlay.nix").mkSwiftOverlay {} ];
-  swiftOverlay = ./swift-overlay.nix;
+  swiftOverlay = ./build/swift/overlay.nix;
 
   # ============================================================================
   # ZIG OVERLAY MODULE (standalone import path)
   # ============================================================================
   # For consumers that need the Zig overlay as a standalone flake overlay.
   # Usage: overlays = [ (import "${substrate}/lib/zig-overlay.nix").mkZigOverlay {} ];
-  zigOverlay = ./zig-overlay.nix;
+  zigOverlay = ./build/zig/overlay.nix;
 
   # ============================================================================
   # ZIG TOOL RELEASE BUILDER (standalone import path)
@@ -317,15 +320,15 @@ in rec {
   #   outputs = (import "${substrate}/lib/zig-tool-release-flake.nix" {
   #     inherit nixpkgs;
   #   }) { toolName = "z9s"; src = self; repo = "drzln/z9s"; };
-  zigToolReleaseBuilder = ./zig-tool-release.nix;
-  zigToolReleaseFlakeBuilder = ./zig-tool-release-flake.nix;
+  zigToolReleaseBuilder = ./build/zig/tool-release.nix;
+  zigToolReleaseFlakeBuilder = ./build/zig/tool-release-flake.nix;
 
   # ============================================================================
   # GO OVERLAY MODULE (standalone import path)
   # ============================================================================
   # For consumers that need the Go overlay as a standalone flake overlay.
   # Usage: overlays = [ (import "${substrate}/lib/go-overlay.nix").mkGoOverlay {} ];
-  goOverlay = ./go-overlay.nix;
+  goOverlay = ./build/go/overlay.nix;
 
   # ============================================================================
   # GO TOOL BUILDER (standalone import path)
@@ -337,7 +340,7 @@ in rec {
   # Usage:
   #   goToolBuilder = import "${substrate}/lib/go-tool.nix";
   #   myTool = goToolBuilder.mkGoTool pkgs { pname = "my-tool"; ... };
-  goToolBuilder = ./go-tool.nix;
+  goToolBuilder = ./build/go/tool.nix;
 
   # ============================================================================
   # GO MONOREPO SOURCE FACTORY (standalone import path)
@@ -356,7 +359,7 @@ in rec {
   #     version = "1.34.3"; srcHash = "sha256-...";
   #     versionPackage = "k8s.io/component-base/version";
   #   };
-  goMonorepoBuilder = ./go-monorepo.nix;
+  goMonorepoBuilder = ./build/go/monorepo.nix;
 
   # ============================================================================
   # GO MONOREPO BINARY BUILDER (standalone import path)
@@ -371,7 +374,7 @@ in rec {
   #     pname = "kubelet";
   #     description = "Kubernetes node agent";
   #   };
-  goMonorepoBinaryBuilder = ./go-monorepo-binary.nix;
+  goMonorepoBinaryBuilder = ./build/go/monorepo-binary.nix;
 
   # ============================================================================
   # VERSIONED OVERLAY GENERATOR (standalone import path)
@@ -387,7 +390,7 @@ in rec {
   #     defaultTrack = "1.34"; latestTrack = "1.35";
   #     components = { kubelet = { src = k8sPkgs; }; };
   #   };
-  versionedOverlay = ./versioned-overlay.nix;
+  versionedOverlay = ./util/versioned-overlay.nix;
 
   # ============================================================================
   # RUST SERVICE FLAKE BUILDER (standalone import path)
@@ -399,14 +402,14 @@ in rec {
   #   outputs = (import "${substrate}/lib/rust-service-flake.nix" {
   #     inherit nixpkgs substrate forge crate2nix;
   #   }) { inherit self; serviceName = "hanabi"; registry = "ghcr.io/pleme-io/hanabi"; };
-  rustServiceFlakeBuilder = ./rust-service-flake.nix;
+  rustServiceFlakeBuilder = ./build/rust/service-flake.nix;
 
   # ============================================================================
   # RUST LIBRARY BUILDER (from rust-library.nix)
   # ============================================================================
   # Standalone module for crates.io Rust library SDLC (build, check, publish).
   # Usage: import "${substrate}/lib/rust-library.nix" { inherit system nixpkgs; nixLib = substrate; crate2nix = inputs.crate2nix; };
-  rustLibraryBuilder = ./rust-library.nix;
+  rustLibraryBuilder = ./build/rust/library.nix;
 
   # ============================================================================
   # RUST TOOL RELEASE BUILDER (standalone import path)
@@ -419,15 +422,15 @@ in rec {
   #   outputs = (import "${substrate}/lib/rust-tool-release-flake.nix" {
   #     inherit nixpkgs crate2nix flake-utils;
   #   }) { toolName = "kindling"; src = self; repo = "pleme-io/kindling"; };
-  rustToolReleaseBuilder = ./rust-tool-release.nix;
-  rustToolReleaseFlakeBuilder = ./rust-tool-release-flake.nix;
+  rustToolReleaseBuilder = ./build/rust/tool-release.nix;
+  rustToolReleaseFlakeBuilder = ./build/rust/tool-release-flake.nix;
 
   # ============================================================================
   # TYPESCRIPT LIBRARY BUILDER (from typescript-library.nix)
   # ============================================================================
   # Standalone module for TypeScript library SDLC (build, check-all, devShell).
   # Usage: import "${substrate}/lib/typescript-library.nix" { inherit system nixpkgs dream2nix; };
-  typescriptLibraryBuilder = ./typescript-library.nix;
+  typescriptLibraryBuilder = ./build/typescript/library.nix;
 
   # ============================================================================
   # TYPESCRIPT LIBRARY FLAKE BUILDER (standalone import path)
@@ -439,7 +442,7 @@ in rec {
   #   outputs = (import "${substrate}/lib/typescript-library-flake.nix" {
   #     inherit nixpkgs dream2nix substrate;
   #   }) { inherit self; name = "pleme-ui-components"; };
-  typescriptLibraryFlakeBuilder = ./typescript-library-flake.nix;
+  typescriptLibraryFlakeBuilder = ./build/typescript/library-flake.nix;
 
   # ============================================================================
   # HOME-MANAGER SERVICE HELPERS (standalone import — no pkgs/system needed)
@@ -450,7 +453,7 @@ in rec {
   #
   # Usage:
   #   hmHelpers = import "${substrate}/lib/hm-service-helpers.nix" { lib = nixpkgs.lib; };
-  hmServiceHelpers = ./hm-service-helpers.nix;
+  hmServiceHelpers = ./hm/service-helpers.nix;
 
   # ============================================================================
   # NIXOS SERVICE HELPERS (standalone import — no pkgs/system needed)
@@ -460,7 +463,7 @@ in rec {
   #
   # Usage:
   #   nixosHelpers = import "${substrate}/lib/nixos-service-helpers.nix" { lib = nixpkgs.lib; };
-  nixosServiceHelpers = ./nixos-service-helpers.nix;
+  nixosServiceHelpers = ./hm/nixos-service-helpers.nix;
 
   # ============================================================================
   # TEST HELPERS (standalone import — no pkgs/system needed)
@@ -476,7 +479,7 @@ in rec {
   #   tests.unit = testHelpers.runTests [
   #     (testHelpers.mkTest "my-test" (1 + 1 == 2) "math works")
   #   ];
-  testHelpers = ./test-helpers.nix;
+  testHelpers = ./util/test-helpers.nix;
 
   # ============================================================================
   # RUBY GEM BUILDER (standalone import path)
@@ -489,7 +492,7 @@ in rec {
   #     inherit nixpkgs system ruby-nix substrate forge;
   #   };
   #   outputs = rubyGem { inherit self; name = "pangea-core"; };
-  rubyGemBuilder = ./ruby-gem.nix;
+  rubyGemBuilder = ./build/ruby/gem.nix;
 
   # ============================================================================
   # RUBY GEM FLAKE BUILDER (standalone import path)
@@ -501,7 +504,7 @@ in rec {
   #   outputs = (import "${substrate}/lib/ruby-gem-flake.nix" {
   #     inherit nixpkgs ruby-nix flake-utils substrate forge;
   #   }) { inherit self; name = "pangea-core"; };
-  rubyGemFlakeBuilder = ./ruby-gem-flake.nix;
+  rubyGemFlakeBuilder = ./build/ruby/gem-flake.nix;
 
   # ============================================================================
   # PANGEA INFRASTRUCTURE BUILDER (standalone import path)
@@ -515,7 +518,7 @@ in rec {
   #     inherit nixpkgs system ruby-nix substrate forge;
   #   };
   #   outputs = pangeaInfra { inherit self; name = "my-infra"; };
-  pangeaInfraBuilder = ./pangea-infra.nix;
+  pangeaInfraBuilder = ./infra/pangea-infra.nix;
 
   # ============================================================================
   # PANGEA INFRASTRUCTURE FLAKE BUILDER (standalone import path)
@@ -527,7 +530,7 @@ in rec {
   #   outputs = (import "${substrate}/lib/pangea-infra-flake.nix" {
   #     inherit nixpkgs ruby-nix flake-utils substrate forge;
   #   }) { inherit self; name = "my-infra"; };
-  pangeaInfraFlakeBuilder = ./pangea-infra-flake.nix;
+  pangeaInfraFlakeBuilder = ./infra/pangea-infra-flake.nix;
 
   # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
@@ -616,10 +619,10 @@ in rec {
   #   sdk-check = goLibCheckBuilder.mkGoLibraryCheck pkgs {
   #     pname = "my-sdk"; version = "1.0"; src = ...; vendorHash = "sha256-...";
   #   };
-  goLibraryCheckBuilder = ./go-library-check.nix;
+  goLibraryCheckBuilder = ./build/go/library-check.nix;
 
   # Instantiated version (requires pkgs from substrate)
-  inherit ((import ./go-library-check.nix)) mkGoLibraryCheck mkGoLibraryCheckOverlay;
+  inherit ((import ./build/go/library-check.nix)) mkGoLibraryCheck mkGoLibraryCheckOverlay;
 
   # ============================================================================
   # PYTHON PACKAGE BUILDER (standalone import path)
@@ -633,9 +636,9 @@ in rec {
   #     pname = "my-sdk"; version = "1.0"; src = ...;
   #     propagatedBuildInputs = with pkgs.python3Packages; [ requests ];
   #   };
-  pythonPackageBuilder = ./python-package.nix;
+  pythonPackageBuilder = ./build/python/package.nix;
 
-  inherit ((import ./python-package.nix)) mkPythonPackage mkPythonPackageOverlay;
+  inherit ((import ./build/python/package.nix)) mkPythonPackage mkPythonPackageOverlay;
 
   # ============================================================================
   # PYTHON UV BUILDER (standalone import path)
@@ -656,9 +659,9 @@ in rec {
   #   devShells.default = uvPythonBuilder.mkUvDevShell pkgs {
   #     extraPackages = [ pkgs.postgresql ];
   #   };
-  uvPythonBuilder = ./python-uv.nix;
+  uvPythonBuilder = ./build/python/uv.nix;
 
-  inherit ((import ./python-uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
+  inherit ((import ./build/python/uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
 
   # ============================================================================
   # GITHUB ACTION BUILDER (standalone import path)
@@ -671,9 +674,9 @@ in rec {
   #   action = actionBuilder.mkGitHubAction pkgs {
   #     pname = "my-action"; src = ./.; npmDepsHash = "sha256-...";
   #   };
-  githubActionBuilder = ./github-action.nix;
+  githubActionBuilder = ./build/web/github-action.nix;
 
-  inherit ((import ./github-action.nix)) mkGitHubAction mkGitHubActionOverlay;
+  inherit ((import ./build/web/github-action.nix)) mkGitHubAction mkGitHubActionOverlay;
 
   # ============================================================================
   # JAVA MAVEN PACKAGE BUILDER (standalone import path)
@@ -687,9 +690,9 @@ in rec {
   #     pname = "akeyless-java"; version = "4.3.0"; src = ...;
   #     mvnHash = "sha256-...";
   #   };
-  javaMavenBuilder = ./java-maven.nix;
+  javaMavenBuilder = ./build/java/maven.nix;
 
-  inherit ((import ./java-maven.nix)) mkJavaMavenPackage mkJavaMavenPackageOverlay;
+  inherit ((import ./build/java/maven.nix)) mkJavaMavenPackage mkJavaMavenPackageOverlay;
 
   # ============================================================================
   # .NET PACKAGE BUILDER (standalone import path)
@@ -703,9 +706,9 @@ in rec {
   #     pname = "akeyless-csharp"; version = "4.3.0"; src = ...;
   #     nugetDeps = ./deps.json;
   #   };
-  dotnetBuilder = ./dotnet-build.nix;
+  dotnetBuilder = ./build/dotnet/build.nix;
 
-  inherit ((import ./dotnet-build.nix)) mkDotnetPackage mkDotnetPackageOverlay;
+  inherit ((import ./build/dotnet/build.nix)) mkDotnetPackage mkDotnetPackageOverlay;
 
   # ============================================================================
   # TERRAFORM MODULE BUILDER (standalone import path)
@@ -718,9 +721,9 @@ in rec {
   #   check = tfBuilder.mkTerraformModuleCheck pkgs {
   #     pname = "my-tf-module"; version = "1.0"; src = ./.;
   #   };
-  terraformModuleBuilder = ./terraform-module.nix;
+  terraformModuleBuilder = ./infra/terraform-module.nix;
 
-  inherit ((import ./terraform-module.nix)) mkTerraformModuleCheck mkTerraformDevShell mkTerraformModuleCheckOverlay;
+  inherit ((import ./infra/terraform-module.nix)) mkTerraformModuleCheck mkTerraformDevShell mkTerraformModuleCheckOverlay;
 
   # ============================================================================
   # SOURCE REGISTRY (standalone import path)
@@ -734,7 +737,7 @@ in rec {
   #     inherit (pkgs) fetchFromGitHub;
   #     repos = { cli = { owner = "org"; repo = "cli"; rev = "abc"; hash = "sha256-..."; }; };
   #   };
-  sourceRegistryBuilder = ./source-registry.nix;
+  sourceRegistryBuilder = ./codegen/source-registry.nix;
 
   # ============================================================================
   # UNIVERSAL REPO FLAKE BUILDER (standalone import path)
@@ -753,7 +756,7 @@ in rec {
   #     vendorHash = "sha256-...";
   #     description = "My Go tool";
   #   };
-  repoFlakeBuilder = ./repo-flake.nix;
+  repoFlakeBuilder = ./util/repo-flake.nix;
 
   # ============================================================================
   # SKILL DEPLOYMENT HELPERS (standalone import path)
@@ -768,7 +771,7 @@ in rec {
   #   config = mkIf cfg.skills.enable (skillHelpers.mkSkillConfig {
   #     skillsDir = ../skills;
   #   });
-  hmSkillHelpers = ./hm-skill-helpers.nix;
+  hmSkillHelpers = ./hm/skill-helpers.nix;
 
   # ============================================================================
   # MCP SERVER DEPLOYMENT HELPERS (standalone import path)
@@ -782,7 +785,7 @@ in rec {
   #   options.mcp.servers = mkOption {
   #     type = types.attrsOf (types.submodule mcpHelpers.mcpServerOpts);
   #   };
-  hmMcpHelpers = ./hm-mcp-helpers.nix;
+  hmMcpHelpers = ./hm/mcp-helpers.nix;
 
   # ============================================================================
   # TYPED CONFIGURATION HELPERS (standalone import path)
@@ -797,7 +800,7 @@ in rec {
   #     path = ".config/app/config.json";
   #     config = { theme = "nord"; };
   #   };
-  hmTypedConfigHelpers = ./hm-typed-config-helpers.nix;
+  hmTypedConfigHelpers = ./hm/typed-config-helpers.nix;
 
   # ============================================================================
   # PULUMI PROVIDER BUILDER (standalone import path)
@@ -811,9 +814,9 @@ in rec {
   #   outputs = pulumiBuilder.mkPulumiProvider pkgs {
   #     name = "akeyless"; version = "0.1.0"; schema = ./schema.json;
   #   };
-  pulumiProviderBuilder = ./pulumi-provider.nix;
+  pulumiProviderBuilder = ./infra/pulumi-provider.nix;
 
-  inherit ((import ./pulumi-provider.nix)) mkPulumiProvider;
+  inherit ((import ./infra/pulumi-provider.nix)) mkPulumiProvider;
 
   # ============================================================================
   # ANSIBLE COLLECTION BUILDER (standalone import path)
@@ -826,9 +829,9 @@ in rec {
   #   outputs = ansibleBuilder.mkAnsibleCollection pkgs {
   #     namespace = "pleme"; name = "akeyless"; version = "0.1.0"; src = ./.;
   #   };
-  ansibleCollectionBuilder = ./ansible-collection.nix;
+  ansibleCollectionBuilder = ./infra/ansible-collection.nix;
 
-  inherit ((import ./ansible-collection.nix)) mkAnsibleCollection;
+  inherit ((import ./infra/ansible-collection.nix)) mkAnsibleCollection;
 
   # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)

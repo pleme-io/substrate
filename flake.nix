@@ -47,7 +47,7 @@
         # Per-system library and overlay exports
         # Consumers access as: substrate.lib.${system}, substrate.rustOverlays.${system}.rust
         lib = eachSystem (system: let
-          rustOverlay = import ./lib/rust-overlay.nix;
+          rustOverlay = import ./lib/build/rust/overlay.nix;
           pkgs = import nixpkgs {
             inherit system;
             overlays = [ (rustOverlay.mkRustOverlay { inherit fenix system; }) ];
@@ -61,18 +61,18 @@
         # `flake.overlays` for nixpkgs overlay functions (final: prev: { ... }).
         # Per-system attrsets like this would fail the overlay type check.
         rustOverlays = eachSystem (system: {
-          rust = (import ./lib/rust-overlay.nix).mkRustOverlay { inherit fenix system; };
+          rust = (import ./lib/build/rust/overlay.nix).mkRustOverlay { inherit fenix system; };
         });
 
         # Standalone import paths for consumer flakes
-        rustToolReleaseFlakeBuilder = ./lib/rust-tool-release-flake.nix;
-        zigToolReleaseFlakeBuilder = ./lib/zig-tool-release-flake.nix;
+        rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;
+        zigToolReleaseFlakeBuilder = ./lib/build/zig/tool-release-flake.nix;
 
         # Rust overlay module for direct import
-        rustOverlay = ./lib/rust-overlay.nix;
+        rustOverlay = ./lib/build/rust/overlay.nix;
 
         # Flake-parts module factory for monorepo consumers
-        monorepoPartsModule = ./lib/monorepo-parts.nix;
+        monorepoPartsModule = ./lib/util/monorepo-parts.nix;
 
         # Expose library for non-system-specific usage
         libFor = {
