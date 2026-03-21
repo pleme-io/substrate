@@ -2,9 +2,9 @@
 # Wraps fleet-pangea-infra.nix + eachSystem for zero-boilerplate consumer flakes.
 #
 # Usage in a flake:
-#   outputs = { self, nixpkgs, ruby-nix, flake-utils, substrate, forge, fleet, ... }:
+#   outputs = { self, nixpkgs, ruby-nix, flake-utils, substrate, forge, fleet, pangea, ... }:
 #     (import "${substrate}/lib/fleet-pangea-infra-flake.nix" {
-#       inherit nixpkgs ruby-nix flake-utils substrate forge fleet;
+#       inherit nixpkgs ruby-nix flake-utils substrate forge fleet pangea;
 #     }) {
 #       inherit self;
 #       name = "my-infra";
@@ -19,6 +19,7 @@
   substrate,
   forge,
   fleet ? null,
+  pangea ? null,
 }:
 {
   name,
@@ -30,7 +31,7 @@
 }:
   flake-utils.lib.eachSystem systems (system:
     (import ./fleet-pangea-infra.nix {
-      inherit nixpkgs system ruby-nix substrate forge fleet;
+      inherit nixpkgs system ruby-nix substrate forge fleet pangea;
     }) {
       inherit self name flows shellHookExtra devShellExtras;
     }

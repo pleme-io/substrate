@@ -11,6 +11,7 @@
 #   let fleetPangeaInfra = import "${substrate}/lib/infra/fleet-pangea-infra.nix" {
 #     inherit nixpkgs system ruby-nix substrate forge;
 #     fleet = inputs.fleet;
+#     pangea = inputs.pangea;
 #   };
 #   in fleetPangeaInfra {
 #     inherit self;
@@ -37,6 +38,7 @@
   substrate,
   forge,
   fleet ? null,
+  pangea ? null,
 }:
 {
   name,
@@ -69,10 +71,24 @@ let
     then "${fleet.packages.${system}.default}/bin/fleet"
     else "fleet";
 
+  # Resolve pangea binary: prefer flake input, fall back to bundle exec
+  pangeaBin = if pangea != null
+    then "${pangea.packages.${system}.default}/bin/pangea"
+    else "${env}/bin/bundle exec pangea";
+
+  # Pangea wrapper script — puts pangea in PATH so Fleet can call it as subprocess
+  pangeaWrapper = if pangea != null
+    then pkgs.writeShellScriptBin "pangea" ''
+      exec ${pangea.packages.${system}.default}/bin/pangea "$@"
+    ''
+    else pkgs.writeShellScriptBin "pangea" ''
+      exec ${env}/bin/bundle exec pangea "$@"
+    '';
+
   # Generate fleet.yaml from Nix attrset (shikumi pattern: Nix → YAML → app)
   fleetYaml = pkgs.writeText "${name}-fleet.yaml" (builtins.toJSON { inherit flows; });
 
-  # Helper: write a shell script for pangea operations (same as pangea-infra.nix)
+  # Helper: write a shell script for pangea operations
   mkPangeaApp = { appName, subcommand, extraFlags ? "" }: {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-${appName}" ''
@@ -95,9 +111,10 @@ let
         exit 1
       fi
 
+      export PATH="${env}/bin:${pkgs.opentofu}/bin:$PATH"
       for tmpl in "''${TEMPLATES[@]}"; do
         echo "==> ${subcommand}: $(basename "$tmpl") [namespace: $NS]"
-        ${env}/bin/bundle exec pangea ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
+        ${pangeaBin} ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
       done
     '');
   };
@@ -115,7 +132,10 @@ let
         cp ${fleetYaml} fleet.yaml
       fi
 
-      export PATH="${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
+      # Fleet calls pangea as a subprocess — put it in PATH
+      export PATH="${pangeaWrapper}/bin:${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
+      export RUBYLIB="$REPO_ROOT/lib:''${RUBYLIB:-}"
+      export DRY_TYPES_WARNINGS=false
       ${fleetBin} flow run ${flowName} "$@"
     '');
   };
@@ -136,7 +156,9 @@ in
       ruby
       pkgs.opentofu
       pkgs.git
-    ] ++ devShellExtras;
+      pangeaWrapper
+    ] ++ (pkgs.lib.optional (fleet != null) fleet.packages.${system}.default)
+      ++ devShellExtras;
     shellHook = ''
       export RUBYLIB=$PWD/lib:$RUBYLIB
       export DRY_TYPES_WARNINGS=false
@@ -184,10 +206,11 @@ in
           NS="$(${pkgs.yq-go}/bin/yq '.default_namespace' pangea.yml)"
         fi
 
+        export PATH="${env}/bin:${pkgs.opentofu}/bin:$PATH"
         for f in "$REPO_ROOT"/*.rb; do
           [ -f "$f" ] || continue
           echo "==> drift check: $(basename "$f") [namespace: $NS]"
-          OUTPUT="$(${env}/bin/bundle exec pangea plan "$f" --namespace "$NS" 2>&1)"
+          OUTPUT="$(${pangeaBin} plan "$f" --namespace "$NS" 2>&1)"
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "changes detected"; then
             echo "DRIFT DETECTED — failing" >&2
