@@ -533,6 +533,40 @@ in rec {
   pangeaInfraFlakeBuilder = ./infra/pangea-infra-flake.nix;
 
   # ============================================================================
+  # FLEET + PANGEA INFRASTRUCTURE BUILDER (standalone import path)
+  # ============================================================================
+  # Per-system Fleet + Pangea infrastructure project builder. Extends
+  # pangea-infra.nix with Fleet DAG orchestration. Generates fleet.yaml
+  # from Nix attrsets (shikumi pattern), wraps fleet+pangea+tofu into apps.
+  #
+  # Apps: flow-{name} (per-flow), flow-list, plan, apply, destroy, validate,
+  #       test, drift, regen.
+  #
+  # Usage:
+  #   fleetPangeaInfra = import "${substrate}/lib/infra/fleet-pangea-infra.nix" {
+  #     inherit nixpkgs system ruby-nix substrate forge;
+  #     fleet = inputs.fleet;
+  #   };
+  #   outputs = fleetPangeaInfra {
+  #     inherit self;
+  #     name = "my-infra";
+  #     flows = { deploy = { ... }; };
+  #   };
+  fleetPangeaInfraBuilder = ./infra/fleet-pangea-infra.nix;
+
+  # ============================================================================
+  # FLEET + PANGEA INFRASTRUCTURE FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Fleet + Pangea infrastructure
+  # project. Wraps fleet-pangea-infra.nix + eachSystem for zero-boilerplate.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/fleet-pangea-infra-flake.nix" {
+  #     inherit nixpkgs ruby-nix flake-utils substrate forge fleet;
+  #   }) { inherit self; name = "my-infra"; flows = { ... }; };
+  fleetPangeaInfraFlakeBuilder = ./infra/fleet-pangea-infra-flake.nix;
+
+  # ============================================================================
   # GATED PANGEA WORKSPACE BUILDER (standalone import path)
   # ============================================================================
   # Wraps pangea-workspace.nix with RSpec test gates. Infrastructure is NEVER
