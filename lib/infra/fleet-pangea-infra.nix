@@ -71,19 +71,15 @@ let
     then "${fleet.packages.${system}.default}/bin/fleet"
     else "fleet";
 
-  # Resolve pangea binary: prefer flake input, fall back to bundle exec
-  pangeaBin = if pangea != null
-    then "${pangea.packages.${system}.default}/bin/pangea"
-    else "${env}/bin/bundle exec pangea";
+  # Pangea runs via bundle exec to resolve workspace gems (pangea-kubernetes, etc.)
+  # The Nix-built pangea binary can conflict with local path gems, so we always
+  # use bundle exec which resolves from the workspace Gemfile.
+  pangeaBin = "${env}/bin/bundle exec pangea";
 
   # Pangea wrapper script — puts pangea in PATH so Fleet can call it as subprocess
-  pangeaWrapper = if pangea != null
-    then pkgs.writeShellScriptBin "pangea" ''
-      exec ${pangea.packages.${system}.default}/bin/pangea "$@"
-    ''
-    else pkgs.writeShellScriptBin "pangea" ''
-      exec ${env}/bin/bundle exec pangea "$@"
-    '';
+  pangeaWrapper = pkgs.writeShellScriptBin "pangea" ''
+    exec ${env}/bin/bundle exec pangea "$@"
+  '';
 
   # Generate fleet.yaml from Nix attrset (shikumi pattern: Nix → YAML → app)
   fleetYaml = pkgs.writeText "${name}-fleet.yaml" (builtins.toJSON { inherit flows; });
