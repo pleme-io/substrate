@@ -1,8 +1,7 @@
 # Home-manager helpers for nix-place flake fragment composition
 #
 # Declares the `blackmatter.flakeFragments` option type and provides
-# a function to generate the home.activation script that runs
-# `nix-place sync` for each target directory.
+# builders + activation script generator for composing managed flake.nix files.
 #
 # Usage (in flake.nix):
 #   fragmentHelpers = import "${substrate}/lib/hm/flake-fragment-helpers.nix" { lib = nixpkgs.lib; };
@@ -12,29 +11,37 @@
 #
 # Usage (in component modules, after mkFlakeFragmentModule is imported):
 #   blackmatter.flakeFragments."code/github/pleme-io" = [
-#     { id = "pleme-workspace"; priority = 50; apps = { git-status = { script = "..."; }; }; }
+#     (fragmentHelpers.mkOrgFragment { org = "pleme-io"; extraApps = { ... }; })
 #   ];
+#
+# Priority convention:
+#   50  = standard workspace fragments (the default for all builders and the type)
+#   100+ = specialized override fragments (e.g. gem tools layered on top)
 { lib }:
 with lib;
 let
+  # ── Shared Constants ────────────────────────────────────────────────
+
+  nixpkgsUrl = "github:NixOS/nixpkgs/nixos-25.11";
+  flakeUtilsUrl = "github:numtide/flake-utils";
+  fleetUrl = "github:pleme-io/fleet";
+
   # ── Option Types ──────────────────────────────────────────────────────
 
-  # A single flake input (matches nix-place FlakeInput)
   flakeInputType = types.submodule {
     options = {
       url = mkOption {
         type = types.str;
-        description = "Flake input URL (e.g. github:NixOS/nixpkgs/nixos-25.11)";
+        description = "Flake input URL";
       };
       follows = mkOption {
         type = types.attrsOf types.str;
         default = {};
-        description = "Input follows relationships (e.g. { nixpkgs = \"nixpkgs\"; })";
+        description = "Input follows relationships";
       };
     };
   };
 
-  # An app definition (matches nix-place AppDef)
   appDefType = types.submodule {
     options = {
       script = mkOption {
@@ -49,7 +56,6 @@ let
     };
   };
 
-  # A fleet flow step (matches nix-place FlowStep)
   flowStepType = types.submodule {
     options = {
       id = mkOption {
@@ -68,7 +74,6 @@ let
     };
   };
 
-  # A fleet flow definition (matches nix-place FlowDef)
   flowDefType = types.submodule {
     options = {
       description = mkOption {
@@ -83,7 +88,6 @@ let
     };
   };
 
-  # A flake fragment (matches nix-place FlakeFragment)
   flakeFragmentType = types.submodule {
     options = {
       id = mkOption {
@@ -92,16 +96,16 @@ let
       };
       priority = mkOption {
         type = types.int;
-        default = 100;
-        description = "Priority for merge conflicts (higher wins)";
+        default = 50;
+        description = "Priority for merge conflicts (higher wins). Convention: 50 = base, 100+ = specialized overrides.";
       };
       inputs = mkOption {
         type = types.attrsOf flakeInputType;
         default = {
-          nixpkgs = { url = "github:NixOS/nixpkgs/nixos-25.11"; };
-          flake-utils = { url = "github:numtide/flake-utils"; };
+          nixpkgs = { url = nixpkgsUrl; };
+          flake-utils = { url = flakeUtilsUrl; };
         };
-        description = "Flake inputs contributed by this fragment. Defaults to nixpkgs + flake-utils.";
+        description = "Flake inputs. Defaults to nixpkgs + flake-utils.";
       };
       apps = mkOption {
         type = types.attrsOf appDefType;
@@ -116,43 +120,36 @@ let
       systems = mkOption {
         type = types.listOf types.str;
         default = [];
-        description = "Target systems (empty = default: aarch64-darwin, x86_64-linux, aarch64-linux)";
+        description = "Target systems (empty = nix-place default: aarch64-darwin, x86_64-linux, aarch64-linux)";
       };
     };
   };
 
-  # ── Fragment → YAML Serialization ────────────────────────────────────
+  # ── Fragment → JSON Serialization ──────────────────────────────────
 
-  # Convert a fragment attrset to a JSON-serializable form.
-  # We use JSON because pkgs.writeText + builtins.toJSON is available
-  # in activation scripts, and nix-place accepts both YAML and JSON.
   fragmentToJson = fragment: let
-    base = {
-      inherit (fragment) id priority;
-    };
+    base = { inherit (fragment) id priority; };
     withInputs = if fragment.inputs == {} then base else base // {
-        inputs = mapAttrs (_: input:
-          { inherit (input) url; }
-          // optionalAttrs (input.follows != {}) { inherit (input) follows; }
-        ) fragment.inputs;
-      };
-    withApps = if fragment.apps == {} then withInputs
-      else withInputs // {
-        apps = mapAttrs (_: app:
-          { inherit (app) script; }
-          // optionalAttrs (app.description != null) { inherit (app) description; }
-        ) fragment.apps;
-      };
-    withFlows = if fragment.flows == {} then withApps
-      else withApps // {
-        flows = mapAttrs (_: flow: {
-          inherit (flow) description;
-          steps = map (step:
-            { inherit (step) id action; }
-            // optionalAttrs (step.depends_on != []) { inherit (step) depends_on; }
-          ) flow.steps;
-        }) fragment.flows;
-      };
+      inputs = mapAttrs (_: input:
+        { inherit (input) url; }
+        // optionalAttrs (input.follows != {}) { inherit (input) follows; }
+      ) fragment.inputs;
+    };
+    withApps = if fragment.apps == {} then withInputs else withInputs // {
+      apps = mapAttrs (_: app:
+        { inherit (app) script; }
+        // optionalAttrs (app.description != null) { inherit (app) description; }
+      ) fragment.apps;
+    };
+    withFlows = if fragment.flows == {} then withApps else withApps // {
+      flows = mapAttrs (_: flow: {
+        inherit (flow) description;
+        steps = map (step:
+          { inherit (step) id action; }
+          // optionalAttrs (step.depends_on != []) { inherit (step) depends_on; }
+        ) flow.steps;
+      }) fragment.flows;
+    };
     withSystems = if fragment.systems == [] then withFlows
       else withFlows // { inherit (fragment) systems; };
   in withSystems;
@@ -163,16 +160,15 @@ in {
 
   # ── Shared Defaults ─────────────────────────────────────────────────
 
-  # Standard inputs — every workspace flake needs nixpkgs + flake-utils.
-  # Centralizes the nixpkgs version pin. Override by merging on top.
+  # Standard inputs — centralizes the nixpkgs version pin.
   defaultInputs = {
-    nixpkgs = { url = "github:NixOS/nixpkgs/nixos-25.11"; };
-    flake-utils = { url = "github:numtide/flake-utils"; };
+    nixpkgs = { url = nixpkgsUrl; };
+    flake-utils = { url = flakeUtilsUrl; };
   };
 
-  # Fleet input — add to fragments that use flows.
+  # Fleet input — merge with defaultInputs for fragments that use flows.
   fleetInput = {
-    fleet = { url = "github:pleme-io/fleet"; follows = { nixpkgs = "nixpkgs"; }; };
+    fleet = { url = fleetUrl; follows = { nixpkgs = "nixpkgs"; }; };
   };
 
   # ── Fragment Builders ───────────────────────────────────────────────
@@ -183,8 +179,9 @@ in {
     script = "tend status${optionalString (workspace != null) " --workspace ${workspace}"}";
   };
 
-  # Build a minimal fragment with standard inputs and sensible defaults.
+  # Build a fragment with standard inputs merged on top.
   #   mkFragment { id = "pleme-workspace"; apps = { ... }; }
+  #   mkFragment { id = "pleme-workspace"; inputs = fleetInput; apps = { ... }; }  # adds fleet
   mkFragment = {
     id,
     priority ? 50,
@@ -193,12 +190,12 @@ in {
     inputs ? {},
     systems ? [],
   }: {
-    inherit id priority systems;
-    inputs = defaultInputs // inputs;
-    inherit apps flows;
+    inherit id priority systems flows apps;
+    inputs = { nixpkgs = { url = nixpkgsUrl; }; flake-utils = { url = flakeUtilsUrl; }; } // inputs;
   };
 
-  # Build a standard org-level workspace fragment with git-status via tend.
+  # Build a standard org-level workspace fragment with tend-status.
+  #   mkOrgFragment { org = "pleme-io"; }
   #   mkOrgFragment { org = "pleme-io"; extraApps = { test-all = { ... }; }; }
   mkOrgFragment = {
     org,
@@ -208,59 +205,52 @@ in {
     extraInputs ? {},
     flows ? {},
   }: {
-    inherit id priority;
-    inputs = defaultInputs // extraInputs;
-    apps = {
-      git-status = mkTendStatusApp org;
-    } // extraApps;
-    inherit flows;
+    inherit id priority flows;
+    inputs = { nixpkgs = { url = nixpkgsUrl; }; flake-utils = { url = flakeUtilsUrl; }; } // extraInputs;
+    apps = { tend-status = mkTendStatusApp org; } // extraApps;
     systems = [];
   };
 
   # ── Module Factory ───────────────────────────────────────────────────
   #
-  # Creates a NixOS/home-manager module that:
+  # Creates a home-manager module that:
   #   1. Declares the blackmatter.flakeFragments option
-  #   2. Generates a home.activation script to sync all directories
+  #   2. Generates a home.activation script to sync all directories via nix-place
   #
-  # nixPlacePkg: the nix-place package (or null to use pkgs.nix-place from overlay)
+  # nixPlacePkg: override the nix-place package (default: pkgs.nix-place from overlay)
+  # skipGitTargets: list of relative paths where git init should be skipped
   mkFlakeFragmentModule = {
     nixPlacePkg ? null,
+    skipGitTargets ? [""],
   }: { config, pkgs, ... }: let
     cfg = config.blackmatter.flakeFragments;
     homeDir = config.home.homeDirectory;
     nixPlace = if nixPlacePkg != null then nixPlacePkg else pkgs.nix-place;
 
-    # Sort targets deepest first so children are processed before parents
     sortedTargets = sort (a: b:
-      let
-        depthOf = p: length (filter (s: s != "") (splitString "/" p));
+      let depthOf = p: length (filter (s: s != "") (splitString "/" p));
       in depthOf a > depthOf b
     ) (attrNames cfg);
 
-    # Materialize fragments for a target as JSON files in the nix store
     materializeFragments = fragments:
       map (frag:
         pkgs.writeText "fragment-${frag.id}.json"
           (builtins.toJSON (fragmentToJson frag))
       ) fragments;
 
-    # Build the nix-place sync command for one target
     mkSyncCommand = target: let
       fragments = cfg.${target};
       fragmentFiles = materializeFragments fragments;
       fragmentArgs = concatMapStringsSep " " (f: "--fragments ${f}") fragmentFiles;
       targetDir = if target == "" then homeDir else "${homeDir}/${target}";
       description = if target == "" then "Home" else target;
-      # Skip git init at $HOME (unusual, could interfere with dotfiles)
-      noGitFlag = optionalString (target == "") "--no-git";
+      skipGit = elem target skipGitTargets;
     in ''
       $VERBOSE_ECHO "Syncing flake fragments for ${description}..."
       ${nixPlace}/bin/nix-place sync \
         --target "${targetDir}" \
         ${fragmentArgs} \
-        --description "Managed workspace: ${description}" \
-        ${noGitFlag}
+        --description "Managed workspace: ${description}"${optionalString skipGit " --no-git"}
     '';
 
   in {
@@ -273,9 +263,11 @@ in {
         Multiple fragments per directory are merged by nix-place using
         priority-based composition (higher priority wins on conflicts).
 
+        Priority convention: 50 = base workspace, 100+ = specialized overrides.
+
         Example:
           blackmatter.flakeFragments."code/github/pleme-io" = [
-            { id = "pleme-workspace"; priority = 50; apps = { ... }; }
+            { id = "pleme-workspace"; apps = { ... }; }
           ];
       '';
     };
