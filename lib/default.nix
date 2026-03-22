@@ -457,6 +457,17 @@ in rec {
   hmServiceHelpers = ./hm/service-helpers.nix;
 
   # ============================================================================
+  # HOME-MANAGER FLAKE FRAGMENT HELPERS (standalone import — no pkgs/system needed)
+  # ============================================================================
+  # Option types and activation script generator for nix-place flake fragment
+  # composition. Any blackmatter module can contribute fragments to any directory.
+  #
+  # Usage:
+  #   fragmentHelpers = import "${substrate}/lib/hm-flake-fragment-helpers.nix" { lib = nixpkgs.lib; };
+  #   module = fragmentHelpers.mkFlakeFragmentModule { nixPlacePkg = nix-place.packages.${system}.default; };
+  hmFlakeFragmentHelpers = ./hm/flake-fragment-helpers.nix;
+
+  # ============================================================================
   # NIXOS SERVICE HELPERS (standalone import — no pkgs/system needed)
   # ============================================================================
   # Reusable patterns for NixOS modules: systemd services, firewall rules,
