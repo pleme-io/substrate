@@ -463,8 +463,8 @@ in rec {
   # composition. Any blackmatter module can contribute fragments to any directory.
   #
   # Usage:
-  #   fragmentHelpers = import "${substrate}/lib/hm-flake-fragment-helpers.nix" { lib = nixpkgs.lib; };
-  #   module = fragmentHelpers.mkFlakeFragmentModule { nixPlacePkg = nix-place.packages.${system}.default; };
+  #   fragmentHelpers = import "${substrate}/lib/hm/flake-fragment-helpers.nix" { lib = nixpkgs.lib; };
+  #   imports = [ (fragmentHelpers.mkFlakeFragmentModule {}) ];  # uses pkgs.nix-place from overlay
   hmFlakeFragmentHelpers = ./hm/flake-fragment-helpers.nix;
 
   # ============================================================================
