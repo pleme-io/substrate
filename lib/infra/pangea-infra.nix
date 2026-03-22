@@ -55,8 +55,16 @@ let
     defaultGhcrToken = "";
   };
 
-  # Helper: write a shell script that resolves repo root, discovers templates,
-  # reads default namespace from pangea.yml, then runs a pangea subcommand.
+  # Pangea CLI wrapper — runs Pangea::CLI via bundle exec ruby -e
+  pangeaWrapper = pkgs.writeShellScriptBin "pangea" ''
+    exec ${env}/bin/bundle exec ruby -e "
+      require 'pangea-core'
+      require 'pangea/cli'
+      Pangea::CLI.run
+    " -- "$@"
+  '';
+
+  # Helper: write a shell script that runs pangea bulk on all templates.
   mkPangeaApp = { appName, subcommand, extraFlags ? "" }: {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-${appName}" ''
@@ -69,32 +77,10 @@ let
         NS="$(${pkgs.yq-go}/bin/yq '.default_namespace' pangea.yml)"
       fi
 
-      TEMPLATES=()
-      for f in "$REPO_ROOT"/*.rb; do
-        [ -f "$f" ] && TEMPLATES+=("$f")
-      done
-
-      if [ ''${#TEMPLATES[@]} -eq 0 ]; then
-        echo "Error: no .rb template files found in $REPO_ROOT" >&2
-        exit 1
-      fi
-
-      for tmpl in "''${TEMPLATES[@]}"; do
-        echo "==> ${subcommand}: $(basename "$tmpl") [namespace: $NS]"
-        # Find pangea CLI: gem path, sibling repo, or direct bundle exec
-        PANGEA_EXE="$(${env}/bin/ruby -e "
-          spec = Gem::Specification.find_by_name('pangea-core') rescue nil
-          puts File.join(spec.full_gem_path, spec.bindir, 'pangea') if spec&.executables&.include?('pangea')
-        " 2>/dev/null)"
-        if [ -z "$PANGEA_EXE" ] || [ ! -f "$PANGEA_EXE" ]; then
-          PANGEA_EXE="$REPO_ROOT/../pangea-core/exe/pangea"
-        fi
-        if [ -f "$PANGEA_EXE" ]; then
-          ${env}/bin/bundle exec ruby "$PANGEA_EXE" ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
-        else
-          ${env}/bin/bundle exec pangea ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
-        fi
-      done
+      export PATH="${pangeaWrapper}/bin:${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
+      export RUBYLIB="$REPO_ROOT/lib:''${RUBYLIB:-}"
+      export DRY_TYPES_WARNINGS=false
+      pangea bulk ${subcommand} --namespace "$NS" --dir "$REPO_ROOT" ${extraFlags}
     '');
   };
 
@@ -106,6 +92,7 @@ in
       ruby
       pkgs.opentofu
       pkgs.git
+      pangeaWrapper
     ] ++ devShellExtras;
     shellHook = ''
       export RUBYLIB=$PWD/lib:$RUBYLIB

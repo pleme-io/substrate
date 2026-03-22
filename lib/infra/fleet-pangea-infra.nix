@@ -71,32 +71,17 @@ let
     then "${fleet.packages.${system}.default}/bin/fleet"
     else "fleet";
 
-  # Pangea runs via bundle exec to resolve workspace gems (pangea-kubernetes, etc.)
-  # The exe/pangea script is in pangea-core; we find it via the gem path or sibling dir.
+  # Pangea CLI: pangea-core gem provides exe/pangea via Pangea::CLI.
+  # When the gem is published with executables, bundle exec pangea works directly.
+  # Until then, resolve via gem spec or sibling repo as a single Ruby expression.
   pangeaBin = "${env}/bin/bundle exec pangea";
 
-  # Pangea wrapper script — puts pangea in PATH so Fleet can call it as subprocess.
-  # Tries gem executable first, falls back to finding exe/pangea in source tree.
   pangeaWrapper = pkgs.writeShellScriptBin "pangea" ''
-    # Try gem-installed executable first (works after gemset.nix regeneration)
-    PANGEA_GEM_EXE="$(${env}/bin/ruby -e "
-      spec = Gem::Specification.find_by_name('pangea-core') rescue nil
-      puts File.join(spec.full_gem_path, spec.bindir, 'pangea') if spec&.executables&.include?('pangea')
-    " 2>/dev/null)"
-    if [ -n "$PANGEA_GEM_EXE" ] && [ -f "$PANGEA_GEM_EXE" ]; then
-      exec ${env}/bin/bundle exec ruby "$PANGEA_GEM_EXE" "$@"
-    fi
-
-    # Fall back to sibling pangea-core repo (development layout)
-    REPO_ROOT="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo .)"
-    for candidate in "$REPO_ROOT/../pangea-core/exe/pangea"; do
-      if [ -f "$candidate" ]; then
-        exec ${env}/bin/bundle exec ruby "$candidate" "$@"
-      fi
-    done
-
-    # Last resort: try bundle exec pangea directly
-    exec ${env}/bin/bundle exec pangea "$@"
+    exec ${env}/bin/bundle exec ruby -e "
+      require 'pangea-core'
+      require 'pangea/cli'
+      Pangea::CLI.run
+    " -- "$@"
   '';
 
   # Generate fleet.yaml from Nix attrset (shikumi pattern: Nix → YAML → app)
@@ -115,21 +100,10 @@ let
         NS="$(${pkgs.yq-go}/bin/yq '.default_namespace' pangea.yml)"
       fi
 
-      TEMPLATES=()
-      for f in "$REPO_ROOT"/*.rb; do
-        [ -f "$f" ] && TEMPLATES+=("$f")
-      done
-
-      if [ ''${#TEMPLATES[@]} -eq 0 ]; then
-        echo "Error: no .rb template files found in $REPO_ROOT" >&2
-        exit 1
-      fi
-
-      export PATH="${env}/bin:${pkgs.opentofu}/bin:$PATH"
-      for tmpl in "''${TEMPLATES[@]}"; do
-        echo "==> ${subcommand}: $(basename "$tmpl") [namespace: $NS]"
-        ${pangeaBin} ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
-      done
+      export PATH="${pangeaWrapper}/bin:${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
+      export RUBYLIB="$REPO_ROOT/lib:''${RUBYLIB:-}"
+      export DRY_TYPES_WARNINGS=false
+      pangea bulk ${subcommand} --namespace "$NS" --dir "$REPO_ROOT" ${extraFlags}
     '');
   };
 
