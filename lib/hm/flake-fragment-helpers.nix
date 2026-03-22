@@ -222,10 +222,12 @@ in {
   mkFlakeFragmentModule = {
     nixPlacePkg ? null,
     skipGitTargets ? [""],
-  }: { config, pkgs, ... }: let
+  }: args @ { config, pkgs, ... }: let
     cfg = config.blackmatter.flakeFragments;
     homeDir = config.home.homeDirectory;
     nixPlace = if nixPlacePkg != null then nixPlacePkg else pkgs.nix-place;
+    # home-manager's lib includes lib.hm.dag — use module arg, not outer lib
+    hmLib = args.lib;
 
     sortedTargets = sort (a: b:
       let depthOf = p: length (filter (s: s != "") (splitString "/" p));
@@ -280,7 +282,7 @@ in {
     };
 
     config.home.activation = mkIf (cfg != {}) {
-      syncWorkspaceFlakes = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      syncWorkspaceFlakes = hmLib.hm.dag.entryAfter ["writeBoundary"] ''
         PATH="${makeBinPath (with pkgs; [ git nix ])}:$PATH"
         ${concatMapStringsSep "\n" mkSyncCommand sortedTargets}
       '';
