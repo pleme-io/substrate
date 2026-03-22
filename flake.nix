@@ -42,6 +42,7 @@
           rust-library = ./lib/devenv/rust-library.nix;
           web = ./lib/devenv/web.nix;
           nix = ./lib/devenv/nix.nix;
+          android = ./lib/devenv/android.nix;
         };
 
         # Per-system library and overlay exports
@@ -63,6 +64,9 @@
         rustOverlays = eachSystem (system: {
           rust = (import ./lib/build/rust/overlay.nix).mkRustOverlay { inherit fenix system; };
         });
+
+        # Home-manager tool module helpers (profile orchestration, safe packages)
+        hmToolHelpers = ./lib/hm-tool-helpers.nix;
 
         # Standalone import paths for consumer flakes
         rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;

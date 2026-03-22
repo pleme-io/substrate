@@ -110,6 +110,7 @@
     rust-library = ./devenv/rust-library.nix;
     web = ./devenv/web.nix;
     nix = ./devenv/nix.nix;
+    android = ./devenv/android.nix;
   };
 
   # mkProductSdlcApps: configurable SDLC app factory.
