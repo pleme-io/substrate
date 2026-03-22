@@ -272,8 +272,15 @@ in {
       '';
     };
 
-    config = mkIf (cfg != {}) {
-      home.activation.syncWorkspaceFlakes = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    # Expose builders to all child modules via _module.args
+    # so consumers can access them as: { flakeFragmentLib, ... }: ...
+    config._module.args.flakeFragmentLib = {
+      inherit mkTendStatusApp mkFragment mkOrgFragment;
+      inherit defaultInputs fleetInput;
+    };
+
+    config.home.activation = mkIf (cfg != {}) {
+      syncWorkspaceFlakes = lib.hm.dag.entryAfter ["writeBoundary"] ''
         PATH="${makeBinPath (with pkgs; [ git nix ])}:$PATH"
         ${concatMapStringsSep "\n" mkSyncCommand sortedTargets}
       '';
