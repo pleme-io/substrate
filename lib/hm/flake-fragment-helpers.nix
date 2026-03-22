@@ -154,34 +154,24 @@ let
       else withFlows // { inherit (fragment) systems; };
   in withSystems;
 
-in {
-  # Expose types for external use
-  inherit flakeFragmentType flakeInputType appDefType flowDefType flowStepType;
-
   # ── Shared Defaults ─────────────────────────────────────────────────
 
-  # Standard inputs — centralizes the nixpkgs version pin.
   defaultInputs = {
     nixpkgs = { url = nixpkgsUrl; };
     flake-utils = { url = flakeUtilsUrl; };
   };
 
-  # Fleet input — merge with defaultInputs for fragments that use flows.
   fleetInput = {
     fleet = { url = fleetUrl; follows = { nixpkgs = "nixpkgs"; }; };
   };
 
   # ── Fragment Builders ───────────────────────────────────────────────
 
-  # Build a tend-status app for a workspace (or all workspaces if null).
   mkTendStatusApp = workspace: {
     description = "Repo status${optionalString (workspace != null) " for ${workspace}"} (via tend)";
     script = "tend status${optionalString (workspace != null) " --workspace ${workspace}"}";
   };
 
-  # Build a fragment with standard inputs merged on top.
-  #   mkFragment { id = "pleme-workspace"; apps = { ... }; }
-  #   mkFragment { id = "pleme-workspace"; inputs = fleetInput; apps = { ... }; }  # adds fleet
   mkFragment = {
     id,
     priority ? 50,
@@ -191,12 +181,9 @@ in {
     systems ? [],
   }: {
     inherit id priority systems flows apps;
-    inputs = { nixpkgs = { url = nixpkgsUrl; }; flake-utils = { url = flakeUtilsUrl; }; } // inputs;
+    inputs = defaultInputs // inputs;
   };
 
-  # Build a standard org-level workspace fragment with tend-status.
-  #   mkOrgFragment { org = "pleme-io"; }
-  #   mkOrgFragment { org = "pleme-io"; extraApps = { test-all = { ... }; }; }
   mkOrgFragment = {
     org,
     id ? org,
@@ -206,10 +193,17 @@ in {
     flows ? {},
   }: {
     inherit id priority flows;
-    inputs = { nixpkgs = { url = nixpkgsUrl; }; flake-utils = { url = flakeUtilsUrl; }; } // extraInputs;
+    inputs = defaultInputs // extraInputs;
     apps = { tend-status = mkTendStatusApp org; } // extraApps;
     systems = [];
   };
+
+in {
+  # Expose types for external use
+  inherit flakeFragmentType flakeInputType appDefType flowDefType flowStepType;
+
+  # Shared defaults and builders
+  inherit defaultInputs fleetInput mkTendStatusApp mkFragment mkOrgFragment;
 
   # ── Module Factory ───────────────────────────────────────────────────
   #
