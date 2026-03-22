@@ -71,11 +71,8 @@ let
     then "${fleet.packages.${system}.default}/bin/fleet"
     else "fleet";
 
-  # Pangea CLI: pangea-core gem provides exe/pangea via Pangea::CLI.
-  # When the gem is published with executables, bundle exec pangea works directly.
-  # Until then, resolve via gem spec or sibling repo as a single Ruby expression.
-  pangeaBin = "${env}/bin/bundle exec pangea";
-
+  # Pangea CLI: pangea-core gem provides Pangea::CLI.
+  # The wrapper inlines the require + run so it works before the gem is published.
   pangeaWrapper = pkgs.writeShellScriptBin "pangea" ''
     exec ${env}/bin/bundle exec ruby -e "
       require 'pangea-core'
