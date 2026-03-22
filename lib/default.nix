@@ -468,6 +468,17 @@ in rec {
   hmFlakeFragmentHelpers = ./hm/flake-fragment-helpers.nix;
 
   # ============================================================================
+  # HOME-MANAGER CLAUDE.MD HELPERS (standalone import — no pkgs/system needed)
+  # ============================================================================
+  # Composable CLAUDE.md deployment at every directory level.
+  # Any blackmatter module can contribute content to any directory path.
+  #
+  # Usage:
+  #   claudeMdHelpers = import "${substrate}/lib/hm/claude-md-helpers.nix" { lib = nixpkgs.lib; };
+  #   imports = [ (claudeMdHelpers.mkClaudeMdModule {}) ];
+  hmClaudeMdHelpers = ./hm/claude-md-helpers.nix;
+
+  # ============================================================================
   # NIXOS SERVICE HELPERS (standalone import — no pkgs/system needed)
   # ============================================================================
   # Reusable patterns for NixOS modules: systemd services, firewall rules,
