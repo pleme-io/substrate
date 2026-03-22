@@ -81,7 +81,19 @@ let
 
       for tmpl in "''${TEMPLATES[@]}"; do
         echo "==> ${subcommand}: $(basename "$tmpl") [namespace: $NS]"
-        ${env}/bin/bundle exec pangea ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
+        # Find pangea CLI: gem path, sibling repo, or direct bundle exec
+        PANGEA_EXE="$(${env}/bin/ruby -e "
+          spec = Gem::Specification.find_by_name('pangea-core') rescue nil
+          puts File.join(spec.full_gem_path, spec.bindir, 'pangea') if spec&.executables&.include?('pangea')
+        " 2>/dev/null)"
+        if [ -z "$PANGEA_EXE" ] || [ ! -f "$PANGEA_EXE" ]; then
+          PANGEA_EXE="$REPO_ROOT/../pangea-core/exe/pangea"
+        fi
+        if [ -f "$PANGEA_EXE" ]; then
+          ${env}/bin/bundle exec ruby "$PANGEA_EXE" ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
+        else
+          ${env}/bin/bundle exec pangea ${subcommand} "$tmpl" --namespace "$NS" ${extraFlags}
+        fi
       done
     '');
   };

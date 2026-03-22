@@ -72,12 +72,30 @@ let
     else "fleet";
 
   # Pangea runs via bundle exec to resolve workspace gems (pangea-kubernetes, etc.)
-  # The Nix-built pangea binary can conflict with local path gems, so we always
-  # use bundle exec which resolves from the workspace Gemfile.
+  # The exe/pangea script is in pangea-core; we find it via the gem path or sibling dir.
   pangeaBin = "${env}/bin/bundle exec pangea";
 
-  # Pangea wrapper script — puts pangea in PATH so Fleet can call it as subprocess
+  # Pangea wrapper script — puts pangea in PATH so Fleet can call it as subprocess.
+  # Tries gem executable first, falls back to finding exe/pangea in source tree.
   pangeaWrapper = pkgs.writeShellScriptBin "pangea" ''
+    # Try gem-installed executable first (works after gemset.nix regeneration)
+    PANGEA_GEM_EXE="$(${env}/bin/ruby -e "
+      spec = Gem::Specification.find_by_name('pangea-core') rescue nil
+      puts File.join(spec.full_gem_path, spec.bindir, 'pangea') if spec&.executables&.include?('pangea')
+    " 2>/dev/null)"
+    if [ -n "$PANGEA_GEM_EXE" ] && [ -f "$PANGEA_GEM_EXE" ]; then
+      exec ${env}/bin/bundle exec ruby "$PANGEA_GEM_EXE" "$@"
+    fi
+
+    # Fall back to sibling pangea-core repo (development layout)
+    REPO_ROOT="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo .)"
+    for candidate in "$REPO_ROOT/../pangea-core/exe/pangea"; do
+      if [ -f "$candidate" ]; then
+        exec ${env}/bin/bundle exec ruby "$candidate" "$@"
+      fi
+    done
+
+    # Last resort: try bundle exec pangea directly
     exec ${env}/bin/bundle exec pangea "$@"
   '';
 
