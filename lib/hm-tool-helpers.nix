@@ -43,8 +43,16 @@ with lib;
   #   mkEnabledPackages toolMap enabledTools
   #   # → [ <scrcpy> <localsend> ] (only enabled tools)
   mkEnabledPackages = toolMap: enabledTools:
-    filter (p: p != null) (mapAttrsToList (name: pkg:
-      if enabledTools.${name} or false then pkg else null
+    let
+      # Catch packages whose transitive deps fail platform checks
+      # (e.g., android-file-transfer → fuse on macOS).
+      # builtins.tryEval catches the throw from meta.platforms assertions
+      # without actually building anything — only forces derivation eval.
+      isBuildable = pkg:
+        let result = builtins.tryEval pkg.drvPath;
+        in result.success;
+    in filter (p: p != null) (mapAttrsToList (name: pkg:
+      if (enabledTools.${name} or false) && isBuildable pkg then pkg else null
     ) toolMap);
 
   # ─── Profile resolution ─────────────────────────────────────────────
