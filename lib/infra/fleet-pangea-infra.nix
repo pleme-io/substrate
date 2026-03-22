@@ -191,11 +191,13 @@ in
           NS="$(${pkgs.yq-go}/bin/yq '.default_namespace' pangea.yml)"
         fi
 
-        export PATH="${env}/bin:${pkgs.opentofu}/bin:$PATH"
+        export PATH="${pangeaWrapper}/bin:${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
+        export RUBYLIB="$REPO_ROOT/lib:''${RUBYLIB:-}"
+        export DRY_TYPES_WARNINGS=false
         for f in "$REPO_ROOT"/*.rb; do
           [ -f "$f" ] || continue
           echo "==> drift check: $(basename "$f") [namespace: $NS]"
-          OUTPUT="$(${pangeaBin} plan "$f" --namespace "$NS" 2>&1)"
+          OUTPUT="$(pangea plan "$f" --namespace "$NS" 2>&1)"
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "changes detected"; then
             echo "DRIFT DETECTED — failing" >&2
