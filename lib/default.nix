@@ -16,9 +16,12 @@
 #     web/       — build, docker, github-action
 #   service/     — Service lifecycle (helpers, environment-apps, product-sdlc, image-release, helm-build, health-supervisor)
 #   hm/          — home-manager integration (service-helpers, skill-helpers, mcp-helpers, typed-config-helpers, nixos-service-helpers)
-#   infra/       — IaC patterns (pangea-infra, terraform-module, pulumi-provider, ansible-collection)
+#   infra/       — IaC patterns (pangea-infra, terraform-module, pulumi-provider, ansible-collection,
+#                  argocd-appset, helm-values-composition, external-secrets, multi-tenant-naming,
+#                  terraform-multi-tenant, environment-config)
 #   codegen/     — Code generation (source-registry)
 #   util/        — Shared utilities (config, darwin, test-helpers, versioned-overlay, repo-flake, monorepo-parts)
+#   devenv/      — Devenv modules (rust, web, nix, android, gitops, infrastructure)
 {
   pkgs,
   forge ? null,
@@ -99,6 +102,24 @@
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
   helmBuildModule = import ./service/helm-build.nix { inherit pkgs forgeCmd; };
 
+  # K8s manifest primitives (metadata, syncPolicy, helm source — shared by appset + es)
+  k8sManifestModule = import ./infra/k8s-manifest.nix;
+
+  # ArgoCD ApplicationSet builder (cluster-generator, git-generator, matrix-generator)
+  argocdAppSetModule = import ./infra/argocd-appset.nix;
+
+  # Helm values composition hierarchy builder
+  helmValuesCompositionModule = import ./infra/helm-values-composition.nix;
+
+  # ExternalSecrets builder (vault-agnostic secret injection)
+  externalSecretsModule = import ./infra/external-secrets.nix;
+
+  # Multi-tenant resource naming conventions (pure — no pkgs)
+  multiTenantNamingModule = import ./infra/multi-tenant-naming.nix;
+
+  # Multi-tenant Terraform module patterns (KMS, IAM, failover, scaffolding)
+  terraformMultiTenantModule = import ./infra/terraform-multi-tenant.nix;
+
   # Standalone Rust dev environment builder
   rustDevenvModule = import ./build/rust/devenv.nix { inherit pkgs; };
 
@@ -111,6 +132,8 @@
     web = ./devenv/web.nix;
     nix = ./devenv/nix.nix;
     android = ./devenv/android.nix;
+    gitops = ./devenv/gitops.nix;
+    infrastructure = ./devenv/infrastructure.nix;
   };
 
   # mkProductSdlcApps: configurable SDLC app factory.
@@ -925,6 +948,206 @@ in rec {
   inherit ((import ./infra/ansible-collection.nix)) mkAnsibleCollection;
 
   # ============================================================================
+  # K8S MANIFEST PRIMITIVES (from k8s-manifest.nix)
+  # ============================================================================
+  # Shared pure functions for building K8s manifest attrsets. Used internally
+  # by argocd-appset.nix and external-secrets.nix. Also available for custom
+  # manifest construction.
+  #
+  # Example:
+  #   meta = substrateLib.mkK8sMetadata { name = "my-app"; namespace = "prod"; };
+  #   sync = substrateLib.mkSyncPolicy { autoSync = true; prune = true; };
+  inherit (k8sManifestModule)
+    mkMetadata
+    mkSyncPolicy
+    mkHelmSource
+    mkApplicationSet
+    mkAppTemplate
+    mkClusterSelector
+    mkManifestGeneratePaths;
+  # Rename to avoid collision with other mkMetadata functions
+  mkK8sMetadata = k8sManifestModule.mkMetadata;
+  k8sManifestBuilder = ./infra/k8s-manifest.nix;
+
+  # ============================================================================
+  # ARGOCD APPLICATIONSET BUILDER (from argocd-appset.nix)
+  # ============================================================================
+  # Generate ArgoCD ApplicationSet manifests from Nix attrsets.
+  # Supports cluster-generator, git-generator, and matrix-generator strategies.
+  # Includes common ignoreDifferences presets (HPA, webhooks, configmaps).
+  #
+  # Example (cluster-generator):
+  #   appSet = substrateLib.mkClusterAppSet {
+  #     name = "api-gateway";
+  #     repoURL = "git@github.com:myorg/envs.git";
+  #     chartPath = "helm/api-gateway";
+  #     clusterLabel = "api-gateway";
+  #     excludeTenants = [ "old-customer" ];
+  #     valuesHierarchy = [
+  #       "envs/global/{{.metadata.labels.environment}}/values.yaml"
+  #       "envs/{{tenant}}/{{.metadata.labels.environment}}/{{.metadata.labels.cloudProvider}}/{{.metadata.labels.region}}/values.yaml"
+  #     ];
+  #   };
+  #
+  # Example (git-generator):
+  #   appSet = substrateLib.mkGitAppSet {
+  #     name = "ingress-nginx";
+  #     repoURL = "git@github.com:myorg/envs.git";
+  #     chartPath = "helm/ingress-nginx";
+  #     filePaths = [ "envs/**/config.json" ];
+  #   };
+  #
+  # Example (batch generation):
+  #   yamls = substrateLib.mkAppSetSuite {
+  #     services = {
+  #       api-gateway = { repoURL = "..."; chartPath = "..."; clusterLabel = "api-gateway"; ... };
+  #       monitoring  = { repoURL = "..."; chartPath = "..."; clusterLabel = "datadog"; ... };
+  #     };
+  #   };
+  inherit (argocdAppSetModule)
+    mkClusterAppSet
+    mkClusterAppSetYaml
+    mkAppSetYaml
+    mkGitAppSet
+    mkMatrixAppSet
+    mkAppSetSuite
+    resolveValuePaths
+    resolveHelmParams
+    ignoreDifferencesPresets;
+  argocdAppSetBuilder = ./infra/argocd-appset.nix;
+
+  # ============================================================================
+  # HELM VALUES COMPOSITION HIERARCHY (from helm-values-composition.nix)
+  # ============================================================================
+  # Multi-tenant, multi-environment Helm value file management.
+  # Generates ArgoCD valueFile paths, validates directory layout,
+  # scaffolds missing files, and diffs between environments.
+  #
+  # Example:
+  #   values = substrateLib.mkValuesHierarchy {
+  #     name = "my-platform";
+  #     tenants = [ "global" "customer-a" "customer-b" ];
+  #     environments = [ "staging" "production" ];
+  #     cloudProviders = [ "AWS" "AZR" ];
+  #     regions = { AWS = [ "us-east-1" "eu-west-1" ]; AZR = [ "eastus2" ]; };
+  #     services = [ "api-gateway" "config" ];
+  #   };
+  #   # values.argocdValuePaths → list of GoTemplate paths for ApplicationSets
+  #   # values.validate → nix app to validate directory structure
+  #   # values.scaffold → nix app to create missing files
+  #   # values.diff → nix app to diff between environments
+  inherit (helmValuesCompositionModule) mkValuesHierarchy;
+  helmValuesCompositionBuilder = ./infra/helm-values-composition.nix;
+
+  # ============================================================================
+  # EXTERNAL SECRETS BUILDER (from external-secrets.nix)
+  # ============================================================================
+  # Generate Kubernetes ExternalSecret manifests for any secret store backend.
+  # Supports Akeyless, AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, GCP.
+  #
+  # Example (Nix manifest):
+  #   es = substrateLib.mkExternalSecret {
+  #     name = "db-credentials";
+  #     secretStoreName = "cluster-secret-store";
+  #     secrets = [
+  #       { secretKey = "password"; remotePath = "/platform/staging/db-password"; }
+  #     ];
+  #   };
+  #
+  # Example (Helm template):
+  #   template = substrateLib.mkExternalSecretHelmTemplate {
+  #     name = "db-credentials";
+  #     secretStoreName = "cluster-secret-store";
+  #     secrets = [
+  #       { secretKey = "password"; remotePath = "/platform/{{ $.Values.environment }}/db-password"; }
+  #     ];
+  #     condition = ".Values.externalSecrets.enabled";
+  #   };
+  #
+  # Example (ClusterSecretStore):
+  #   store = substrateLib.mkClusterSecretStore {
+  #     name = "akeyless-store";
+  #     provider = "akeyless";
+  #     providerConfig = { gatewayUrl = "https://gw.example.com"; };
+  #   };
+  inherit (externalSecretsModule)
+    mkExternalSecret
+    mkExternalSecretHelmTemplate
+    mkClusterSecretStore
+    mkSecretPaths;
+  externalSecretsBuilder = ./infra/external-secrets.nix;
+
+  # ============================================================================
+  # MULTI-TENANT NAMING CONVENTIONS (from multi-tenant-naming.nix)
+  # ============================================================================
+  # Tenant-aware resource naming for infrastructure and Kubernetes resources.
+  # Default tenants get short names; named tenants get prefixed names.
+  #
+  # Example (Nix):
+  #   name = substrateLib.mkResourceName {
+  #     tenant = "customer-a"; environment = "production";
+  #     region = "us-east-2"; resource = "eks";
+  #   };
+  #   # → "customer-a-production-us-east-2-eks"
+  #
+  # Example (Terraform locals):
+  #   hcl = substrateLib.mkTerraformNamingLocals {
+  #     defaultTenants = [ "mte" "" ];
+  #   };
+  #
+  # Example (full naming scheme):
+  #   scheme = substrateLib.mkNamingScheme {
+  #     tenant = "customer-a"; environment = "production"; region = "us-east-2";
+  #   };
+  #   scheme.eksCluster    # → "customer-a-production-us-east-2-eks"
+  #   scheme.resource "rds" # → "customer-a-production-us-east-2-rds"
+  inherit (multiTenantNamingModule)
+    isDefaultTenant
+    mkResourceName
+    mkNamingScheme
+    mkTenantExpr
+    mkTenantPathExpr
+    mkTerraformNamingLocals;
+  multiTenantNamingBuilder = ./infra/multi-tenant-naming.nix;
+
+  # ============================================================================
+  # MULTI-TENANT TERRAFORM PATTERNS (from terraform-multi-tenant.nix)
+  # ============================================================================
+  # Enhanced Terraform module patterns for multi-tenant infrastructure.
+  # Validates multi-cloud module layouts, scaffolds new modules with
+  # tenant-aware naming, and provides multi-tenant dev shells.
+  #
+  # Example (validate all modules):
+  #   check = substrateLib.mkMultiTenantModuleCheck {
+  #     pname = "my-platform"; version = "1.0"; src = ./.;
+  #     modules = [ "kms_key" "rds" "eks_cluster" ];
+  #     cloudProviders = [ "AWS" "AZR" ];
+  #   };
+  #
+  # Example (scaffold a new module):
+  #   apps.scaffold = substrateLib.mkModuleScaffold {
+  #     name = "s3_bucket"; cloudProvider = "AWS";
+  #   };
+  #
+  # Example (dev shell):
+  #   devShells.default = substrateLib.mkMultiTenantTerraformDevShell {
+  #     awsCli = true; azureCli = true;
+  #   };
+  inherit (terraformMultiTenantModule)
+    mkMultiTenantModuleCheck
+    mkModuleScaffold
+    mkMultiTenantTerraformDevShell;
+  terraformMultiTenantBuilder = ./infra/terraform-multi-tenant.nix;
+
+  # ============================================================================
+  # ENVIRONMENT CONFIGURATION (from environment-config.nix)
+  # ============================================================================
+  # Build K8s ConfigMaps from multi-tenant environment config directories.
+  # See environment-config.nix for full documentation.
+  inherit ((import ./infra/environment-config.nix)) mkEnvironmentConfig;
+  environmentConfigBuilder = ./infra/environment-config.nix;
+
+  # ============================================================================
   # DEVENV MODULE PATHS (from lib/devenv/)
   # ============================================================================
   # Import paths for devenv modules. Use with devenv.lib.mkShell or
@@ -934,5 +1157,20 @@ in rec {
   #   devenv.lib.mkShell {
   #     modules = [ (import substrateLib.devenvModulePaths.rust-service) ];
   #   };
+  #
+  # Available modules:
+  #   rust, rust-service, rust-tool, rust-library — Rust development
+  #   web — Web/frontend development (Vite, React)
+  #   nix — Nix development
+  #   android — Android development
+  #   gitops — ArgoCD, Helm, kubectl, kustomize, YAML validation
+  #   infrastructure — Terraform, cloud CLIs, Python automation
   inherit devenvModulePaths;
+
+  # ============================================================================
+  # INFRASTRUCTURE TESTS (from infra/tests.nix)
+  # ============================================================================
+  # 56 pure Nix evaluation tests covering all infra builders.
+  # Run: nix eval --impure --raw --file lib/infra/tests.nix --apply 'r: r.summary'
+  infraTests = ./infra/tests.nix;
 }

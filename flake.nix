@@ -43,6 +43,8 @@
           web = ./lib/devenv/web.nix;
           nix = ./lib/devenv/nix.nix;
           android = ./lib/devenv/android.nix;
+          gitops = ./lib/devenv/gitops.nix;
+          infrastructure = ./lib/devenv/infrastructure.nix;
         };
 
         # Per-system library and overlay exports
