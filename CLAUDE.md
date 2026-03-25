@@ -228,6 +228,9 @@ Infrastructure follows the same pattern via Pangea:
 Nix option -> pangea-workspace.nix -> YAML workspace config -> Pangea Ruby DSL
 ```
 
+Fleet flows always regenerate `fleet.yaml` before execution — the YAML file
+is a build artifact, never hand-edited or cached between runs.
+
 ---
 
 ## Conventions
