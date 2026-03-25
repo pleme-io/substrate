@@ -112,10 +112,8 @@ let
       REPO_ROOT="$(${pkgs.git}/bin/git rev-parse --show-toplevel)"
       cd "$REPO_ROOT"
 
-      # Ensure fleet.yaml exists (generated from Nix or checked in)
-      if [ ! -f fleet.yaml ]; then
-        cp ${fleetYaml} fleet.yaml
-      fi
+      # Always regenerate fleet.yaml from Nix (ensures flows are current)
+      cp -f ${fleetYaml} fleet.yaml 2>/dev/null || cp ${fleetYaml} fleet.yaml
 
       # Fleet calls pangea as a subprocess — put it in PATH
       export PATH="${pangeaWrapper}/bin:${env}/bin:${pkgs.opentofu}/bin:${pkgs.git}/bin:$PATH"
@@ -148,9 +146,9 @@ in
       export RUBYLIB=$PWD/lib:$RUBYLIB
       export DRY_TYPES_WARNINGS=false
 
-      # Ensure fleet.yaml is available (Nix-generated)
-      if [ ! -f fleet.yaml ] && [ -n "${toString fleetYaml}" ]; then
-        cp ${fleetYaml} fleet.yaml 2>/dev/null || true
+      # Always regenerate fleet.yaml from Nix (ensures flows are current)
+      if [ -n "${toString fleetYaml}" ]; then
+        cp -f ${fleetYaml} fleet.yaml 2>/dev/null || cp ${fleetYaml} fleet.yaml
       fi
 
       ${shellHookExtra}
@@ -165,9 +163,7 @@ in
         set -euo pipefail
         REPO_ROOT="$(${pkgs.git}/bin/git rev-parse --show-toplevel)"
         cd "$REPO_ROOT"
-        if [ ! -f fleet.yaml ]; then
-          cp ${fleetYaml} fleet.yaml
-        fi
+        cp -f ${fleetYaml} fleet.yaml 2>/dev/null || cp ${fleetYaml} fleet.yaml
         ${fleetBin} flow list
       '');
     };
