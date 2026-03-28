@@ -60,6 +60,8 @@ in rec {
     iops ? 8000,
     throughput ? 500,
     provisionerScript ? [],
+    # Binary to upload to /tmp/ before running provisioner (e.g. kindling)
+    uploadBinary ? null,
     extraVariables ? {},
     extraTags ? {},
     extraEnvironmentVars ? [],
@@ -111,13 +113,23 @@ in rec {
 
       build = [{
         sources = [ "source.amazon-ebs.nixos" ];
-        provisioner.shell = {
-          inline = provisionerScript;
-          environment_vars = [
-            "GITHUB_TOKEN=\${var.github_token}"
-            "FLAKE_REF=\${var.flake_ref}"
-          ] ++ extraEnvironmentVars;
-        };
+        provisioner =
+          # Upload binary to instance if specified (e.g. kindling)
+          (pkgs.lib.optional (uploadBinary != null) {
+            file = {
+              source = uploadBinary;
+              destination = "/tmp/${builtins.baseNameOf uploadBinary}";
+            };
+          })
+          ++ [{
+            shell = {
+              inline = provisionerScript;
+              environment_vars = [
+                "GITHUB_TOKEN=\${var.github_token}"
+                "FLAKE_REF=\${var.flake_ref}"
+              ] ++ extraEnvironmentVars;
+            };
+          }];
         post-processor.manifest = {
           output = "packer-manifest.json";
           strip_path = true;
