@@ -56,13 +56,19 @@ let
     aws_profile = awsProfile;
   }));
 
+  # Packer is BSL-licensed (unfree) — import with allowUnfree for just this package
+  unfreePkgs = import pkgs.path {
+    inherit (pkgs) system;
+    config.allowUnfreePredicate = pkg: builtins.elem (pkgs.lib.getName pkg) [ "packer" ];
+  };
+
   # Internal: one-line app — just ami-forge pipeline --config <nix-generated-json>
   mkPipelineApp = { forgePackage, extraBinaries ? [] }:
     name: config: flags: {
       type = "app";
       program = toString (pkgs.writeShellScript name ''
         set -euo pipefail
-        export PATH="${pkgs.lib.makeBinPath ([ forgePackage pkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
+        export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
         exec ami-forge pipeline --config "${config}" ${flags}
       '');
     };
