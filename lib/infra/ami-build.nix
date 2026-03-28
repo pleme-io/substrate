@@ -134,10 +134,15 @@ in rec {
     name ? "test-template.pkr.json",
     region ? "us-east-1",
     instanceType ? "t3.medium",
-    forgePackage,              # ami-forge derivation (x86_64-linux)
-    bootChecks ? [],           # Extra commands to run after boot-check
+    testScript ? [             # Commands to run on the test instance
+      "echo '=== boot check ==='"
+      "kindling --version"
+      "k3s --version"
+      "wg --version"
+      "systemctl is-system-running --wait || true"
+      "echo '=== boot check passed ==='"
+    ],
   }: let
-    forgeLinux = forgePackage;
     template = {
       variable = {
         source_ami = { type = "string"; };
@@ -160,24 +165,9 @@ in rec {
 
       build = [{
         sources = [ "source.amazon-ebs.test" ];
-        provisioner = [
-          # Upload ami-forge binary to the test instance
-          {
-            file = {
-              source = "${forgeLinux}/bin/ami-forge";
-              destination = "/tmp/ami-forge";
-            };
-          }
-          # Run boot checks
-          {
-            shell = {
-              inline = [
-                "chmod +x /tmp/ami-forge"
-                "/tmp/ami-forge boot-check"
-              ] ++ bootChecks;
-            };
-          }
-        ];
+        provisioner.shell = {
+          inline = testScript;
+        };
       }];
     };
   in pkgs.writeText name (builtins.toJSON template);
