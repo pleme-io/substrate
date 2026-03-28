@@ -647,6 +647,27 @@ in rec {
   infraSdlcBuilder = ./infra/infra-sdlc.nix;
 
   # ============================================================================
+  # AMI BUILD PIPELINE (from infra/ami-build.nix)
+  # ============================================================================
+  # Reusable AMI build + test pipeline apps using ami-forge + Packer.
+  # Generates 7 nix run apps: build, build-tested, build-vpn-tested,
+  # build-full, boot-test, vpn-test, status.
+  #
+  # Usage:
+  #   amiBuild = import "${substrate}/lib/infra/ami-build.nix" { inherit pkgs; };
+  #   apps = amiBuild.mkAmiBuildApps {
+  #     forgePackage = inputs.ami-forge.packages.${system}.default;
+  #     packerTemplate = self.packages.${system}.packer-template;
+  #     ssmParameter = "/my/ssm/param";
+  #   };
+  #   packages.packer-template = amiBuild.mkPackerTemplate {
+  #     amiName = "my-ami";
+  #     flakeRef = "github:my-org/my-profiles#builder";
+  #     provisionerScript = [ "nixos-rebuild switch --flake $FLAKE_REF" ];
+  #   };
+  amiBuildBuilder = ./infra/ami-build.nix;
+
+  # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
   # ============================================================================
   # Build Docker images, regenerate gemset.nix, push/release Ruby services.
