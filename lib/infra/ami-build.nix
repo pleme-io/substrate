@@ -59,6 +59,37 @@ let
 
 in rec {
 
+  # ── Cluster Test Config ──────────────────────────────────────
+  # Generates a YAML config file (JSON is valid YAML) describing the
+  # multi-node cluster topology for ami-forge cluster-test.
+  mkClusterTestConfig = {
+    nodes,
+    instanceType ? "c7i.xlarge",
+    timeout ? 600,
+    k3sToken ? "ami-forge-cluster-test-token",
+    clusterName ? "cluster-test",
+    minReadyNodes ? (builtins.length nodes),
+    minVpnHandshakes ? 2,
+    kubectlFromClient ? true,
+  }: pkgs.writeText "cluster-test-config.yaml" (builtins.toJSON {
+    inherit timeout;
+    instance_type = instanceType;
+    k3s_token = k3sToken;
+    cluster_name = clusterName;
+    nodes = builtins.map (n: {
+      name = n.name;
+      role = n.role;
+      vpn_address = n.vpn_address;
+      node_index = n.node_index;
+      cluster_init = n.cluster_init or false;
+    }) nodes;
+    checks = {
+      min_ready_nodes = minReadyNodes;
+      min_vpn_handshakes = minVpnHandshakes;
+      kubectl_from_client = kubectlFromClient;
+    };
+  });
+
   # ── Build Template ──────────────────────────────────────────
   # Generates build.pkr.json — builds a NixOS AMI from a base image.
   # Packer handles SSH, instance lifecycle, and cleanup.
@@ -209,11 +240,12 @@ in rec {
     awsProfile ? null,
     extraBinaries ? [],
     skipClusterTest ? false,
+    clusterTestConfig ? null,
     clusterTestInstanceType ? "c7i.xlarge",
     clusterTestTimeout ? 480,
   }: let
     # Generate pipeline config as YAML via Nix (JSON is valid YAML)
-    pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON {
+    pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON ({
       build_template = "${buildTemplate}";
       test_template = "${testTemplate}";
       ssm = ssmParameter;
@@ -222,7 +254,8 @@ in rec {
       skip_cluster_test = skipClusterTest;
       cluster_test_instance_type = clusterTestInstanceType;
       cluster_test_timeout = clusterTestTimeout;
-    });
+    } // (if skipClusterTest || clusterTestConfig == null then {}
+      else { cluster_test = { config = "${clusterTestConfig}"; }; })));
 
     mkApp = name: script: {
       type = "app";
