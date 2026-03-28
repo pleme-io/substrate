@@ -1,8 +1,22 @@
 # Reusable AMI build + test pipeline.
 #
 # Packer orchestrates everything — SSH keys, instance lifecycle, cleanup.
-# ami-forge is called BY Packer as a provisioner tool.
+# ami-forge (Rust CLI) is called BY Packer and by the Nix-generated pipeline apps.
 # Nix generates all Packer templates as JSON via builtins.toJSON.
+#
+# Architecture:
+#   Nix (this file) generates Packer JSON templates.
+#   mkAmiBuildPipeline creates `nix run` apps that invoke `ami-forge pipeline-run`.
+#   ami-forge orchestrates: packer build → extract AMI → packer test → cluster-test → promote.
+#   On any test failure, ami-forge deregisters the AMI (no bad AMIs in inventory).
+#
+# Key exports:
+#   mkBuildTemplate   — generates build.pkr.json (base NixOS → nixos-rebuild → snapshot)
+#   mkTestTemplate    — generates test.pkr.json (boot AMI, run validation)
+#                       When testUserData is provided: boots with userdata, runs
+#                       `kindling ami-integration-test` (VPN + K3s + kubectl).
+#                       When null: runs `kindling ami-test` (11 static checks).
+#   mkAmiBuildPipeline — generates nix run apps that call `ami-forge pipeline-run`
 #
 # Usage:
 #   amiBuild = import "${substrate}/lib/infra/ami-build.nix" { inherit pkgs; };

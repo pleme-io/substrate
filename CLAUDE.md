@@ -31,6 +31,9 @@ lib/
 │   ├── pangea-workspace.nix       # Nix->YAML->pangea pattern
 │   ├── pangea-infra.nix           # Per-system Pangea builder
 │   ├── pangea-infra-flake.nix     # Zero-boilerplate Pangea flake
+│   ├── ami-build.nix              # AMI build/test/promote pipeline
+│   │                              #   mkBuildTemplate, mkTestTemplate,
+│   │                              #   mkAmiBuildPipeline
 │   ├── infra-workspace.nix        # DEPRECATED (shim kept)
 │   ├── infra-state-backend.nix    # DEPRECATED (shim kept)
 │   ├── terraform-module.nix       # TF module validation
@@ -317,6 +320,9 @@ See [docs/testing.md](docs/testing.md) for the three-layer test pyramid.
 | `mkTerraformModuleCheck` | `infra/terraform-module.nix` | TF validation derivation |
 | `mkPulumiProvider` | `infra/pulumi-provider.nix` | Pulumi SDK generation |
 | `mkAnsibleCollection` | `infra/ansible-collection.nix` | Ansible Galaxy packaging |
+| `mkBuildTemplate` | `infra/ami-build.nix` | Packer build template (NixOS AMI from base image) |
+| `mkTestTemplate` | `infra/ami-build.nix` | Packer test template (boot AMI, run validation) |
+| `mkAmiBuildPipeline` | `infra/ami-build.nix` | Nix run apps wrapping `ami-forge pipeline-run` |
 
 ### Home-Manager
 
