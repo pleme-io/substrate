@@ -60,8 +60,6 @@ in rec {
     iops ? 8000,
     throughput ? 500,
     provisionerScript ? [],
-    # Binary to upload to /tmp/ before running provisioner (e.g. kindling)
-    uploadBinary ? null,
     extraVariables ? {},
     extraTags ? {},
     extraEnvironmentVars ? [],
@@ -114,14 +112,7 @@ in rec {
       build = [{
         sources = [ "source.amazon-ebs.nixos" ];
         provisioner =
-          # Upload binary to instance if specified (e.g. kindling)
-          (pkgs.lib.optional (uploadBinary != null) {
-            file = {
-              source = uploadBinary;
-              destination = "/tmp/${builtins.baseNameOf uploadBinary}";
-            };
-          })
-          ++ [{
+          [{
             shell = {
               inline = provisionerScript;
               environment_vars = [
