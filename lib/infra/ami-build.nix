@@ -142,18 +142,15 @@ in rec {
     # If null, no userdata is injected (basic boot check only).
     testUserData ? null,
     # Commands to run on the test instance.
-    # Default: kindling ami-test (same 11 checks as build, verifies AMI boots clean)
-    testScript ? [
+    # When testUserData is set: defaults to integration test (waits for kindling-init + validates VPN/K3s/kubectl).
+    # When null: defaults to static AMI checks (binary presence, services, no stale state).
+    testScript ? (if testUserData != null then [
+      "export PATH=/run/current-system/sw/bin:$PATH"
+      "kindling ami-integration-test --timeout 600"
+    ] else [
       "kindling ami-test"
-    ],
+    ]),
   }: let
-    # Base64-encode userdata for Packer
-    encodedUserData = if testUserData != null
-      then builtins.baseNameOf (pkgs.runCommand "test-userdata-b64" {} ''
-        echo '${testUserData}' | ${pkgs.coreutils}/bin/base64 -w0 > $out
-      '')
-      else null;
-
     template = {
       variable = {
         source_ami = { type = "string"; };
@@ -173,7 +170,6 @@ in rec {
           ManagedBy = "ami-forge";
         };
       } // (if testUserData != null then {
-        # Inject test userdata so kindling-init bootstraps on the test instance
         user_data = testUserData;
       } else {});
 
@@ -204,57 +200,33 @@ in rec {
         set -euo pipefail
         export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
         ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
-        BUILD_TPL="${buildTemplate}"
-        TEST_TPL="${testTemplate}"
-        SSM="${ssmParameter}"
-        AMI_NAME="${amiName}"
-        REGION="${region}"
-        GITHUB_TOKEN="''${GITHUB_TOKEN:-}"
         ${script}
       '');
     };
 
-    buildScript = ''
-      packer init "$BUILD_TPL"
-      packer build -var "github_token=$GITHUB_TOKEN" "$BUILD_TPL"
-      AMI_ID=$(ami-forge manifest-id packer-manifest.json)
-    '';
-
-    testScript = ''
-      packer init "$TEST_TPL"
-      if ! packer build -var "source_ami=$AMI_ID" "$TEST_TPL"; then
-        echo "Tests FAILED — deregistering AMI $AMI_ID"
-        ami-forge rotate --ami-name "$AMI_NAME" --region "$REGION" || true
-        rm -f packer-manifest.json
-        exit 1
-      fi
-    '';
-
-    promoteScript = ''
-      ami-forge promote --ami-id "$AMI_ID" --ssm "$SSM" --region "$REGION"
-      rm -f packer-manifest.json
-      echo "AMI $AMI_ID promoted to $SSM"
-    '';
-
   in {
     # Build AMI: build → test → promote (ONE pipeline, always tested)
+    # All orchestration logic in Rust (ami-forge pipeline-run).
     ami-build = mkApp "ami-build" ''
-      ${buildScript}
-      ${testScript}
-      ${promoteScript}
+      exec ami-forge pipeline-run \
+        --build-template "${buildTemplate}" \
+        --test-template "${testTemplate}" \
+        --ssm "${ssmParameter}" \
+        --ami-name "${amiName}" \
+        --region "${region}"
     '';
 
     # Test existing AMI from SSM (re-run tests without rebuilding)
     ami-test = mkApp "ami-test" ''
-      AMI_ID=$(aws ssm get-parameter --name "$SSM" --region "$REGION" --query 'Parameter.Value' --output text)
+      AMI_ID=$(aws ssm get-parameter --name "${ssmParameter}" --region "${region}" --query 'Parameter.Value' --output text)
       echo "Testing AMI: $AMI_ID"
-      packer init "$TEST_TPL"
-      packer build -var "source_ami=$AMI_ID" "$TEST_TPL"
+      packer init "${testTemplate}"
+      packer build -var "source_ami=$AMI_ID" "${testTemplate}"
     '';
 
     # Show AMI status
     ami-status = mkApp "ami-status" ''
-      ami-forge status --ssm "$SSM" --region "$REGION"
+      ami-forge status --ssm "${ssmParameter}" --region "${region}"
     '';
   };
 }
