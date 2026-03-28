@@ -62,13 +62,15 @@ let
     config.allowUnfreePredicate = pkg: builtins.elem (pkgs.lib.getName pkg) [ "packer" ];
   };
 
-  # Internal: one-line app — just ami-forge pipeline --config <nix-generated-json>
-  mkPipelineApp = { forgePackage, extraBinaries ? [] }:
+  # Internal: one-line app — ami-forge pipeline --config <nix-generated-json>
+  # Sets AWS_PROFILE in the shell env so Packer (child process) inherits it.
+  mkPipelineApp = { forgePackage, awsProfile ? null, extraBinaries ? [] }:
     name: config: flags: {
       type = "app";
       program = toString (pkgs.writeShellScript name ''
         set -euo pipefail
         export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
+        ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
         exec ami-forge pipeline --config "${config}" ${flags}
       '');
     };
@@ -92,7 +94,7 @@ in rec {
     extraBinaries ? [],
     packerVars ? {},
   }: let
-    app = mkPipelineApp { inherit forgePackage extraBinaries; };
+    app = mkPipelineApp { inherit forgePackage awsProfile extraBinaries; };
     sharedArgs = { inherit packerTemplate ssmParameter region awsProfile sshUser testInstanceType testSubnet packerVars; };
 
     # JSON configs with different test gate combinations
