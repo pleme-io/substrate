@@ -207,6 +207,8 @@ in rec {
     region ? "us-east-1",
     awsProfile ? null,
     extraBinaries ? [],
+    # Extra flags passed to `ami-forge pipeline-run` (e.g. --skip-cluster-test)
+    extraPipelineFlags ? [],
   }: let
     mkApp = name: script: {
       type = "app";
@@ -227,7 +229,8 @@ in rec {
         --test-template "${testTemplate}" \
         --ssm "${ssmParameter}" \
         --ami-name "${amiName}" \
-        --region "${region}"
+        --region "${region}" \
+        ${pkgs.lib.concatStringsSep " \\\n        " extraPipelineFlags}
     '';
 
     # Test existing AMI from SSM (re-run tests without rebuilding)
