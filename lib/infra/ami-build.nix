@@ -1,8 +1,7 @@
 # Reusable AMI build + test pipeline apps.
 #
-# Generates nix run apps that orchestrate ami-forge + Packer for building,
-# testing, and promoting AMIs. Also provides mkPackerTemplate to generate
-# Packer JSON templates from Nix attrsets.
+# Generates nix run apps that use ami-forge's JSON-driven pipeline subcommand.
+# Nix generates the config, Rust executes it — zero shell logic in between.
 #
 # Usage:
 #   amiBuild = import "${substrate}/lib/infra/ami-build.nix" { inherit pkgs; };
@@ -23,17 +22,45 @@
 { pkgs }:
 
 let
-  # Internal: create a nix run app with ami-forge + packer + awscli2 on PATH
-  mkApp = { forgePackage, extraBinaries ? [], envVars ? {} }:
-    name: script: {
+  # Internal: create a pipeline config JSON as a Nix derivation
+  mkPipelineConfig = {
+    packerTemplate,
+    ssmParameter,
+    region,
+    sshUser,
+    testInstanceType,
+    testSubnet,
+    packerVars,
+    bootTest,
+    vpnTest,
+  }: pkgs.writeText "pipeline.json" (builtins.toJSON {
+    template = "${packerTemplate}";
+    ssm_parameter = ssmParameter;
+    inherit region;
+    packer_vars = { github_token = ""; } // packerVars;
+    test_subnet = testSubnet;
+    tests = {
+      boot = {
+        enabled = bootTest;
+        ssh_user = sshUser;
+        instance_type = testInstanceType;
+      };
+      vpn = {
+        enabled = vpnTest;
+        ssh_user = sshUser;
+        instance_type = testInstanceType;
+      };
+    };
+  });
+
+  # Internal: one-line app — just ami-forge pipeline --config <nix-generated-json>
+  mkPipelineApp = { forgePackage, extraBinaries ? [] }:
+    name: config: flags: {
       type = "app";
       program = toString (pkgs.writeShellScript name ''
         set -euo pipefail
         export PATH="${pkgs.lib.makeBinPath ([ forgePackage pkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
-        ${builtins.concatStringsSep "\n" (
-          pkgs.lib.mapAttrsToList (k: v: ''export ${k}="${v}"'') envVars
-        )}
-        ${script}
+        exec ami-forge pipeline --config "${config}" ${flags}
       '');
     };
 
@@ -41,14 +68,9 @@ in rec {
 
   # Generate all AMI pipeline apps.
   #
-  # Returns an attrset of 7 apps suitable for flake `apps.${system}` output:
-  #   ami-build           — Packer build, no integration tests
-  #   ami-build-tested    — Packer build + boot test gate
-  #   ami-build-vpn-tested — Packer build + VPN connectivity test gate
-  #   ami-build-full      — Packer build + boot test + VPN test gates
-  #   ami-boot-test       — Boot-test an existing AMI (from SSM or arg)
-  #   ami-vpn-test        — VPN-test an existing AMI (from SSM or arg)
-  #   ami-status          — Show current AMI from SSM
+  # Returns an attrset of 7 apps suitable for flake `apps.${system}` output.
+  # Each app is a single `ami-forge pipeline --config <json>` call —
+  # all logic lives in Rust, config is pure Nix → JSON.
   mkAmiBuildApps = {
     forgePackage,
     packerTemplate,
@@ -58,73 +80,25 @@ in rec {
     testInstanceType ? "t3.medium",
     testSubnet ? null,
     extraBinaries ? [],
-    extraVars ? [],
+    packerVars ? {},
   }: let
-    app = mkApp {
-      inherit forgePackage extraBinaries;
-      envVars = {
-        TEMPLATE = "${packerTemplate}";
-        SSM = ssmParameter;
-        REGION = region;
-      };
-    };
+    app = mkPipelineApp { inherit forgePackage extraBinaries; };
+    sharedArgs = { inherit packerTemplate ssmParameter region sshUser testInstanceType testSubnet packerVars; };
 
-    varFlags = builtins.concatStringsSep " " (
-      map (v: "--var '${v}'") extraVars
-    );
-
-    testFlags = builtins.concatStringsSep " " ([
-      "--test-ssh-user ${sshUser}"
-      "--test-instance-type ${testInstanceType}"
-    ] ++ pkgs.lib.optional (testSubnet != null) "--test-subnet ${testSubnet}");
+    # JSON configs with different test gate combinations
+    configBuild    = mkPipelineConfig (sharedArgs // { bootTest = false; vpnTest = false; });
+    configBoot     = mkPipelineConfig (sharedArgs // { bootTest = true;  vpnTest = false; });
+    configVpn      = mkPipelineConfig (sharedArgs // { bootTest = false; vpnTest = true;  });
+    configFull     = mkPipelineConfig (sharedArgs // { bootTest = true;  vpnTest = true;  });
 
   in {
-    ami-build = app "ami-build" ''
-      ami-forge packer \
-        --template "$TEMPLATE" --ssm "$SSM" --region "$REGION" \
-        --var "github_token=''${GITHUB_TOKEN:-}" ${varFlags}
-    '';
-
-    ami-build-tested = app "ami-build-tested" ''
-      ami-forge packer \
-        --template "$TEMPLATE" --ssm "$SSM" --region "$REGION" \
-        --var "github_token=''${GITHUB_TOKEN:-}" ${varFlags} \
-        --boot-test ${testFlags}
-    '';
-
-    ami-build-vpn-tested = app "ami-build-vpn-tested" ''
-      ami-forge packer \
-        --template "$TEMPLATE" --ssm "$SSM" --region "$REGION" \
-        --var "github_token=''${GITHUB_TOKEN:-}" ${varFlags} \
-        --vpn-test ${testFlags}
-    '';
-
-    ami-build-full = app "ami-build-full" ''
-      ami-forge packer \
-        --template "$TEMPLATE" --ssm "$SSM" --region "$REGION" \
-        --var "github_token=''${GITHUB_TOKEN:-}" ${varFlags} \
-        --boot-test --vpn-test ${testFlags}
-    '';
-
-    ami-boot-test = app "ami-boot-test" ''
-      AMI_ID="''${1:-$(aws ssm get-parameter --name "$SSM" --region "$REGION" \
-        --query 'Parameter.Value' --output text)}"
-      echo "Boot testing AMI: $AMI_ID"
-      ami-forge boot-test --ami-id "$AMI_ID" --region "$REGION" \
-        --ssh-user ${sshUser} --instance-type ${testInstanceType}
-    '';
-
-    ami-vpn-test = app "ami-vpn-test" ''
-      AMI_ID="''${1:-$(aws ssm get-parameter --name "$SSM" --region "$REGION" \
-        --query 'Parameter.Value' --output text)}"
-      echo "VPN testing AMI: $AMI_ID"
-      ami-forge vpn-test --ami-id "$AMI_ID" --region "$REGION" \
-        --ssh-user ${sshUser} --instance-type ${testInstanceType}
-    '';
-
-    ami-status = app "ami-status" ''
-      ami-forge status --ssm "$SSM" --region "$REGION"
-    '';
+    ami-build            = app "ami-build"            configBuild "--skip-tests";
+    ami-build-tested     = app "ami-build-tested"     configBoot  "";
+    ami-build-vpn-tested = app "ami-build-vpn-tested" configVpn   "";
+    ami-build-full       = app "ami-build-full"       configFull  "";
+    ami-boot-test        = app "ami-boot-test"        configBoot  "--test-only";
+    ami-vpn-test         = app "ami-vpn-test"         configVpn   "--test-only";
+    ami-status           = app "ami-status"           configBuild "--status";
   };
 
   # Generate a Packer JSON template from Nix attrsets.
