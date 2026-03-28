@@ -137,15 +137,23 @@ in rec {
     name ? "test-template.pkr.json",
     region ? "us-east-1",
     instanceType ? "t3.medium",
-    testScript ? [             # Commands to run on the test instance
-      "echo '=== boot check ==='"
-      "kindling --version"
-      "k3s --version"
-      "wg --version"
-      "systemctl is-system-running --wait || true"
-      "echo '=== boot check passed ==='"
+    # Test userdata (JSON string) — injected as EC2 user_data.
+    # Provides a minimal cluster-config for kindling-init to bootstrap.
+    # If null, no userdata is injected (basic boot check only).
+    testUserData ? null,
+    # Commands to run on the test instance.
+    # Default: kindling ami-test (same 11 checks as build, verifies AMI boots clean)
+    testScript ? [
+      "kindling ami-test"
     ],
   }: let
+    # Base64-encode userdata for Packer
+    encodedUserData = if testUserData != null
+      then builtins.baseNameOf (pkgs.runCommand "test-userdata-b64" {} ''
+        echo '${testUserData}' | ${pkgs.coreutils}/bin/base64 -w0 > $out
+      '')
+      else null;
+
     template = {
       variable = {
         source_ami = { type = "string"; };
@@ -164,7 +172,10 @@ in rec {
           Name = "ami-forge-test";
           ManagedBy = "ami-forge";
         };
-      };
+      } // (if testUserData != null then {
+        # Inject test userdata so kindling-init bootstraps on the test instance
+        user_data = testUserData;
+      } else {});
 
       build = [{
         sources = [ "source.amazon-ebs.test" ];
