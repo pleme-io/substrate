@@ -226,20 +226,14 @@ in rec {
     '';
 
   in {
-    # Build only — no integration tests
+    # Build AMI: build → test → promote (ONE pipeline, always tested)
     ami-build = mkApp "ami-build" ''
-      ${buildScript}
-      ${promoteScript}
-    '';
-
-    # Build + test gate → promote
-    ami-build-tested = mkApp "ami-build-tested" ''
       ${buildScript}
       ${testScript}
       ${promoteScript}
     '';
 
-    # Test existing AMI from SSM
+    # Test existing AMI from SSM (re-run tests without rebuilding)
     ami-test = mkApp "ami-test" ''
       AMI_ID=$(aws ssm get-parameter --name "$SSM" --region "$REGION" --query 'Parameter.Value' --output text)
       echo "Testing AMI: $AMI_ID"
