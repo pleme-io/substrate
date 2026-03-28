@@ -198,6 +198,7 @@ in rec {
 
   # ── Pipeline Apps ───────────────────────────────────────────
   # Generates nix run apps that orchestrate: packer build → packer test → promote
+  # Configuration follows the shikumi pattern: Nix option → YAML config → Rust reads config.
   mkAmiBuildPipeline = {
     forgePackage,
     buildTemplate,
@@ -207,9 +208,22 @@ in rec {
     region ? "us-east-1",
     awsProfile ? null,
     extraBinaries ? [],
-    # Extra flags passed to `ami-forge pipeline-run` (e.g. --skip-cluster-test)
-    extraPipelineFlags ? [],
+    skipClusterTest ? false,
+    clusterTestInstanceType ? "c7i.xlarge",
+    clusterTestTimeout ? 480,
   }: let
+    # Generate pipeline config as YAML via Nix (JSON is valid YAML)
+    pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON {
+      build_template = "${buildTemplate}";
+      test_template = "${testTemplate}";
+      ssm = ssmParameter;
+      ami_name = amiName;
+      inherit region;
+      skip_cluster_test = skipClusterTest;
+      cluster_test_instance_type = clusterTestInstanceType;
+      cluster_test_timeout = clusterTestTimeout;
+    });
+
     mkApp = name: script: {
       type = "app";
       program = toString (pkgs.writeShellScript name ''
@@ -223,14 +237,9 @@ in rec {
   in {
     # Build AMI: build → test → promote (ONE pipeline, always tested)
     # All orchestration logic in Rust (ami-forge pipeline-run).
+    # Config is a Nix-generated YAML file (shikumi pattern).
     ami-build = mkApp "ami-build" ''
-      exec ami-forge pipeline-run \
-        --build-template "${buildTemplate}" \
-        --test-template "${testTemplate}" \
-        --ssm "${ssmParameter}" \
-        --ami-name "${amiName}" \
-        --region "${region}" \
-        ${pkgs.lib.concatStringsSep " \\\n        " extraPipelineFlags}
+      exec ami-forge pipeline-run --config "${pipelineConfig}"
     '';
 
     # Test existing AMI from SSM (re-run tests without rebuilding)
