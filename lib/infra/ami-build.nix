@@ -27,13 +27,14 @@ let
     packerTemplate,
     ssmParameter,
     region,
+    awsProfile,
     sshUser,
     testInstanceType,
     testSubnet,
     packerVars,
     bootTest,
     vpnTest,
-  }: pkgs.writeText "pipeline.json" (builtins.toJSON {
+  }: pkgs.writeText "pipeline.json" (builtins.toJSON ({
     template = "${packerTemplate}";
     ssm_parameter = ssmParameter;
     inherit region;
@@ -51,7 +52,9 @@ let
         instance_type = testInstanceType;
       };
     };
-  });
+  } // pkgs.lib.optionalAttrs (awsProfile != null) {
+    aws_profile = awsProfile;
+  }));
 
   # Internal: one-line app — just ami-forge pipeline --config <nix-generated-json>
   mkPipelineApp = { forgePackage, extraBinaries ? [] }:
@@ -76,6 +79,7 @@ in rec {
     packerTemplate,
     ssmParameter,
     region ? "us-east-1",
+    awsProfile ? null,
     sshUser ? "root",
     testInstanceType ? "t3.medium",
     testSubnet ? null,
@@ -83,7 +87,7 @@ in rec {
     packerVars ? {},
   }: let
     app = mkPipelineApp { inherit forgePackage extraBinaries; };
-    sharedArgs = { inherit packerTemplate ssmParameter region sshUser testInstanceType testSubnet packerVars; };
+    sharedArgs = { inherit packerTemplate ssmParameter region awsProfile sshUser testInstanceType testSubnet packerVars; };
 
     # JSON configs with different test gate combinations
     configBuild    = mkPipelineConfig (sharedArgs // { bootTest = false; vpnTest = false; });
