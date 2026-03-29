@@ -71,7 +71,11 @@ in rec {
     minReadyNodes ? (builtins.length nodes),
     minVpnHandshakes ? 2,
     kubectlFromClient ? true,
-  }: pkgs.writeText "cluster-test-config.yaml" (builtins.toJSON {
+    # IAM instance profile name for EC2 tag-based state reporting.
+    # Deployed via Pangea (one-time IaC). Instances tag themselves with
+    # BootstrapPhase during kindling-init, orchestrator polls tags.
+    instanceProfileName ? null,
+  }: pkgs.writeText "cluster-test-config.yaml" (builtins.toJSON ({
     inherit timeout;
     instance_type = instanceType;
     k3s_token = k3sToken;
@@ -88,7 +92,9 @@ in rec {
       min_vpn_handshakes = minVpnHandshakes;
       kubectl_from_client = kubectlFromClient;
     };
-  });
+  } // (if instanceProfileName != null then {
+    instance_profile_name = instanceProfileName;
+  } else {})));
 
   # ── Build Template ──────────────────────────────────────────
   # Generates build.pkr.json — builds a NixOS AMI from a base image.
