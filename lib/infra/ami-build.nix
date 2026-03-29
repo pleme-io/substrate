@@ -123,6 +123,7 @@ in rec {
         volume_size = { type = "number"; default = volumeSize; };
         github_token = { type = "string"; default = ""; sensitive = true; };
         flake_ref = { type = "string"; default = flakeRef; };
+        attic_url = { type = "string"; default = ""; };
       } // extraVariables;
 
       packer.required_plugins = requiredPlugins;
@@ -169,6 +170,7 @@ in rec {
               environment_vars = [
                 "GITHUB_TOKEN=\${var.github_token}"
                 "FLAKE_REF=\${var.flake_ref}"
+                "ATTIC_URL=\${var.attic_url}"
               ] ++ extraEnvironmentVars;
             };
           }];
@@ -249,6 +251,11 @@ in rec {
     clusterTestConfig ? null,
     clusterTestInstanceType ? "c7i.xlarge",
     clusterTestTimeout ? 480,
+    # Attic ephemeral cache (optional). When set, ami-forge boots an Attic
+    # instance before building, uses it as a substituter, snapshots after.
+    atticSsm ? null,          # SSM parameter with Attic AMI ID
+    atticInstanceType ? "t3.medium",
+    atticCacheName ? "nexus",
   }: let
     # Generate pipeline config as YAML via Nix (JSON is valid YAML)
     pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON ({
@@ -261,7 +268,13 @@ in rec {
       cluster_test_instance_type = clusterTestInstanceType;
       cluster_test_timeout = clusterTestTimeout;
     } // (if skipClusterTest || clusterTestConfig == null then {}
-      else { cluster_test = { config = "${clusterTestConfig}"; }; })));
+      else { cluster_test = { config = "${clusterTestConfig}"; }; })
+    // (if atticSsm == null then {}
+      else { attic = {
+        ssm = atticSsm;
+        instance_type = atticInstanceType;
+        cache_name = atticCacheName;
+      }; })));
 
     mkApp = name: script: {
       type = "app";
