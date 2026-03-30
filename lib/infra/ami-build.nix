@@ -41,6 +41,10 @@ let
   };
 
   # Shared NixOS-optimized Packer source defaults
+  #
+  # shutdown_behavior = "terminate": the builder instance self-terminates on OS
+  # shutdown, preventing orphaned instances if Packer loses connectivity or the
+  # pipeline process is killed.
   nixosSourceDefaults = {
     ssh_username = "root";
     ssh_timeout = "10m";
@@ -158,6 +162,8 @@ in rec {
         run_tags = {
           Name = "ami-forge-builder";
           ManagedBy = "ami-forge";
+          "ami-forge:purpose" = "ami-build";
+          "ami-forge:ttl-hours" = "4";
         };
       };
 
@@ -221,6 +227,8 @@ in rec {
         run_tags = {
           Name = "ami-forge-test";
           ManagedBy = "ami-forge";
+          "ami-forge:purpose" = "ami-test";
+          "ami-forge:ttl-hours" = "2";
         };
       } // (if testUserData != null then {
         user_data = testUserData;
@@ -305,6 +313,8 @@ in rec {
         run_tags = {
           Name = "ami-forge-layer-builder";
           ManagedBy = "ami-forge";
+          "ami-forge:purpose" = "layer-build";
+          "ami-forge:ttl-hours" = "4";
         };
       };
 
