@@ -235,6 +235,99 @@ in rec {
     };
   in pkgs.writeText name (builtins.toJSON template);
 
+  # ── Layer Template (for multi-layer AMI pipelines) ──────────────
+  # Generalized template builder supporting both source AMI filter mode
+  # (Layer 1 — finds base NixOS) and explicit source AMI mode (Layers 2+).
+  mkLayerTemplate = {
+    name ? "layer.pkr.json",
+    amiName,
+    provisionerScript,
+    # When false: uses sourceAmiFilter to find base AMI (like mkBuildTemplate)
+    # When true: uses source_ami variable (like mkTestTemplate)
+    sourceAmiVariable ? false,
+    sourceAmiFilter ? { name = "nixos/25.*"; architecture = "x86_64"; },
+    sourceAmiOwners ? [ "427812963091" ],
+    instanceType ? "c7i.4xlarge",
+    volumeSize ? 30,
+    region ? "us-east-1",
+    iops ? 8000,
+    throughput ? 500,
+    extraVariables ? {},
+    extraEnvironmentVars ? [],
+    extraTags ? {},
+    skipCreateAmi ? false,
+  }: let
+    template = {
+      variable = {
+        ami_name = { type = "string"; default = amiName; };
+        region = { type = "string"; default = region; };
+        instance_type = { type = "string"; default = instanceType; };
+        volume_size = { type = "number"; default = volumeSize; };
+        github_token = { type = "string"; default = ""; sensitive = true; };
+        attic_url = { type = "string"; default = ""; };
+      } // (if sourceAmiVariable then {
+        source_ami = { type = "string"; };
+      } else {}) // extraVariables;
+
+      packer.required_plugins = requiredPlugins;
+
+      source.amazon-ebs.nixos = nixosSourceDefaults // {
+        ami_name = "\${var.ami_name}";
+        region = "\${var.region}";
+        instance_type = "\${var.instance_type}";
+      } // (if sourceAmiVariable then {
+        source_ami = "\${var.source_ami}";
+      } else {
+        source_ami_filter = {
+          filters = {
+            virtualization-type = "hvm";
+            root-device-type = "ebs";
+          } // sourceAmiFilter;
+          owners = sourceAmiOwners;
+          most_recent = true;
+        };
+      }) // {
+        launch_block_device_mappings = [{
+          device_name = "/dev/xvda";
+          volume_size = "\${var.volume_size}";
+          volume_type = "gp3";
+          inherit iops throughput;
+          delete_on_termination = true;
+        }];
+        skip_create_ami = skipCreateAmi;
+        force_deregister = !skipCreateAmi;
+        force_delete_snapshot = !skipCreateAmi;
+        tags = {
+          Name = "\${var.ami_name}";
+          ManagedBy = "ami-forge";
+          BuildTimestamp = "{{timestamp}}";
+        } // extraTags;
+        run_tags = {
+          Name = "ami-forge-layer-builder";
+          ManagedBy = "ami-forge";
+        };
+      };
+
+      build = [{
+        sources = [ "source.amazon-ebs.nixos" ];
+        provisioner = [{
+          shell = {
+            inline = provisionerScript;
+            environment_vars = [
+              "GITHUB_TOKEN=\${var.github_token}"
+              "ATTIC_URL=\${var.attic_url}"
+            ] ++ extraEnvironmentVars;
+          };
+        }];
+      } // (if !skipCreateAmi then {
+        post-processor.manifest = {
+          output = "packer-manifest.json";
+          strip_path = true;
+        };
+      } else {})];
+    };
+  in pkgs.writeText name (builtins.toJSON template);
+
   # ── Pipeline Apps ───────────────────────────────────────────
   # Generates nix run apps that orchestrate: packer build → packer test → promote
   # Configuration follows the shikumi pattern: Nix option → YAML config → Rust reads config.
@@ -305,6 +398,69 @@ in rec {
     # Show AMI status
     ami-status = mkApp "ami-status" ''
       ami-forge status --ssm "${ssmParameter}" --region "${region}"
+    '';
+  };
+
+  # ── Multi-Layer Pipeline Apps ────────────────────────────────────
+  # Generates nix run apps for multi-layer AMI build pipeline.
+  # Each layer produces an intermediate AMI checkpointed in SSM.
+  mkMultiLayerPipeline = {
+    forgePackage,
+    layers,           # list of { template, name, ssmParameter, fingerprintInputs ? [] }
+    testLayers ? [],  # list of { template, name }
+    promoteSsm,
+    amiName,
+    region ? "us-east-1",
+    awsProfile ? null,
+    extraBinaries ? [],
+    atticSsm ? null,
+    atticInstanceType ? "t3.medium",
+    atticCacheName ? "nexus",
+  }: let
+    pipelineConfig = pkgs.writeText "multi-layer-pipeline-config.yaml" (builtins.toJSON ({
+      layers = map (l: {
+        template = "${l.template}";
+        name = l.name;
+        ssm_parameter = l.ssmParameter;
+        fingerprint_inputs = l.fingerprintInputs or [];
+      }) layers;
+      test_layers = map (t: {
+        template = "${t.template}";
+        name = t.name;
+      }) testLayers;
+      promote_ssm = promoteSsm;
+      ami_name = amiName;
+      inherit region;
+    } // (if atticSsm == null then {} else {
+      attic = {
+        ssm = atticSsm;
+        instance_type = atticInstanceType;
+        cache_name = atticCacheName;
+      };
+    })));
+
+    mkApp = name: script: {
+      type = "app";
+      program = toString (pkgs.writeShellScript name ''
+        set -euo pipefail
+        export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
+        ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
+        ${script}
+      '');
+    };
+  in {
+    ami-build = mkApp "ami-build-layered" ''
+      exec ami-forge multi-layer-run --config "${pipelineConfig}"
+    '';
+
+    ami-status = mkApp "ami-status-layered" ''
+      echo "Layer status:"
+      ${builtins.concatStringsSep "\n" (map (l: ''
+        echo -n "  ${l.name}: "
+        aws ssm get-parameter --name "${l.ssmParameter}" --region "${region}" --query 'Parameter.Value' --output text 2>/dev/null || echo "not built"
+      '') layers)}
+      echo -n "  promoted: "
+      aws ssm get-parameter --name "${promoteSsm}" --region "${region}" --query 'Parameter.Value' --output text 2>/dev/null || echo "not promoted"
     '';
   };
 }
