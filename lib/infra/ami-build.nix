@@ -308,7 +308,7 @@ in rec {
         };
       };
 
-      build = [{
+      build = [({
         sources = [ "source.amazon-ebs.nixos" ];
         provisioner = [{
           shell = {
@@ -324,7 +324,7 @@ in rec {
           output = "packer-manifest.json";
           strip_path = true;
         };
-      } else {})];
+      } else {}))];
     };
   in pkgs.writeText name (builtins.toJSON template);
 
