@@ -78,16 +78,12 @@ let
   # ============================================================================
   # Builds a minimal Docker image for a specific Linux architecture.
   # On macOS, Nix delegates to remote builders transparently.
+  # Requires Cargo.nix to exist — generate with: crate2nix generate
   mkImage = arch: let
     targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
     targetPkgs = import nixpkgs { system = targetSystem; };
 
-    crate2nixTools = import "${crate2nix}/tools.nix" { pkgs = targetPkgs; };
-    generatedCargoNix = if builtins.pathExists cargoNix
-      then cargoNix
-      else crate2nixTools.generatedCargoNix { name = effectivePackageName; inherit src; };
-
-    project = import generatedCargoNix {
+    project = import cargoNix {
       pkgs = targetPkgs;
       defaultCrateOverrides = targetPkgs.defaultCrateOverrides // {
         ${effectivePackageName} = attrs: {
@@ -125,12 +121,7 @@ let
   # ============================================================================
   # NATIVE BINARY (for local dev/testing on host system)
   # ============================================================================
-  nativeCrate2nixTools = import "${crate2nix}/tools.nix" { pkgs = hostPkgs; };
-  nativeCargoNix = if builtins.pathExists cargoNix
-    then cargoNix
-    else nativeCrate2nixTools.generatedCargoNix { name = effectivePackageName; inherit src; };
-
-  nativeProject = import nativeCargoNix {
+  nativeProject = import cargoNix {
     pkgs = hostPkgs;
     defaultCrateOverrides = hostPkgs.defaultCrateOverrides // {
       ${effectivePackageName} = attrs: {
