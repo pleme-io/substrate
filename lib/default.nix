@@ -3,7 +3,7 @@
 #
 # Module Organization:
 #   build/       — Language-specific build patterns
-#     rust/      — overlay, library, service-flake, tool-release, devenv, crate2nix
+#     rust/      — overlay, library, service-flake, tool-release, tool-image, devenv, crate2nix
 #     go/        — overlay, tool, monorepo, monorepo-binary, library-check
 #     zig/       — overlay, tool-release, tool-release-flake
 #     swift/     — overlay

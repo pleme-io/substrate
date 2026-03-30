@@ -225,7 +225,8 @@ Drop-in modules for `devenv.sh` / `devenv.lib.mkShell`:
   lib               # Per-system: lib.${system} -> full attribute set
   rustOverlays      # Per-system: rustOverlays.${system}.rust
   libFor            # Function: { pkgs, system, ... } -> full attribute set
-  rustToolReleaseFlakeBuilder   # Path to standalone builder
+  rustToolReleaseFlakeBuilder   # Path to standalone builder (CLI + GitHub releases)
+  rustToolImageFlakeBuilder     # Path to standalone builder (CLI + Docker image)
   zigToolReleaseFlakeBuilder    # Path to standalone builder
   rustOverlay                   # Path to overlay module
   monorepoPartsModule           # Path to flake-parts module

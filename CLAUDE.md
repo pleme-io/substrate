@@ -12,7 +12,8 @@ lib/
 ├── default.nix                    # Root aggregation — ALL public API surfaces
 ├── build/                         # Language-specific build patterns
 │   ├── rust/                      # overlay, library, service, service-flake,
-│   │                              #   tool-release, tool-release-flake, devenv,
+│   │                              #   tool-release, tool-release-flake,
+│   │                              #   tool-image, tool-image-flake, devenv,
 │   │                              #   crate2nix-builders, crate2nix-apps
 │   ├── go/                        # overlay, tool, monorepo, monorepo-binary,
 │   │                              #   library-check, docker, grpc-service,
@@ -108,10 +109,22 @@ apps = substrateLib.mkCrate2nixServiceApps { ... };
 ### Pattern 3: Standalone flake builders (zero-boilerplate)
 
 ```nix
-# Rust tool:
+# Rust tool (CLI with GitHub releases):
 outputs = (import "${substrate}/lib/build/rust/tool-release-flake.nix" {
   inherit nixpkgs crate2nix flake-utils;
 }) { toolName = "kindling"; src = self; repo = "pleme-io/kindling"; };
+
+# Rust tool image (CLI packaged as Docker image for K8s CronJobs/init containers):
+outputs = (import "${substrate}/lib/build/rust/tool-image-flake.nix" {
+  inherit nixpkgs crate2nix flake-utils;
+}) {
+  toolName = "image-sync";
+  src = self;
+  repo = "pleme-io/image-sync";
+  tag = "0.1.0";
+  extraContents = pkgs: [ pkgs.crane ];  # runtime tools in Docker image
+  architectures = ["amd64"];
+};
 
 # Ruby gem:
 outputs = (import "${substrate}/lib/build/ruby/gem-flake.nix" {
