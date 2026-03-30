@@ -17,6 +17,7 @@
 # Usage:
 #   let rustToolImage = import "${substrate}/lib/build/rust/tool-image.nix" {
 #     inherit system nixpkgs crate2nix;
+#     forge = forge.packages.${system}.default;  # for `nix run .#release`
 #   };
 #   in rustToolImage {
 #     toolName = "image-sync";
@@ -24,6 +25,9 @@
 #     repo = "pleme-io/image-sync";
 #     extraContents = pkgs: [ pkgs.crane ];
 #   }
+#
+# Apps:
+#   nix run .#release  — push all arch images to ghcr.io/${repo} via forge
 #
 # Returns: { packages, devShells, apps }
 {
@@ -157,23 +161,30 @@ let
   ] else (with hostPkgs; [ cargo rustc clippy rustfmt ]);
 
   # ============================================================================
-  # PUSH APPS
+  # IMAGE RELEASE (forge-based, standard multi-arch pattern)
   # ============================================================================
-  mkPushApp = archName: {
-    type = "app";
-    program = toString (hostPkgs.writeShellScript "${toolName}-push-${archName}" ''
-      set -euo pipefail
-      IMAGE_TAR=$(nix build --no-link --print-out-paths .#dockerImage-${archName})
-      REGISTRY="ghcr.io/${repo}"
-      echo "Loading ${archName} image..."
-      docker load < "$IMAGE_TAR"
-      docker tag "${toolName}:${tag}" "$REGISTRY:${tag}"
-      docker tag "${toolName}:${tag}" "$REGISTRY:latest"
-      echo "Pushing to $REGISTRY..."
-      docker push "$REGISTRY:${tag}"
-      docker push "$REGISTRY:latest"
-      echo "Published $REGISTRY:${tag}"
-    '');
+  forgeCmd = if forge != null
+    then "${forge}/bin/forge"
+    else "forge";
+
+  imageReleaseModule = import ../../service/image-release.nix {
+    pkgs = hostPkgs;
+    inherit forgeCmd;
+  };
+
+  registry = "ghcr.io/${repo}";
+
+  # Map architecture names to Linux system triples for mkImageReleaseApp
+  archToSystem = arch:
+    if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
+
+  releaseApp = imageReleaseModule.mkImageReleaseApp {
+    name = toolName;
+    inherit registry;
+    mkImage = targetSystem: mkImage (
+      if targetSystem == "aarch64-linux" then "arm64" else "amd64"
+    );
+    systems = map archToSystem architectures;
   };
 
 in {
@@ -209,6 +220,10 @@ in {
       program = "${wrappedNative}/bin/${toolName}";
     };
 
+    # Primary release app: pushes all architectures via forge image-release
+    # Tags: {arch}-{git-short-sha} (immutable) + {arch}-latest (floating)
+    release = releaseApp;
+
     regenerate-cargo-nix = {
       type = "app";
       program = toString (hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
@@ -216,7 +231,5 @@ in {
         ${crate2nix}/bin/crate2nix generate
       '');
     };
-  }
-  // (if hasArch "amd64" then { push-amd64 = mkPushApp "amd64"; } else {})
-  // (if hasArch "arm64" then { push-arm64 = mkPushApp "arm64"; } else {});
+  };
 }

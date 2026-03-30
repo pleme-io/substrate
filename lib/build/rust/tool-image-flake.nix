@@ -3,9 +3,9 @@
 # consumer flakes.
 #
 # Usage in a flake:
-#   outputs = { self, nixpkgs, crate2nix, flake-utils, substrate, ... }:
+#   outputs = { self, nixpkgs, crate2nix, flake-utils, substrate, forge, ... }:
 #     (import "${substrate}/lib/build/rust/tool-image-flake.nix" {
-#       inherit nixpkgs crate2nix flake-utils;
+#       inherit nixpkgs crate2nix flake-utils forge;
 #     }) {
 #       toolName = "image-sync";
 #       src = self;
@@ -14,6 +14,9 @@
 #       extraContents = pkgs: [ pkgs.crane ];
 #       architectures = ["amd64"];
 #     };
+#
+# Apps:
+#   nix run .#release  — push all arch images to ghcr.io/${repo} via forge
 {
   nixpkgs,
   crate2nix,
