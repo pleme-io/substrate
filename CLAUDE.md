@@ -313,6 +313,44 @@ See [docs/testing.md](docs/testing.md) for the three-layer test pyramid.
 | `mkWasmBuild` | `build/wasm/build.nix` | Yew/WASM builds |
 | `mkGitHubAction` | `build/web/github-action.nix` | GitHub Action builder |
 
+#### Standalone Rust Flake Builders
+
+These are imported directly from substrate (not via `lib.${system}`):
+
+| Builder | Source | Description |
+|---------|--------|-------------|
+| `rust-tool-release-flake.nix` | `build/rust/tool-release-flake.nix` | CLI tool with 4-target GitHub releases |
+| `rust-tool-image-flake.nix` | `build/rust/tool-image-flake.nix` | CLI tool as Docker image for K8s CronJobs/init containers |
+| `rust-workspace-release-flake.nix` | `build/rust/tool-release-flake.nix` | Workspace CLI with `packageName` member selection |
+| `rust-service-flake.nix` | `build/rust/service-flake.nix` | Dockerized microservice |
+| `rust-library.nix` | `build/rust/library.nix` | crates.io library (check + test) |
+
+##### rust-tool-image Pattern
+
+For CLI tools that run as K8s CronJobs, init containers, or one-shot Jobs
+rather than long-running services. Produces Docker images instead of GitHub
+releases. Only targets Linux (amd64, arm64).
+
+```nix
+outputs = (import "${substrate}/lib/build/rust/tool-image-flake.nix" {
+  inherit nixpkgs crate2nix flake-utils forge;
+}) {
+  toolName = "image-sync";
+  src = self;
+  repo = "pleme-io/image-sync";
+  tag = "0.1.0";
+  extraContents = pkgs: [ pkgs.crane ];  # runtime tools in Docker image
+  architectures = ["amd64" "arm64"];
+};
+```
+
+Key differences from `rust-tool-release`:
+- Produces `dockerImage-amd64` / `dockerImage-arm64` packages
+- `nix run .#release` pushes to `ghcr.io/${repo}` via forge (not GitHub releases)
+- `extraContents` function receives target pkgs, adds runtime deps to the image
+- Native binary wrapped with runtime deps on PATH for local testing
+- No GitHub release artifacts -- images only
+
 ### Service
 
 | Export | Source | Description |
