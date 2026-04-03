@@ -314,7 +314,8 @@
         # Default to "nix-build" to indicate this is a Nix-built image
         # The actual git SHA should be injected by the release pipeline
         "GIT_SHA=nix-build"
-      ] ++ serviceTypeEnvVars;
+      ] ++ serviceTypeEnvVars
+        ++ pkgs.lib.optional (extras != []) "PATH=${pkgs.lib.makeBinPath ([serviceBinary] ++ extras)}";
       WorkingDir = "/app";
       User = "65534:65534";
     };
