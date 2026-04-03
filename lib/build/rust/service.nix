@@ -82,6 +82,7 @@ in {
   # Function: pkgs -> [packages] to include in Docker image at runtime.
   # Example: pkgs: with pkgs; [ opentofu git busybox ]
   extraContents ? (_pkgs: []),
+  crateOverrides ? {},
 }: let
   # Service lib - uses native (host) pkgs for apps, devShells, etc.
   serviceLib = import ../../default.nix {
@@ -108,7 +109,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;
