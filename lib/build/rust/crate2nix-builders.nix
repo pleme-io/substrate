@@ -221,6 +221,9 @@
     crateOverrides ? {},
     enableAwsSdk ? false,
     packageName ? "${serviceName}-service",  # Crate name in workspace (standalone: just serviceName)
+    # Function: pkgs -> [packages] to include in Docker image at runtime.
+    # Example: pkgs: with pkgs; [ opentofu git ]
+    extraContents ? (_pkgs: []),
   }: let
     muslTarget = if architecture == "arm64" then "aarch64-unknown-linux-musl" else "x86_64-unknown-linux-musl";
     crossPkgs = if enableAwsSdk then (if architecture == "arm64" then pkgs.pkgsCross.aarch64-multiplatform-musl else pkgs.pkgsCross.musl64) else pkgs;
@@ -292,10 +295,11 @@
         "PORT=${toString mainPort}"
         "GRAPHQL_PORT=${toString mainPort}"
       ];
+    extras = extraContents pkgs;
   in pkgs.dockerTools.buildLayeredImage {
     name = "${serviceName}-service";
     inherit tag architecture;
-    contents = with pkgs; [cacert serviceBinary];
+    contents = with pkgs; [cacert serviceBinary] ++ extras;
     config = let dockerHelpers = import ../../util/docker-helpers.nix; in {
       Entrypoint = ["${serviceBinary}/bin/${serviceName}"];
       ExposedPorts = builtins.listToAttrs (
