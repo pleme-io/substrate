@@ -165,9 +165,10 @@ rec {
     # Namespace is automatically derived from deploy.yaml based on environment
     # Pushes arch-prefixed tags (amd64-{sha}, arm64-{sha}) and creates manifest index ({sha})
     release = let
-      imageAmd64 = if dockerImage-amd64 != null then dockerImage-amd64 else throw "AMD64 image not available for ${serviceName}";
-      imageArm64 = dockerImage-arm64;
-      hasArm64 = imageArm64 != null;
+      hasAmd64 = builtins.elem "amd64" architectures;
+      hasArm64 = builtins.elem "arm64" architectures;
+      imageAmd64 = if hasAmd64 then (if dockerImage-amd64 != null then dockerImage-amd64 else throw "AMD64 image not available for ${serviceName}") else null;
+      imageArm64 = if hasArm64 then (if dockerImage-arm64 != null then dockerImage-arm64 else null) else null;
       hasTestImage = dockerImage-test != null;
       # Check if test image push is enabled in deploy.yaml (default: true for backward compat)
       # Supports both testImage.enabled (product deploy.yaml) and release.test_image.enabled (service deploy.yaml)
@@ -200,13 +201,13 @@ rec {
         echo "ℹ️  Test image ${if hasTestImage then "disabled in deploy.yaml" else "not available"}, skipping test image push"
         ''}
 
-        # Run production release workflow (multi-arch when arm64 available)
+        # Run production release workflow (respects architectures list)
         exec ${localForgeCmd} orchestrate-release \
           --service ${serviceName} \
           --service-dir "$(${pkgs.git}/bin/git rev-parse --show-toplevel)/${serviceDirRelative}" \
           --repo-root "$(${pkgs.git}/bin/git rev-parse --show-toplevel)" \
           --registry ${effectiveRegistry} \
-          --image-path ${imageAmd64} \
+          ${if hasAmd64 then "--image-path ${imageAmd64}" else ""} \
           ${if hasArm64 then "--image-path-arm64 ${imageArm64}" else ""} \
           "$@"
       '');
