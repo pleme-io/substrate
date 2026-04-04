@@ -188,7 +188,263 @@ Any primitive ──emit──▶ Vector/NATS ──route──▶ Storage + Ale
 
 ---
 
-## 4. The Observation Layer
+## 4. The Transport Layer (Universal Data Bus)
+
+The transport layer is not merely observability — it is the **universal data bus**
+that connects any infrastructure composition to any other. Every architecture that
+produces data (logs, metrics, events, state changes, compliance results, pipeline
+phases) plugs into the bus through a typed **transport declaration**. The bus handles
+routing, transformation, delivery guarantees, and auto-scaling.
+
+### 4.1 Transport Primitives
+
+| Primitive | What it does | Pangea | Helm |
+|-----------|-------------|--------|------|
+| **Source** | Collects data from a producer | `VectorIngestionLayer` | Vector DaemonSet source config |
+| **Transform** | Enriches/normalizes data in-flight | `VectorTransformLayer` | VRL transform chain |
+| **Sink** | Delivers data to a consumer | `VectorSinkLayer` | Vector sink config |
+| **Route** | Conditional fan-out to multiple sinks | NATS subject routing | NATS JetStream consumers |
+| **Faucet** | Tap into a live stream without disruption | Shinryu traffic ops | `vector tap` + NATS mirror |
+| **Mirror** | Duplicate a stream to a secondary destination | NATS mirror config | HelmRelease sink duplication |
+| **Sample** | Probabilistic sampling of high-volume streams | VRL `random(0.01)` | Transform config |
+| **Filter** | Drop events matching criteria | VRL `if .level == "debug" { abort }` | Transform config |
+| **Buffer** | Absorb burst traffic with backpressure | NATS JetStream + DLQ | Vector memory/disk buffer |
+| **Breathe** | Auto-scale transport capacity to load | KEDA ScaledObject | HelmRelease + KEDA trigger |
+
+### 4.2 Transport Profiles
+
+Services declare transport needs through **profiles** — named presets that
+compose source + transform + sink configurations:
+
+```yaml
+# Minimal: just logs to Loki
+transport:
+  profile: minimal
+
+# Full observability: logs + metrics + traces
+transport:
+  profile: observability
+
+# Scale test: HTTP ingest + analytics + guaranteed delivery
+transport:
+  profile: scale_test
+
+# Production: everything + NATS guarantees + KEDA breathing
+transport:
+  profile: production
+```
+
+Each profile maps to a `VectorDataPlatform` Pangea architecture composition
+(ingestion + transform + sink layers) and a Shinryu Helm chart values override.
+
+### 4.3 The DAG of Data Movement
+
+Infrastructure compositions form a **directed acyclic graph of data movement**:
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│ PackerBuild  │     │ K3s Cluster  │     │ Compliance   │
+│ (AMI events) │     │ (pod logs)   │     │ (results)    │
+└──────┬───────┘     └──────┬───────┘     └──────┬───────┘
+       │                    │                    │
+       ▼                    ▼                    ▼
+┌─────────────────────────────────────────────────────────┐
+│              Transport Bus (Vector + NATS)                │
+│                                                           │
+│  Sources ──▶ Transforms ──▶ Routes ──▶ Sinks             │
+│                                                           │
+│  Breathing: KEDA watches NATS lag, scales Vector pods     │
+│  Guarantees: JetStream persistence, consumer acks, DLQ    │
+└────┬──────────┬──────────┬──────────┬──────────┬─────────┘
+     │          │          │          │          │
+     ▼          ▼          ▼          ▼          ▼
+  ┌──────┐  ┌──────┐  ┌────────┐  ┌──────┐  ┌────────┐
+  │ Loki │  │ VM   │  │ Shinryu│  │ S3   │  │Grafana │
+  │(logs)│  │(metr)│  │(analyt)│  │(arch)│  │(dash)  │
+  └──────┘  └──────┘  └────────┘  └──────┘  └────────┘
+```
+
+**Key principle:** No infrastructure talks directly to another infrastructure.
+All data flows through the transport bus. This means:
+
+1. **Any producer can reach any consumer** — just declare source + sink
+2. **Adding a new consumer never changes the producer** — add a sink, done
+3. **Transport capacity adapts to load** — KEDA breathing, not manual scaling
+4. **Delivery guarantees are configurable per-stream** — at-most-once, at-least-once, exactly-once
+5. **The entire data flow is observable** — Vector emits metrics about itself
+
+### 4.4 Expressing Transport in Pangea and Helm
+
+**Pangea (typed Ruby DSL):**
+```ruby
+VectorDataPlatform.build(synth, {
+  profile: :production,
+  cluster_name: 'akeyless-dev',
+  ingestion: { kubernetes_logs: true, statsd: true },
+  sink: { loki: true, analytics: true },
+})
+```
+
+**Helm (values override):**
+```yaml
+shinryu:
+  vector:
+    profile: production
+  analytics:
+    pvc:
+      enabled: true
+      size: 100Gi
+  keda:
+    enabled: true
+    stream: VECTOR_DELIVERY
+    lagThreshold: 100
+```
+
+Both produce the same operational result — a breathing data pipeline that
+collects, transforms, routes, and delivers. The Pangea expression is for
+provisioning the cloud infrastructure (NATS cluster, S3 buckets, IAM roles).
+The Helm expression is for deploying the K8s workloads (Vector DaemonSets,
+Shinryu pods, KEDA ScaledObjects).
+
+---
+
+---
+
+## 5. The Eight Infrastructure Slices
+
+Every infrastructure need maps to exactly one of eight universal slices.
+Each slice has a Pangea expression (cloud provisioning) and a Helm expression
+(K8s deployment). Compositions combine slices — a "database" is Storage +
+Identity + Observe. A "service" is Compute + Transport + Identity + Observe.
+
+### Slice 1: Compute — Where Code Runs
+
+**Need:** Execute workloads (containers, functions, VMs, AMIs).
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| VM | `K3sDevCluster`, `EksScaleTest`, `AmiProductionIam` | n/a (pre-K8s) |
+| Container | (K8s manages) | `pleme-lib.deployment`, `pleme-lib.operator` |
+| Job | (K8s manages) | `pleme-cronjob`, batch/v1 Job |
+| Function | Lambda architecture (future) | Knative (future) |
+
+**Pangea primitives:** `aws_launch_template`, `aws_autoscaling_group`, `aws_eks_cluster`
+**Helm primitives:** `pleme-lib.deployment` (strategy, replicas, resources, probes)
+
+### Slice 2: Transport — How Data Moves
+
+**Need:** Route data between producers and consumers with guarantees.
+
+Already formalized in Section 4. Summary:
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Stream | `VectorIngestionLayer` | Vector DaemonSet sources |
+| Transform | `VectorTransformLayer` | VRL transform chain |
+| Deliver | `VectorSinkLayer` | Vector sinks + NATS JetStream |
+| Breathe | KEDA config | `pleme-shinryu` ScaledObject |
+
+### Slice 3: Storage — Where Data Stays
+
+**Need:** Persist state (databases, object stores, volumes, caches).
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Block | `aws_ebs_volume`, PVC | `pleme-statefulset` volumeClaimTemplates |
+| Object | `StateBackend` (S3 + DynamoDB) | ConfigMap/Secret references |
+| Relational | `PitrTestDatabase`, RDS architecture | `pleme-database` (CNPG PostgreSQL) |
+| Cache | ElastiCache architecture (future) | Redis/Valkey StatefulSet |
+| State | `PangeaNamespace` (PostgreSQL schema) | pangea-operator workspace volume |
+
+**Pangea primitives:** `aws_s3_bucket`, `aws_dynamodb_table`, `aws_rds_cluster`
+**Helm primitives:** `pleme-database`, `pleme-statefulset`, PVC templates
+
+### Slice 4: Identity — Who You Are
+
+**Need:** Authenticate, authorize, issue credentials.
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Cloud | `K3sClusterIam`, `AmiProductionIam` | n/a (pre-K8s) |
+| Cluster | (RBAC via CRDs) | `pleme-lib.serviceaccount`, `pleme-lib.crd-rbac` |
+| Service | Akeyless auth methods | `akeyless-k8s-secrets-injection` |
+| User | `AkeylessDevWorkspace` (SSO trust) | OIDC provider config |
+
+**Pangea primitives:** `aws_iam_role`, `aws_iam_policy`, `akeyless_auth_method`
+**Helm primitives:** ServiceAccount + ClusterRole + ClusterRoleBinding
+
+### Slice 5: Network — How Things Connect
+
+**Need:** Route traffic, segment access, encrypt in transit.
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| VPC | `AwsVpcNetwork` (3-tier subnets) | n/a (pre-K8s) |
+| Mesh | WireGuard VPN (mamorigami) | `pleme-lib.networkpolicy` |
+| DNS | Cloudflare DNS, Route53 | CoreDNS config |
+| Ingress | NLB, ALB | `pleme-lib.service`, Ingress/VirtualService |
+| Policy | Security groups | `pleme-lib.networkpolicy` (deny-all + allows) |
+
+**Pangea primitives:** `aws_vpc`, `aws_subnet`, `aws_security_group`, `aws_lb`
+**Helm primitives:** Service, NetworkPolicy, Istio PeerAuthentication
+
+### Slice 6: Observe — What's Happening
+
+**Need:** Metrics, logs, traces, dashboards, alerts.
+
+Built on top of Transport (Slice 2) — Observe is the **consumption side**
+of the transport bus.
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Collect | `VectorDataPlatform` | `pleme-shinryu` |
+| Store | Loki, VictoriaMetrics, Tempo | `pleme-statefulset` for each |
+| Alert | PrometheusRules | `pleme-lib.prometheusrule` |
+| Dashboard | Grafana provisioning | Grafana Helm chart + ConfigMaps |
+| Query | shinryu-mcp (Bronze/Silver/Gold) | shinryu deployment |
+
+### Slice 7: Attest — Proof of Integrity
+
+**Need:** Cryptographic proof that infrastructure is what it claims to be.
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Hash | tameshi LayerSignature (BLAKE3) | Annotation on Deployment |
+| Certify | tameshi CertificationArtifact (3-leaf Merkle) | sekiban Certification CRD |
+| Verify | kensa ComplianceRunner | ComplianceSchedule CRD |
+| Audit | tameshi HeartbeatChain | S3 + Vector sink |
+
+### Slice 8: Gate — Who Can Do What When
+
+**Need:** Control flow — block, allow, react based on conditions.
+
+| Level | Pangea | Helm |
+|-------|--------|------|
+| Admission | sekiban SignatureGate (K8s webhook) | sekiban HelmRelease |
+| Compliance | ComplianceBinding (suspend/resume targets) | pangea-operator controller |
+| Approval | ImagePipeline approval mode | Manual/webhook/auto |
+| Policy | CompliancePolicy (NIST 800-53) | sekiban CompliancePolicy CRD |
+
+---
+
+### Composition Rules
+
+Any infrastructure composition is a **subset of slices with typed connections**:
+
+```
+Service = Compute + Transport + Identity + Observe
+Database = Storage + Identity + Observe + Gate
+Pipeline = Compute + Transport + Storage + Attest + Gate
+Cluster = Compute + Network + Identity + Storage + Observe + Attest
+```
+
+Each slice is independently configurable via Pangea (cloud) and Helm (K8s).
+The Transport slice connects all others — any slice that produces data
+declares a transport profile, and the bus handles the rest.
+
+---
+
+## 6. The Observation Layer (built on Transport)
 
 All four domains emit events into a **universal observation pipeline**:
 
