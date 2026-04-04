@@ -33,6 +33,12 @@ let
     "self" "systems" "moduleDir" "nixosModuleFile"
   ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
+  hygiene = import ../../util/flake-hygiene.nix {
+    lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
+  };
+  # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
+  # Pass self.inputs if available (flake context), otherwise skip gracefully.
+  _hygieneCheck = if self ? inputs then hygiene.enforceAll self.inputs else true;
 
   mkPerSystem = system: let
     rustService = import ./service.nix {
