@@ -14,9 +14,11 @@
 { lib ? (import <nixpkgs> {}).lib }:
 
 let
-  # The org-wide nixpkgs branch. All repos MUST use this.
-  # When this changes, `tend` propagates the update to all flake.nix files.
-  requiredBranch = "nixos-25.11";
+  versions = import ./versions.nix;
+
+  # The org-wide nixpkgs branch — single source of truth from versions.nix.
+  # Change it ONCE in versions.nix, all repos inherit automatically.
+  requiredBranch = versions.nixpkgs.branch;
 
   # Patterns that indicate an unstable/unpinned nixpkgs reference
   unstablePatterns = [
