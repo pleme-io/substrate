@@ -29,6 +29,14 @@
 let
   workspaceArgs = builtins.removeAttrs args [ "systems" ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
+  hygiene = import ../../util/flake-hygiene.nix {
+    lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
+  };
+  # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
+  # In workspace flakes, src = self, so src.inputs holds the flake inputs.
+  _hygieneCheck =
+    if args ? src && args.src ? inputs then hygiene.enforceAll args.src.inputs
+    else true;
 
   mkPerSystem = system: let
     rustWorkspace = import ./workspace-release.nix {

@@ -24,6 +24,11 @@
 let
   libArgs = builtins.removeAttrs args ["self" "systems"];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
+  hygiene = import ../../util/flake-hygiene.nix {
+    lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
+  };
+  # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
+  _hygieneCheck = if self ? inputs then hygiene.enforceAll self.inputs else true;
 
   mkPerSystem = system:
     (import ./library.nix {

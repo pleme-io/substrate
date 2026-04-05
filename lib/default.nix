@@ -12,7 +12,7 @@
 #     python/    — package, uv
 #     dotnet/    — build
 #     java/      — maven
-#     wasm/      — build
+#     wasm/      — build, wasi-overlay, wasi-service, wasi-service-flake, wasi-component
 #     web/       — build, docker, github-action
 #   service/     — Service lifecycle (helpers, environment-apps, product-sdlc, image-release, helm-build, health-supervisor)
 #   hm/          — home-manager integration (service-helpers, skill-helpers, mcp-helpers, typed-config-helpers, nixos-service-helpers)
@@ -58,6 +58,9 @@
   wasmBuildModule = if fenix != null && crate2nix != null
     then import ./build/wasm/build.nix { inherit pkgs fenix crate2nix; }
     else {};
+
+  # WASI build helpers (wasm32-wasip2 services and components)
+  wasiOverlayModule = import ./build/wasm/wasi-overlay.nix;
 
   # Web docker and deployment (needs config for tokens)
   webDockerModule = import ./build/web/docker.nix {
@@ -199,6 +202,44 @@ in rec {
   mkWasmDockerImageWithHanabi = wasmBuildModule.mkWasmDockerImageWithHanabi or null;
   mkWasmDevShell = wasmBuildModule.mkWasmDevShell or null;
   wasmToolchain = wasmBuildModule.wasmToolchain or null;
+
+  # ============================================================================
+  # WASI BUILD HELPERS (from wasi-*.nix)
+  # ============================================================================
+  # WASI/Wasm infrastructure builders for wasm32-wasip2 services and components.
+  #
+  # mkWasiOverlay: Nix overlay providing wasiRustToolchain + wasiTools
+  # mkWasiService: Rust source -> wasm32-wasip2 -> Docker image with wasmtime
+  # mkWasiComponent: Rust source -> WASI Component Model artifact + WIT extraction
+  #
+  # Usage (overlay):
+  #   pkgs = import nixpkgs { overlays = [ (substrateLib.mkWasiOverlay { inherit fenix; }) ]; };
+  #
+  # Usage (service):
+  #   wasiSvc = import "${substrate}/lib/wasi-service.nix" { inherit pkgs; fenix = fenixPkgs; };
+  #   result = wasiSvc { name = "my-svc"; src = ./.; };
+  #   # result.wasmModule, result.dockerImage, result.devShell
+  #
+  # Usage (component):
+  #   wasiComp = import "${substrate}/lib/wasi-component.nix" { inherit pkgs; fenix = fenixPkgs; };
+  #   result = wasiComp { name = "my-comp"; src = ./.; };
+  #   # result.component, result.wit, result.wasmModule
+  mkWasiOverlay = wasiOverlayModule;
+  mkWasiService = ./build/wasm/wasi-service.nix;
+  mkWasiComponent = ./build/wasm/wasi-component.nix;
+
+  # ============================================================================
+  # WASI SERVICE FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a WASI service.
+  # Wraps wasi-service.nix + eachSystem + overlays + flake-hygiene for
+  # zero-boilerplate consumer flakes.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/wasi-service-flake.nix" {
+  #     inherit nixpkgs substrate fenix;
+  #   }) { inherit self; serviceName = "my-wasi-svc"; };
+  wasiServiceFlakeBuilder = ./build/wasm/wasi-service-flake.nix;
 
   # ============================================================================
   # WEB DOCKER & DEPLOYMENT (from web-docker.nix)

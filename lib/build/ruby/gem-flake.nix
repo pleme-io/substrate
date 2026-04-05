@@ -23,6 +23,13 @@
   shellHookExtra ? "",
   devShellExtras ? [],
 }:
+let
+  hygiene = import ../../util/flake-hygiene.nix {
+    lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
+  };
+  # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
+  _hygieneCheck = if self ? inputs then hygiene.enforceAll self.inputs else true;
+in
   flake-utils.lib.eachSystem systems (system:
     (import ./gem.nix {
       inherit nixpkgs system ruby-nix substrate forge;
