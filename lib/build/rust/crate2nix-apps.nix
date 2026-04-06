@@ -134,15 +134,60 @@ rec {
     };
 
     # Push pre-built Docker image to GHCR (simplified - just build+push, no deploy)
-    # Uses mkImagePushApp helper for consistency
-    push-image = let
-      imageAmd64 = if dockerImage-amd64 != null then dockerImage-amd64 else throw "AMD64 image not available for ${serviceName}";
-    in mkImagePushApp {
+    # `push-image` defaults to amd64 if available, falls back to arm64.
+    # `push-image-amd64` and `push-image-arm64` are explicit per-arch variants.
+    # Apps for unavailable architectures throw at evaluation time only when invoked.
+    push-image-amd64 = if dockerImage-amd64 != null then mkImagePushApp {
       inherit serviceName ghcrToken;
-      imagePath = imageAmd64;
+      imagePath = dockerImage-amd64;
       registry = effectiveRegistry;
+      imageSuffix = "-amd64";
       forge = forge;
+    } else {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${serviceName}-push-image-amd64-unavailable" ''
+        echo "ERROR: amd64 image not built for ${serviceName} (architectures = ${builtins.toJSON architectures})" >&2
+        exit 1
+      '');
     };
+
+    push-image-arm64 = if dockerImage-arm64 != null then mkImagePushApp {
+      inherit serviceName ghcrToken;
+      imagePath = dockerImage-arm64;
+      registry = effectiveRegistry;
+      imageSuffix = "-arm64";
+      forge = forge;
+    } else {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${serviceName}-push-image-arm64-unavailable" ''
+        echo "ERROR: arm64 image not built for ${serviceName} (architectures = ${builtins.toJSON architectures})" >&2
+        exit 1
+      '');
+    };
+
+    # Default `push-image` selects whichever arch is available (amd64 preferred for compatibility).
+    # Throws at invocation time only if neither is built.
+    push-image =
+      if dockerImage-amd64 != null then mkImagePushApp {
+        inherit serviceName ghcrToken;
+        imagePath = dockerImage-amd64;
+        registry = effectiveRegistry;
+        forge = forge;
+      }
+      else if dockerImage-arm64 != null then mkImagePushApp {
+        inherit serviceName ghcrToken;
+        imagePath = dockerImage-arm64;
+        registry = effectiveRegistry;
+        forge = forge;
+      }
+      else {
+        type = "app";
+        program = toString (pkgs.writeShellScript "${serviceName}-push-image-unavailable" ''
+          echo "ERROR: no Docker images built for ${serviceName} (architectures = ${builtins.toJSON architectures})" >&2
+          echo "Set 'architectures = [ \"amd64\" \"arm64\" ]' (or at least one) in your service flake." >&2
+          exit 1
+        '');
+      };
 
     # Deploy to Kubernetes via GitOps
     deploy = {
@@ -160,10 +205,65 @@ rec {
       '');
     };
 
+    # Simple release: build + push images for all enabled architectures, no deploy.yaml needed.
+    # Use this for standalone services without a product layout.
+    # Pushes per-arch tags (amd64-{sha}, arm64-{sha}) and creates a manifest index.
+    simple-release = let
+      hasAmd64 = builtins.elem "amd64" architectures && dockerImage-amd64 != null;
+      hasArm64 = builtins.elem "arm64" architectures && dockerImage-arm64 != null;
+    in if !hasAmd64 && !hasArm64 then {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${serviceName}-simple-release-unavailable" ''
+        echo "ERROR: no Docker images built for ${serviceName} (architectures = ${builtins.toJSON architectures})" >&2
+        echo "Set 'architectures' in your service flake to include at least one of: amd64, arm64" >&2
+        exit 1
+      '');
+    } else {
+      type = "app";
+      program = toString (pkgs.writeShellScript "${serviceName}-simple-release" ''
+        set -euo pipefail
+
+        ${if ghcrToken != "" then ''export GITHUB_TOKEN="${ghcrToken}"
+        export GHCR_TOKEN="${ghcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"
+        export GHCR_TOKEN="$GITHUB_TOKEN"''}
+        ${mkRuntimeToolsEnv { tools = ["skopeo"]; }}
+
+        echo ""
+        echo "📦 Simple release for ${serviceName}"
+        echo "🏷️  Registry: ${effectiveRegistry}"
+        echo "🏗️  Architectures: ${builtins.concatStringsSep ", " architectures}"
+        echo ""
+
+        ${if hasAmd64 then ''
+        echo "📤 Pushing amd64 image..."
+        ${localForgeCmd} push \
+          --image-path "${dockerImage-amd64}" \
+          --registry "${effectiveRegistry}" \
+          --auto-tags \
+          --arch amd64 \
+          --retries 3
+        '' else "echo 'ℹ️  amd64 not enabled, skipping'"}
+
+        ${if hasArm64 then ''
+        echo "📤 Pushing arm64 image..."
+        ${localForgeCmd} push \
+          --image-path "${dockerImage-arm64}" \
+          --registry "${effectiveRegistry}" \
+          --auto-tags \
+          --arch arm64 \
+          --retries 3
+        '' else "echo 'ℹ️  arm64 not enabled, skipping'"}
+
+        echo ""
+        echo "✅ Simple release complete"
+      '');
+    };
+
     # Full release workflow
     # Environment selected via --environment flag (default: staging)
     # Namespace is automatically derived from deploy.yaml based on environment
     # Pushes arch-prefixed tags (amd64-{sha}, arm64-{sha}) and creates manifest index ({sha})
+    # Falls back to simple-release if no deploy.yaml is present (standalone repos).
     release = let
       hasAmd64 = builtins.elem "amd64" architectures;
       hasArm64 = builtins.elem "arm64" architectures;
@@ -184,31 +284,15 @@ rec {
         export GHCR_TOKEN="$GITHUB_TOKEN"''}
         ${mkRuntimeToolsEnv { tools = deploymentTools ++ ["bun"]; }}
 
-        ${if hasTestImage && testImageEnabled then ''
-        # Push test image first (same tags as production)
-        echo ""
-        echo "🧪 Pushing test image for Kenshi TestGates..."
-        echo ""
-        ${localForgeCmd} push \
-          --image-path "${dockerImage-test}" \
-          --registry "${testRegistry}" \
-          --auto-tags \
-          --retries 3
-        echo ""
-        echo "✅ Test image pushed successfully"
-        echo ""
-        '' else ''
-        echo "ℹ️  Test image ${if hasTestImage then "disabled in deploy.yaml" else "not available"}, skipping test image push"
-        ''}
-
-        # Run production release workflow (respects architectures list)
+        # forge orchestrate-release auto-detects standalone vs product layout via deploy.yaml presence.
+        # For standalone services without deploy.yaml, it falls back to build+push only (no GitOps).
         exec ${localForgeCmd} orchestrate-release \
           --service ${serviceName} \
           --service-dir "$(${pkgs.git}/bin/git rev-parse --show-toplevel)/${serviceDirRelative}" \
           --repo-root "$(${pkgs.git}/bin/git rev-parse --show-toplevel)" \
           --registry ${effectiveRegistry} \
-          ${if hasAmd64 then "--image-path ${imageAmd64}" else ""} \
-          ${if hasArm64 then "--image-path-arm64 ${imageArm64}" else ""} \
+          ${if hasAmd64 && imageAmd64 != null then "--image-path ${imageAmd64}" else ""} \
+          ${if hasArm64 && imageArm64 != null then "--image-path-arm64 ${imageArm64}" else ""} \
           "$@"
       '');
     };
