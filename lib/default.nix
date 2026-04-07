@@ -1232,7 +1232,24 @@ in rec {
   # ============================================================================
   # INFRASTRUCTURE TESTS (from infra/tests.nix)
   # ============================================================================
-  # 56 pure Nix evaluation tests covering all infra builders.
+  # 105 pure Nix evaluation tests covering all infra builders.
   # Run: nix eval --impure --raw --file lib/infra/tests.nix --apply 'r: r.summary'
   infraTests = ./infra/tests.nix;
+
+  # ============================================================================
+  # HOME-MANAGER TESTS (from hm/tests.nix)
+  # ============================================================================
+  # 65 pure Nix evaluation tests covering all hm/ helpers:
+  # service-helpers, typed-config-helpers, mcp-helpers, nixos-service-helpers,
+  # secret-helpers, workspace-helpers, claude-md-helpers, flake-fragment-helpers.
+  # Run: nix eval --impure --raw --file lib/hm/tests.nix --apply 'r: r.summary'
+  hmTests = ./hm/tests.nix;
+
+  # ============================================================================
+  # UTILITY TESTS (from util/tests.nix)
+  # ============================================================================
+  # 22 pure Nix evaluation tests covering util/ helpers:
+  # test-helpers self-tests, versioned-overlay, docker-helpers.
+  # Run: nix eval --impure --raw --file lib/util/tests.nix --apply 'r: r.summary'
+  utilTests = ./util/tests.nix;
 }
