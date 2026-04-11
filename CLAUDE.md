@@ -28,7 +28,38 @@ lib/
 │   ├── java/                      # maven
 │   ├── wasm/                      # build
 │   └── web/                       # build, docker, github-action
+├── kube/                          # Kubernetes resource builders (nix-kube)
+│   ├── primitives/                # 29 pure K8s resource builders (no pkgs)
+│   │   ├── deployment.nix         # mkDeployment
+│   │   ├── service.nix            # mkService
+│   │   ├── network-policy.nix     # mkNetworkPolicySet (deny-all+DNS+Prometheus)
+│   │   └── ...                    # 26 more (statefulset, hpa, pdb, shinka, etc.)
+│   ├── compositions/              # 9 service archetypes
+│   │   ├── microservice.nix       # mkMicroservice → Deployment+Service+SA+SM+NP+...
+│   │   ├── worker.nix             # mkWorker → Deployment+PodMonitor+NP
+│   │   ├── operator.nix           # mkOperator → Deployment+SA+RBAC+NP
+│   │   └── ...                    # web, cronjob, database, cache, namespace-gov, bootstrap
+│   ├── modules/                   # NixOS-style module system
+│   │   ├── eval.nix               # evalKubeModules (overlay applicator)
+│   │   └── presets/               # hardened.nix, observable.nix
+│   ├── eval.nix                   # Dependency ordering by K8s kind
+│   ├── flake.nix                  # Zero-boilerplate flake entry point
+│   ├── defaults.nix               # Shared defaults (security, probes, resources)
+│   └── tests.nix                  # 37 pure eval tests
 ├── infra/                         # Infrastructure-as-Code patterns
+│   ├── workload-archetypes.nix    # Unified infrastructure theory: 7 abstract archetypes
+│   │                              #   mkHttpService, mkWorker, mkCronJob, mkGateway,
+│   │                              #   mkStatefulService, mkFunction, mkFrontend
+│   ├── compositions.nix           # Cross-archetype wiring: mkMultiTierApp, mkPipeline
+│   ├── policies.nix               # Governance: mkPolicy, evaluateAll, assertPolicies
+│   ├── policy-presets/            # production.nix, development.nix
+│   ├── renderers/                 # Backend-specific translation
+│   │   ├── kubernetes.nix         # Archetype → nix-kube compositions
+│   │   ├── tatara.nix             # Archetype → tatara JobSpec
+│   │   └── wasi.nix               # Archetype → WASI component config
+│   ├── k8s-manifest.nix           # K8s metadata, ArgoCD sync policies
+│   ├── argocd-appset.nix          # ApplicationSet generators
+│   ├── external-secrets.nix       # ExternalSecret manifests
 │   ├── pangea-workspace.nix       # Nix->YAML->pangea pattern
 │   ├── pangea-infra.nix           # Per-system Pangea builder
 │   ├── pangea-infra-flake.nix     # Zero-boilerplate Pangea flake
@@ -395,6 +426,31 @@ Key differences from `rust-tool-release`:
 | `mkVersionedOverlay` | `util/versioned-overlay.nix` | N-track overlay gen |
 | `repoFlakeBuilder` | `util/repo-flake.nix` | Universal flake builder |
 | `monorepoPartsModule` | `util/monorepo-parts.nix` | flake-parts module |
+
+### Kubernetes (nix-kube) — Standalone Import
+
+These are imported directly from substrate, not via `lib.${system}`:
+
+| Builder | Source | Description |
+|---------|--------|-------------|
+| nix-kube primitives | `kube/primitives/*.nix` | 29 pure K8s resource builders (no pkgs) |
+| nix-kube compositions | `kube/compositions/*.nix` | 9 service archetypes (mkMicroservice, mkWorker, etc.) |
+| nix-kube eval | `kube/eval.nix` | Dependency ordering + JSON serialization |
+| nix-kube flake | `kube/flake.nix` | Zero-boilerplate K8s resource flake |
+| nix-kube modules | `kube/modules/eval.nix` | NixOS-style overlay system |
+| nix-kube tests | `kube/tests.nix` | 37 pure eval tests |
+
+### Unified Infrastructure Theory — Standalone Import
+
+| Builder | Source | Description |
+|---------|--------|-------------|
+| Workload archetypes | `infra/workload-archetypes.nix` | 7 abstract archetypes: mkHttpService, mkWorker, mkCronJob, mkGateway, mkStatefulService, mkFunction, mkFrontend |
+| Compositions | `infra/compositions.nix` | mkMultiTierApp, mkPipeline — cross-archetype wiring |
+| Policies | `infra/policies.nix` | mkPolicy, evaluateAll, assertPolicies — governance |
+| Policy presets | `infra/policy-presets/*.nix` | production.nix, development.nix |
+| K8s renderer | `infra/renderers/kubernetes.nix` | Archetype → nix-kube compositions |
+| Tatara renderer | `infra/renderers/tatara.nix` | Archetype → tatara JobSpec |
+| WASI renderer | `infra/renderers/wasi.nix` | Archetype → WASI component config |
 
 ---
 
