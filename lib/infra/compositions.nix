@@ -69,12 +69,12 @@ in rec {
       existingEgress = (tier.network or {}).egress or [];
     in tier // {
       serviceName = tier.serviceName or tierName;
-      labels = (tier.labels or {}) // sharedLabels // {
+      labels = {
         "app.pleme.io/part-of" = name;
         "app.pleme.io/tier" = tierName;
         "app.pleme.io/environment" = environment;
-      };
-      annotations = (tier.annotations or {}) // sharedAnnotations;
+      } // sharedLabels // (tier.labels or {});  # user labels override system
+      annotations = sharedAnnotations // (tier.annotations or {});  # user annotations override shared
       network = (tier.network or {}) // {
         egress = existingEgress ++ egressPolicies;
       };

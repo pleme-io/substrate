@@ -37,8 +37,14 @@ rec {
     "ServiceMonitor" = 90;
     "PodMonitor" = 91;
     "PrometheusRule" = 92;
+    "Ingress" = 85;
+    "IngressClass" = 84;
     "PeerAuthentication" = 95;
     "DestinationRule" = 96;
+    "VirtualService" = 86;
+    "Gateway" = 87;
+    "HTTPRoute" = 88;
+    "GRPCRoute" = 88;
     "MutatingWebhookConfiguration" = 98;
     "ValidatingWebhookConfiguration" = 99;
   };

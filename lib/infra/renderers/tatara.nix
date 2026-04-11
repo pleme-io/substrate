@@ -61,16 +61,30 @@
         args = spec.args' or [ "hello" ];
       };
 
-    # Parse resources to cpu_mhz and memory_mb
+    # Parse K8s resource strings to numeric values
     parseCpu = s:
       if builtins.isInt s then s
-      else if builtins.match ".*m$" s != null then
-        builtins.fromJSON (builtins.head (builtins.match "([0-9]+)m" s))
+      else if builtins.isString s then
+        let m = builtins.match "([0-9]+)m$" s; in
+        if m != null then builtins.fromJSON (builtins.head m)
+        else let cores = builtins.match "([0-9]+)$" s; in
+        if cores != null then (builtins.fromJSON (builtins.head cores)) * 1000
+        else 0
       else 0;
     parseMem = s:
       if builtins.isInt s then s
-      else if builtins.match ".*Mi$" s != null then
-        builtins.fromJSON (builtins.head (builtins.match "([0-9]+)Mi" s))
+      else if builtins.isString s then
+        let gi = builtins.match "([0-9]+)Gi$" s; in
+        if gi != null then (builtins.fromJSON (builtins.head gi)) * 1024
+        else let mi = builtins.match "([0-9]+)Mi$" s; in
+        if mi != null then builtins.fromJSON (builtins.head mi)
+        else let g = builtins.match "([0-9]+)G$" s; in
+        if g != null then (builtins.fromJSON (builtins.head g)) * 1000
+        else let m = builtins.match "([0-9]+)M$" s; in
+        if m != null then builtins.fromJSON (builtins.head m)
+        else let ki = builtins.match "([0-9]+)Ki$" s; in
+        if ki != null then (builtins.fromJSON (builtins.head ki)) / 1024
+        else 0
       else 0;
 
   in {

@@ -6,7 +6,18 @@
     hasNetwork = (spec.network.egress or []) != [] || (spec.ports or []) != [];
     hasFilesystem = (spec.volumes or []) != [];
     hasHttp = (spec.ports or []) != [];
-  in {
+  in if spec.wasmPath == null then {
+    name = spec.name;
+    wasm_path = null;
+    capabilities = {};
+    world = null;
+    mounts = {};
+    network = {};
+    imports = [];
+    exports = [];
+    fuel = 0;
+    max_memory_bytes = 0;
+  } else {
     # Component metadata
     name = spec.name;
     wasm_path = spec.wasmPath;
@@ -74,5 +85,5 @@
         then builtins.fromJSON (builtins.head (builtins.match "([0-9]+)Mi" mem))
         else 128;
     in mb * 1024 * 1024;
-  };
+  }; # end else (wasmPath != null)
 }

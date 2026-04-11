@@ -36,7 +36,10 @@ in {
 
     rendered = {
       "http-service" = micro.mkMicroservice (commonArgs // {
-        service = { type = "ClusterIP"; ports = spec.ports; };
+        service = {
+          type = spec.meta.serviceType or "ClusterIP";
+          ports = spec.ports;
+        };
       });
       "worker" = worker.mkWorker commonArgs;
       "cron-job" = cron.mkCronjobService (commonArgs // {
