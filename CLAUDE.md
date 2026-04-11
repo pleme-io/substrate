@@ -1,6 +1,12 @@
 # Substrate
 
 Reusable Nix build patterns consumed by all pleme-io product and library repos.
+Part of the **unified infrastructure theory**: Nix as the universal language
+for describing any system. Abstract workload archetypes declare intent;
+backend renderers translate to any target (K8s, tatara, WASI, Compose).
+The archetypes feed tatara's convergence DAG — each rendering becomes a
+convergence point that the distributed platform drives to completion.
+
 This repo is PUBLIC. Never commit secrets, user-specific data, or private paths.
 
 ---
