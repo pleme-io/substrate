@@ -279,6 +279,77 @@ in rec {
     result = eval.mkKubeEval { inherit resources; };
   in assert' "mkKubeEval orders correctly" ((builtins.head result).kind == "Namespace");
 
+  # ── New: Secret ───────────────────────────────────────────
+  secretLib = import ./primitives/secret.nix;
+  testMkSecret = let
+    s = secretLib.mkSecret { name = "db-creds"; namespace = "default"; type = "Opaque"; data = { password = "base64enc"; }; };
+  in assert' "secret" (s.kind == "Secret" && s.type == "Opaque" && s.data.password == "base64enc");
+
+  testMkTlsSecret = let
+    s = secretLib.mkTlsSecret { name = "tls"; namespace = "default"; certData = "cert"; keyData = "key"; };
+  in assert' "tls secret" (s.type == "kubernetes.io/tls");
+
+  # ── New: Ingress ─────────────────────────────────────────
+  ingressLib = import ./primitives/ingress.nix;
+  testMkIngress = let
+    i = ingressLib.mkIngress { name = "web"; namespace = "default"; rules = [{ host = "example.com"; }]; };
+  in assert' "ingress" (i.kind == "Ingress" && i.apiVersion == "networking.k8s.io/v1");
+
+  testMkSimpleIngress = let
+    i = ingressLib.mkSimpleIngress {
+      name = "web"; namespace = "default"; host = "example.com";
+      serviceName = "web-svc"; servicePort = 8080;
+    };
+  in assert' "simple ingress" (i.kind == "Ingress" && builtins.length i.spec.rules == 1);
+
+  # ── New: Probe variants ──────────────────────────────────
+  testMkTcpProbe = let
+    p = probes.mkTcpProbe { port = 5432; };
+  in assert' "tcp probe" (p.tcpSocket.port == 5432);
+
+  testMkExecProbe = let
+    p = probes.mkExecProbe { command = [ "/bin/check" ]; };
+  in assert' "exec probe" (builtins.length p.exec.command == 1);
+
+  # ── New: Headless Service ────────────────────────────────
+  testMkHeadlessService = let
+    s = svc.mkHeadlessService { name = "db"; namespace = "default"; selectorLabels = { app = "db"; }; ports = [{ name = "pg"; port = 5432; targetPort = "pg"; }]; };
+  in assert' "headless service" (s.spec.clusterIP == "None");
+
+  # ── New: Annotations ─────────────────────────────────────
+  testMkPrometheusAnnotations = let
+    a = meta.mkPrometheusAnnotations {};
+  in assert' "prometheus annotations" (a."prometheus.io/scrape" == "true");
+
+  testMkIstioAnnotations = let
+    a = meta.mkIstioAnnotations { enabled = true; };
+  in assert' "istio annotations" (a."sidecar.istio.io/inject" == "true");
+
+  testMkIstioAnnotationsDisabled = let
+    a = meta.mkIstioAnnotations {};
+  in assert' "istio disabled" (a == {});
+
+  # ── New: Edge cases ──────────────────────────────────────
+  testMkFullnameTruncation = let
+    longName = "a-very-long-service-name-that-exceeds-the-kubernetes-sixty-three-character-limit-by-far";
+    n = meta.mkFullname { name = longName; };
+  in assert' "fullname truncates to 63" (builtins.stringLength n == 63);
+
+  testEmptyNetworkPolicySet = let
+    nps = np.mkNetworkPolicySet { name = "x"; namespace = "default"; selectorLabels = {}; enabled = true; };
+  in assert' "network policy set with empty selectors" (builtins.length nps == 3);
+
+  # ── New: Eval ordering with new kinds ────────────────────
+  testSortWithIngress = let
+    resources = [
+      { apiVersion = "networking.k8s.io/v1"; kind = "Ingress"; metadata = { name = "web"; namespace = "default"; }; }
+      { apiVersion = "apps/v1"; kind = "Deployment"; metadata = { name = "app"; namespace = "default"; }; }
+      { apiVersion = "v1"; kind = "Service"; metadata = { name = "svc"; namespace = "default"; }; }
+    ];
+    sorted = eval.sortByKind eval.defaultDependencyOrder resources;
+    kinds = map (r: r.kind) sorted;
+  in assert' "ingress after service" (kinds == [ "Service" "Deployment" "Ingress" ]);
+
   # ── All tests pass ───────────────────────────────────────
   allPassed = builtins.all (x: x == true) (builtins.attrValues {
     inherit testMkLabels testMkSelectorLabels testMkFullname testMkFullnameOverride;
@@ -298,5 +369,13 @@ in rec {
     inherit testMkDatabaseMigration testMkShinkaWaitContainer;
     inherit testMkDeliveryConfig testMkBreathability;
     inherit testSortByKind testFlatten testMkKubeEval;
+    # New tests
+    inherit testMkSecret testMkTlsSecret;
+    inherit testMkIngress testMkSimpleIngress;
+    inherit testMkTcpProbe testMkExecProbe;
+    inherit testMkHeadlessService;
+    inherit testMkPrometheusAnnotations testMkIstioAnnotations testMkIstioAnnotationsDisabled;
+    inherit testMkFullnameTruncation testEmptyNetworkPolicySet;
+    inherit testSortWithIngress;
   });
 }
