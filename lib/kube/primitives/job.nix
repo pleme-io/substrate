@@ -43,8 +43,7 @@ in rec {
             securityContext = securityContext;
           })
         ];
-      }
-      // (if volumes != [] then { template.spec.volumes = volumes; } else {});
+      } // (if volumes != [] then { inherit volumes; } else {});
     }
     // (if activeDeadlineSeconds != null then { spec.activeDeadlineSeconds = activeDeadlineSeconds; } else {})
     // (if ttlSecondsAfterFinished != null then { spec.ttlSecondsAfterFinished = ttlSecondsAfterFinished; } else {});

@@ -125,5 +125,5 @@ in rec {
     if flake ? packages.${system}.wasi-component then "wasi"
     else if flake ? packages.${system}.default then "nix"
     else if flake ? packages.${system}.dockerImage then "oci"
-    else "exec";
+    else builtins.throw "autoDriver: no suitable driver detected — flake must export wasi-component, default, or dockerImage in packages.${system}";
 }
