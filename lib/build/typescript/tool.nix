@@ -125,6 +125,12 @@ rec {
     workspaceDeps ? {},
   }:
     let
+      check = import ../../types/assertions.nix;
+      _ = check.all [
+        (check.nonEmptyStr "name" name)
+        (check.nonEmptyStr "cliEntry" cliEntry)
+        (check.nonEmptyStr "binName" binName)
+      ];
       depsNixPath = src + "/deps.nix";
       deps = fetchTypescriptDeps depsNixPath;
       manifestJson = mkTypescriptManifestJson {
@@ -243,6 +249,7 @@ rec {
     workspaceRoot ? null,
   }:
     let
+      check = import ../../types/assertions.nix;
       packageJsonPath = src + "/package.json";
       packageJson = builtins.fromJSON (builtins.readFile packageJsonPath);
       name = packageJson.name or "typescript-tool";
@@ -272,6 +279,13 @@ rec {
     plemeLinker,
     projectDirs,
   }:
+    let
+      check = import ../../types/assertions.nix;
+      _ = check.all [
+        (check.nonEmptyStr "name" name)
+        (check.list "projectDirs" projectDirs)
+      ];
+    in
     pkgs.writeShellScript "regen-${name}" ''
       set -euo pipefail
       export PATH="${plemeLinker}/bin:$PATH"

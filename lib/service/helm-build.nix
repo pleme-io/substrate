@@ -37,7 +37,13 @@ in
     chartDir,
     libChartDir ? null,
     registry ? "oci://ghcr.io/pleme-io/charts",
-  }: {
+  }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "registry" registry)
+    ];
+  in {
     lint = pkgs.writeShellScript "helm-lint-${name}" ''
       set -euo pipefail
       export PATH="${helm}/bin:$PATH"

@@ -67,6 +67,13 @@
     platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.bool "doCheck" doCheck)
+      (check.list "propagatedBuildInputs" propagatedBuildInputs)
+    ];
   in python.pkgs.buildPythonPackage ({
     inherit pname version src format propagatedBuildInputs
       pythonImportsCheck doCheck;
@@ -115,7 +122,10 @@
     python ? pkgs.python3,
     extraPackages ? [],
     shellHook ? "",
-  }: pkgs.mkShellNoCC {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.list "extraPackages" extraPackages;
+  in pkgs.mkShellNoCC {
     packages = [
       python
       pkgs.uv

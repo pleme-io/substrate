@@ -43,6 +43,13 @@ in rec {
     mkImage,
     systems ? linuxSystems,
   }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "registry" registry)
+      (check.list "systems" systems)
+    ];
+
     # Resolve image derivation paths at Nix eval time for forge to use
     imageArgs = builtins.concatStringsSep " " (map (sys: let
       image = mkImage sys;

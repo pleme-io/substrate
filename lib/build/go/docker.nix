@@ -35,6 +35,17 @@
     extraContents ? [],
   }: let
     inherit (pkgs) lib dockerTools cacert busybox;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "tag" tag)
+      (check.architecture "architecture" architecture)
+      (check.namedPorts "ports" ports)
+      (check.list "env" env)
+      (check.str "user" user)
+      (check.str "workDir" workDir)
+      (check.list "extraContents" extraContents)
+    ];
 
     mainPort = ports.http or ports.api or (lib.head (lib.attrValues ports));
     healthPort = ports.health or mainPort;

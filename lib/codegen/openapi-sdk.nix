@@ -59,6 +59,13 @@
 }:
 let
   inherit (pkgs) lib;
+  check = import ../types/assertions.nix;
+  _ = check.all [
+    (check.nonEmptyStr "name" name)
+    (check.nonEmptyStr "version" version)
+    (check.nonEmptyStr "language" language)
+    (check.str "license" license)
+  ];
 
   # Language-specific generator names and defaults
   generators = {

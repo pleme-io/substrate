@@ -48,6 +48,13 @@
     license ? pkgs.lib.licenses.asl20,
   }: let
     lib = pkgs.lib;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.enum "format" [ "setuptools" "pyproject" "flit" "hatchling" ] format)
+      (check.bool "doCheck" doCheck)
+    ];
   in pkgs.python3Packages.buildPythonPackage ({
     inherit pname version src format propagatedBuildInputs
       nativeBuildInputs pythonImportsCheck doCheck;

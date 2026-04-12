@@ -109,6 +109,15 @@ rec {
     crateOverrides ? {},
     extraLabels ? {},
   }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.nonEmptyStr "githubOrg" githubOrg)
+      (check.list "env" env)
+      (check.attrs "crateOverrides" crateOverrides)
+      (check.attrs "extraLabels" extraLabels)
+    ];
+
     binary = buildFromCargoNix {
       inherit name cargoNix crateOverrides;
     };

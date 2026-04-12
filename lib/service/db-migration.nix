@@ -34,6 +34,12 @@
     migrationsDir ? null,
     extraArgs ? [],
   }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.enum "type" ["liquibase" "sql"] type)
+    ];
+
     inherit (pkgs) lib writeShellScript;
 
     liquibaseRunner = writeShellScript "migrate-${name}" ''

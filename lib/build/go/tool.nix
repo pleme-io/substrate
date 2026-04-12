@@ -76,6 +76,18 @@
     platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.list "tags" tags)
+      (check.bool "proxyVendor" proxyVendor)
+      (check.bool "doCheck" doCheck)
+      (check.list "extraBuildInputs" extraBuildInputs)
+      (check.str "extraPostInstall" extraPostInstall)
+      (check.attrs "extraAttrs" extraAttrs)
+      (check.attrs "versionLdflags" versionLdflags)
+    ];
     completionsHelper = import ../../util/completions.nix;
 
     # Build ldflags: explicit ldflags take priority, otherwise construct from versionLdflags

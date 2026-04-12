@@ -58,6 +58,17 @@
 }:
 let
   inherit (pkgs) lib;
+  check = import ../types/assertions.nix;
+  _ = check.all [
+    (check.nonEmptyStr "name" name)
+    (check.str "version" version)
+    (check.str "license" license)
+    (check.list "sdks" sdks)
+    (check.list "servers" servers)
+    (check.list "iac" iac)
+    (check.list "schemas" schemas)
+    (check.list "docs" docs)
+  ];
 
   mkOpenApiSdk = import ./openapi-sdk.nix;
 

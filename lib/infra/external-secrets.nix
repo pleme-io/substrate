@@ -41,6 +41,14 @@ in rec {
     secretType ? null,
     template ? null,
   }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.nonEmptyStr "secretStoreName" secretStoreName)
+      (check.enum "secretStoreKind" [ "ClusterSecretStore" "SecretStore" ] secretStoreKind)
+      (check.enum "creationPolicy" [ "Owner" "Orphan" "Merge" "None" ] creationPolicy)
+      (check.enum "deletionPolicy" [ "Retain" "Delete" "Merge" ] deletionPolicy)
+    ];
     # Build target.template carefully — avoid silent overwrites.
     # Priority: explicit template > secretType > targetLabels/Annotations
     targetTemplate =
@@ -126,6 +134,11 @@ in rec {
     labels ? {},
     annotations ? {},
   }: let
+    check = import ../types/assertions.nix;
+    __ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.enum "provider" [ "akeyless" "aws" "vault" "azure" "gcp" ] provider)
+    ];
     providers = {
       akeyless = { akeyless = {
         akeylessGWApiURL = providerConfig.gatewayUrl or "https://api.akeyless.io";

@@ -38,7 +38,15 @@ in rec {
     extraContents ? [],
     workingDir ? "/",
     exposedPorts ? {},
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "tag" tag)
+      (check.list "env" env)
+      (check.list "extraContents" extraContents)
+    ];
+  in pkgs.dockerTools.buildLayeredImage {
     inherit name tag;
 
     contents = [
@@ -77,7 +85,10 @@ in rec {
   mkRubyRegenApp = {
     srcDir,
     name,
-  }: {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.nonEmptyStr "name" name;
+  in {
     type = "app";
     program = toString (writeShellScript "regen-${name}" ''
       set -euo pipefail
@@ -178,7 +189,13 @@ in rec {
     srcDir,
     name,
     level ? "patch",
-  }: {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.enum "level" [ "patch" "minor" "major" ] level)
+    ];
+  in {
     type = "app";
     program = toString (writeShellScript "gem-bump-${name}" ''
       set -euo pipefail
@@ -263,7 +280,10 @@ in rec {
   mkRubyGemApps = {
     srcDir,
     name,
-  }: {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.nonEmptyStr "name" name;
+  in {
     test = mkRubyGemTestApp { inherit srcDir name; };
     regen = mkRubyRegenApp { inherit srcDir name; };
     "gem:bump" = mkRubyGemBumpApp { inherit srcDir name; };
@@ -306,7 +326,13 @@ in rec {
     imageOutput,
     registry,
     name,
-  }: {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.nonEmptyStr "registry" registry)
+    ];
+  in {
     "regen:${name}" = mkRubyRegenApp { inherit srcDir name; };
     "push:${name}" = mkRubyPushApp { inherit flakePath imageOutput registry name; };
     "release:${name}" = {

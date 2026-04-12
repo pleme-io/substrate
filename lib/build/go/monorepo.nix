@@ -54,6 +54,16 @@
     extraLdflags ? [],
   }: let
     lib = pkgs.lib;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "owner" owner)
+      (check.nonEmptyStr "repo" repo)
+      (check.nonEmptyStr "version" version)
+      (check.nonEmptyStr "srcHash" srcHash)
+      (check.str "tag" tag)
+      (check.strOrNull "versionPackage" versionPackage)
+      (check.list "extraLdflags" extraLdflags)
+    ];
 
     # Parse major.minor from semver for version ldflags
     majorMinor = builtins.match "([0-9]+)\\.([0-9]+)\\..+" version;

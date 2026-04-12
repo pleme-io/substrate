@@ -12,6 +12,9 @@
     architecture ? "amd64",
   }:
     let
+      check = import ../types/assertions.nix;
+      _ = check.architecture "architecture" architecture;
+
       # Select correct musl target based on architecture
       muslTarget =
         if architecture == "arm64"

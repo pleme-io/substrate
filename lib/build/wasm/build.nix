@@ -22,6 +22,12 @@ in {
     optimizeLevel ? 3,
     crateOverrides ? {},
   }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.int "optimizeLevel" optimizeLevel)
+      (check.attrs "crateOverrides" crateOverrides)
+    ];
     # Generate or use existing Cargo.nix
     crate2nixTools = import "${crate2nix}/tools.nix" { inherit pkgs; };
     generatedCargoNix =
@@ -122,7 +128,15 @@ EOF
     tag ? "latest",
     architecture ? "amd64",
     port ? 80,
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "tag" tag)
+      (check.architecture "architecture" architecture)
+      (check.port "port" port)
+    ];
+  in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
     contents = with pkgs; [
       nginx
@@ -192,7 +206,13 @@ EOF
   mkWasmDevShell = {
     name,
     extraPackages ? [],
-  }: pkgs.mkShell {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.list "extraPackages" extraPackages)
+    ];
+  in pkgs.mkShell {
     buildInputs = [
       wasmToolchain
       pkgs.wasm-bindgen-cli
@@ -225,7 +245,14 @@ EOF
     webServer,  # Hanabi binary from crate2nix build
     tag ? "latest",
     architecture ? "amd64",
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.str "tag" tag)
+      (check.architecture "architecture" architecture)
+    ];
+  in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
 
     contents = with pkgs; [

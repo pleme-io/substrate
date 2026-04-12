@@ -11,7 +11,14 @@ rec {
     dbName ? "${serviceName}_test",
     dbUser ? "${serviceName}_test",
     dbPassword ? "test_password",
-  }:
+  }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "serviceName" serviceName)
+      (check.port "dbPort" dbPort)
+      (check.port "redisPort" redisPort)
+    ];
+  in
     pkgs.writeText "docker-compose.yml" ''
       version: "3.8"
 
@@ -280,7 +287,16 @@ rec {
     },
     timeout ? 300,
     ttlSecondsAfterFinished ? 3600,
-  }:
+  }: let
+    check = import ../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "serviceName" serviceName)
+      (check.nonEmptyStr "productName" productName)
+      (check.nonEmptyStr "namespace" namespace)
+      (check.nonEmptyStr "registry" registry)
+      (check.positiveInt "timeout" timeout)
+    ];
+  in
     pkgs.writeText "${serviceName}-migration-job.yaml" ''
       ---
       # ${serviceName} Service Migration Job - Runs database migrations before service deployment
@@ -441,6 +457,13 @@ rec {
     runMigrations ? true,
     forge,
   }: let
+    check = import ../types/assertions.nix;
+    __ = check.all [
+      (check.nonEmptyStr "serviceName" serviceName)
+      (check.nonEmptyStr "productName" productName)
+      (check.nonEmptyStr "namespace" namespace)
+      (check.str "cluster" cluster)
+    ];
     forgeTool = forge;
     registry = "${registryBase}/${productName}-${serviceName}";
   in

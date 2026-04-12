@@ -12,6 +12,14 @@
     nodeVersion ? pkgs.nodejs_20,
     npmFlags ? [],
   }:
+    let
+      check = import ../../types/assertions.nix;
+      _ = check.all [
+        (check.nonEmptyStr "appName" appName)
+        (check.str "buildScript" buildScript)
+        (check.list "npmFlags" npmFlags)
+      ];
+    in
     pkgs.buildNpmPackage {
       pname = appName;
       version = "1.0.0";
@@ -120,6 +128,13 @@
     extraPackages ? [],
     nodeVersion ? pkgs.nodejs_20,
   }:
+    let
+      check = import ../../types/assertions.nix;
+      _ = check.all [
+        (check.nonEmptyStr "appName" appName)
+        (check.list "extraPackages" extraPackages)
+      ];
+    in
     pkgs.mkShell {
       buildInputs = with pkgs; [
         git git-lfs
@@ -160,7 +175,14 @@
     flakeAttr ? "dockerImage-amd64",
     composeFile ? null,
     port ? 8080,
-  }: {
+  }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "appName" appName)
+      (check.str "flakeAttr" flakeAttr)
+      (check.port "port" port)
+    ];
+  in {
     local = {
       type = "app";
       program = toString (pkgs.writeShellScript "${appName}-local" ''
