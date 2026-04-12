@@ -354,6 +354,9 @@ See [docs/testing.md](docs/testing.md) for the three-layer test pyramid.
 | `mkJavaMavenPackage` | `build/java/maven.nix` | Maven package builder |
 | `mkWasmBuild` | `build/wasm/build.nix` | Yew/WASM builds |
 | `mkGitHubAction` | `build/web/github-action.nix` | GitHub Action builder |
+| `mkLeptosBuild` | `build/rust/leptos-build.nix` | Dual-target Leptos SSR+CSR build |
+| `mkLeptosDockerImage` | `build/rust/leptos-build.nix` | Docker image for Leptos SSR |
+| `mkLeptosDockerImageWithHanabi` | `build/rust/leptos-build.nix` | CSR-only via Hanabi BFF |
 
 #### Standalone Rust Flake Builders
 
@@ -366,6 +369,7 @@ These are imported directly from substrate (not via `lib.${system}`):
 | `rust-workspace-release-flake.nix` | `build/rust/tool-release-flake.nix` | Workspace CLI with `packageName` member selection |
 | `rust-service-flake.nix` | `build/rust/service-flake.nix` | Dockerized microservice |
 | `rust-library.nix` | `build/rust/library.nix` | crates.io library (check + test) |
+| `leptos-build-flake.nix` | `build/rust/leptos-build-flake.nix` | Zero-boilerplate Leptos PWA flake |
 
 ##### rust-tool-image Pattern
 
@@ -462,6 +466,16 @@ These are imported directly from substrate, not via `lib.${system}`:
 | K8s renderer | `infra/renderers/kubernetes.nix` | Archetype → nix-kube compositions |
 | Tatara renderer | `infra/renderers/tatara.nix` | Archetype → tatara JobSpec |
 | WASI renderer | `infra/renderers/wasi.nix` | Archetype → WASI component config |
+| Infra tests | `infra/tests/leptos-deploy-test.nix` | 30 pure eval tests for Leptos PWA archetype rendering |
+
+### Examples
+
+| File | Description |
+|------|-------------|
+| `examples/leptos-deploy.nix` | Full Leptos PWA deployment through all three renderers (K8s, Tatara, WASI) |
+| `examples/leptos-helm-values.nix` | Helm values generator for Leptos SSR services (`mkLeptosHelmValues`) |
+| `examples/leptos-tatara-jobspec.json` | Concrete Tatara JobSpec for Lilitu Web PWA |
+| `examples/leptos-wasi-config.json` | WASI Preview 2 component config for Leptos SSR |
 
 ---
 

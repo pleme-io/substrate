@@ -1,0 +1,35 @@
+{
+  "component": "lilitu-web-ssr",
+  "world": "tatara-service",
+  "capabilities": {
+    "network": true,
+    "filesystem": false,
+    "clocks": true,
+    "random": true,
+    "stdout": true,
+    "stderr": true
+  },
+  "imports": [
+    "wasi:cli/environment@0.2.0",
+    "wasi:clocks/monotonic-clock@0.2.0",
+    "wasi:random/random@0.2.0",
+    "wasi:sockets/tcp@0.2.0",
+    "wasi:http/outgoing-handler@0.2.0",
+    "tatara:host/catalog@0.1.0",
+    "tatara:host/config@0.1.0",
+    "tatara:host/health@0.1.0",
+    "tatara:host/secrets@0.1.0"
+  ],
+  "exports": [
+    "wasi:http/incoming-handler@0.2.0"
+  ],
+  "resource_limits": {
+    "fuel": 200000000,
+    "max_memory_bytes": 268435456
+  },
+  "env": {
+    "LEPTOS_SITE_ADDR": "0.0.0.0:3000",
+    "LEPTOS_SITE_ROOT": "/static",
+    "RUST_LOG": "info"
+  }
+}

@@ -59,6 +59,11 @@
     then import ./build/wasm/build.nix { inherit pkgs fenix crate2nix; }
     else {};
 
+  # Leptos build helpers (SSR + CSR dual-target applications)
+  leptosBuildModule = if fenix != null && crate2nix != null
+    then import ./build/rust/leptos-build.nix { inherit pkgs fenix crate2nix; }
+    else {};
+
   # WASI build helpers (wasm32-wasip2 services and components)
   wasiOverlayModule = import ./build/wasm/wasi-overlay.nix;
 
@@ -202,6 +207,26 @@ in rec {
   mkWasmDockerImageWithHanabi = wasmBuildModule.mkWasmDockerImageWithHanabi or null;
   mkWasmDevShell = wasmBuildModule.mkWasmDevShell or null;
   wasmToolchain = wasmBuildModule.wasmToolchain or null;
+
+  # ============================================================================
+  # LEPTOS BUILD HELPERS (from leptos-build.nix)
+  # ============================================================================
+  # Dual-target Leptos application builders (SSR native + CSR WASM).
+  #
+  # mkLeptosBuild: Build SSR binary + CSR WASM bundle + combined deployment
+  # mkLeptosDockerImage: Docker image with SSR binary serving CSR bundle
+  # mkLeptosDockerImageWithHanabi: CSR-only served via Hanabi BFF
+  #
+  # Usage:
+  #   result = mkLeptosBuild { name = "my-app"; src = ./.; };
+  #   result.combined  -- SSR binary + CSR bundle
+  #   result.packages  -- { default, ssrBinary, csrBundle }
+  mkLeptosBuild = leptosBuildModule.mkLeptosBuild or null;
+  mkLeptosDockerImage = leptosBuildModule.mkLeptosDockerImage or null;
+  mkLeptosDockerImageWithHanabi = leptosBuildModule.mkLeptosDockerImageWithHanabi or null;
+  mkLeptosDevShell = leptosBuildModule.mkLeptosDevShell or null;
+  leptosWasmToolchain = leptosBuildModule.wasmToolchain or null;
+  leptosNativeToolchain = leptosBuildModule.nativeToolchain or null;
 
   # ============================================================================
   # WASI BUILD HELPERS (from wasi-*.nix)
@@ -468,6 +493,81 @@ in rec {
   #     inherit nixpkgs substrate forge crate2nix;
   #   }) { inherit self; serviceName = "hanabi"; registry = "ghcr.io/pleme-io/hanabi"; };
   rustServiceFlakeBuilder = ./build/rust/service-flake.nix;
+
+  # ============================================================================
+  # LEPTOS BUILD FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Leptos web application.
+  # Wraps leptos-build.nix + eachSystem + overlays for zero-boilerplate consumer
+  # flakes. Produces SSR binary, CSR WASM bundle, Docker images, and dev shell.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/leptos-build-flake.nix" {
+  #     inherit nixpkgs substrate;
+  #   }) { inherit self; name = "lilitu-web"; };
+  leptosBuildFlakeBuilder = ./build/rust/leptos-build-flake.nix;
+
+  # ============================================================================
+  # LEPTOS APP SCAFFOLD (standalone import path)
+  # ============================================================================
+  # Generate a complete Leptos PWA project structure from a declaration.
+  # Implements convergence computing: declare -> scaffold -> build -> deploy.
+  #
+  # Usage:
+  #   scaffold = import "${substrate}/lib/leptos-app-scaffold.nix" { inherit lib; };
+  #   files = scaffold.generate {
+  #     name = "my-app";
+  #     displayName = "My App";
+  #     features = [ "auth" "pwa" "i18n" ];
+  #   };
+  #
+  # Templates: scaffold.templates.{minimal,standard,product,internal}
+  leptosAppScaffold = ./build/rust/leptos-app-scaffold.nix;
+
+  # ============================================================================
+  # RUST SERVICE SCAFFOLD (Axum backend)
+  # ============================================================================
+  # Generate a complete Axum backend service with GraphQL/REST, DB, auth, health.
+  # Usage: scaffold = import "${substrate}/lib/rust-service-scaffold.nix" { inherit lib; };
+  #        app = scaffold.generate ({ name = "my-svc"; } // scaffold.templates.graphql);
+  # Templates: scaffold.templates.{minimal,api,graphql,full}
+  rustServiceScaffold = ./build/rust/rust-service-scaffold.nix;
+
+  # ============================================================================
+  # RUST TOOL SCAFFOLD (Clap CLI)
+  # ============================================================================
+  # Generate a complete Clap CLI tool with config, completions, MCP.
+  # Usage: scaffold = import "${substrate}/lib/rust-tool-scaffold.nix" { inherit lib; };
+  #        app = scaffold.generate ({ name = "my-tool"; } // scaffold.templates.standard);
+  # Templates: scaffold.templates.{minimal,standard,mcp}
+  rustToolScaffold = ./build/rust/rust-tool-scaffold.nix;
+
+  # ============================================================================
+  # DIOXUS APP SCAFFOLD (Desktop/Mobile)
+  # ============================================================================
+  # Generate a complete Dioxus desktop/mobile app with routing and theme.
+  # Usage: scaffold = import "${substrate}/lib/dioxus-app-scaffold.nix" { inherit lib; };
+  #        app = scaffold.generate ({ name = "my-app"; } // scaffold.templates.desktop);
+  # Templates: scaffold.templates.{desktop,mobile,full}
+  dioxusAppScaffold = ./build/rust/dioxus-app-scaffold.nix;
+
+  # ============================================================================
+  # GPU APP SCAFFOLD (garasu+egaku+madori)
+  # ============================================================================
+  # Generate a complete GPU-rendered application using the pleme GPU stack.
+  # Usage: scaffold = import "${substrate}/lib/gpu-app-scaffold.nix" { inherit lib; };
+  #        app = scaffold.generate ({ name = "my-gpu"; } // scaffold.templates.minimal);
+  # Templates: scaffold.templates.{minimal,editor,media,full}
+  gpuAppScaffold = ./build/rust/gpu-app-scaffold.nix;
+
+  # ============================================================================
+  # RUBY GEM SCAFFOLD (Library/Pangea provider)
+  # ============================================================================
+  # Generate a complete Ruby gem or Pangea IaC provider with RSpec.
+  # Usage: scaffold = import "${substrate}/lib/ruby-gem-scaffold.nix" { inherit lib; };
+  #        app = scaffold.generate ({ name = "my-gem"; } // scaffold.templates.library);
+  # Templates: scaffold.templates.{library,pangea}
+  rubyGemScaffold = ./build/ruby/ruby-gem-scaffold.nix;
 
   # ============================================================================
   # RUST LIBRARY BUILDER (from rust-library.nix)

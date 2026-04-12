@@ -1,0 +1,63 @@
+{
+  "id": "lilitu-web",
+  "name": "Lilitu Web PWA",
+  "job_type": "service",
+  "meta": {
+    "namespace": "lilitu",
+    "product": "lilitu",
+    "component": "web",
+    "team": "product",
+    "environment": "production"
+  },
+  "groups": [
+    {
+      "name": "main",
+      "count": 2,
+      "service_name": "lilitu-web",
+      "restart_policy": {
+        "mode": "on-failure",
+        "max_restarts": 5,
+        "delay_seconds": 10
+      },
+      "update_strategy": {
+        "type": "rolling",
+        "max_parallel": 1,
+        "health_check_seconds": 30,
+        "min_healthy_seconds": 60
+      },
+      "tasks": [
+        {
+          "name": "lilitu-web",
+          "driver": "oci",
+          "config": {
+            "type": "oci",
+            "image": "ghcr.io/pleme-io/lilitu-web:latest",
+            "ports": {
+              "3000": "3000"
+            }
+          },
+          "env": {
+            "LEPTOS_SITE_ADDR": "0.0.0.0:3000",
+            "LEPTOS_SITE_ROOT": "/static",
+            "RUST_LOG": "info"
+          },
+          "resources": {
+            "cpu_mhz": 200,
+            "memory_mb": 256
+          },
+          "health_checks": [
+            {
+              "type": "http",
+              "port": 3000,
+              "path": "/healthz",
+              "interval_secs": 10,
+              "timeout_secs": 5
+            }
+          ]
+        }
+      ],
+      "secrets": []
+    }
+  ],
+  "constraints": []
+}

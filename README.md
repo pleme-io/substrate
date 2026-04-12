@@ -20,19 +20,31 @@ Crossplane, Ansible, Helm), **home-manager integration**, and
 ```
 lib/
   build/          Language-specific build patterns
-    rust/           overlay, library, service, tool-release, crate2nix, devenv
+    rust/           overlay, library, service, tool-release, leptos-build, crate2nix, devenv
+                    scaffolds: leptos-app, rust-service, rust-tool, dioxus-app, gpu-app
     go/             overlay, tool, monorepo, grpc-service, docker
     zig/            overlay, tool-release, bootstrap, zls
     swift/          overlay, bootstrap, sdk-helpers
     typescript/     tool, library, library-flake
-    ruby/           config, build, gem, gem-flake
+    ruby/           config, build, gem, gem-flake, scaffold: ruby-gem
     python/         package, uv
     dotnet/         build
     java/           maven
     wasm/           build (Yew/WASM with wasm-bindgen + wasm-opt)
     web/            build (Vite/React), docker, github-action
 
-  infra/          Infrastructure-as-Code patterns
+  kube/           Kubernetes resource builders (nix-kube)
+    primitives/     29 pure K8s resource builders (no pkgs)
+    compositions/   9 service archetypes (mkMicroservice, mkWorker, etc.)
+    modules/        NixOS-style overlay system
+    tests.nix       37 pure eval tests
+
+  infra/          Infrastructure-as-Code patterns + Unified Infrastructure Theory
+    workload-archetypes.nix   7 abstract archetypes -> K8s + Tatara + WASI
+    compositions.nix          mkMultiTierApp, mkPipeline
+    policies.nix              mkPolicy, evaluateAll, assertPolicies
+    renderers/                kubernetes.nix, tatara.nix, wasi.nix
+    tests/                    8 Nix eval test suites (151+ assertions)
     pangea-workspace.nix      Nix->YAML->Pangea config (shikumi pattern)
     pangea-infra.nix          Per-system Pangea project builder
     pangea-infra-flake.nix    Zero-boilerplate Pangea flake
@@ -81,7 +93,14 @@ lib/
     flake-wrapper.nix         Flake boilerplate reduction
 
   devenv/         devenv.sh module templates (standalone)
-    rust.nix, rust-service.nix, rust-tool.nix, rust-library.nix, web.nix, nix.nix
+    rust.nix, rust-service.nix, rust-tool.nix, rust-library.nix, leptos.nix, web.nix, nix.nix
+
+  examples/       Deployment examples
+    leptos-deploy.nix           Full Leptos PWA through all 3 renderers
+    leptos-helm-values.nix      Helm values for Leptos SSR
+    convergence-bridge.nix      Frontend in the convergence DAG
+    leptos-tatara-jobspec.json  Tatara JobSpec for PWA
+    leptos-wasi-config.json     WASI Preview 2 component config
 ```
 
 ### Dependency DAG
@@ -287,6 +306,8 @@ in rustService {
 | `mkDotnetPackage` | `build/dotnet/build.nix` | .NET package builder |
 | `mkJavaMavenPackage` | `build/java/maven.nix` | Maven package builder |
 | `mkWasmBuild` | `build/wasm/build.nix` | Yew/WASM builds |
+| `mkLeptosBuild` | `build/rust/leptos-build.nix` | Leptos SSR+CSR dual-target |
+| `mkLeptosDockerImage` | `build/rust/leptos-build.nix` | Docker for Leptos SSR |
 | `mkGitHubAction` | `build/web/github-action.nix` | GitHub Action builder |
 
 ### Service
@@ -381,8 +402,89 @@ substrateLib = substrate.libFor {
 
 When `forge` is not provided, commands fall back to looking for `forge` on `$PATH`.
 
+## Scaffold System -- Generate Complete Projects
+
+Scaffolds implement convergence computing: declare intent, scaffold converges
+it into a complete project. Each scaffold matches a builder.
+
+```nix
+scaffold = import "${substrate}/lib/leptos-app-scaffold.nix" { inherit lib; };
+app = scaffold.generate ({
+  name = "my-product";
+  primaryColor = "#6366f1";
+} // scaffold.templates.standard);
+# app.files -- 22 files ready to write to disk
+# app.meta -- project metadata  
+# app.deployment -- deployment spec for substrate archetypes
+```
+
+| Scaffold | Builder | What It Generates |
+|----------|---------|-------------------|
+| `leptosAppScaffold` | `leptosBuildFlakeBuilder` | Leptos PWA (22 files, auth + PWA + i18n) |
+| `rustServiceScaffold` | `rustServiceFlakeBuilder` | Axum backend (GraphQL/REST, DB, health) |
+| `rustToolScaffold` | `rustToolReleaseFlakeBuilder` | Clap CLI (config, completions) |
+| `dioxusAppScaffold` | -- | Dioxus desktop/mobile app |
+| `gpuAppScaffold` | -- | garasu+egaku+madori GPU app |
+| `rubyGemScaffold` | `rubyGemFlakeBuilder` | Pangea IaC gem (RSpec) |
+
+See [docs/scaffolds.md](docs/scaffolds.md) for all templates and options.
+
+## Leptos Web Application Builders
+
+Dual-target Leptos builds: SSR native binary + CSR WASM bundle.
+
+| Function | Source | Description |
+|----------|--------|-------------|
+| `mkLeptosBuild` | `build/rust/leptos-build.nix` | SSR binary + CSR WASM + combined |
+| `mkLeptosDockerImage` | `build/rust/leptos-build.nix` | Docker with SSR serving CSR |
+| `mkLeptosDockerImageWithHanabi` | `build/rust/leptos-build.nix` | CSR-only via Hanabi BFF |
+| `leptosBuildFlakeBuilder` | `build/rust/leptos-build-flake.nix` | Zero-boilerplate flake |
+
+Devenv module: `lib/devenv/leptos.nix` (cargo-leptos, trunk, tailwindcss, wasm-bindgen, npm).
+
+See [docs/adding-a-leptos-app.md](docs/adding-a-leptos-app.md).
+
+## Unified Infrastructure Theory
+
+Abstract workload archetypes render simultaneously to Kubernetes, Tatara, and WASI:
+
+```nix
+svc = archetypes.mkHttpService {
+  name = "my-app"; image = "ghcr.io/org/app:latest";
+  ports = [{ port = 3000; }]; health = { path = "/healthz"; };
+};
+# svc.kubernetes -- nix-kube compositions (Deployment + Service + SA + NP + HPA)
+# svc.tatara -- JobSpec JSON (7 drivers: exec, oci, nix, kube, wasi, ...)
+# svc.wasi -- WASI Component Model config (capability-based security)
+```
+
+7 archetypes: `mkHttpService`, `mkWorker`, `mkCronJob`, `mkGateway`,
+`mkStatefulService`, `mkFunction`, `mkFrontend`.
+
+See [docs/unified-infrastructure-theory.md](docs/unified-infrastructure-theory.md)
+and [docs/metaframework.md](docs/metaframework.md).
+
+## Metaframework
+
+Substrate powers the pleme-io metaframework: declare application state once,
+render through any backend (garasu GPU or Leptos web), deploy to any platform.
+
+Framework crates powered by substrate:
+- **pleme-app-core** -- state machines, cache, sanitization, convergence types + Leptos web providers
+- **pleme-mui** -- 92 Material Web + MUI island components for Leptos
+- **egaku** -- platform-agnostic widget state machines (pure Rust, WASM-safe)
+- **irodori** -- color system (source of truth for theming)
+
+See [docs/metaframework.md](docs/metaframework.md) and
+[docs/convergence-application-theory.md](docs/convergence-application-theory.md).
+
 ## Further Reading
 
+- [docs/scaffolds.md](docs/scaffolds.md) -- all 6 scaffold generators with templates
+- [docs/metaframework.md](docs/metaframework.md) -- application framework architecture
+- [docs/convergence-application-theory.md](docs/convergence-application-theory.md) -- manufacturing intent into computational reality
+- [docs/adding-a-leptos-app.md](docs/adding-a-leptos-app.md) -- Leptos PWA scaffold + build + deploy
+- [docs/unified-infrastructure-theory.md](docs/unified-infrastructure-theory.md) -- workload archetypes + renderers
 - [docs/architecture.md](docs/architecture.md) -- layered design, dependency graph, flake structure
 - [docs/security.md](docs/security.md) -- IAM, encryption, lifecycle, secrets, tagging
 - [docs/testing.md](docs/testing.md) -- three-layer test pyramid, gated workspaces
