@@ -33,6 +33,20 @@ in rec {
     # Environment (production, staging, development)
     environment ? "development",
   }: let
+    # ── Type assertions ─────────────────────────────────────────
+    _ = assert builtins.isString name && name != ""
+      || throw "mkMultiTierApp: 'name' must be a non-empty string"; true;
+    __ = assert builtins.isAttrs tiers && tiers != {}
+      || throw "mkMultiTierApp: 'tiers' must be a non-empty attrset"; true;
+    ___ = assert builtins.elem environment [ "production" "staging" "development" ]
+      || throw "mkMultiTierApp: 'environment' must be 'production', 'staging', or 'development', got: ${environment}"; true;
+    ____ = assert builtins.isAttrs sharedLabels
+      || throw "mkMultiTierApp: 'sharedLabels' must be an attrset"; true;
+    _____ = assert builtins.isAttrs sharedAnnotations
+      || throw "mkMultiTierApp: 'sharedAnnotations' must be an attrset"; true;
+    ______ = assert builtins.isList policies
+      || throw "mkMultiTierApp: 'policies' must be a list"; true;
+
     tierNames = builtins.attrNames tiers;
 
     # Auto-infer connections from tier specs
@@ -82,10 +96,16 @@ in rec {
 
     enrichedTiers = builtins.mapAttrs enrichTier tiers;
 
+    # Valid archetype names
+    validArchetypes = [ "http-service" "worker" "cron-job" "gateway" "stateful-service" "function" "frontend" ];
+
     # Render each tier through the archetype system
     renderedTiers = builtins.mapAttrs (tierName: tier:
       let
         archetype = tier.archetype or "http-service";
+        _archetypeCheck = assert builtins.elem archetype validArchetypes
+          || throw "mkMultiTierApp: tier '${tierName}' has invalid archetype '${archetype}'. Valid: ${builtins.concatStringsSep ", " validArchetypes}";
+          true;
         builder = {
           "http-service" = archetypes.mkHttpService;
           "worker" = archetypes.mkWorker;
@@ -94,7 +114,7 @@ in rec {
           "stateful-service" = archetypes.mkStatefulService;
           "function" = archetypes.mkFunction;
           "frontend" = archetypes.mkFrontend;
-        }.${archetype} or archetypes.mkHttpService;
+        }.${archetype};
       in builder (builtins.removeAttrs tier [ "archetype" ])
     ) enrichedTiers;
 

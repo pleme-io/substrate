@@ -38,15 +38,68 @@ let
     labels = {};
   };
 
+  # ── Type assertions (eliminate undesired invariants at declaration time)
+  assertNonEmpty = field: value:
+    assert builtins.isString value && value != ""
+      || throw "workload-archetypes: '${field}' must be a non-empty string, got: ${builtins.typeOf value}";
+    value;
+
+  assertPositiveInt = field: value:
+    assert builtins.isInt value && value > 0
+      || throw "workload-archetypes: '${field}' must be a positive integer, got: ${toString value}";
+    value;
+
+  assertResourceQuantity = field: value:
+    assert builtins.isString value
+      && builtins.match "[0-9]+(m|Mi|Gi|Ki|Ti)?" value != null
+      || throw "workload-archetypes: '${field}' must be a resource quantity (e.g. '100m', '128Mi'), got: ${value}";
+    value;
+
+  assertList = field: value:
+    assert builtins.isList value
+      || throw "workload-archetypes: '${field}' must be a list, got: ${builtins.typeOf value}";
+    value;
+
+  assertAttrs = field: value:
+    assert builtins.isAttrs value
+      || throw "workload-archetypes: '${field}' must be an attrset, got: ${builtins.typeOf value}";
+    value;
+
+  # Validate resources subfields
+  validateResources = res: let
+    r = assertAttrs "resources" res;
+  in {
+    cpu = assertResourceQuantity "resources.cpu" (r.cpu or "100m");
+    memory = assertResourceQuantity "resources.memory" (r.memory or "128Mi");
+  };
+
+  # Validate scaling subfields if present
+  validateScaling = scaling:
+    if scaling == null then null
+    else let
+      s = assertAttrs "scaling" scaling;
+    in s // {
+      min = if s ? min then assertPositiveInt "scaling.min" s.min
+            else if scaling ? min then scaling.min else 1;
+    };
+
   # Build the unified result: abstract spec + all renderings
   mkArchetype = archetype: userArgs: let
     args = defaults // userArgs // { inherit archetype; };
+    # Validate required fields
+    _ = assertNonEmpty "name" (args.name or "");
+    __ = assertPositiveInt "replicas" args.replicas;
+    ___ = assertList "secrets" args.secrets;
+    ____ = assertAttrs "env" args.env;
+    _____ = assertList "volumes" args.volumes;
+    validatedResources = validateResources args.resources;
+    validatedScaling = validateScaling args.scaling;
     spec = {
       inherit (args) name archetype;
       ports = args.ports or [];
       health = args.health;
-      scaling = args.scaling;
-      resources = args.resources;
+      scaling = validatedScaling;
+      resources = validatedResources;
       replicas = args.replicas;
       secrets = args.secrets;
       network = args.network;

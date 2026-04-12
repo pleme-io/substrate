@@ -110,6 +110,11 @@
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
   helmBuildModule = import ./service/helm-build.nix { inherit pkgs forgeCmd; };
 
+  # Shared cross-cutting middleware (typed, language-agnostic)
+  sharedDockerModule = import ./build/shared/docker-image.nix { inherit pkgs; };
+  sharedReleaseModule = import ./build/shared/release-app.nix { inherit pkgs forgeCmd; };
+  sharedDevShellModule = import ./build/shared/devshell.nix { inherit pkgs; };
+
   # K8s manifest primitives (metadata, syncPolicy, helm source — shared by appset + es)
   k8sManifestModule = import ./infra/k8s-manifest.nix;
 
@@ -1352,4 +1357,65 @@ in rec {
   # test-helpers self-tests, versioned-overlay, docker-helpers.
   # Run: nix eval --impure --raw --file lib/util/tests.nix --apply 'r: r.summary'
   utilTests = ./util/tests.nix;
+
+  # ============================================================================
+  # TYPE SYSTEM (from types/)
+  # ============================================================================
+  # Complete type lattice for builder inputs, outputs, and domain specs.
+  # Standalone import (no pkgs needed):
+  #   types = import "${substrate}/lib/types" { lib = nixpkgs.lib; };
+  #
+  # Sub-modules:
+  #   types.foundation  — NixSystem, Architecture, Language, ArtifactKind, etc.
+  #   types.ports       — Unified port representation with coercion bridges
+  #   types.buildResult — Universal output contract (packages, devShells, apps)
+  #   types.buildSpec   — Per-language typed input specs
+  #   types.serviceSpec — Health checks, scaling, resources, monitoring
+  #   types.deploySpec  — Docker images, registries, release automation
+  #   types.infraSpec   — Workload archetypes, policies, compositions
+  #   types.kubeSpec    — K8s metadata, security, probes, RBAC
+  #   types.validate    — Builder wrapping and validation middleware
+  #
+  # Tests: nix eval --impure --expr '(import ./lib/types/tests.nix { lib = (import <nixpkgs> {}).lib; }).summary'
+  # ============================================================================
+  # TYPED BUILDER WRAPPERS (from build/*/...-typed.nix)
+  # ============================================================================
+  # Module-system validated versions of complex builders. These validate
+  # all inputs through lib.evalModules before delegating to the original
+  # builders. Drop-in replacements with type checking at the boundary.
+  #
+  # Standalone import paths:
+  #   rustServiceTyped = import "${substrate}/lib/build/rust/service-typed.nix" { ... };
+  #   rustToolReleaseTyped = import "${substrate}/lib/build/rust/tool-release-typed.nix" { ... };
+  #   rustWorkspaceReleaseTyped = import "${substrate}/lib/build/rust/workspace-release-typed.nix" { ... };
+  #   goGrpcServiceTyped = (import "${substrate}/lib/build/go/grpc-service-typed.nix").mkGoGrpcService;
+  rustServiceTypedBuilder = ./build/rust/service-typed.nix;
+  rustToolReleaseTypedBuilder = ./build/rust/tool-release-typed.nix;
+  rustWorkspaceReleaseTypedBuilder = ./build/rust/workspace-release-typed.nix;
+  goGrpcServiceTypedBuilder = ./build/go/grpc-service-typed.nix;
+
+  # Module definitions (for custom evalModules compositions)
+  rustServiceModule = ./build/rust/service-module.nix;
+  rustToolReleaseModule = ./build/rust/tool-release-module.nix;
+  rustWorkspaceReleaseModule = ./build/rust/workspace-release-module.nix;
+  goGrpcServiceModule = ./build/go/grpc-service-module.nix;
+
+  substrateTypes = import ./types { lib = pkgs.lib; };
+  substrateTypesPath = ./types;
+  typeTests = ./types/tests.nix;
+
+  # ============================================================================
+  # SHARED CROSS-CUTTING MIDDLEWARE (from build/shared/)
+  # ============================================================================
+  # Language-agnostic typed builders for Docker images, release apps, and devShells.
+  # These replace the per-language duplications with a single implementation.
+  #
+  # Docker: mkTypedDockerImage, mkWebDockerImage, mkServiceDockerImage
+  # Release: mkReleaseApps, mkReleaseApp, mkBumpApp, mkCheckAllApp, mkLockPlatformApp, mkImagePushApp
+  # DevShell: mkTypedDevShell, mkRustServiceDevShell, mkGoGrpcDevShell, language tool presets
+  inherit (sharedDockerModule) mkTypedDockerImage mkWebDockerImage mkServiceDockerImage;
+  inherit (sharedReleaseModule) mkReleaseApps;
+  sharedReleaseApps = sharedReleaseModule;
+  inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
+  sharedDevShell = sharedDevShellModule;
 }

@@ -21,6 +21,18 @@ This repo is PUBLIC. Never commit secrets, user-specific data, or private paths.
 ```
 lib/
 ├── default.nix                    # Root aggregation — ALL public API surfaces
+├── types/                         # Type system — typed interfaces for all domains
+│   ├── default.nix                # Aggregation: foundation, ports, buildResult, etc.
+│   ├── foundation.nix             # NixSystem, Architecture, Language, ArtifactKind, etc.
+│   ├── ports.nix                  # Unified port types with attrTag + coercedTo
+│   ├── build-result.nix           # Universal output contract (packages, devShells, apps)
+│   ├── build-spec.nix             # Per-language typed input specs
+│   ├── service-spec.nix           # HealthSpec, ScalingSpec, ResourceSpec, MonitoringSpec
+│   ├── deploy-spec.nix            # DockerImageSpec, DeploySpec, ReleaseSpec
+│   ├── infra-spec.nix             # WorkloadSpec, PolicyRule, MultiTierAppSpec
+│   ├── kube-spec.nix              # KubeMetadata, SecurityContext, Probes, RBAC
+│   ├── validate.nix               # mkTypedBuilder, validateSpec, checkBuildResult
+│   └── tests.nix                  # 79 pure eval tests for all types
 ├── build/                         # Language-specific build patterns
 │   ├── rust/                      # overlay, library, service, service-flake,
 │   │                              #   tool-release, tool-release-flake,
@@ -217,10 +229,14 @@ devenv.lib.mkShell {
 Modules follow a strict dependency DAG. Violations cause circular imports.
 
 ```
+types/ ----> (none)     (standalone: only needs nixpkgs.lib — DAG leaf)
 build/ ----> util/       (OK: builders use config, darwin, docker helpers)
+build/ ----> types/      (OK: builders validate through types)
 service/ --> build/      (OK: service patterns compose build outputs)
 service/ --> util/       (OK: service patterns use config, release helpers)
+service/ --> types/      (OK: service patterns use type contracts)
 infra/ ----> util/       (OK: infra uses config)
+infra/ ----> types/      (OK: infra specs become typed)
 codegen/ --> util/       (OK: codegen uses source registry)
 hm/ -------> (none)     (standalone: only needs nixpkgs.lib)
 devenv/ ---> (none)     (standalone: devenv module format)
@@ -228,12 +244,29 @@ devenv/ ---> (none)     (standalone: devenv module format)
 util/ -----> build/     (PROHIBITED: would create cycles)
 util/ -----> service/   (PROHIBITED)
 util/ -----> infra/     (PROHIBITED)
+util/ -----> types/     (PROHIBITED: types is a pure leaf)
 build/ ----> service/   (PROHIBITED)
 build/ ----> infra/     (PROHIBITED)
+types/ ----> build/     (PROHIBITED: types must remain pure)
+types/ ----> util/      (PROHIBITED: types must remain pure)
 ```
 
 Within `build/`, language directories are independent of each other.
 Cross-language imports (e.g., `rust/` importing from `go/`) are prohibited.
+
+### Convergence Layer Mapping
+
+Every substrate module maps to a convergence theory layer:
+
+| Layer | Substrate | Implementation |
+|-------|-----------|----------------|
+| **Declare** | Type-checked specs | `lib/types/*.nix` — submodule options |
+| **Resolve** | Module evaluation | `lib.evalModules` in `types/validate.nix` |
+| **Converge** | Builder transforms | `lib/build/*/*.nix` — derivation construction |
+| **Checkpoint** | Build outputs | `packages.*`, store paths, Docker images |
+| **Verify** | Invariant proofs | `lib/types/tests.nix`, `lib/kube/tests.nix` |
+| **Cache** | Content-addressed | Nix store (automatic) |
+| **Compose** | Lattice join | `imports = [a b]`, overlays, `//` merge |
 
 ---
 
@@ -441,6 +474,27 @@ Key differences from `rust-tool-release`:
 | `mkVersionedOverlay` | `util/versioned-overlay.nix` | N-track overlay gen |
 | `repoFlakeBuilder` | `util/repo-flake.nix` | Universal flake builder |
 | `monorepoPartsModule` | `util/monorepo-parts.nix` | flake-parts module |
+
+### Type System
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `substrateTypes` | `types/default.nix` | Complete type lattice (instantiated with pkgs.lib) |
+| `substrateTypesPath` | `types/` | Standalone import path (no pkgs needed) |
+| `typeTests` | `types/tests.nix` | 79 pure eval tests |
+
+Standalone import: `types = import "${substrate}/lib/types" { lib = nixpkgs.lib; };`
+
+Key type modules:
+- `types.foundation` — NixSystem, Architecture, Language, ArtifactKind, ServiceType, etc.
+- `types.ports` — Unified port types with `attrTag` + `coercedTo` for legacy compat
+- `types.buildResult` — Universal output contract (`packages`, `devShells`, `apps`)
+- `types.buildSpec` — Per-language typed input specs (rust, go, zig, ts, ruby, python, web, wasm)
+- `types.serviceSpec` — HealthCheck, ScalingSpec, ResourceSpec, MonitoringSpec
+- `types.deploySpec` — DockerImageSpec, DeploySpec, ReleaseSpec
+- `types.infraSpec` — WorkloadSpec, PolicyRule, MultiTierAppSpec
+- `types.kubeSpec` — KubeMetadata, SecurityContext, Probes, RBAC rules
+- `types.validate` — `mkTypedBuilder`, `validateSpec`, `checkBuildResult`
 
 ### Kubernetes (nix-kube) — Standalone Import
 

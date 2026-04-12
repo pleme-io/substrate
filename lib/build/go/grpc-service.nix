@@ -76,6 +76,19 @@
       '';
     };
   in {
+    # Standard BuildResult contract
+    packages = {
+      default = binary;
+      ${name} = binary;
+      dockerImage = dockerImage;
+    };
+    devShells.default = devShell;
+    apps.default = {
+      type = "app";
+      program = "${binary}/bin/${name}";
+    };
+
+    # Backward compatibility (existing consumers destructure these)
     inherit binary dockerImage devShell;
     package = binary;
   };

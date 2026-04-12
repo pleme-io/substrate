@@ -61,6 +61,9 @@ let
   };
 in
 {
+  # Standard BuildResult contract
+  packages = {};
+
   devShells.default = pkgs.mkShell {
     buildInputs = [env ruby] ++ devShellExtras;
     shellHook = ''
