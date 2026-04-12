@@ -41,6 +41,14 @@
   license ? "MIT",
   additionalProperties ? {},
 }: let
+  check = import ../types/assertions.nix;
+  _ = check.all [
+    (check.nonEmptyStr "name" name)
+    (check.nonEmptyStr "version" version)
+    (check.str "library" library)
+    (check.str "tls" tls)
+    (check.str "license" license)
+  ];
   inherit (pkgs) lib;
 
   # Merge user properties with defaults

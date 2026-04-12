@@ -41,6 +41,12 @@
     postInstall ? "",
     platforms ? pkgs.lib.platforms.linux,
   }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "description" description)
+      (check.list "subPackages" subPackages)
+    ];
     lib = pkgs.lib;
     completionsHelper = import ../../util/completions.nix;
 

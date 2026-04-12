@@ -42,6 +42,11 @@
 }:
 
 let
+  check = import ../types/assertions.nix;
+  _ = check.all [
+    (check.str "backendDir" backendDir)
+    (check.list "infraServices" infraServices)
+  ];
   # Build a minimal app that just wraps a forge command with REPO_ROOT resolved
   mkForgeApp = name: script: {
     type = "app";

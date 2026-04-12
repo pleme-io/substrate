@@ -21,6 +21,7 @@
 #     valuesHierarchy = [ "envs/{{tenant}}/{{.metadata.labels.environment}}/values.yaml" ];
 #   };
 let
+  check = import ../types/assertions.nix;
   k8s = import ./k8s-manifest.nix;
   naming = import ./multi-tenant-naming.nix;
 in rec {
@@ -66,6 +67,20 @@ in rec {
     annotations ? {},
     labels ? {},
   }: let
+    _ = check.all [
+      (check.nonEmptyStr "name" name)
+      (check.nonEmptyStr "repoURL" repoURL)
+      (check.nonEmptyStr "chartPath" chartPath)
+      (check.str "project" project)
+      (check.str "targetRevision" targetRevision)
+      (check.bool "autoSync" autoSync)
+      (check.bool "selfHeal" selfHeal)
+      (check.bool "prune" prune)
+      (check.bool "createNamespace" createNamespace)
+      (check.positiveInt "retryLimit" retryLimit)
+      (check.attrs "annotations" annotations)
+      (check.attrs "labels" labels)
+    ];
     resolvedValues = resolveValuePaths { inherit tenantPathLabel tenantMappings; } valuesHierarchy;
     resolvedParams = resolveHelmParams helmParameters;
     source = k8s.mkHelmSource {

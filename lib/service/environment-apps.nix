@@ -3,7 +3,8 @@
 # Adds production-specific safety measures and confirmation prompts
 { pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken, mkWebDeploymentApps, mkServiceApps }:
 
-{
+let check = import ../types/assertions.nix;
+in {
   # Web deployment apps with environment support
   mkEnvironmentWebDeploymentApps = {
     appName,
@@ -15,6 +16,12 @@
     atticToken ? defaultAtticToken,
     ghcrToken ? defaultGhcrToken,
   }: let
+    _ = check.all [
+      (check.nonEmptyStr "appName" appName)
+      (check.nonEmptyStr "productName" productName)
+      (check.nonEmptyStr "clusterName" clusterName)
+      (check.str "registry" registry)
+    ];
     # Base apps using existing function for staging
     stagingApps = mkWebDeploymentApps {
       inherit appName registry forge flakeAttr atticToken ghcrToken;
@@ -160,6 +167,12 @@
     dbPassword ? "postgres",
     dbName ? "test",
   }: let
+    _ = check.all [
+      (check.nonEmptyStr "appName" appName)
+      (check.nonEmptyStr "productName" productName)
+      (check.nonEmptyStr "clusterName" clusterName)
+      (check.str "registry" registry)
+    ];
     # Base apps using existing function for staging
     stagingApps = mkServiceApps {
       serviceName = appName;

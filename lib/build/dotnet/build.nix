@@ -55,6 +55,15 @@
     license ? pkgs.lib.licenses.asl20,
     platforms ? pkgs.lib.platforms.all,
   }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.bool "doCheck" doCheck)
+      (check.bool "selfContainedBuild" selfContainedBuild)
+      (check.list "executables" executables)
+      (check.list "nativeBuildInputs" nativeBuildInputs)
+    ];
     lib = pkgs.lib;
   in pkgs.buildDotnetModule ({
     inherit pname version src nugetDeps;

@@ -30,6 +30,7 @@
   crate2nix,
   devenv ? null,
 }: let
+  check = import ../../types/assertions.nix;
   pkgs = import nixpkgs {
     inherit system;
     overlays = [ nixLib.rustOverlays.${system}.rust ];
@@ -44,6 +45,12 @@ in {
   extraDevInputs ? [],
   devEnvVars ? {},
 }: let
+  _ = check.all [
+    (check.nonEmptyStr "name" name)
+    (check.list "buildInputs" buildInputs)
+    (check.list "nativeBuildInputs" nativeBuildInputs)
+    (check.attrs "crateOverrides" crateOverrides)
+  ];
   # Default build inputs for libraries (lighter than services — no postgres/sqlite)
   defaultBuildInputs = with pkgs; [ openssl ];
   allBuildInputs = defaultBuildInputs ++ buildInputs;

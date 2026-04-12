@@ -43,6 +43,8 @@
   # This fixes the "exec format error" caused by embedding Darwin binaries in
   # Docker images labeled as amd64.
 
+  check = import ../../types/assertions.nix;
+
   # Native pkgs with Rust overlay
   pkgs = import nixpkgs {
     inherit system;
@@ -84,6 +86,17 @@ in {
   extraContents ? (_pkgs: []),
   crateOverrides ? {},
 }: let
+  _ = check.all [
+    (check.nonEmptyStr "serviceName" serviceName)
+    (check.enum "serviceType" ["graphql" "rest"] serviceType)
+    (check.architectures "architectures" architectures)
+    (check.namedPorts "ports" ports)
+    (check.bool "enableAwsSdk" enableAwsSdk)
+    (check.list "buildInputs" buildInputs)
+    (check.list "nativeBuildInputs" nativeBuildInputs)
+    (check.attrs "crateOverrides" crateOverrides)
+    (check.attrs "devEnvVars" devEnvVars)
+  ];
   # Service lib - uses native (host) pkgs for apps, devShells, etc.
   serviceLib = import ../../default.nix {
     inherit pkgs system crate2nix forge;

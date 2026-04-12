@@ -30,6 +30,7 @@
   devenv ? null,
   forge ? null,
 }: let
+  check = import ../../types/assertions.nix;
   darwinHelpers = import ../../util/darwin.nix;
   rustOverlay = import ./overlay.nix;
 
@@ -74,6 +75,13 @@ in {
   ...
 }:
 let
+  _ = check.all [
+    (check.nonEmptyStr "toolName" toolName)
+    (check.nonEmptyStr "packageName" packageName)
+    (check.list "buildInputs" buildInputs)
+    (check.list "nativeBuildInputs" nativeBuildInputs)
+    (check.attrs "crateOverrides" crateOverrides)
+  ];
   # ============================================================================
   # BINARY BUILDER — workspace-aware
   # ============================================================================

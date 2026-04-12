@@ -54,6 +54,14 @@
     license ? pkgs.lib.licenses.asl20,
     platforms ? pkgs.lib.platforms.all,
   }: let
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.str "mvnParameters" mvnParameters)
+      (check.bool "buildOffline" buildOffline)
+      (check.bool "doCheck" doCheck)
+    ];
     lib = pkgs.lib;
 
     defaultInstallPhase = ''

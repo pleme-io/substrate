@@ -26,6 +26,7 @@
   nixpkgs,
   system,
 }: let
+  check = import ../../types/assertions.nix;
   zigOverlay = import ./overlay.nix;
 
   hostPkgs = import nixpkgs {
@@ -59,6 +60,12 @@ in {
   ...
 }:
 let
+  _ = check.all [
+    (check.nonEmptyStr "toolName" toolName)
+    (check.nonEmptyStr "repo" repo)
+    (check.list "nativeBuildInputs" nativeBuildInputs)
+    (check.list "zigBuildFlags" zigBuildFlags)
+  ];
   # ============================================================================
   # BINARY BUILDER
   # ============================================================================

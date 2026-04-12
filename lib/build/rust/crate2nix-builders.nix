@@ -2,7 +2,8 @@
 # Per-crate derivation caching with Attic for 60-80% faster CI/CD builds
 { pkgs, crate2nix }:
 
-{
+let check = import ../../types/assertions.nix;
+in {
   # Build Rust project using crate2nix for granular per-crate caching
   mkCrate2nixProject = {
     serviceName,
@@ -225,6 +226,15 @@
     # Example: pkgs: with pkgs; [ opentofu git ]
     extraContents ? (_pkgs: []),
   }: let
+    _ = check.all [
+      (check.nonEmptyStr "serviceName" serviceName)
+      (check.architecture "architecture" architecture)
+      (check.str "tag" tag)
+      (check.enum "serviceType" ["graphql" "rest"] serviceType)
+      (check.namedPorts "ports" ports)
+      (check.attrs "crateOverrides" crateOverrides)
+      (check.bool "enableAwsSdk" enableAwsSdk)
+    ];
     muslTarget = if architecture == "arm64" then "aarch64-unknown-linux-musl" else "x86_64-unknown-linux-musl";
     crossPkgs = if enableAwsSdk then (if architecture == "arm64" then pkgs.pkgsCross.aarch64-multiplatform-musl else pkgs.pkgsCross.musl64) else pkgs;
     targetEnvNameUpper = pkgs.lib.toUpper (pkgs.lib.replaceStrings ["-"] ["_"] muslTarget);

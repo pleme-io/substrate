@@ -2,7 +2,8 @@
 # Deployment workflows for crate2nix-based Rust services
 { pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken, mkRuntimeToolsEnv, deploymentTools, kubernetesTools }:
 
-rec {
+let check = import ../../types/assertions.nix;
+in rec {
   # Helper to create a push app for any Docker image
   # Reusable across production and test images
   mkImagePushApp = {
@@ -78,6 +79,11 @@ rec {
     crate2nix,
     nixHooks ? null,  # Optional: Nix hooks package for attic-push-hook
   }: let
+    _ = check.all [
+      (check.nonEmptyStr "serviceName" serviceName)
+      (check.list "architectures" architectures)
+      (check.str "cluster" cluster)
+    ];
     # Compute effective registry: explicit override > product-based derivation
     effectiveRegistry = if registry != null then registry
       else if productName != null && registryBase != null

@@ -1403,6 +1403,7 @@ in rec {
   substrateTypes = import ./types { lib = pkgs.lib; };
   substrateTypesPath = ./types;
   typeTests = ./types/tests.nix;
+  assertionTests = ./types/assertion-tests.nix;
 
   # ============================================================================
   # SHARED CROSS-CUTTING MIDDLEWARE (from build/shared/)
