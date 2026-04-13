@@ -120,6 +120,14 @@
       }) (spec.secrets or []);
     }];
     constraints = [];
-    meta = spec.meta or {};
+    meta = (spec.meta or {})
+      # Promise metadata (bilateral bindings)
+      // (if (spec.exports or []) != [] then { exports = builtins.toJSON spec.exports; } else {})
+      // (if (spec.imports or []) != [] then { imports = builtins.toJSON spec.imports; } else {})
+      # Attestation metadata (PCC)
+      // (if spec ? attestation && spec.attestation ? signature then {
+        attestation_signature = spec.attestation.signature;
+        attestation_version = spec.attestation.specVersion or "v1";
+      } else {});
   };
 }

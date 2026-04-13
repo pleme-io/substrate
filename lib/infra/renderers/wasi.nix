@@ -85,5 +85,11 @@
         then builtins.fromJSON (builtins.head (builtins.match "([0-9]+)Mi" mem))
         else 128;
     in mb * 1024 * 1024;
+
+    # Attestation metadata (PCC)
+    attestation =
+      if spec ? attestation && spec.attestation ? signature
+      then spec.attestation
+      else null;
   }; # end else (wasmPath != null)
 }

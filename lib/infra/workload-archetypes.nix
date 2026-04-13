@@ -148,17 +148,17 @@ let
   mkArchetypeWith = renderers: archetype: userArgs: let
     # Recursive lattice merge preserves nested defaults
     args = recursiveMerge defaults (userArgs // { inherit archetype; });
-    # Validate required fields
-    _ = assertNonEmpty "name" (args.name or "");
-    __ = assertPositiveInt "replicas" args.replicas;
-    ___ = assertList "secrets" args.secrets;
-    ____ = assertAttrs "env" args.env;
-    _____ = assertList "volumes" args.volumes;
+    # Validate required fields (force all assertions via builtins.seq chain)
+    _v1 = assertNonEmpty "name" (args.name or "");
+    _v2 = builtins.seq _v1 (assertPositiveInt "replicas" args.replicas);
+    _v3 = builtins.seq _v2 (assertList "secrets" args.secrets);
+    _v4 = builtins.seq _v3 (assertAttrs "env" args.env);
+    _v5 = builtins.seq _v4 (assertList "volumes" args.volumes);
     # Information flow: secrets must not leak into env
-    ______ = assertNoSecretLeaks args.env args.secrets;
-    validatedResources = validateResources args.resources;
+    _v6 = builtins.seq _v5 (assertNoSecretLeaks args.env args.secrets);
+    validatedResources = builtins.seq _v6 (validateResources args.resources);
     validatedScaling = validateScaling args.scaling;
-    spec = {
+    spec = builtins.seq validatedResources {
       inherit (args) name archetype;
       ports = args.ports or [];
       health = args.health;

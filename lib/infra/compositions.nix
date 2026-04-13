@@ -119,12 +119,6 @@ in rec {
       ) tierImports
     ) tierNames;
 
-    _promiseCheck = assert promiseViolations == []
-      || throw "Promise binding violations in '${name}':\n${builtins.concatStringsSep "\n" (map (v:
-        "  ${v.tier} imports '${v.import'.protocol or "?"}' from ${v.provider}, but ${v.provider} does not export it"
-      ) promiseViolations)}";
-      true;
-
     # Valid archetype names
     validArchetypes = [ "http-service" "worker" "cron-job" "gateway" "stateful-service" "function" "frontend" ];
 
@@ -147,7 +141,14 @@ in rec {
       in builder (builtins.removeAttrs tier [ "archetype" ])
     ) enrichedTiers;
 
-  in {
+    # Force promise validation (lazy eval requires explicit seq)
+    _promiseCheck =
+      if promiseViolations == [] then true
+      else throw "Promise binding violations in '${name}':\n${builtins.concatStringsSep "\n" (map (v:
+        "  ${v.tier} imports '${v.import'.protocol or "?"}' from ${v.provider}, but ${v.provider} does not export it"
+      ) promiseViolations)}";
+
+  in builtins.seq _promiseCheck {
     inherit name environment;
     tiers = renderedTiers;
     deploymentOrder = orderedTierNames;

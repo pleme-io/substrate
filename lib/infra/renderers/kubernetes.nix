@@ -14,6 +14,26 @@ in {
     namespace = spec.meta.namespace or "default";
     image = spec.image or "placeholder:latest";
 
+    # Attestation annotations (PCC — Necula 1996)
+    attestationAnnotations =
+      if spec ? attestation && spec.attestation ? signature then {
+        "sekiban.pleme.io/signature" = spec.attestation.signature;
+        "sekiban.pleme.io/spec-version" = spec.attestation.specVersion or "v1";
+        "sekiban.pleme.io/attested" = "true";
+      } else {};
+
+    # Promise annotations (bilateral bindings)
+    promiseAnnotations =
+      let
+        exports = spec.exports or [];
+        imports = spec.imports or [];
+      in (if exports != [] then {
+        "pleme.io/exports" = builtins.toJSON exports;
+      } else {})
+      // (if imports != [] then {
+        "pleme.io/imports" = builtins.toJSON imports;
+      } else {});
+
     # Common arguments mapped from abstract spec to nix-kube
     commonArgs = {
       inherit (spec) name;
@@ -24,6 +44,10 @@ in {
       monitoring = { enabled = true; };
       networkPolicy = { enabled = true; };
       additionalLabels = spec.labels or {};
+      podAnnotations = attestationAnnotations // promiseAnnotations;
+      attestation = if spec ? attestation then
+        builtins.removeAttrs spec.attestation [ "specVersion" ]
+      else {};
     } // (if spec.health != null then {
       health = spec.health;
     } else {})
