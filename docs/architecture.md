@@ -6,7 +6,7 @@ Substrate is a library of parameterized Nix functions. It produces no packages
 of its own -- consumers import it as a flake input and call its builders to
 produce packages, dev shells, apps, overlays, and home-manager modules.
 
-The library is organized into six module categories with a strict dependency DAG.
+The library is organized into seven module categories with a strict dependency DAG.
 
 ---
 
@@ -29,7 +29,7 @@ The library is organized into six module categories with a strict dependency DAG
 ┌──────────────────────────────────────────────────┐
 │                     build/                        │
 │  rust/ go/ zig/ swift/ typescript/ ruby/ python/  │
-│  dotnet/ java/ wasm/ web/                         │
+│  dotnet/ java/ wasm/ web/  shared/                │
 └──────────────────────┬───────────────────────────┘
                        │
                        ▼
@@ -39,12 +39,22 @@ The library is organized into six module categories with a strict dependency DAG
 │  test-helpers  versioned-overlay  repo-flake      │
 └──────────────────────────────────────────────────┘
 
-┌──────────────┐  ┌──────────────┐
-│     hm/      │  │   devenv/    │   (standalone -- no internal deps)
-│ home-manager │  │  devenv.sh   │
-│   helpers    │  │   modules    │
-└──────────────┘  └──────────────┘
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│    types/    │  │     hm/      │  │   devenv/    │  (standalone -- no
+│ type system  │  │ home-manager │  │  devenv.sh   │   internal deps,
+│ + assertions │  │   helpers    │  │   modules    │   only nixpkgs.lib)
+└──────────────┘  └──────────────┘  └──────────────┘
+        ↑ consumed by build/, service/, infra/
 ```
+
+### types/ — The Type Foundation
+
+`lib/types/` is a pure DAG leaf that depends only on `nixpkgs.lib`. It provides:
+- **60+ typed interfaces** for every domain (build, service, deploy, infra, kube)
+- **Assertion guards** on every builder function (50+ functions validated)
+- **Convergence typestate** (declared → resolved → converged → verified)
+- **Validation middleware** (`mkTypedBuilder`, `validateSpec`)
+- **362+ pure eval tests** verifying every type and convergence property
 
 ---
 

@@ -827,3 +827,47 @@ set of test commands for product repos:
 - `test:ci` -- CI-optimized test suite
 - `test:coverage` -- tests with coverage reporting
 - `bench` -- benchmarks
+
+---
+
+## Pure Nix Evaluation Tests (Substrate Internal)
+
+Substrate itself is tested with 362+ pure Nix evaluation tests across 9 suites.
+These tests run instantly (no builds, no VMs) and verify every type, assertion,
+and convergence property at the Nix evaluation layer.
+
+```bash
+# Run all test suites:
+nix eval --impure --expr '(import ./lib/types/tests.nix { lib = (import <nixpkgs> {}).lib; }).summary'
+nix eval --impure --expr '(import ./lib/types/assertion-tests.nix).summary'
+nix eval --impure --expr '(import ./lib/types/property-tests.nix).testConvergenceStages.summary'
+nix eval --impure --expr '(import ./lib/types/property-tests.nix).testInformationFlow.summary'
+nix eval --impure --expr '(import ./lib/infra/tests/convergence-improvements-test.nix).summary'
+nix eval --impure --expr '(import ./lib/kube/tests.nix).allPassed'
+nix eval --impure --expr '(import ./lib/infra/tests.nix).summary'
+nix eval --impure --expr '(import ./lib/hm/tests.nix).summary'
+nix eval --impure --expr '(import ./lib/util/tests.nix).summary'
+```
+
+| Suite | Tests | Coverage |
+|-------|-------|----------|
+| `types/tests.nix` | 79 | Every type, coercion path, enum validation |
+| `types/assertion-tests.nix` | 47 | Every assertion function (nonEmptyStr, port, enum, etc.) |
+| `types/property-tests.nix` | 18 | Convergence typestate + information flow properties |
+| `infra/tests/convergence-improvements-test.nix` | 26 | All 8 formal-methods improvements end-to-end |
+| `kube/tests.nix` | 37+ | All K8s primitives, compositions, modules |
+| `infra/tests.nix` | 105 | All infra builders, archetypes, renderers |
+| `hm/tests.nix` | 65 | All home-manager helpers |
+| `util/tests.nix` | 22 | Utility functions, test-helpers self-tests |
+
+### What These Tests Prove
+
+- **Type safety**: Invalid inputs (wrong type, out-of-range, empty string) are rejected
+- **Information flow**: Secret names in plain `env` cause evaluation-time failure
+- **Bilateral promises**: Importing a protocol not exported by the provider throws
+- **Attestation determinism**: Same spec always produces same SHA-256 hash
+- **Recursive merge**: Partial nested override preserves sibling defaults
+- **Extensible renderers**: Custom backends receive the same spec as built-ins
+- **Monotonicity**: Modules cannot remove services from the evaluation fold
+- **Convergence typestate**: Wrong-stage operations are rejected at function boundaries
+- **Idempotence**: Renderers produce identical output on repeated application

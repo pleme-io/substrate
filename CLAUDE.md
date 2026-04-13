@@ -482,11 +482,14 @@ Key differences from `rust-tool-release`:
 | `substrateTypes` | `types/default.nix` | Complete type lattice (instantiated with pkgs.lib) |
 | `substrateTypesPath` | `types/` | Standalone import path (no pkgs needed) |
 | `typeTests` | `types/tests.nix` | 79 pure eval tests |
+| `assertionTests` | `types/assertion-tests.nix` | 47 assertion library tests |
+| `convergenceTests` | `types/property-tests.nix` | 18 property-based + convergence stage tests |
+| `convergenceTypestate` | `types/convergence.nix` | Stage machine: declared → resolved → converged → verified |
 
 Standalone import: `types = import "${substrate}/lib/types" { lib = nixpkgs.lib; };`
 
 Key type modules:
-- `types.foundation` — NixSystem, Architecture, Language, ArtifactKind, ServiceType, etc.
+- `types.foundation` — NixSystem, Architecture, Language, ArtifactKind, ServiceType, etc. (19 types)
 - `types.ports` — Unified port types with `attrTag` + `coercedTo` for legacy compat
 - `types.buildResult` — Universal output contract (`packages`, `devShells`, `apps`)
 - `types.buildSpec` — Per-language typed input specs (rust, go, zig, ts, ruby, python, web, wasm)
@@ -494,7 +497,42 @@ Key type modules:
 - `types.deploySpec` — DockerImageSpec, DeploySpec, ReleaseSpec
 - `types.infraSpec` — WorkloadSpec, PolicyRule, MultiTierAppSpec
 - `types.kubeSpec` — KubeMetadata, SecurityContext, Probes, RBAC rules
+- `types.convergence` — Stage typestate: `declared` → `resolved` → `converged` → `verified`
 - `types.validate` — `mkTypedBuilder`, `validateSpec`, `checkBuildResult`
+- `types.assertions` — Lightweight assertion guards: `nonEmptyStr`, `port`, `architecture`, `enum`, etc.
+
+### Typed Builder Wrappers (module-system validated)
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `rustServiceTypedBuilder` | `build/rust/service-typed.nix` | 25-option module-validated Rust service |
+| `rustToolReleaseTypedBuilder` | `build/rust/tool-release-typed.nix` | Module-validated Rust CLI tool |
+| `rustWorkspaceReleaseTypedBuilder` | `build/rust/workspace-release-typed.nix` | Module-validated workspace |
+| `goGrpcServiceTypedBuilder` | `build/go/grpc-service-typed.nix` | Module-validated Go gRPC service |
+
+### Shared Cross-Cutting Middleware
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `mkTypedDockerImage` | `build/shared/docker-image.nix` | Universal Docker image builder |
+| `mkWebDockerImage` | `build/shared/docker-image.nix` | Web app Docker with Hanabi |
+| `mkServiceDockerImage` | `build/shared/docker-image.nix` | Service Docker with migrations |
+| `mkReleaseApps` | `build/shared/release-app.nix` | Shared release/bump/check-all/lock-platform |
+| `mkTypedDevShell` | `build/shared/devshell.nix` | Universal devShell factory |
+
+### Formal Methods Improvements (academic-grounded)
+
+These are structural properties enforced in the infrastructure layer:
+
+| Property | Enforcement | Source |
+|----------|-------------|--------|
+| Information flow | `assertNoSecretLeaks` — secrets cannot appear in env | `workload-archetypes.nix` |
+| Bilateral promises | `promiseViolations` — imports must match exports | `compositions.nix` |
+| Intrinsic attestation | `mkSpecAttestation` — SHA-256 spec hash in every result | `workload-archetypes.nix` |
+| Recursive lattice merge | `recursiveMerge` — nested defaults preserved | `workload-archetypes.nix` |
+| Extensible renderers | `mkArchetypeWith` — add backends via functor interface | `workload-archetypes.nix` |
+| Monotonicity guard | Module fold cannot remove services | `kube/modules/eval.nix` |
+| Convergence typestate | `declared` → `resolved` → `converged` → `verified` | `types/convergence.nix` |
 
 ### Kubernetes (nix-kube) — Standalone Import
 

@@ -148,8 +148,32 @@ The convergence DAG IS the program. The substrate IS the hardware.
 
 9 compositions: mkMicroservice, mkWorker, mkOperator, mkWeb, mkCronjobService, mkDatabase, mkCache, mkNamespaceGovernance, mkBootstrapJob
 
+### Formal Methods Properties (Implemented)
+
+8 properties grounded in academic research are enforced in the archetype system:
+
+1. **Information flow enforcement** (Denning 1976): `assertNoSecretLeaks` prevents secret names from appearing in plain `env` attrsets. Violations throw at Nix evaluation time.
+
+2. **Bilateral promise bindings** (Burgess Promise Theory 2005): Archetypes declare `exports` (what protocols they serve) and `imports` (what they consume). `mkMultiTierApp` validates every import has a matching export.
+
+3. **Intrinsic attestation** (Necula PCC 1996): `mkSpecAttestation` computes SHA-256 hash from the spec fields. The hash IS the proof that the spec was well-typed at declaration time. Renderers embed it in pod annotations (K8s), job metadata (tatara), and component config (WASI).
+
+4. **Recursive lattice merge** (CUE lattice theory): `recursiveMerge` replaces flat `//` — overriding `network.policies` preserves `network.egress` from defaults instead of silently dropping it.
+
+5. **Extensible renderer interface** (Mokhov categorical functors 2018): `mkArchetypeWith` accepts arbitrary renderers: `mkHttpServiceWith { compose = { render = ...; }; }`. New backends implement `{ render = spec: ...; }` without touching core archetype code.
+
+6. **Monotonicity guard** (Knaster-Tarski theorem): `evalKubeModules` asserts that module fold cannot remove services — the precondition for convergence to a fixed point.
+
+7. **Convergence stage typestate** (Brady dependent types 2021): `lib/types/convergence.nix` defines `declared` → `resolved` → `converged` → `verified`. Functions requiring a specific stage reject specs at the wrong stage.
+
+8. **Property-based test generation** (ProTI/QuickCheck): Deterministic edge-case generators verify idempotence, determinism, name preservation, and resource preservation across all archetypes.
+
 ### Testing
 
-- 50 pure Nix eval tests (primitives, compositions, edge cases, renderers)
+- 362+ pure Nix eval tests across 9 suites
+- Type system: 79 tests for every type, coercion path, enum validation
+- Assertion library: 47 tests for every assertion function
+- Convergence improvements: 26 integration tests covering all 8 formal properties
 - Archetype rendering verified: same input → correct K8s + tatara + WASI output
 - Policy evaluation verified: violations produce clear error messages
+- Property tests: information flow (8), convergence stages (10)

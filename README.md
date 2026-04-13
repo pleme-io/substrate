@@ -19,6 +19,22 @@ Crossplane, Ansible, Helm), **home-manager integration**, and
 
 ```
 lib/
+  types/          Type system — typed interfaces for all domains (pure, no pkgs)
+    foundation.nix      19 enum/refined types (NixSystem, Architecture, Language, ...)
+    ports.nix           Unified port representation with attrTag + coercedTo
+    build-result.nix    Universal output contract (packages, devShells, apps)
+    build-spec.nix      Per-language typed input specs (10 languages)
+    service-spec.nix    HealthSpec, ScalingSpec, ResourceSpec, MonitoringSpec
+    deploy-spec.nix     DockerImageSpec, DeploySpec, ReleaseSpec
+    infra-spec.nix      WorkloadSpec, PolicyRule, MultiTierAppSpec
+    kube-spec.nix       KubeMetadata, SecurityContext, Probes, RBAC
+    convergence.nix     Stage typestate: declared → resolved → converged → verified
+    validate.nix        mkTypedBuilder, validateSpec, checkBuildResult
+    assertions.nix      Lightweight assertion guards for all builders
+    tests.nix           79 pure eval tests
+    assertion-tests.nix 47 pure eval tests
+    property-tests.nix  18 property-based + convergence stage tests
+
   build/          Language-specific build patterns
     rust/           overlay, library, service, tool-release, leptos-build, crate2nix, devenv
                     scaffolds: leptos-app, rust-service, rust-tool, dioxus-app, gpu-app
@@ -103,20 +119,67 @@ lib/
     leptos-wasi-config.json     WASI Preview 2 component config
 ```
 
+  build/shared/   Cross-cutting typed middleware
+    docker-image.nix    Universal Docker image builder (replaces per-language duplication)
+    release-app.nix     Shared release/bump/check-all factory
+    devshell.nix        Universal devShell with language presets
+
 ### Dependency DAG
 
 Modules follow a strict import hierarchy. Violations cause circular imports.
 
 ```
+types/   (standalone -- pure DAG leaf, only needs nixpkgs.lib)
 service/ ---> build/ ---> util/
+build/   ---> types/
+service/ ---> types/
 infra/   ----------------> util/
+infra/   ---> types/
 codegen/ ----------------> util/
 hm/      (standalone -- no internal deps, only nixpkgs.lib)
 devenv/  (standalone -- devenv module format)
 ```
 
 Cross-language imports within `build/` are prohibited (e.g., `rust/` cannot
-import from `go/`). `util/` cannot import from any higher layer.
+import from `go/`). `util/` and `types/` cannot import from any higher layer.
+
+## Type System — Typed Interfaces for All Domains
+
+Every builder function validates its inputs through a typed interface layer.
+Invalid states are caught at Nix evaluation time with descriptive messages,
+not deep in derivation construction.
+
+```nix
+# Foundation types (19 enums + refined primitives)
+types = import "${substrate}/lib/types" { lib = nixpkgs.lib; };
+assert types.foundation.architecture.check "amd64";   # true
+assert types.foundation.architecture.check "sparc64";  # false
+
+# Assertion guards on every builder (50+ functions)
+# Passing wrong types fails fast:
+mkGoTool pkgs { pname = ""; ... }
+# → error: pname: must be a non-empty string, got string
+
+# Module-system validation on complex builders
+rustServiceTyped = import "${substrate}/lib/build/rust/service-typed.nix" { ... };
+rustServiceTyped { serviceName = "auth"; src = ./.; serviceType = "soap"; }
+# → error: serviceType must be "graphql" or "rest", got "soap"
+```
+
+**8 formal-methods improvements** grounded in academic research:
+
+| Improvement | Foundation | What it prevents |
+|-------------|-----------|------------------|
+| Information flow | Denning 1976 | Secrets leaking into plain env/ConfigMap |
+| Bilateral promises | Burgess Promise Theory | Service wiring errors (import without matching export) |
+| Intrinsic attestation | Necula PCC 1996 | Gap between eval-time correctness and deploy-time proof |
+| Recursive lattice merge | CUE lattice theory | Silent loss of nested defaults on partial override |
+| Extensible renderers | Mokhov categorical functors | New backends require core changes |
+| Monotonicity guard | Knaster-Tarski theorem | Modules removing services (breaking convergence) |
+| Convergence typestate | Brady dependent types | Operating on specs at wrong convergence stage |
+| Property-based tests | ProTI/QuickCheck | Renderer non-determinism, idempotence violations |
+
+**362+ pure eval tests** across 9 suites verify every type, assertion, and convergence property.
 
 ## Security-First Infrastructure
 
@@ -362,6 +425,37 @@ in rustService {
 | `mkOpenApiSdk` | `codegen/openapi-sdk.nix` | Multi-language SDK gen |
 | `mkOpenApiRustSdk` | `codegen/openapi-rust-sdk.nix` | Rust SDK gen |
 
+### Type System
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `substrateTypes` | `types/default.nix` | Complete type lattice (instantiated) |
+| `substrateTypesPath` | `types/` | Standalone import path (no pkgs) |
+| `substrateTypes.foundation` | `types/foundation.nix` | 19 enums + refined primitives |
+| `substrateTypes.ports` | `types/ports.nix` | Unified ports with coercion |
+| `substrateTypes.buildResult` | `types/build-result.nix` | Universal output contract |
+| `substrateTypes.buildSpec` | `types/build-spec.nix` | Per-language input specs |
+| `substrateTypes.validate` | `types/validate.nix` | Builder wrapping middleware |
+| `substrateTypes.convergence` | `types/convergence.nix` | Stage typestate machine |
+| `substrateTypes.assertions` | `types/assertions.nix` | Assertion guard library |
+
+### Typed Builder Wrappers
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `rustServiceTypedBuilder` | `build/rust/service-typed.nix` | Module-validated Rust service |
+| `rustToolReleaseTypedBuilder` | `build/rust/tool-release-typed.nix` | Module-validated Rust tool |
+| `rustWorkspaceReleaseTypedBuilder` | `build/rust/workspace-release-typed.nix` | Module-validated workspace |
+| `goGrpcServiceTypedBuilder` | `build/go/grpc-service-typed.nix` | Module-validated Go gRPC |
+
+### Shared Middleware
+
+| Export | Source | Description |
+|--------|--------|-------------|
+| `mkTypedDockerImage` | `build/shared/docker-image.nix` | Universal Docker image builder |
+| `mkReleaseApps` | `build/shared/release-app.nix` | Shared release/bump/check-all |
+| `mkTypedDevShell` | `build/shared/devshell.nix` | Universal devShell factory |
+
 ## Backward Compatibility
 
 All old flat paths (`lib/rust-overlay.nix`, `lib/go-tool.nix`, etc.) are
@@ -446,20 +540,31 @@ See [docs/adding-a-leptos-app.md](docs/adding-a-leptos-app.md).
 
 ## Unified Infrastructure Theory
 
-Abstract workload archetypes render simultaneously to Kubernetes, Tatara, and WASI:
+Abstract workload archetypes render simultaneously to Kubernetes, Tatara, WASI,
+and any custom backend via the extensible renderer interface:
 
 ```nix
 svc = archetypes.mkHttpService {
   name = "my-app"; image = "ghcr.io/org/app:latest";
-  ports = [{ port = 3000; }]; health = { path = "/healthz"; };
+  ports = [{ name = "http"; port = 3000; }];
+  health = { path = "/healthz"; };
+  exports = [{ protocol = "http"; port = 3000; }];  # bilateral promise
 };
-# svc.kubernetes -- nix-kube compositions (Deployment + Service + SA + NP + HPA)
-# svc.tatara -- JobSpec JSON (7 drivers: exec, oci, nix, kube, wasi, ...)
-# svc.wasi -- WASI Component Model config (capability-based security)
+# svc.spec.attestation.signature -- SHA-256 proof of well-typed spec
+# svc.kubernetes -- nix-kube compositions + attestation annotations
+# svc.tatara -- JobSpec JSON + attestation metadata
+# svc.wasi -- WASI Component Model config + attestation
+
+# Extensible: add a custom backend without touching core code
+svc = archetypes.mkHttpServiceWith {
+  compose = { render = spec: mkDockerCompose spec; };
+} { name = "my-app"; ... };
+# svc.compose -- Docker Compose config from custom renderer
 ```
 
 7 archetypes: `mkHttpService`, `mkWorker`, `mkCronJob`, `mkGateway`,
 `mkStatefulService`, `mkFunction`, `mkFrontend`.
+Each has a `mk*With` variant accepting additional renderers.
 
 See [docs/unified-infrastructure-theory.md](docs/unified-infrastructure-theory.md)
 and [docs/metaframework.md](docs/metaframework.md).
@@ -478,6 +583,34 @@ Framework crates powered by substrate:
 See [docs/metaframework.md](docs/metaframework.md) and
 [docs/convergence-application-theory.md](docs/convergence-application-theory.md).
 
+## Test Battery
+
+362+ pure eval tests across 9 suites. Run all:
+
+```bash
+nix eval --impure --expr '(import ./lib/types/tests.nix { lib = (import <nixpkgs> {}).lib; }).summary'
+nix eval --impure --expr '(import ./lib/types/assertion-tests.nix).summary'
+nix eval --impure --expr '(import ./lib/types/property-tests.nix).testConvergenceStages.summary'
+nix eval --impure --expr '(import ./lib/types/property-tests.nix).testInformationFlow.summary'
+nix eval --impure --expr '(import ./lib/infra/tests/convergence-improvements-test.nix).summary'
+nix eval --impure --expr '(import ./lib/kube/tests.nix).allPassed'
+nix eval --impure --expr '(import ./lib/infra/tests.nix).summary'
+nix eval --impure --expr '(import ./lib/hm/tests.nix).summary'
+nix eval --impure --expr '(import ./lib/util/tests.nix).summary'
+```
+
+| Suite | Tests | What it proves |
+|-------|-------|----------------|
+| Types | 79 | Every type, coercion, enum rejects invalid input |
+| Assertions | 47 | Every assertion function accepts valid, rejects invalid |
+| Convergence stages | 10 | Stage transitions correct, invalid transitions throw |
+| Information flow | 8 | Secrets cannot leak into plain env |
+| Improvements | 26 | All 8 academic improvements work end-to-end |
+| Kube | 37+ | All K8s primitives produce valid manifests |
+| Infra | 105 | All infra builders produce correct output |
+| HM | 65 | All home-manager helpers work correctly |
+| Util | 22 | Utility functions work correctly |
+
 ## Further Reading
 
 - [docs/scaffolds.md](docs/scaffolds.md) -- all 6 scaffold generators with templates
@@ -491,6 +624,7 @@ See [docs/metaframework.md](docs/metaframework.md) and
 - [docs/adding-a-builder.md](docs/adding-a-builder.md) -- step-by-step builder creation
 - [docs/adding-an-architecture.md](docs/adding-an-architecture.md) -- Pangea architecture lifecycle
 - [docs/migration.md](docs/migration.md) -- old-to-new path mapping
+- [docs/cia/theory.md](docs/cia/theory.md) -- CIA axioms, four domains, eight infrastructure slices
 
 ## License
 

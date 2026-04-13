@@ -278,6 +278,9 @@ Run `nix build` to verify it evaluates and builds correctly.
 - [ ] Updated `docs/architecture.md`
 - [ ] Tested with a minimal consumer flake
 - [ ] Cross-reference rules respected (no cycles in import DAG)
+- [ ] **Type assertions added** — import `../../types/assertions.nix` and add `check.all [...]` validating all parameters (nonEmptyStr for names, architecture for arch, namedPorts for ports, etc.)
+- [ ] **BuildResult contract** — return shape includes `{ packages, devShells, apps }` (even if some are `{}`)
+- [ ] For complex builders: create `{pattern}-module.nix` (typed options) + `{pattern}-typed.nix` (module-validated wrapper)
 
 ---
 
