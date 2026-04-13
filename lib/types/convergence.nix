@@ -101,4 +101,32 @@ rec {
     stage3 = converge stage2 (renderer (requireResolved "pipeline.render" stage2));
     stage4 = verify stage3 (attester (requireConverged "pipeline.attest" stage3));
   in stage4;
+
+  # ── Pipeline with assertion validation ────────────────────────
+  # Validates the spec through the assertion library before entering
+  # the convergence pipeline. Use this when the spec comes from
+  # untrusted input (user config, external API, etc.).
+  pipelineWithValidation = {
+    spec,
+    validator ? (_: true),    # assertion function: spec → true or throw
+    renderer,
+    resolver ? (s: s),
+    verifier ? (_: true),
+    attester ? (s: builtins.hashString "sha256" (builtins.toJSON s)),
+  }: let
+    _ = validator spec;
+  in pipeline { inherit spec renderer resolver verifier attester; };
+
+  # ── Stage introspection ───────────────────────────────────────
+  # Extract the current stage name from a tagged value.
+  stageName = x: x._convergenceStage or "untagged";
+
+  # Extract the spec from any stage.
+  extractSpec = x:
+    if isDeclared x || isResolved x then x.spec
+    else if isConverged x || isVerified x then x.spec
+    else throw "extractSpec: not a convergence-tagged value";
+
+  # Check if a value has any convergence tag.
+  isTagged = x: (x._convergenceStage or null) != null;
 }
