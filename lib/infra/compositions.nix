@@ -96,6 +96,35 @@ in rec {
 
     enrichedTiers = builtins.mapAttrs enrichTier tiers;
 
+    # ── Bilateral promise validation (Promise Theory — Burgess 2005) ──
+    # Every import must be matched by an export from the referenced tier.
+    # This catches wiring errors at Nix evaluation time, not deploy time.
+    promiseViolations = builtins.concatMap (tierName:
+      let
+        tier = enrichedTiers.${tierName};
+        tierImports = tier.imports or [];
+      in builtins.concatMap (imp:
+        let
+          provider = imp.service or "";
+          requiredProtocol = imp.protocol or "any";
+          providerTier = enrichedTiers.${provider} or null;
+          providerExports = if providerTier != null then (providerTier.exports or []) else [];
+          hasMatch = requiredProtocol == "any"
+            || builtins.any (exp: (exp.protocol or "any") == requiredProtocol) providerExports;
+        in
+          if provider == "" || !(builtins.hasAttr provider enrichedTiers) then []  # external dep, skip
+          else if providerExports == [] then []  # provider has no exports declared, skip (backward compat)
+          else if hasMatch then []
+          else [{ tier = tierName; import' = imp; provider = provider; }]
+      ) tierImports
+    ) tierNames;
+
+    _promiseCheck = assert promiseViolations == []
+      || throw "Promise binding violations in '${name}':\n${builtins.concatStringsSep "\n" (map (v:
+        "  ${v.tier} imports '${v.import'.protocol or "?"}' from ${v.provider}, but ${v.provider} does not export it"
+      ) promiseViolations)}";
+      true;
+
     # Valid archetype names
     validArchetypes = [ "http-service" "worker" "cron-job" "gateway" "stateful-service" "function" "frontend" ];
 

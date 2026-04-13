@@ -1404,6 +1404,8 @@ in rec {
   substrateTypesPath = ./types;
   typeTests = ./types/tests.nix;
   assertionTests = ./types/assertion-tests.nix;
+  convergenceTests = ./types/property-tests.nix;
+  convergenceTypestate = ./types/convergence.nix;
 
   # ============================================================================
   # SHARED CROSS-CUTTING MIDDLEWARE (from build/shared/)

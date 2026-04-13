@@ -49,4 +49,13 @@
   # ── Validation ────────────────────────────────────────────────────
   # Builder wrapping, input/output type checking middleware.
   validate = import ./validate.nix { inherit lib; };
+
+  # ── Convergence Typestate ────────────────────────────────────────
+  # Stage machine: declared → resolved → converged → verified.
+  # Makes impossible stage transitions unrepresentable.
+  convergence = import ./convergence.nix;
+
+  # ── Assertions ───────────────────────────────────────────────────
+  # Lightweight evaluation-time assertion library for builder guards.
+  assertions = import ./assertions.nix;
 }

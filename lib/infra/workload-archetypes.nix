@@ -23,6 +23,13 @@ let
   tataraRenderers = import ./renderers/tatara.nix;
   wasiRenderers = import ./renderers/wasi.nix;
 
+  # ── Built-in renderers (extensible via mkArchetypeWith) ───────
+  builtinRenderers = {
+    kubernetes = kubeRenderers;
+    tatara = tataraRenderers;
+    wasi = wasiRenderers;
+  };
+
   # Common defaults applied to all archetypes
   defaults = {
     replicas = 1;
@@ -36,7 +43,32 @@ let
     meta = {};
     annotations = {};
     labels = {};
+    # Bilateral promise bindings (Promise Theory — Burgess 2005)
+    exports = [];   # [{ protocol = "http"; port = 8080; }]
+    imports = [];   # [{ service = "db"; protocol = "pg"; port = 5432; }]
   };
+
+  # ── Recursive lattice merge (CUE/lattice theory) ─────────────
+  # Preserves nested defaults instead of flat // override.
+  # { network = { egress = []; } } // { network = { policies = [...] } }
+  # Flat: loses egress. Recursive: preserves both.
+  recursiveMerge = a: b:
+    let
+      allKeys = builtins.attrNames (a // b);
+    in builtins.listToAttrs (map (key:
+      let
+        aVal = a.${key} or null;
+        bVal = b.${key} or null;
+      in {
+        name = key;
+        value =
+          if bVal == null then aVal
+          else if aVal == null then bVal
+          else if builtins.isAttrs aVal && builtins.isAttrs bVal
+            then recursiveMerge aVal bVal
+          else bVal;  # user value overrides default at leaf
+      }
+    ) allKeys);
 
   # ── Type assertions (eliminate undesired invariants at declaration time)
   assertNonEmpty = field: value:
@@ -83,15 +115,47 @@ let
             else if scaling ? min then scaling.min else 1;
     };
 
+  # ── Information flow enforcement (Denning 1976) ────────────────
+  # Secrets must not leak into plain env. Non-interference check.
+  assertNoSecretLeaks = env: secrets:
+    let
+      secretNames = map (s:
+        if builtins.isAttrs s then (s.name or s.key or "") else toString s
+      ) secrets;
+      envKeys = builtins.attrNames env;
+      leaked = builtins.filter (k: builtins.elem k secretNames) envKeys;
+    in assert leaked == []
+      || throw "Information flow violation: secret(s) [${builtins.concatStringsSep ", " leaked}] appear in plain env. Use the 'secrets' field for secret values, not 'env'.";
+    true;
+
+  # ── Intrinsic attestation (PCC — Necula 1996) ─────────────────
+  # Compute attestation hash from the spec itself. The hash IS the
+  # proof that the spec was well-typed at declaration time.
+  mkSpecAttestation = spec: {
+    enabled = true;
+    signature = builtins.hashString "sha256" (builtins.toJSON {
+      inherit (spec) name archetype ports resources replicas;
+      secretCount = builtins.length spec.secrets;
+      envKeys = builtins.sort builtins.lessThan (builtins.attrNames spec.env);
+      hasHealth = spec.health != null;
+      hasScaling = spec.scaling != null;
+    });
+    specVersion = "v1";
+  };
+
   # Build the unified result: abstract spec + all renderings
-  mkArchetype = archetype: userArgs: let
-    args = defaults // userArgs // { inherit archetype; };
+  # Supports extensible renderers via mkArchetypeWith.
+  mkArchetypeWith = renderers: archetype: userArgs: let
+    # Recursive lattice merge preserves nested defaults
+    args = recursiveMerge defaults (userArgs // { inherit archetype; });
     # Validate required fields
     _ = assertNonEmpty "name" (args.name or "");
     __ = assertPositiveInt "replicas" args.replicas;
     ___ = assertList "secrets" args.secrets;
     ____ = assertAttrs "env" args.env;
     _____ = assertList "volumes" args.volumes;
+    # Information flow: secrets must not leak into env
+    ______ = assertNoSecretLeaks args.env args.secrets;
     validatedResources = validateResources args.resources;
     validatedScaling = validateScaling args.scaling;
     spec = {
@@ -108,6 +172,9 @@ let
       meta = args.meta;
       annotations = args.annotations;
       labels = args.labels;
+      # Bilateral promise bindings (Promise Theory)
+      exports = args.exports or [];
+      imports = args.imports or [];
       # Source detection hints (set by consumer flake)
       source = args.source or null;
       image = args.image or null;
@@ -117,15 +184,30 @@ let
       args' = args.args or [];
       schedule = args.schedule or null;
       serviceName = args.serviceName or args.name;
+      # Intrinsic attestation — proof-carrying spec
+      attestation = mkSpecAttestation spec;
     };
   in {
     inherit spec;
-    kubernetes = kubeRenderers.render spec;
-    tatara = tataraRenderers.render spec;
-    wasi = wasiRenderers.render spec;
-  };
+  } // builtins.mapAttrs (_: r: r.render spec) renderers;
+
+  # Default mkArchetype uses built-in renderers
+  mkArchetype = mkArchetypeWith builtinRenderers;
 
 in rec {
+  # ── Extensible Renderer Interface (Category Theory — Mokhov 2018) ─
+  # New backends implement { render = spec: ...; } and pass to mkArchetypeWith.
+  # Usage:
+  #   composeRenderer = { render = spec: { ... }; };
+  #   result = mkHttpServiceWith { compose = composeRenderer; } { name = "auth"; ... };
+  mkHttpServiceWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "http-service" args;
+  mkWorkerWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "worker" args;
+  mkCronJobWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "cron-job" (args // { replicas = args.replicas or 1; });
+  mkGatewayWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "gateway" args;
+  mkStatefulServiceWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "stateful-service" args;
+  mkFunctionWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "function" (args // { scaling = (args.scaling or {}) // { min = args.scaling.min or 0; }; });
+  mkFrontendWith = renderers: args: mkArchetypeWith (builtinRenderers // renderers) "frontend" args;
+
   # ── HTTP Service ──────────────────────────────────────────────
   # Serves HTTP requests. Maps to: Deployment+Service (K8s), Service job (tatara),
   # wasi:http handler (WASI).
