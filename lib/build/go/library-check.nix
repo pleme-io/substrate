@@ -47,6 +47,15 @@
     license ? pkgs.lib.licenses.asl20,
   }: let
     lib = pkgs.lib;
+    check = import ../../types/assertions.nix;
+    _ = check.all [
+      (check.nonEmptyStr "pname" pname)
+      (check.nonEmptyStr "version" version)
+      (check.bool "proxyVendor" proxyVendor)
+      (check.list "packages" packages)
+      (check.list "tags" tags)
+      (check.attrs "extraAttrs" extraAttrs)
+    ];
     pkgArgs = lib.concatStringsSep " " packages;
   in pkgs.buildGoModule ({
     inherit pname version src vendorHash proxyVendor tags;

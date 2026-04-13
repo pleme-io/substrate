@@ -101,6 +101,24 @@
   extraDevPackages ? [],
   extraAttrs ? {},
 }:
+let
+  check = import ../types/assertions.nix;
+  validLanguages = [ "go" "typescript" "npm" "java" "csharp" "python" "ruby" "php" "rust" "terraform" "helm" "c" "shell" "nushell" "docker" "kustomize" "hugo" "docs" ];
+  validBuilders = [ "tool" "library" "package" "check" "devShell" ];
+  _lang = check.enum "language" validLanguages language;
+  _builder = check.enum "builder" validBuilders builder;
+  _version = check.str "version" version;
+  _desc = check.str "description" description;
+  _tags = check.list "tags" tags;
+  _npmFlags = check.list "npmFlags" npmFlags;
+  _cDeps = check.list "cDeps" cDeps;
+  _cNativeDeps = check.list "cNativeDeps" cNativeDeps;
+  _extraDevPackages = check.list "extraDevPackages" extraDevPackages;
+  _extraAttrs = check.attrs "extraAttrs" extraAttrs;
+  _versionLdflags = check.attrs "versionLdflags" versionLdflags;
+  _pnameCheck = assert (builder == "devShell" || pname != null)
+    || throw "repo-flake: 'pname' is required when builder is '${builder}' (not devShell)"; true;
+in
 flake-utils.lib.eachDefaultSystem (system: let
   pkgs = import nixpkgs { inherit system; };
   lib = pkgs.lib;
