@@ -21,10 +21,10 @@
 {
   workspaces,
   awsProfile ? "default",
-  # Use nix develop to get the full Ruby + gems + opentofu environment
-  deployCmd ? "nix develop --impure --command bash -c 'pangea apply'",
-  planCmd ? "nix develop --impure --command bash -c 'pangea plan'",
-  destroyCmd ? "nix develop --impure --command bash -c 'pangea destroy'",
+  # Commands run INSIDE nix develop from the root directory
+  deployCmd ? "pangea apply",
+  planCmd ? "pangea plan",
+  destroyCmd ? "pangea destroy",
 }:
 
 let
@@ -33,7 +33,7 @@ let
     program = "${pkgs.writeShellScriptBin name text}/bin/${name}";
   };
 
-  # Per-workspace apps
+  # Per-workspace apps — run nix develop from root, cd into workspace
   perWorkspace = builtins.listToAttrs (builtins.concatMap (ws: [
     {
       name = "deploy-${ws}";
@@ -41,8 +41,7 @@ let
         set -euo pipefail
         export AWS_PROFILE="${awsProfile}"
         echo "=== Deploying ${ws} ==="
-        cd ${ws}
-        ${deployCmd}
+        exec nix develop --impure --command bash -c "cd ${ws} && ${deployCmd}"
       '';
     }
     {
@@ -51,8 +50,7 @@ let
         set -euo pipefail
         export AWS_PROFILE="${awsProfile}"
         echo "=== Planning ${ws} ==="
-        cd ${ws}
-        ${planCmd}
+        exec nix develop --impure --command bash -c "cd ${ws} && ${planCmd}"
       '';
     }
     {
@@ -61,39 +59,28 @@ let
         set -euo pipefail
         export AWS_PROFILE="${awsProfile}"
         echo "=== Destroying ${ws} ==="
-        cd ${ws}
-        ${destroyCmd}
+        exec nix develop --impure --command bash -c "cd ${ws} && ${destroyCmd}"
       '';
     }
   ]) workspaces);
 
-  # Orchestrators — run all workspaces in order
-  deployAllScript = builtins.concatStringsSep "\n" (map (ws: ''
-    echo "=== Deploying ${ws} ==="
-    cd $src/${ws}
-    ${deployCmd}
-  '') workspaces);
+  # Orchestrators — run all workspaces in order via nix develop
+  deployAllScript = builtins.concatStringsSep " && " (map (ws: ''
+    echo "=== Deploying ${ws} ===" && cd ${ws} && ${deployCmd} && cd ..'') workspaces);
 
-  planAllScript = builtins.concatStringsSep "\n" (map (ws: ''
-    echo "=== Planning ${ws} ==="
-    cd $src/${ws}
-    ${planCmd}
-  '') workspaces);
+  planAllScript = builtins.concatStringsSep " && " (map (ws: ''
+    echo "=== Planning ${ws} ===" && cd ${ws} && ${planCmd} && cd ..'') workspaces);
 
   orchestrators = {
     deploy-all = mkApp "deploy-all" ''
       set -euo pipefail
       export AWS_PROFILE="${awsProfile}"
-      src=$(pwd)
-      ${deployAllScript}
-      echo "=== All ${toString (builtins.length workspaces)} workspaces deployed ==="
+      exec nix develop --impure --command bash -c '${deployAllScript} && echo "=== All ${toString (builtins.length workspaces)} workspaces deployed ==="'
     '';
     plan-all = mkApp "plan-all" ''
       set -euo pipefail
       export AWS_PROFILE="${awsProfile}"
-      src=$(pwd)
-      ${planAllScript}
-      echo "=== All ${toString (builtins.length workspaces)} workspaces planned ==="
+      exec nix develop --impure --command bash -c '${planAllScript} && echo "=== All ${toString (builtins.length workspaces)} workspaces planned ==="'
     '';
   };
 
