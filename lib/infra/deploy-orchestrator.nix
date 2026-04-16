@@ -21,9 +21,10 @@
 {
   workspaces,
   awsProfile ? "default",
-  deployCmd ? "bundle exec pangea apply",
-  planCmd ? "bundle exec pangea plan",
-  destroyCmd ? "bundle exec pangea destroy",
+  # Use nix develop to get the full Ruby + gems + opentofu environment
+  deployCmd ? "nix develop --impure --command bash -c 'pangea apply'",
+  planCmd ? "nix develop --impure --command bash -c 'pangea plan'",
+  destroyCmd ? "nix develop --impure --command bash -c 'pangea destroy'",
 }:
 
 let
