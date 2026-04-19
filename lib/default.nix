@@ -115,6 +115,10 @@
   sharedReleaseModule = import ./build/shared/release-app.nix { inherit pkgs forgeCmd; };
   sharedDevShellModule = import ./build/shared/devshell.nix { inherit pkgs; };
 
+  # Hardened OCI bases + vendor rewrap (Path 2 — pleme-io owns Akeyless
+  # image substrate; see arch-synthesizer::akeyless_image).
+  ociHardenedModule = import ./build/oci/hardened-base.nix { inherit pkgs; };
+
   # K8s manifest primitives (metadata, syncPolicy, helm source — shared by appset + es)
   k8sManifestModule = import ./infra/k8s-manifest.nix;
 
@@ -1419,6 +1423,22 @@ in rec {
   inherit (sharedDockerModule) mkTypedDockerImage mkWebDockerImage mkServiceDockerImage;
   inherit (sharedReleaseModule) mkReleaseApps;
   sharedReleaseApps = sharedReleaseModule;
+
+  # ──────────────────────────────────────────────────────────────────
+  # OCI HARDENED BASES (from build/oci/hardened-base.nix)
+  # ──────────────────────────────────────────────────────────────────
+  # Path 2: `hardenedBases.{distroless-static,distroless-glibc,wolfi}`
+  # are ready-to-use base images; `mkVendorRewrap` pulls an upstream
+  # image, extracts a binary, and repackages on a hardened base for
+  # publication to ghcr.io/pleme-io/*.
+  hardenedBases = ociHardenedModule.bases;
+  inherit (ociHardenedModule)
+    mkDistrolessStaticBase
+    mkDistrolessGlibcBase
+    mkWolfiBase
+    mkVendorRewrap
+    nonrootUid
+    nonrootGid;
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
   sharedDevShell = sharedDevShellModule;
 }
