@@ -846,6 +846,35 @@ in rec {
   amiBuildBuilder = ./infra/ami-build.nix;
 
   # ============================================================================
+  # NIXOS AWS AMI BUILDER (from build/nixos/aws-ami.nix)
+  # ============================================================================
+  # `mkNixosAwsAmi` — reusable "NixOS-system-closure → AWS AMI" primitive.
+  # Wraps the nixos-rebuild → Packer → snapshot flow so any pleme-io NixOS
+  # configuration can turn into an AMI with one call. Integrates directly
+  # with arch-synthesizer's `AmiConventionDecl` (`.name()`, `.all_tags()`).
+  #
+  # Two modes:
+  #   - "packer" (default) — emits a Packer JSON template identical in shape
+  #                          to what platform-packer renders today. Zero-cost
+  #                          adoption for kindling-profiles.
+  #   - "direct"           — interface for future nixos-generators + `aws ec2`
+  #                          registration path. Stubbed with documented TODO.
+  #
+  # Standalone import:
+  #   nixosAwsAmiBuilder = import "${substrate}/lib/build/nixos/aws-ami.nix" { inherit pkgs; };
+  #   ami = nixosAwsAmiBuilder {
+  #     nixosSystem  = "github:pleme-io/kindling-profiles#ami-builder";
+  #     amiName      = "quero-platform-builder-2026-04-19-154530";
+  #     amiTags      = { ManagedBy = "pangea"; Platform = "quero"; Role = "builder"; };
+  #     architecture = "arm64";
+  #     region       = "us-east-1";
+  #     mode         = "packer";
+  #   };
+  #   # ami.packerTemplate is a /nix/store/....pkr.json — feed to `packer build`.
+  mkNixosAwsAmi = import ./build/nixos/aws-ami.nix { inherit pkgs; };
+  nixosAwsAmiBuilder = ./build/nixos/aws-ami.nix;
+
+  # ============================================================================
   # CLOUDWATCH METRIC PUBLISHER (from infra/cloudwatch-metric-publisher.nix)
   # ============================================================================
   # Reusable NixOS module that publishes custom CloudWatch metrics on a

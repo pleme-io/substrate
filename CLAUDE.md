@@ -50,7 +50,8 @@ lib/
 │   ├── dotnet/                    # build
 │   ├── java/                      # maven
 │   ├── wasm/                      # build
-│   └── web/                       # build, docker, github-action
+│   ├── web/                       # build, docker, github-action
+│   └── nixos/                     # aws-ami (NixOS → AWS AMI, packer + direct)
 ├── kube/                          # Kubernetes resource builders (nix-kube)
 │   ├── primitives/                # 29 pure K8s resource builders (no pkgs)
 │   │   ├── deployment.nix         # mkDeployment
@@ -390,6 +391,7 @@ See [docs/testing.md](docs/testing.md) for the three-layer test pyramid.
 | `mkLeptosBuild` | `build/rust/leptos-build.nix` | Dual-target Leptos SSR+CSR build |
 | `mkLeptosDockerImage` | `build/rust/leptos-build.nix` | Docker image for Leptos SSR |
 | `mkLeptosDockerImageWithHanabi` | `build/rust/leptos-build.nix` | CSR-only via Hanabi BFF |
+| `mkNixosAwsAmi` | `build/nixos/aws-ami.nix` | NixOS system closure → AWS AMI (packer mode + direct mode); consumes `AmiConventionDecl`-shaped `amiName` + `amiTags` |
 
 #### Standalone Rust Flake Builders
 
