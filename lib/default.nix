@@ -600,6 +600,34 @@ in rec {
   rustToolReleaseFlakeBuilder = ./build/rust/tool-release-flake.nix;
 
   # ============================================================================
+  # RUST LAMBDA BUILDER (from build/rust/lambda.nix)
+  # ============================================================================
+  # Package a cross-compiled `bootstrap` binary into an AWS Lambda zip.
+  # Pairs with tool-release-flake.nix (which produces the musl binary) and
+  # with service/lambda-deploy.nix (which runs the deploy flow).
+  # Usage (from a flake):
+  #   lambda = import "${substrate}/lib/build/rust/lambda.nix" { inherit nixpkgs; };
+  #   zip = lambda.mkLambdaZip { inherit pkgs name binary architecture; };
+  # The resulting zip is content-addressed; hand it to the typescape as
+  # LambdaZipSource::LocalBuild { nix_ref = "github:repo#lambda-zip"; }.
+  rustLambdaBuilder = ./build/rust/lambda.nix;
+
+  # ============================================================================
+  # LAMBDA DEPLOY APP (from service/lambda-deploy.nix)
+  # ============================================================================
+  # `nix run .#deploy` app that: nix-builds the zip, stages it at a stable
+  # path inside the workspace, computes base64-sha256 content hash,
+  # and runs `tofu apply` with ZIP_LOCAL_PATH + ZIP_SOURCE_HASH env vars.
+  # Pairs with `Pangea::Architectures::LambdaDeployment.build`, which
+  # reads those env vars and threads them into `aws_s3_object.etag` +
+  # `aws_lambda_function.source_code_hash` for content-addressed
+  # upload + redeploy. One command; zero operator shell dance.
+  # Usage:
+  #   lambdaDeploy = import "${substrate}/lib/service/lambda-deploy.nix" { inherit pkgs; };
+  #   apps.<sys>.deploy = lambdaDeploy.mkLambdaDeployApp { name; workspacePath; zipSource; };
+  lambdaDeployBuilder = ./service/lambda-deploy.nix;
+
+  # ============================================================================
   # TYPESCRIPT LIBRARY BUILDER (from typescript-library.nix)
   # ============================================================================
   # Standalone module for TypeScript library SDLC (build, check-all, devShell).
