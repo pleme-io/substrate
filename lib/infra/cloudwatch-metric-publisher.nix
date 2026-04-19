@@ -146,14 +146,18 @@
       value=0
     fi
     echo "[cloudwatch-publish-${name}] ${p.namespace}/${p.metricName}=$value unit=${p.unit} region=${p.region}"
+    # `|| echo` is glued onto the optional `--dimensions` line so an empty
+    # dimensions attrset (the default) doesn't break bash continuation: the
+    # previous `--region ... \` still continues into this single token,
+    # yielding `... --region R  || echo ...` (valid) instead of a blank
+    # line followed by a stray `||` (syntax error near `||`).
     ${awsCli} cloudwatch put-metric-data \
       --namespace ${lib.escapeShellArg p.namespace} \
       --metric-name ${lib.escapeShellArg p.metricName} \
       --value "$value" \
       --unit ${lib.escapeShellArg p.unit} \
       --region ${lib.escapeShellArg p.region} \
-      ${lib.optionalString (p.dimensions != {}) ''--dimensions ${lib.escapeShellArg (lib.concatStringsSep "," (lib.mapAttrsToList (k: v: "${k}=${v}") p.dimensions))} \''}
-      || echo "[cloudwatch-publish-${name}] put-metric-data failed (continuing)" >&2
+      ${lib.optionalString (p.dimensions != {}) "--dimensions ${lib.escapeShellArg (lib.concatStringsSep "," (lib.mapAttrsToList (k: v: "${k}=${v}") p.dimensions))} "}|| echo "[cloudwatch-publish-${name}] put-metric-data failed (continuing)" >&2
     exit 0
   '';
 
