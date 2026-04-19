@@ -163,25 +163,16 @@ in {
     (if dockerImage-arm64 != null then { inherit dockerImage-arm64; } else {}) //
     { default = if dockerImage-amd64 != null then dockerImage-amd64 else dockerImage-arm64; };
 
-  # Development shell with all dependencies
-  devShells.default = if devenv != null then
-    devenv.lib.mkShell {
-      inputs = { inherit nixpkgs; inherit devenv; };
-      inherit pkgs;
-      modules = [
-        (import ../../devenv/rust-service.nix)
-        ({ lib, ... }: {
-          env = builtins.mapAttrs (_: v: lib.mkDefault v) allDevEnvVars;
-          packages = extraDevInputs ++ [ crate2nix ];
-        })
-      ];
-    }
-  else
-    pkgs.mkShell ({
-      buildInputs = allBuildInputs ++ devTools ++ extraDevInputs ++ [ crate2nix ];
-      nativeBuildInputs = allNativeBuildInputs;
-    }
-    // allDevEnvVars);
+  # Development shell with all dependencies — delegates to shared factory
+  devShells.default = (import ../shared/devshell.nix { inherit pkgs; }).mkRustDevShell {
+    inherit pkgs devenv nixpkgs;
+    devenvModule = ../../devenv/rust-service.nix;
+    tools = devTools;
+    buildInputs = allBuildInputs;
+    nativeBuildInputs = allNativeBuildInputs;
+    extraPackages = extraDevInputs ++ [ crate2nix ];
+    env = allDevEnvVars;
+  };
 
   # Apps for build, push, deploy, release workflows
   # Apps call `nix build --system x86_64-linux` directly (no nix→shell→nix pattern)

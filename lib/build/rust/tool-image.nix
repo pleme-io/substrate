@@ -193,26 +193,14 @@ in {
     ${toolName} = wrappedNative;
   };
 
-  devShells.default = if devenv != null then
-    devenv.lib.mkShell {
-      inputs = { inherit nixpkgs; inherit devenv; };
-      pkgs = hostPkgs;
-      modules = [
-        (import ../../devenv/rust-tool.nix)
-        ({ ... }: {
-          packages = [ crate2nix ] ++ buildInputs ++ runtimeDeps;
-        })
-      ];
-    }
-  else
-    hostPkgs.mkShell {
-      buildInputs = devTools ++ [
-        hostPkgs.rust-analyzer
-        crate2nix
-      ] ++ buildInputs
-        ++ runtimeDeps
-        ++ (darwinHelpers.mkDarwinBuildInputs hostPkgs);
-    };
+  devShells.default = (import ../shared/devshell.nix { pkgs = hostPkgs; }).mkRustDevShell {
+    pkgs = hostPkgs;
+    inherit devenv nixpkgs;
+    devenvModule = ../../devenv/rust-tool.nix;
+    tools = devTools ++ [ hostPkgs.rust-analyzer ];
+    extraPackages = [ crate2nix ] ++ runtimeDeps;
+    inherit buildInputs;
+  };
 
   apps = {
     default = {
