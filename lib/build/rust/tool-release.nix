@@ -1,20 +1,29 @@
 # ============================================================================
-# RUST TOOL RELEASE BUILDER - Cross-platform CLI tool builds + GitHub releases
+# RUST RELEASE BUILDER — unified single-crate + workspace CLI tool builds
 # ============================================================================
-# Builds a Rust CLI tool for 4 targets from aarch64-darwin:
-#   - aarch64-apple-darwin  (native)
-#   - x86_64-apple-darwin   (Rosetta)
-#   - x86_64-unknown-linux-musl  (remote builder, static)
-#   - aarch64-unknown-linux-musl (remote builder, static)
+# Builds a Rust CLI tool for 4 targets from any supported host:
+#   - aarch64-apple-darwin
+#   - x86_64-apple-darwin          (via Rosetta from aarch64-darwin)
+#   - x86_64-unknown-linux-musl    (remote builder, static)
+#   - aarch64-unknown-linux-musl   (remote builder, static)
 #
-# Usage:
-#   let rustTool = import "${substrate}/lib/rust-tool-release.nix" {
-#     inherit system nixpkgs crate2nix;
-#   };
-#   in rustTool {
+# Works for both single-crate tools and workspace members:
+#   - Single crate:     omit `packageName`; uses `project.rootCrate`
+#   - Workspace member: set `packageName`; uses `project.workspaceMembers.${packageName}`
+#
+# Usage (single crate):
+#   rustTool {
 #     toolName = "kindling";
 #     src = self;
 #     repo = "pleme-io/kindling";
+#   }
+#
+# Usage (workspace member — replaces the old separate workspace-release builder):
+#   rustTool {
+#     toolName = "mamorigami";
+#     packageName = "mamorigami-cli";
+#     src = self;
+#     repo = "pleme-io/mamorigami";
 #   }
 #
 # Returns: { packages, devShells, apps }
@@ -42,13 +51,11 @@
   # ============================================================================
   # TARGET PKGS BUILDERS
   # ============================================================================
-  # Linux static binaries via pkgsStatic (musl) — built on remote builders.
-  # Darwin binaries via standard pkgs — Rosetta handles x86_64-darwin on arm64.
-
+  # Linux static binaries via pkgsStatic (musl). Darwin binaries via standard
+  # pkgs — Rosetta handles x86_64-darwin on aarch64 hosts.
   mkLinuxStaticPkgs = targetSystem: (import nixpkgs { system = targetSystem; }).pkgsStatic;
   mkDarwinPkgs = targetSystem: import nixpkgs { system = targetSystem; };
 
-  # All cross-compilation targets
   targets = {
     "aarch64-apple-darwin" = {
       pkgs = mkDarwinPkgs "aarch64-darwin";
@@ -71,6 +78,7 @@ in {
   toolName,
   src,
   repo,
+  packageName ? null,            # null = single-crate; set = workspace member
   cargoNix ? src + "/Cargo.nix",
   buildInputs ? [],
   nativeBuildInputs ? [],
@@ -85,15 +93,19 @@ let
     (check.list "nativeBuildInputs" nativeBuildInputs)
     (check.attrs "crateOverrides" crateOverrides)
   ];
+
+  # Crate name for defaultCrateOverrides: workspace member when set, else toolName.
+  crateKey = if packageName != null then packageName else toolName;
+
   # ============================================================================
   # BINARY BUILDER
   # ============================================================================
-  mkBinary = targetName: targetInfo: let
+  mkBinary = _targetName: targetInfo: let
     targetPkgs = targetInfo.pkgs;
     project = import cargoNix {
       pkgs = targetPkgs;
       defaultCrateOverrides = targetPkgs.defaultCrateOverrides // {
-        ${toolName} = attrs: {
+        ${crateKey} = attrs: {
           buildInputs = (attrs.buildInputs or [])
             ++ buildInputs
             ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
@@ -102,7 +114,19 @@ let
         };
       } // crateOverrides;
     };
-  in project.rootCrate.build;
+  in
+    if packageName != null then
+      if project ? workspaceMembers && project.workspaceMembers ? "${packageName}" then
+        project.workspaceMembers.${packageName}.build
+      else
+        builtins.throw ''
+          substrate/rust-release: packageName "${packageName}" not found.
+          ${if project ? workspaceMembers
+            then "Available members: ${builtins.concatStringsSep ", " (builtins.attrNames project.workspaceMembers)}"
+            else "Project has no workspaceMembers — is ${toString cargoNix} a workspace Cargo.nix?"}
+        ''
+    else
+      project.rootCrate.build;
 
   # Build all target binaries
   binaries = builtins.mapAttrs mkBinary targets;
