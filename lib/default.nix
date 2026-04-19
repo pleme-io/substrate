@@ -818,6 +818,27 @@ in rec {
   amiBuildBuilder = ./infra/ami-build.nix;
 
   # ============================================================================
+  # CLOUDWATCH METRIC PUBLISHER (from infra/cloudwatch-metric-publisher.nix)
+  # ============================================================================
+  # Reusable NixOS module that publishes custom CloudWatch metrics on a
+  # systemd timer cadence. Feeds custom alarms (e.g. arch-synthesizer
+  # `AtticQuiescentTriggerDecl` / `BuilderQuiescentTriggerDecl`) so the
+  # alarm fires as soon as the metric goes to zero.
+  #
+  # Usage (in a NixOS config for an AMI):
+  #   imports = [ (import "${substrate}/lib/infra/cloudwatch-metric-publisher.nix") ];
+  #   pleme.metrics = {
+  #     enable = true;
+  #     publishers.atticWriteCount = {
+  #       namespace = "Pleme/Attic";
+  #       metricName = "WriteCount";
+  #       intervalSecs = 10;
+  #       command = "ss -tHn state established '( sport = :8080 or sport = :443 )' | wc -l | tr -d ' '";
+  #     };
+  #   };
+  cloudwatchMetricPublisherModule = ./infra/cloudwatch-metric-publisher.nix;
+
+  # ============================================================================
   # RUBY BUILD HELPERS (from ruby-build.nix)
   # ============================================================================
   # Build Docker images, regenerate gemset.nix, push/release Ruby services.
