@@ -124,4 +124,54 @@ in rec {
       tools = goTools ++ goGrpcTools ++ extraTools;
       inherit env;
     };
+
+  # ── Rust DevShell (CC-enabled, devenv-aware) ──────────────────────
+  # Shared factory for the Rust builders (tool-release, workspace-release,
+  # library, service, tool-image). Uses `pkgs.mkShell` (not mkShellNoCC) —
+  # Rust `-sys` crates (openssl-sys, ring, …) need the C toolchain on PATH.
+  #
+  # Automatically injects Darwin SDK on macOS. When a devenv input is
+  # passed, delegates to `devenv.lib.mkShell` with an optional per-kind
+  # devenv module (../devenv/rust-tool.nix, rust-library.nix, rust-service.nix).
+  #
+  # Args:
+  #   pkgs:              target pkgs (may include fenix overlay)
+  #   devenv:            optional devenv flake input (null = plain mkShell)
+  #   nixpkgs:           required only when devenv != null
+  #   devenvModule:      path to devenv module (optional)
+  #   tools:             toolchain + dev tools — NON-DEVENV path only
+  #                      (devenv expects toolchain via its module)
+  #   buildInputs:       C/system libs — NON-DEVENV path only
+  #   nativeBuildInputs: native build inputs — NON-DEVENV path only
+  #   extraPackages:     extras included in BOTH paths (e.g. crate2nix)
+  #   env:               environment variables for both paths
+  mkRustDevShell = {
+    pkgs,
+    devenv ? null,
+    nixpkgs ? null,
+    devenvModule ? null,
+    tools ? [],
+    buildInputs ? [],
+    nativeBuildInputs ? [],
+    extraPackages ? [],
+    env ? {},
+  }: let
+    darwinInputs = darwinHelper.mkDarwinBuildInputs pkgs;
+  in
+    if devenv != null then
+      assert (nixpkgs != null) || (throw "mkRustDevShell: nixpkgs is required when devenv is non-null");
+      devenv.lib.mkShell {
+        inputs = { inherit nixpkgs devenv; };
+        inherit pkgs;
+        modules = (if devenvModule != null then [ (import devenvModule) ] else [])
+          ++ [ ({ lib, ... }: {
+            env = builtins.mapAttrs (_: v: lib.mkDefault v) env;
+            packages = extraPackages;
+          }) ];
+      }
+    else
+      pkgs.mkShell ({
+        buildInputs = tools ++ buildInputs ++ extraPackages ++ darwinInputs;
+        inherit nativeBuildInputs;
+      } // env);
 }

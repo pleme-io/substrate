@@ -201,25 +201,14 @@ in {
     ${toolName} = nativeBinary;
   };
 
-  devShells.default = if devenv != null then
-    devenv.lib.mkShell {
-      inputs = { inherit nixpkgs; inherit devenv; };
-      pkgs = hostPkgs;
-      modules = [
-        (import ../../devenv/rust-tool.nix)
-        ({ ... }: {
-          packages = [ crate2nix ] ++ buildInputs;
-        })
-      ];
-    }
-  else
-    hostPkgs.mkShell {
-      buildInputs = devTools ++ [
-        hostPkgs.rust-analyzer
-        crate2nix
-      ] ++ buildInputs
-        ++ (darwinHelpers.mkDarwinBuildInputs hostPkgs);
-    };
+  devShells.default = (import ../shared/devshell.nix { pkgs = hostPkgs; }).mkRustDevShell {
+    pkgs = hostPkgs;
+    inherit devenv nixpkgs;
+    devenvModule = ../../devenv/rust-tool.nix;
+    tools = devTools ++ [ hostPkgs.rust-analyzer ];
+    extraPackages = [ crate2nix ];
+    inherit buildInputs;
+  };
 
   apps = {
     default = {
