@@ -1,8 +1,8 @@
 # Reusable CloudWatch metric publisher for NixOS AMIs.
 #
 # Publishes custom CloudWatch metrics from the instance by running a shell
-# command on a systemd timer. The command's stdout is parsed as an integer
-# and sent via `aws cloudwatch put-metric-data`.
+# command on a systemd timer (legacy) or by invoking `cordel metric-publish`
+# with a typed source spec (when `useCordel = true`).
 #
 # Feeds custom CloudWatch alarms such as `AtticQuiescentTriggerDecl` and
 # `BuilderQuiescentTriggerDecl` declared in arch-synthesizer. With a 10s
@@ -71,12 +71,32 @@
         '';
       };
       command = lib.mkOption {
-        type = lib.types.str;
+        type = lib.types.nullOr lib.types.str;
+        default = null;
         description = ''
-          Shell command whose stdout is the integer metric value. Run via
-          `bash -c` with the usual NixOS PATH. Example:
+          Legacy shell command whose stdout is the integer metric value.
+          Consumed only when `pleme.metrics.useCordel = false` (the
+          day-1 default). Prefer `typedSource` when migrating to the
+          cordel backend — it's provably integer-valued at seal time.
 
               ss -tHn state established '( sport = :22 )' | wc -l | tr -d ' '
+        '';
+      };
+      typedSource = lib.mkOption {
+        type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
+        default = null;
+        description = ''
+          Typed CordelMetricSource spec (JSON-serializable attrset). One
+          of the following shapes:
+
+            { kind = "TcpConnectionCount"; ports = [ 22 ]; state = "Established"; }
+            { kind = "FileAgeSecs"; path = "/var/log/foo"; fallback = 0; }
+            { kind = "ProcessCount"; name_pattern = "akeyless-gateway"; }
+            { kind = "HttpAccessLogLinesSince"; path = "/var/log/nginx.log"; seconds_ago = 60; }
+            { kind = "Constant"; value = 42; }
+
+          Consumed only when `pleme.metrics.useCordel = true`. Overrides
+          `command` when both are set.
         '';
       };
       region = lib.mkOption {
@@ -137,7 +157,38 @@
     exit 0
   '';
 
-  mkService = name: p: {
+  # Cordel path: write a one-shot YAML config file, exec `cordel metric-publish`.
+  mkCordelConfigFile = name: p: let
+    source =
+      if p.typedSource != null
+      then p.typedSource
+      else {kind = "Constant"; value = 0;}; # defensive fallback
+    dimList = lib.mapAttrsToList (k: v: [k v]) p.dimensions;
+    yamlPayload = {
+      namespace = p.namespace;
+      metric_name = p.metricName;
+      source = source;
+      region = p.region;
+      unit = p.unit;
+      dimensions = dimList;
+      tolerant = true;
+    };
+  in
+    pkgs.writeText "cordel-metric-${name}.yaml" (builtins.toJSON yamlPayload);
+
+  mkCordelPublishService = name: p: {
+    description = "Publish ${p.namespace}/${p.metricName} to CloudWatch via cordel";
+    after = ["network-online.target"];
+    wants = ["network-online.target"];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.cordel}/bin/cordel metric-publish --config ${mkCordelConfigFile name p}";
+      Restart = "no";
+    };
+    path = [pkgs.cordel];
+  };
+
+  mkLegacyBashService = name: p: {
     description = "Publish ${p.namespace}/${p.metricName} to CloudWatch";
     after = ["network-online.target"];
     wants = ["network-online.target"];
@@ -152,6 +203,10 @@
     path = [pkgs.awscli2 pkgs.iproute2 pkgs.coreutils pkgs.gawk pkgs.gnugrep];
   };
 
+  # Dispatcher: pick cordel or legacy per module-level flag.
+  mkService = name: p:
+    if cfg.useCordel then mkCordelPublishService name p else mkLegacyBashService name p;
+
   mkTimer = name: p: {
     description = "Timer: publish ${p.namespace}/${p.metricName} every ${toString p.intervalSecs}s";
     wantedBy = ["timers.target"];
@@ -165,6 +220,22 @@
 in {
   options.pleme.metrics = {
     enable = lib.mkEnableOption "pleme CloudWatch custom metric publisher";
+
+    useCordel = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        When true, each publisher becomes `cordel metric-publish --config
+        <yaml>`: typed Rust executor with the MetricSource enum
+        (TcpConnectionCount / FileAgeSecs / ProcessCount /
+        HttpAccessLogLinesSince / Constant) instead of shelling out to
+        `ss` + `aws cloudwatch put-metric-data`. Publishers using the
+        new path set `typedSource` instead of `command`.
+
+        Off by default — flip per-AMI when `pkgs.cordel` is available in
+        the AMI closure.
+      '';
+    };
 
     publishers = lib.mkOption {
       type = lib.types.attrsOf publisherType;
