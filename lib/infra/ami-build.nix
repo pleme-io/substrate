@@ -473,4 +473,70 @@ in rec {
       aws ssm get-parameter --name "${promoteSsm}" --region "${region}" --query 'Parameter.Value' --output text 2>/dev/null || echo "not promoted"
     '';
   };
+
+  # ── Multi-Arch AMI Pipelines ──────────────────────────────────
+  # The common case: same AMI shape, different CPU architectures (and
+  # whatever arch-dependent knobs fall out — source AMI SSM path,
+  # Packer build template, AMI name prefix). Instead of every caller
+  # copy-pasting mkAmiBuildPipeline once per arch, declare the list
+  # once and get symmetrical nix-run apps out.
+  #
+  # Input:  archs = [ "aarch64" "x86_64" ... ];
+  #         anything produced "for this arch" is supplied as a
+  #         function `a -> …`.
+  # Output: { ami-build-<arch>, ami-test-<arch>, ami-status-<arch> }
+  #         for each arch, plus a `ami-build-all` helper that runs
+  #         every build sequentially.
+  mkAmiBuildPipelines = {
+    forgePackage,
+    archs,                 # [ "aarch64" "x86_64" ]
+    buildTemplateFor,      # arch -> derivation (Packer build template)
+    testTemplateFor,       # arch -> derivation (Packer test template)
+    ssmParameterFor,       # arch -> string (SSM path holding promoted AMI id)
+    amiNameFor,            # arch -> string (Packer ami_name)
+    region ? "us-east-1",
+    awsProfile ? null,
+    extraBinaries ? [],
+    skipClusterTest ? false,
+    clusterTestConfigFor ? null,  # arch -> derivation  (or null for skip)
+    clusterTestInstanceType ? "c7i.xlarge",
+    clusterTestTimeout ? 480,
+    atticSsm ? null,
+    atticInstanceType ? "t3.medium",
+    atticCacheName ? "nexus",
+  }: let
+    # Reuse the single-arch builder for each arch in the list, and
+    # rewrite the resulting attribute keys to be arch-suffixed so
+    # they can all coexist under `apps = { … }`.
+    perArch = arch: let
+      cluster = if clusterTestConfigFor == null then null else clusterTestConfigFor arch;
+      apps = mkAmiBuildPipeline {
+        inherit forgePackage region awsProfile extraBinaries
+          skipClusterTest clusterTestInstanceType clusterTestTimeout
+          atticSsm atticInstanceType atticCacheName;
+        buildTemplate = buildTemplateFor arch;
+        testTemplate  = testTemplateFor arch;
+        ssmParameter  = ssmParameterFor arch;
+        amiName       = amiNameFor arch;
+        clusterTestConfig = cluster;
+      };
+    in
+      pkgs.lib.mapAttrs' (name: value:
+        pkgs.lib.nameValuePair "${name}-${arch}" value
+      ) apps;
+
+    merged = pkgs.lib.foldl' (a: b: a // b) {} (map perArch archs);
+
+    # Convenience aggregator: run every ami-build-<arch> in order.
+    buildAll = {
+      type = "app";
+      program = toString (pkgs.writeShellScript "ami-build-all" ''
+        set -euo pipefail
+        ${pkgs.lib.concatMapStringsSep "\n" (a: ''
+          echo "=== build ${a} ==="
+          ${merged."ami-build-${a}".program}
+        '') archs}
+      '');
+    };
+  in merged // { ami-build-all = buildAll; };
 }
