@@ -47,18 +47,52 @@ in {
   };
 
   # Render a provisioner-script fragment that runs `kindling harden`
-  # with a given stack. Consumers splice this into their provisioner
-  # (typically after `kindling ami-build`).
+  # with a stack of profiles INLINED as heredocs.
+  #
+  # The stack argument accepts either raw /nix/store paths (for local
+  # in-nix composition where the paths are reachable) OR the names of
+  # bundled profiles ("base", "hardened", "ami-snapshot",
+  # "cis-level-1"). Profiles are emitted to /tmp on the target host
+  # via heredoc so the `--profile` paths resolve on the REMOTE box,
+  # not the orchestrator.
+  #
+  # Why heredoc-inline: /nix/store paths produced here live on the
+  # orchestrator only. Passing them to `--profile` on a remote Packer
+  # instance gives `ENOENT`. Inlining avoids needing a file upload
+  # step and keeps the Packer provisioner a single inline shell.
   mkHardenStep = {
-    stack,
+    stack ? [],
+    stackNames ? [],
     strict ? false,
     format ? "text",
   }: let
-    profileArgs = pkgs.lib.concatMapStringsSep " "
-      (p: "--profile ${p}") stack;
+    # Resolve either `stack` (store paths) or `stackNames` (bundled
+    # profile names) into a list of (filename, yaml-content) pairs.
+    # Inlining the yaml content means the remote host writes it and
+    # then feeds it to `kindling harden`.
+    byName = name: { filename = "${name}.yaml"; content = yamlRead name; };
+    resolved =
+      if stackNames != []
+      then map byName stackNames
+      else if stack != []
+      then builtins.throw "mkHardenStep: use stackNames = [ \"base\" \"hardened\" ... ] so content can be inlined on the remote host; passing /nix/store paths via `stack` is local-only"
+      else builtins.throw "mkHardenStep: need stackNames (or stack)";
+
     strictArg = if strict then "--strict" else "";
-  in [
-    "echo '[hardening] applying ${toString (builtins.length stack)} profile(s)'"
-    "nix --extra-experimental-features 'nix-command flakes' run github:pleme-io/kindling --accept-flake-config -- harden ${profileArgs} --format ${format} ${strictArg}"
-  ];
+    emit = p: [
+      "mkdir -p /tmp/kindling-harden"
+      "cat > /tmp/kindling-harden/${p.filename} <<'HARDEN_PROFILE_EOF'"
+      p.content
+      "HARDEN_PROFILE_EOF"
+    ];
+    emitAll = pkgs.lib.concatMap emit resolved;
+    profileArgs = pkgs.lib.concatMapStringsSep " "
+      (p: "--profile /tmp/kindling-harden/${p.filename}") resolved;
+  in
+    [ "echo '[hardening] inlining ${toString (builtins.length resolved)} profile(s) + applying'" ]
+    ++ emitAll
+    ++ [
+      "nix --extra-experimental-features 'nix-command flakes' run github:pleme-io/kindling --accept-flake-config -- harden ${profileArgs} --format ${format} ${strictArg}"
+      "rm -rf /tmp/kindling-harden"
+    ];
 }

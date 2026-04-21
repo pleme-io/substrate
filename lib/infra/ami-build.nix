@@ -135,11 +135,23 @@ in rec {
     hardeningStrict ? false,
   }: let
     hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
+    # Resolve a stack name ("base", "hardened", "ami-full",
+    # "cis-level-1") into its ordered list of profile-name strings.
+    # ami-full expands to base + hardened + ami-snapshot; cis-level-1
+    # is standalone. The resolved names are passed to mkHardenStep
+    # as `stackNames` so the profile YAML is inlined into the Packer
+    # provisioner (remote /nix/store paths don't resolve otherwise).
+    stackNameList = {
+      base = [ "base" ];
+      hardened = [ "base" "hardened" ];
+      ami-full = [ "base" "hardened" "ami-snapshot" ];
+      cis-level-1 = [ "cis-level-1" ];
+    };
     hardeningSteps =
       if hardeningStack == null
       then []
       else hardeningProfiles.mkHardenStep {
-        stack = hardeningProfiles.stack.${hardeningStack};
+        stackNames = stackNameList.${hardeningStack};
         strict = hardeningStrict;
       };
     fullProvisioner = provisionerScript ++ hardeningSteps;
