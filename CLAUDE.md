@@ -1,5 +1,13 @@
 # Substrate
 
+<!-- Blackmatter alignment: pillars 8, 9 -->
+<!-- See ~/code/github/pleme-io/BLACKMATTER.md for pillar definitions. -->
+
+## Blackmatter pillars upheld
+
+- **Pillar 8** (Image building): `substrate/lib/oci-image-*.nix` patterns are THE way every pleme-io container image is built. No Dockerfiles. Hardened minimal roots.
+- **Pillar 9** (SDLC): `rust-tool-release-flake.nix`, `rust-workspace-release-flake.nix`, `rust-service-flake.nix`, `rust-library.nix`, `ruby-gem-flake.nix` — every repo's `flake.nix` anchors on one of these. `nix run .#app` / `nix run .#test` / `nix run .#release` uniformity comes from here.
+
 Reusable Nix build patterns consumed by all pleme-io product and library repos.
 
 Implements the **Unified Infrastructure Theory**: Nix as the universal
