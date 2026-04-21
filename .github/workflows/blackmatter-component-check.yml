@@ -1,0 +1,63 @@
+# Reusable CI workflow for blackmatter-* component repos.
+#
+# Usage in a component's .github/workflows/ci.yml:
+#
+#   name: CI
+#   on:
+#     pull_request:
+#     push: { branches: [main] }
+#   jobs:
+#     check:
+#       uses: pleme-io/substrate/.github/workflows/blackmatter-component-check.yml@main
+#
+# What it does:
+#   - Installs Nix (Determinate Systems installer) with flakes + KVM
+#   - Restores the Magic Nix Cache for faster reruns
+#   - Runs `nix flake check -L --show-trace` on x86_64-linux
+#
+# Intentionally Linux-only. macOS checks are expensive on GitHub-hosted
+# runners; the component-level eval-*-module checks are pure evaluation
+# and produce identical results across platforms, so running on Linux
+# is sufficient.
+
+name: blackmatter-component-check
+
+on:
+  workflow_call:
+    inputs:
+      flake-dir:
+        description: Relative path to the flake (default = repo root)
+        type: string
+        required: false
+        default: "."
+      extra-nix-config:
+        description: Extra lines appended to nix.conf (e.g. access tokens, substituters)
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  flake-check:
+    name: nix flake check (x86_64-linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            accept-flake-config = true
+            experimental-features = nix-command flakes
+            ${{ inputs.extra-nix-config }}
+
+      - name: Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: nix flake check
+        working-directory: ${{ inputs.flake-dir }}
+        run: |
+          set -euo pipefail
+          nix flake check -L --show-trace --accept-flake-config
