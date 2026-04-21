@@ -84,12 +84,24 @@ let
   hasNixos = modules ? nixos && modules.nixos != null;
   hasDarwin = modules ? darwin && modules.darwin != null;
 
+  # Modules may be supplied as a path (imported lazily) or as an already-
+  # imported value (a function, attrset, or list of modules). Some consumers
+  # pass a function invocation because they need to thread helper libs in:
+  #
+  #   modules.homeManager = import ./module {
+  #     mcpHelpers = import "${substrate}/lib/hm-mcp-helpers.nix" { inherit lib; };
+  #   };
+  loadModule = m:
+    if builtins.isPath m || builtins.isString m
+    then import m
+    else m;
+
   # ─── evalModules smoke check ───────────────────────────────────────
   # Imports the module with enable = false and verifies it evaluates without
   # throwing. Guards against: missing imports, stale option paths, module
   # system errors, and accidental breakage from dependency updates.
   mkModuleEvalCheck = { pkgs, kind, modulePath }: let
-    module = import modulePath;
+    module = loadModule modulePath;
     disabledConfig = lib.setAttrByPath (optionPath ++ [ "enable" ]) false;
 
     commonStubs = {
@@ -133,9 +145,9 @@ let
 
   # ─── Aggregate outputs ─────────────────────────────────────────────
   moduleOutputs =
-    (lib.optionalAttrs hasHm { homeManagerModules.default = import modules.homeManager; })
-    // (lib.optionalAttrs hasNixos { nixosModules.default = import modules.nixos; })
-    // (lib.optionalAttrs hasDarwin { darwinModules.default = import modules.darwin; });
+    (lib.optionalAttrs hasHm { homeManagerModules.default = loadModule modules.homeManager; })
+    // (lib.optionalAttrs hasNixos { nixosModules.default = loadModule modules.nixos; })
+    // (lib.optionalAttrs hasDarwin { darwinModules.default = loadModule modules.darwin; });
 
   packageOutputs = lib.optionalAttrs (package != null) {
     packages = forAllSystems ({ pkgs, ... }: {
