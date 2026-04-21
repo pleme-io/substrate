@@ -21,10 +21,14 @@
 {
   workspaces,
   awsProfile ? "default",
-  # Commands run INSIDE nix develop from the root directory
-  deployCmd ? "pangea apply",
-  planCmd ? "pangea plan",
-  destroyCmd ? "pangea destroy",
+  # Commands run INSIDE nix develop from each workspace directory.
+  # Default uses `pangea bulk …` which walks every .rb in the dir —
+  # matches what every quero-* workspace actually needs. Bare
+  # `pangea plan` would require a specific template filename, which
+  # the orchestrator can't know without per-workspace config.
+  deployCmd ? "pangea bulk apply --dir .",
+  planCmd ? "pangea bulk plan --dir .",
+  destroyCmd ? "pangea bulk destroy --dir .",
 }:
 
 let
