@@ -56,6 +56,14 @@
   # blackmatter.components.<last-segment-of-name>, matching the fleet convention.
   # Override when a repo uses a different namespace (e.g. services.blackmatter.*).
   enableOptionPath ? null,
+  # If true, auto-generate an evalModules smoke check per module. Off by
+  # default because many HM modules depend on home-manager's full option
+  # schema (home.file, services.*) which this helper intentionally doesn't
+  # stub. Turn on for modules that only declare under blackmatter.components.*.
+  # Complex consumers should supply their own check via `extraChecks`.
+  autoEvalChecks ? false,
+  # Extra module args threaded into the eval check (e.g. claudeMdLib).
+  extraModuleArgs ? {},
 }:
 
 let
@@ -139,7 +147,7 @@ let
         { config = disabledConfig; }
         commonStubs
         (if kind == "nixos" then testHelpers.mkNixOSModuleStubs {} else {})
-        { _module.args = { inherit pkgs; }; }
+        { _module.args = { inherit pkgs; } // extraModuleArgs; }
       ];
     };
 
@@ -189,7 +197,7 @@ let
 
   checkOutputs = {
     checks = forAllSystems ({ pkgs, system, ... }: let
-      moduleChecks =
+      moduleChecks = lib.optionalAttrs autoEvalChecks (
         (lib.optionalAttrs hasHm {
           eval-hm-module = mkModuleEvalCheck { inherit pkgs; kind = "hm"; modulePath = modules.homeManager; };
         })
@@ -198,7 +206,7 @@ let
         })
         // (lib.optionalAttrs hasDarwin {
           eval-darwin-module = mkModuleEvalCheck { inherit pkgs; kind = "darwin"; modulePath = modules.darwin; };
-        });
+        }));
     in
       moduleChecks // (extraChecks pkgs));
   };
