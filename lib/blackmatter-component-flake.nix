@@ -104,22 +104,32 @@ let
     module = loadModule modulePath;
     disabledConfig = lib.setAttrByPath (optionPath ++ [ "enable" ]) false;
 
+    # Permissive stubs for options blackmatter modules write to. Using
+    # `types.anything` (aka lazily merged) avoids conflicts with modules
+    # that declare their own nested sub-options under these namespaces
+    # (e.g. services.blackmatter.tend.*, launchd.user.agents.*).
+    anyAttrs = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
     commonStubs = {
       options = {
         home.homeDirectory = lib.mkOption { type = lib.types.str; default = "/tmp/bm-eval"; };
         home.username = lib.mkOption { type = lib.types.str; default = "bm-eval"; };
         home.stateVersion = lib.mkOption { type = lib.types.str; default = "25.11"; };
         home.packages = lib.mkOption { type = lib.types.listOf lib.types.package; default = []; };
-        home.file = lib.mkOption { type = lib.types.attrs; default = {}; };
-        home.activation = lib.mkOption { type = lib.types.attrs; default = {}; };
-        home.sessionVariables = lib.mkOption { type = lib.types.attrs; default = {}; };
         home.sessionPath = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
-        programs = lib.mkOption { type = lib.types.attrs; default = {}; };
-        services = lib.mkOption { type = lib.types.attrs; default = {}; };
-        launchd = lib.mkOption { type = lib.types.attrs; default = {}; };
-        systemd = lib.mkOption { type = lib.types.attrs; default = {}; };
-        xdg = lib.mkOption { type = lib.types.attrs; default = {}; };
-        sops = lib.mkOption { type = lib.types.attrs; default = {}; };
+        home.file = anyAttrs;
+        home.activation = anyAttrs;
+        home.sessionVariables = anyAttrs;
+        programs = anyAttrs;
+        services = anyAttrs;
+        launchd = anyAttrs;
+        systemd = anyAttrs;
+        xdg = anyAttrs;
+        sops = anyAttrs;
+        targets = anyAttrs;
+        nix = anyAttrs;
+        fonts = anyAttrs;
+        security = anyAttrs;
+        system = anyAttrs;
       };
     };
 
