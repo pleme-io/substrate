@@ -63,6 +63,12 @@ let
 
 in rec {
 
+  # ── Hardening profile bundle ────────────────────────────────
+  # Re-export so consumers can build their own provisioner scripts
+  # without a separate import. See lib/infra/hardening-profiles/
+  # for the underlying yaml files + helper.
+  hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
+
   # ── Cluster Test Config ──────────────────────────────────────
   # Generates a YAML config file (JSON is valid YAML) describing the
   # multi-node cluster topology for ami-forge cluster-test.
@@ -118,7 +124,25 @@ in rec {
     extraVariables ? {},
     extraTags ? {},
     extraEnvironmentVars ? [],
+    # List of profile names to apply via `kindling harden` after the
+    # main provisionerScript. Accepts the same stack keys as the
+    # hardening-profiles bundle: "base", "hardened", "ami-full",
+    # "cis-level-1". Pass `null` (default) to skip — some pipelines
+    # handle hardening themselves inside provisionerScript.
+    hardeningStack ? null,
+    # When true, a Degraded hardening report also fails the build.
+    # Default `false` matches `kindling harden`'s exit semantics.
+    hardeningStrict ? false,
   }: let
+    hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
+    hardeningSteps =
+      if hardeningStack == null
+      then []
+      else hardeningProfiles.mkHardenStep {
+        stack = hardeningProfiles.stack.${hardeningStack};
+        strict = hardeningStrict;
+      };
+    fullProvisioner = provisionerScript ++ hardeningSteps;
     template = {
       variable = {
         ami_name = { type = "string"; default = amiName; };
@@ -172,7 +196,7 @@ in rec {
         provisioner =
           [{
             shell = {
-              inline = provisionerScript;
+              inline = fullProvisioner;
               environment_vars = [
                 "GITHUB_TOKEN=\${var.github_token}"
                 "FLAKE_REF=\${var.flake_ref}"

@@ -1,0 +1,22 @@
+# Substrate AMI-snapshot profile — runs LAST.
+#
+# This is the "burn everything, we're about to snapshot" layer. It
+# wipes build history, ssh keys, cloud-init state, and zero-fills free
+# space so the resulting EBS snapshot compresses tight. Never compose
+# this in a long-lived-machine context — only in AMI build pipelines.
+
+name: ami-snapshot
+description: |
+  Final-pass scrub for AMIs. Wipes logs, history, cloud-init state,
+  host ssh keys, and zero-fills free space. Must run after every
+  other profile in the stack.
+
+scrub:
+  - scrub-logs
+  - scrub-cloud-init
+  - scrub-shell-history
+  - scrub-ssh-keys
+  - scrub-temp-dirs
+  - zero-fill
+
+on_failure: warn

@@ -1,0 +1,39 @@
+# Substrate hardened profile.
+#
+# Adds the more aggressive primitives on top of `base.yaml` — tmpfs
+# for sensitive dirs, kernel lockdown, firewall default-deny,
+# moduli regen, build-tool strip. Still safe for any server role.
+# Pair with `ami-snapshot.yaml` for the final-cleanup layer.
+
+name: hardened
+description: |
+  Adds firewall, kernel lockdown, tmpfs mounts, default-user removal,
+  and stripped build tooling on top of the base profile.
+
+minimize:
+  - strip-debug
+  - strip-build-tools
+  - minimize-closure
+
+fs:
+  - tmpfs-sensitive-dirs
+  - remount-readonly
+
+kernel:
+  - kernel-lockdown
+
+network:
+  - firewall-deny-all
+  - ssh-moduli-regen
+
+audit:
+  - remove-default-users
+
+params:
+  firewall_allow_in:
+    - 22
+  keep_locales:
+    - en_US.UTF-8
+    - C
+
+on_failure: abort

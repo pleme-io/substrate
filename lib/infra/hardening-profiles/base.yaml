@@ -1,0 +1,29 @@
+# Substrate base hardening profile.
+#
+# Safe baseline — every AMI that claims to be pleme-io-produced should
+# compose at least this profile. Nothing here is workload-specific.
+#
+# Consumed by `kindling harden --profile base.yaml`. Stack with
+# `hardened.yaml` and `ami-snapshot.yaml` for a full production bake.
+
+name: base
+description: |
+  Minimal, non-destructive baseline applied to every pleme-io AMI.
+  Removes docs + locales, applies CIS-aligned sysctl + modprobe
+  drop-ins, hardens sshd.
+
+minimize:
+  - strip-docs
+  - strip-locales
+
+kernel:
+  - sysctl-baseline
+  - blacklist-modules
+
+network:
+  - sshd-strict
+
+audit:
+  - auditd-baseline
+
+on_failure: warn

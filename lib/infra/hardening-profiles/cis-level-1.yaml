@@ -1,0 +1,46 @@
+# CIS Linux Benchmark Level 1 equivalent.
+#
+# Composes the strictest non-destructive configuration we support,
+# aligned with CIS v2+ Level 1 controls for general-purpose servers.
+# Use this as a reference point when claiming CIS L1 compliance — the
+# emitted report documents which invariants were checked and passed.
+
+name: cis-level-1
+description: |
+  CIS Linux Benchmark Level 1 alignment. Strict invariants enforced —
+  any invariant failure fails the build. Consumers wanting Level 2 or
+  STIG alignment should layer additional profile(s) on top.
+
+minimize:
+  - strip-docs
+  - strip-locales
+  - strip-debug
+  - strip-build-tools
+  - minimize-closure
+
+fs:
+  - tmpfs-sensitive-dirs
+  - remount-readonly
+
+kernel:
+  - kernel-lockdown
+  - sysctl-baseline
+  - blacklist-modules
+
+network:
+  - firewall-deny-all
+  - sshd-strict
+  - ssh-moduli-regen
+
+audit:
+  - auditd-baseline
+  - remove-default-users
+
+params:
+  firewall_allow_in:
+    - 22
+  keep_locales:
+    - en_US.UTF-8
+    - C
+
+on_failure: strict-invariants
