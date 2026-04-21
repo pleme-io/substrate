@@ -151,6 +151,12 @@
     # previous `--region ... \` still continues into this single token,
     # yielding `... --region R  || echo ...` (valid) instead of a blank
     # line followed by a stray `||` (syntax error near `||`).
+    #
+    # This legacy bash publisher is the fallback path for roles that
+    # don't use cordel. For cordel-managed publishers (pleme.metrics
+    # .useCordel = true, the preferred path), the publishing, tagging,
+    # and error handling are all typed Rust — see cordel-core's
+    # metric_publish.rs.
     ${awsCli} cloudwatch put-metric-data \
       --namespace ${lib.escapeShellArg p.namespace} \
       --metric-name ${lib.escapeShellArg p.metricName} \
