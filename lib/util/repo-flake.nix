@@ -341,7 +341,7 @@ flake-utils.lib.eachDefaultSystem (system: let
       lint = mkApp "lint" ''${pkgs.maven}/bin/mvn verify -DskipTests 2>/dev/null || true'';
     }
     else if language == "rust" then {
-      lint = mkApp "lint" ''${pkgs.clippy}/bin/cargo-clippy -- -D warnings'';
+      lint = mkApp "lint" ''cargo clippy -- -D warnings'';
       test = mkApp "test" ''cargo test'';
       fmt = mkApp "fmt" ''${pkgs.rustfmt}/bin/cargo-fmt --all'';
     }
