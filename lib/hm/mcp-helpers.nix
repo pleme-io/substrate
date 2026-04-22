@@ -7,9 +7,10 @@
 # Used by: blackmatter-anvil, blackmatter-claude (via generatedServers)
 #
 # Agent Categories:
-#   1. mcpjson  — anvil writes config file (Cursor, OpenCode, Windsurf, Rovo Dev, VS Code)
+#   1. mcpjson  — anvil writes config file (Cursor, VS Code, Gemini, Rovo Dev)
 #   2. claude   — agent reads anvil.generatedServers, deep-merges own config (Claude Code)
-#   3. context  — anvil.contexts generates wrapper binaries (claude-pleme, claude-akeyless)
+#   3. opencode — agent reads anvil.generatedServers in own module (OpenCode)
+#   4. context  — anvil.contexts generates wrapper binaries (claude-pleme, claude-akeyless)
 #
 # Usage (in flake.nix):
 #   homeManagerModules.default = import ./module {
@@ -116,12 +117,13 @@ in rec {
       };
 
       configFormat = mkOption {
-        type = types.enum [ "mcpjson" "claude" ];
+        type = types.enum [ "mcpjson" "claude" "opencode" ];
         default = "mcpjson";
         description = ''
           Config format:
-          - mcpjson: standard { "mcpServers": { ... } } JSON (Cursor, VS Code, OpenCode)
+          - mcpjson: standard { "mcpServers": { ... } } JSON (Cursor, VS Code, Gemini)
           - claude: skip deployment — module manages its own config via deep merge
+          - opencode: skip deployment — module reads anvil.generatedServers directly (like claude)
         '';
       };
 

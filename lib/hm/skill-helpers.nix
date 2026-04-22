@@ -1,8 +1,9 @@
 # Home-manager skill deployment helpers
 #
-# Reusable pattern for any repo that bundles Claude Code skills.
+# Reusable pattern for any agent that bundles skills (Claude Code, OpenCode, etc.).
 # Provides auto-discovery from a skills/ directory, option declarations,
-# and home.file deployment config.
+# and home.file deployment config. The `basePath` parameter controls where
+# skills are deployed (default: `.claude/skills` for backward compat).
 #
 # Usage (in flake.nix):
 #   homeManagerModules.default = import ./module {
@@ -15,6 +16,7 @@
 #     skills = skillHelpers.mkSkills {
 #       skillsDir = ../skills;
 #       extraSkills = cfg.skills.extraSkills;
+#       basePath = ".config/opencode/skills";  # agent-specific deployment path
 #     };
 #   in {
 #     options.myModule.skills = skillHelpers.mkSkillOptions;
@@ -42,6 +44,7 @@ with lib;
   mkSkills = {
     skillsDir,
     extraSkills ? {},
+    basePath ? ".claude/skills",
   }: let
     bundledSkillNames =
       if builtins.pathExists skillsDir
@@ -55,7 +58,7 @@ with lib;
     allSkillFiles = bundledSkillFiles // extraSkills;
 
     homeFiles = mapAttrs' (name: path:
-      nameValuePair ".claude/skills/${name}/SKILL.md" {
+      nameValuePair "${basePath}/${name}/SKILL.md" {
         source = path;
       }
     ) allSkillFiles;
@@ -75,7 +78,7 @@ with lib;
     enable = mkOption {
       type = types.bool;
       default = true;
-      description = "Deploy bundled skills to ~/.claude/skills/";
+      description = "Deploy bundled skills to the agent's skills directory.";
     };
 
     extraSkills = mkOption {
@@ -101,9 +104,10 @@ with lib;
   mkSkillConfig = {
     skillsDir,
     extraSkills ? {},
+    basePath ? ".claude/skills",
   }: let
     skills = (import ./skill-helpers.nix { inherit lib; }).mkSkills {
-      inherit skillsDir extraSkills;
+      inherit skillsDir extraSkills basePath;
     };
   in {
     home.file = skills.homeFiles;
