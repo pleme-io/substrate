@@ -38,11 +38,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            flake.nix
-            flake.lock
-          sparse-checkout-cone-mode: false
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -50,6 +45,5 @@ jobs:
       - name: Publish to FlakeHub
         uses: DeterminateSystems/flakehub-push@main
         with:
-          directory: ${{ inputs.directory }}
           visibility: ${{ inputs.visibility }}
           rolling: ${{ inputs.rolling }}
