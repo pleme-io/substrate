@@ -66,10 +66,13 @@ in {
   project = import generatedCargoNix {
     inherit pkgs;
     defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-      # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time, which
-      # Cargo sets but crate2nix's buildRustCrate does not. Provide it
-      # fleet-wide so any lib with a transitive rmcp dep builds cleanly.
-      rmcp = _: { CARGO_CRATE_NAME = "rmcp"; };
+      # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time
+      # (src/model.rs:860). Cargo sets this per-crate, but nixpkgs'
+      # buildRustCrate only exports the CARGO_PKG_* / CARGO_CFG_* /
+      # CARGO_MANIFEST_* families — CARGO_CRATE_NAME is absent. A
+      # top-level attr does not reach the rustc child, so inject
+      # via preBuild which runs in the same shell as buildCrate.
+      rmcp = _: { preBuild = "export CARGO_CRATE_NAME=rmcp"; };
       ${name} = oldAttrs: {
         buildInputs = allBuildInputs;
         nativeBuildInputs = allNativeBuildInputs;
