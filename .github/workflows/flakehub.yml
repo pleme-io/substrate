@@ -10,10 +10,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            nix
+            flake.nix
+            flake.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Nix & Python
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Get FlakeHub token
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          echo "$SOPS_AGE_KEY" > /tmp/agekey.txt
+          cd nix
+          sops --age-key-file=/tmp/agekey.txt -d secrets.yaml > /tmp/secrets.yaml
+          python3 - << 'EOF'
+          import yaml
+          with open('/tmp/secrets.yaml') as f:
+              secrets = yaml.safe_load(f)
+          token = secrets.get('flakehub', {}).get('token', '')
+          print(f'FLAKEHUB_TOKEN={token}', file=open('/tmp/token.env'), mode='w')
+          print(f'Extracted: {token[:12]}...')
+          EOF
+          cat /tmp/token.env >> $GITHUB_ENV
 
       - name: Publish to FlakeHub
         uses: DeterminateSystems/flakehub-push@main
         with:
           directory: .
           visibility: public
-          token: ${{ secrets.FLAKEHUB_TOKEN }}
+          token: ${{ env.FLAKEHUB_TOKEN }}
