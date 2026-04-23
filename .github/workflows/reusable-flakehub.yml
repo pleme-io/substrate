@@ -1,0 +1,55 @@
+# Reusable workflow to publish Nix flakes to FlakeHub
+# Usage:
+#   jobs:
+#     flakehub:
+#       uses: pleme-io/substrate/.github/workflows/reusable-flakehub.yml@main
+#       with:
+#         visibility: public  # or unlisted
+#         rolling: true      # branch-based versioning
+
+name: Reusable FlakeHub Publish
+
+on:
+  workflow_call:
+    inputs:
+      visibility:
+        description: "Flake visibility (public or unlisted)"
+        required: false
+        type: string
+        default: public
+      rolling:
+        description: "Use rolling versioning (for branch-based releases)"
+        required: false
+        type: boolean
+        default: true
+      directory:
+        description: "Flake directory (relative to repo root)"
+        required: false
+        type: string
+        default: .
+    secrets:
+      # No secrets needed - uses OIDC authentication
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            flake.nix
+            flake.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Publish to FlakeHub
+        uses: DeterminateSystems/flakehub-push@main
+        with:
+          directory: ${{ inputs.directory }}
+          visibility: ${{ inputs.visibility }}
+          rolling: ${{ inputs.rolling }}
