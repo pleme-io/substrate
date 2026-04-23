@@ -7,6 +7,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,6 +24,4 @@ jobs:
       - name: Publish to FlakeHub
         uses: DeterminateSystems/flakehub-push@main
         with:
-          directory: .
           visibility: public
-          github-token: ${{ secrets.GITHUB_TOKEN }}
