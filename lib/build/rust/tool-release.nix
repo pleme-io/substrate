@@ -105,6 +105,11 @@ let
     project = import cargoNix {
       pkgs = targetPkgs;
       defaultCrateOverrides = targetPkgs.defaultCrateOverrides // {
+        # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time, which
+        # Cargo sets but crate2nix's buildRustCrate does not. Provide it
+        # fleet-wide so any downstream tool/lib with a transitive rmcp
+        # dep builds cleanly without each flake duplicating this hack.
+        rmcp = _: { CARGO_CRATE_NAME = "rmcp"; };
         ${crateKey} = attrs: {
           buildInputs = (attrs.buildInputs or [])
             ++ buildInputs

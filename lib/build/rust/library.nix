@@ -66,6 +66,10 @@ in {
   project = import generatedCargoNix {
     inherit pkgs;
     defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+      # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time, which
+      # Cargo sets but crate2nix's buildRustCrate does not. Provide it
+      # fleet-wide so any lib with a transitive rmcp dep builds cleanly.
+      rmcp = _: { CARGO_CRATE_NAME = "rmcp"; };
       ${name} = oldAttrs: {
         buildInputs = allBuildInputs;
         nativeBuildInputs = allNativeBuildInputs;
