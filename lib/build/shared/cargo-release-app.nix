@@ -24,10 +24,11 @@ let
   # the fenix flow too.
   cargo = pkgs.fenixRustToolchain or pkgs.cargo;
   cargoBin = "${cargo}/bin/cargo";
-  # cargo subcommands (fmt, clippy) resolve via PATH, not relative to cargo.
-  # Put the toolchain bin/ first so cargo-fmt/cargo-clippy come from the
-  # same toolchain as cargo itself.
-  toolchainPath = ''export PATH="${cargo}/bin:${pkgs.git}/bin:$PATH"'';
+  # cargo subcommands (fmt, clippy, set-version) resolve via PATH, not
+  # relative to cargo. Put the toolchain bin/ and cargo-edit's bin/ on
+  # PATH so `cargo fmt` / `cargo clippy` / `cargo set-version` all route
+  # to the bundled tools.
+  toolchainPath = ''export PATH="${cargo}/bin:${pkgs.cargo-edit}/bin:${pkgs.git}/bin:$PATH"'';
 in rec {
   # ── check-all ─────────────────────────────────────────────────────
   mkCheckAllApp = { name }: {
@@ -62,6 +63,7 @@ in rec {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-bump" ''
       set -euo pipefail
+      ${toolchainPath}
 
       BUMP_TYPE="''${1:-patch}"
       case "$BUMP_TYPE" in
@@ -79,7 +81,7 @@ in rec {
       echo ""
 
       echo "==> cargo set-version --bump $BUMP_TYPE"
-      ${pkgs.cargo-edit}/bin/cargo-set-version --bump "$BUMP_TYPE"
+      ${pkgs.cargo-edit}/bin/cargo-set-version set-version --bump "$BUMP_TYPE"
       NEW_VERSION=$(${cargoBin} metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
       echo ""
 
@@ -109,6 +111,7 @@ in rec {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-publish" ''
       set -euo pipefail
+      ${toolchainPath}
 
       DRY_RUN=false
       for arg in "$@"; do
@@ -143,6 +146,7 @@ in rec {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-release" ''
       set -euo pipefail
+      ${toolchainPath}
 
       BUMP_TYPE="''${1:-patch}"
       case "$BUMP_TYPE" in
@@ -167,7 +171,7 @@ in rec {
 
       # Bump
       echo "==> cargo set-version --bump $BUMP_TYPE"
-      ${pkgs.cargo-edit}/bin/cargo-set-version --bump "$BUMP_TYPE"
+      ${pkgs.cargo-edit}/bin/cargo-set-version set-version --bump "$BUMP_TYPE"
       NEW_VERSION=$(${cargoBin} metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
       echo ""
 
