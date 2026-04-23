@@ -1,0 +1,41 @@
+name: publish-flakehub
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            nix
+            flake.nix
+            flake.lock
+          sparse-checkout-cone-mode: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Install age for SOPS
+        run: |
+          sudo apt-get install -y age
+
+      - name: Get FlakeHub token
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          echo "$SOPS_AGE_KEY" > /tmp/agekey.txt
+          cd nix
+          sops --age-key-file=/tmp/agekey.txt -d secrets.yaml > /tmp/secrets_dec.yaml
+          echo "FLAKEHUB_TOKEN=$(grep -A2 '^flakehub:' /tmp/secrets_dec.yaml | grep 'token:' | cut -d: -f2- | tr -d ' ')" >> $GITHUB_ENV
+
+      - name: Publish to FlakeHub
+        uses: DeterminateSystems/flakehub-push@main
+        with:
+          directory: .
+          visibility: public
+          token: ${{ env.FLAKEHUB_TOKEN }}
