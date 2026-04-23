@@ -11,7 +11,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            nix
             flake.nix
             flake.lock
           sparse-checkout-cone-mode: false
@@ -19,32 +18,9 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Install age & sops
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y age
-          sudo curl -Lo /usr/local/bin/sops https://github.com/getsops/sops/releases/download/v3.8.0/sops_3.8.0_linux_amd64
-          sudo chmod +x /usr/local/bin/sops
-
-      - name: Get FlakeHub token via SOPS
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          echo "$SOPS_AGE_KEY" > /tmp/agekey.txt
-          cd nix
-          sops --age-key-file=/tmp/agekey.txt -d secrets.yaml > /tmp/secrets.yaml
-          python3 << 'PYEOF'
-import yaml
-with open('/tmp/secrets.yaml') as f:
-    s = yaml.safe_load(f)
-t = s.get('flakehub',{}).get('token','')
-print('FLAKEHUB_TOKEN=' + t)
-PYEOF
-          >> $GITHUB_ENV
-
       - name: Publish to FlakeHub
         uses: DeterminateSystems/flakehub-push@main
         with:
           directory: .
           visibility: public
-          token: ${{ env.FLAKEHUB_TOKEN }}
+          token: ${{ secrets.FLAKEHUB_TOKEN }}
