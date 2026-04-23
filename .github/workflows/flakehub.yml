@@ -17,8 +17,15 @@ jobs:
             flake.lock
           sparse-checkout-cone-mode: false
 
-      - name: Install Nix & Python
+      - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Install age & sops
+        run: |
+          sudo apt-get update && sudo apt-get install -y age
+          curl -LO https://github.com/getsops/sops/releases/download/v3.8.0/sops_3.8.0_linux_amd64.tar.gz
+          tar -xzf sops_3.8.0_linux_amd64.tar.gz
+          sudo mv sops_3.8.0_linux_amd64 /usr/local/bin/sops
 
       - name: Get FlakeHub token
         env:
