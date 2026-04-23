@@ -24,12 +24,17 @@ let
   # the fenix flow too.
   cargo = pkgs.fenixRustToolchain or pkgs.cargo;
   cargoBin = "${cargo}/bin/cargo";
+  # cargo subcommands (fmt, clippy) resolve via PATH, not relative to cargo.
+  # Put the toolchain bin/ first so cargo-fmt/cargo-clippy come from the
+  # same toolchain as cargo itself.
+  toolchainPath = ''export PATH="${cargo}/bin:${pkgs.git}/bin:$PATH"'';
 in rec {
   # ── check-all ─────────────────────────────────────────────────────
   mkCheckAllApp = { name }: {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-check-all" ''
       set -euo pipefail
+      ${toolchainPath}
       echo "Running checks for ${name}..."
       echo ""
 
