@@ -86,7 +86,7 @@ in rec {
       echo ""
 
       echo "==> Regenerating Cargo.nix..."
-      ${crate2nix}/bin/crate2nix generate
+      ${crate2nix.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/crate2nix generate
       echo ""
 
       # Update Cargo.lock (ignored if network-free check fails)
@@ -176,7 +176,7 @@ in rec {
       echo ""
 
       echo "==> Regenerating Cargo.nix..."
-      ${crate2nix}/bin/crate2nix generate
+      ${crate2nix.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/crate2nix generate
       ${cargoBin} check --quiet 2>/dev/null || true
       ${pkgs.git}/bin/git add Cargo.toml Cargo.lock Cargo.nix
       ${pkgs.git}/bin/git commit -m "release: ${name} v$NEW_VERSION"
@@ -205,7 +205,7 @@ in rec {
     program = toString (pkgs.writeShellScript "${name}-regenerate" ''
       set -euo pipefail
       echo "Regenerating Cargo.nix for ${name}..."
-      ${crate2nix}/bin/crate2nix generate
+      ${crate2nix.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/crate2nix generate
       echo "Cargo.nix regenerated."
       echo ""
       echo "Don't forget to commit it:"
