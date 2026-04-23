@@ -79,7 +79,7 @@ in rec {
       echo ""
 
       echo "==> cargo set-version --bump $BUMP_TYPE"
-      ${pkgs.cargo-edit}/bin/cargo set-version --bump "$BUMP_TYPE"
+      ${pkgs.cargo-edit}/bin/cargo-set-version --bump "$BUMP_TYPE"
       NEW_VERSION=$(${cargoBin} metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
       echo ""
 
@@ -167,7 +167,7 @@ in rec {
 
       # Bump
       echo "==> cargo set-version --bump $BUMP_TYPE"
-      ${pkgs.cargo-edit}/bin/cargo set-version --bump "$BUMP_TYPE"
+      ${pkgs.cargo-edit}/bin/cargo-set-version --bump "$BUMP_TYPE"
       NEW_VERSION=$(${cargoBin} metadata --no-deps --format-version 1 | ${pkgs.jq}/bin/jq -r '.packages[0].version')
       echo ""
 
