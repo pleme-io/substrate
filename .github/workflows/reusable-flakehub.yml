@@ -27,8 +27,9 @@ on:
         required: false
         type: string
         default: .
-    secrets:
-      # No secrets needed - uses OIDC authentication
+    # No secrets stanza — publish uses OIDC. An empty `secrets:` with only
+    # a comment parses as `secrets: null` and breaks workflow-file
+    # validation for callers.
 
 jobs:
   publish:
