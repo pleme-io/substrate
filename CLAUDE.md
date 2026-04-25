@@ -92,9 +92,13 @@ lib/
 │   ├── k8s-manifest.nix           # K8s metadata, ArgoCD sync policies
 │   ├── argocd-appset.nix          # ApplicationSet generators
 │   ├── external-secrets.nix       # ExternalSecret manifests
-│   ├── pangea-workspace.nix       # Nix->YAML->pangea pattern
-│   ├── pangea-infra.nix           # Per-system Pangea builder
-│   ├── pangea-infra-flake.nix     # Zero-boilerplate Pangea flake
+│   ├── pangea-workspace.nix       # Nix->YAML->pangea pattern (no .rb template)
+│   ├── pangea-infra.nix           # Per-system top-level Pangea builder
+│   ├── pangea-infra-flake.nix     # Zero-boilerplate top-level Pangea flake
+│   ├── pangea-arch-workspace.nix  # CANONICAL — subdirectory workspace
+│   │                              # in pangea-architectures (six verbs:
+│   │                              # plan/deploy/destroy/synth/test/import)
+│   │                              # See pangea-architectures/docs/workspace-sdlc.md
 │   ├── ami-build.nix              # AMI build/test/promote pipeline
 │   │                              #   mkBuildTemplate, mkTestTemplate,
 │   │                              #   mkAmiBuildPipeline
