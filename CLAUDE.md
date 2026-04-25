@@ -92,18 +92,21 @@ lib/
 │   ├── k8s-manifest.nix           # K8s metadata, ArgoCD sync policies
 │   ├── argocd-appset.nix          # ApplicationSet generators
 │   ├── external-secrets.nix       # ExternalSecret manifests
-│   ├── pangea-workspace.nix       # Nix->YAML->pangea pattern (no .rb template)
-│   ├── pangea-infra.nix           # Per-system top-level Pangea builder
-│   ├── pangea-infra-flake.nix     # Zero-boilerplate top-level Pangea flake
 │   ├── pangea-arch-workspace.nix  # CANONICAL — subdirectory workspace
 │   │                              # in pangea-architectures (six verbs:
-│   │                              # plan/deploy/destroy/synth/test/import)
+│   │                              # plan/deploy/destroy/synth/test/import +
+│   │                              # extraApps for custom verbs).
 │   │                              # See pangea-architectures/docs/workspace-sdlc.md
+│   ├── pangea-workspace.nix       # Nix->YAML->pangea (no .rb template,
+│   │                              # whole config in Nix attrsets)
+│   ├── pangea-infra.nix           # Top-level repo-as-workspace builder
+│   ├── pangea-infra-flake.nix     # Top-level Pangea flake wrapper
+│   ├── fleet-pangea-infra.nix     # Top-level repo with declarative
+│   │                              # fleet flows in Nix
+│   ├── fleet-pangea-infra-flake.nix # ^ flake wrapper
 │   ├── ami-build.nix              # AMI build/test/promote pipeline
 │   │                              #   mkBuildTemplate, mkTestTemplate,
 │   │                              #   mkAmiBuildPipeline
-│   ├── infra-workspace.nix        # DEPRECATED (shim kept)
-│   ├── infra-state-backend.nix    # DEPRECATED (shim kept)
 │   ├── terraform-module.nix       # TF module validation
 │   ├── terraform-provider.nix     # TF provider builds
 │   ├── pulumi-provider.nix        # Pulumi SDK gen (5 languages)
