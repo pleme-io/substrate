@@ -99,6 +99,24 @@
   # passing a smaller list (e.g. [ "plan" "deploy" "test" ]).
   verbs ? [ "plan" "deploy" "destroy" "synth" "test" "import" ],
 
+  # Workspace-specific extra apps beyond the canonical six. Use for
+  # AMI build/sweep/commission/verify steps that aren't a pangea verb.
+  # Each entry: { command = "<shell command>"; runtimeInputs ? []; }
+  # The command runs inside the same prologue (cd to workspace, AWS
+  # profile, RUBYLIB, bundle install) the standard verbs use.
+  #
+  # Example:
+  #   extraApps = {
+  #     build-ami = {
+  #       command = "bundle exec ruby bin/build_ami.rb \"$@\"";
+  #     };
+  #     sweep = {
+  #       command = "bundle exec ruby bin/sweep_amis.rb \"$@\"";
+  #       runtimeInputs = [ pkgs.awscli2 ];
+  #     };
+  #   };
+  extraApps ? {},
+
   # Ruby version. Defaults to the gemfile-pinned 3.3 that pangea-core
   # requires; bumping should be coordinated with the gem ecosystem.
   ruby ? pkgs.ruby_3_3,
@@ -183,13 +201,30 @@ let
     else if verb == "import" then mkImportApp
     else mkPangeaApp verb;
 
-  apps = lib.listToAttrs (map (verb: {
+  mkExtraApp = verb: spec: pkgs.writeShellApplication {
+    name = "${name}-${verb}";
+    runtimeInputs = rubyEnv ++ (spec.runtimeInputs or []);
+    excludeShellChecks = [ "SC2086" "SC2046" ];
+    text = ''
+      ${prologue}
+      ${spec.command}
+    '';
+  };
+
+  standardApps = lib.listToAttrs (map (verb: {
     name = verb;
     value = {
       type = "app";
       program = "${appFor verb}/bin/${name}-${verb}";
     };
   }) verbs);
+
+  extraAppDefs = lib.mapAttrs (verb: spec: {
+    type = "app";
+    program = "${mkExtraApp verb spec}/bin/${name}-${verb}";
+  }) extraApps;
+
+  apps = standardApps // extraAppDefs;
 
 in {
   # Map of verb → `nix run .#<verb>` app definition.
