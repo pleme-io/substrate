@@ -138,11 +138,14 @@ in
       withMcp           = spec.withMcp          or false;
       mcpSubcommand     = spec.mcpSubcommand    or "mcp";
 
-      withAnvilMcp      = spec.withAnvilMcp     or false;
-      anvilArgs         = spec.anvilArgs        or
-                          (if mcpSubcommand == "" then [] else [ mcpSubcommand ]);
-      anvilEnv          = spec.anvilEnv         or {};
-      anvilDescription  = spec.anvilDescription or description;
+      withAnvilMcp        = spec.withAnvilMcp        or false;
+      anvilArgs           = spec.anvilArgs           or
+                            (if mcpSubcommand == "" then [] else [ mcpSubcommand ]);
+      anvilEnv            = spec.anvilEnv            or {};
+      anvilDescription    = spec.anvilDescription    or description;
+      anvilDefaultEnable  = spec.anvilDefaultEnable  or false;
+      anvilGateOnEnable   = spec.anvilGateOnEnable   or false;
+      shikumiGateOnEnable = spec.shikumiGateOnEnable or false;
 
       withHttp          = spec.withHttp         or false;
       httpSubcommand    = spec.httpSubcommand   or "serve";
@@ -234,7 +237,7 @@ in
         mcp = {
           enable = mkOption {
             type = types.bool;
-            default = false;
+            default = anvilDefaultEnable;
             description = ''
               Register ${binaryName} with blackmatter-anvil so AI agents
               (Claude Code, Cursor, OpenCode) can invoke it as an MCP
@@ -312,10 +315,10 @@ in
           hmOptionsTree = lib.setAttrByPath (hmNamespacePath ++ [ name ]) mergedHmOptions;
         in
         {
-          options = hmOptionsTree
-            // optionalAttrs (mergedServiceOptions != {}) {
-              services.${name} = (mergedServiceOptions.services.${name} or {});
-            };
+          # recursiveUpdate, not //, so when hmNamespace = "services" the
+          # inner mcp/settings options merge with the top-level enable/
+          # package instead of clobbering them.
+          options = lib.recursiveUpdate hmOptionsTree mergedServiceOptions;
 
           config = mkMerge [
             (mkIf cfg.enable (mkMerge [
@@ -370,19 +373,23 @@ in
               (extraHmConfig cfg)
             ]))
 
-            # Shikumi YAML — independent of programs.<name>.enable so it
-            # can be deployed as just-config (apps that consume it via
-            # in-cluster pods rather than the local PATH binary).
-            (mkIf (withShikumiConfig && shikumiCfg != null) {
+            # Shikumi YAML — independent of <hmNamespace>.<name>.enable by
+            # default so it can be deployed as just-config (apps that
+            # consume it via in-cluster pods rather than the local PATH
+            # binary). Set shikumiGateOnEnable = true to bind the YAML
+            # deploy to cfg.enable.
+            (mkIf (withShikumiConfig && shikumiCfg != null
+                   && (!shikumiGateOnEnable || (cfg.enable or false))) {
               home.file.${shikumiConfigPath} = {
                 source = yamlFormat.generate "${name}.yaml" shikumiCfg;
               };
             })
 
-            # Anvil MCP registration — also independent of cfg.enable;
-            # registering the server doesn't require the local binary
-            # (it can resolve from PATH or be invoked over a socket).
-            (mkIf (withAnvilMcp && mcpCfg != null && mcpCfg.enable) (
+            # Anvil MCP registration — independent of cfg.enable by
+            # default. Set anvilGateOnEnable = true for apps that want
+            # the parent enable to gate registration too.
+            (mkIf (withAnvilMcp && mcpCfg != null && mcpCfg.enable
+                   && (!anvilGateOnEnable || (cfg.enable or false))) (
               hmHelpers.mkAnvilRegistration {
                 inherit name;
                 command = "${mcpCfg.package}/bin/${binaryName}";
