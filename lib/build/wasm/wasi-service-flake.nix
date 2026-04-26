@@ -16,6 +16,10 @@
 #     };
 #
 # Produces: packages.default (Docker image), devShells.default, overlays.default
+#
+# Module trio (NixOS + nix-darwin + home-manager): pass `module = { ... }` to
+# auto-emit nixosModules.default / darwinModules.default / homeManagerModules.default.
+# See substrate/lib/module-trio.nix for the spec shape.
 {
   nixpkgs,
   substrate,
@@ -25,20 +29,38 @@
   self,
   serviceName,
   systems ? [ "aarch64-darwin" "x86_64-linux" "aarch64-linux" ],
+  module ? null,
   # All remaining args forwarded to wasi-service.nix
   ...
 } @ args:
 let
   serviceArgs = builtins.removeAttrs args [
-    "self" "systems"
+    "self" "systems" "module"
   ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
+  pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   hygiene = import ../../util/flake-hygiene.nix {
-    lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
+    lib = pkgsLib;
   };
   # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
   # Pass self.inputs if available (flake context), otherwise skip gracefully.
   _hygieneCheck = if self ? inputs then hygiene.enforceAll self.inputs else true;
+
+  trio =
+    if module == null then null
+    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio (
+      {
+        name = module.name or serviceName;
+        description = module.description or "${serviceName} WASI service";
+        packageAttr = module.packageAttr or serviceName;
+      } // (builtins.removeAttrs module [ "name" "description" "packageAttr" ])
+    );
+
+  moduleOutputs = if trio == null then {} else {
+    homeManagerModules.default = trio.homeManagerModule;
+    nixosModules.default = trio.nixosModule;
+    darwinModules.default = trio.darwinModule;
+  };
 
   mkPerSystem = system: let
     fenixPkgs = fenix.packages.${system};
@@ -84,5 +106,5 @@ in
       overlays.default = final: prev: {
         ${serviceName} = (mkPerSystem final.system).packages.default;
       };
-    };
+    } // moduleOutputs;
   }

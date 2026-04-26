@@ -24,14 +24,16 @@
   toolName,
   packageName,
   systems ? ["aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux"],
+  module ? null,
   ...
 } @ args:
 let
-  workspaceArgs = builtins.removeAttrs args [ "systems" ];
+  workspaceArgs = builtins.removeAttrs args [ "systems" "module" ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
   hygiene = import ../../util/flake-hygiene.nix {
     lib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   };
+  pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   # Enforce flake hygiene at evaluation time — fails fast on misconfiguration.
   # In workspace flakes, src = self, so src.inputs holds the flake inputs.
   _hygieneCheck =
@@ -46,6 +48,22 @@ let
       forge = if forge != null then forge.packages.${system}.default else null;
     };
   in rustWorkspace workspaceArgs;
+
+  trio =
+    if module == null then null
+    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio (
+      {
+        name = module.name or toolName;
+        description = module.description or "${toolName} CLI tool";
+        packageAttr = module.packageAttr or toolName;
+      } // (builtins.removeAttrs module [ "name" "description" "packageAttr" ])
+    );
+
+  moduleOutputs = if trio == null then {} else {
+    homeManagerModules.default = trio.homeManagerModule;
+    nixosModules.default = trio.nixosModule;
+    darwinModules.default = trio.darwinModule;
+  };
 in
   flakeWrapper.mkFlakeOutputs {
     inherit systems mkPerSystem;
@@ -53,5 +71,5 @@ in
       overlays.default = final: prev: {
         ${workspaceArgs.toolName} = (mkPerSystem final.system).packages.default;
       };
-    };
+    } // moduleOutputs;
   }

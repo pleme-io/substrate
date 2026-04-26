@@ -1,18 +1,16 @@
-# Complete multi-system flake outputs for a Zig CLI tool.
-# Wraps zig-tool-release.nix + eachSystem + overlays for zero-boilerplate
+# Complete multi-system flake outputs for a Go CLI tool.
+# Wraps go-tool.nix + eachSystem + overlays for zero-boilerplate
 # consumer flakes.
 #
-# Zig has built-in cross-compilation, so all 4 targets are built on the host
-# system — no remote builders, no fenix, no crate2nix needed.
-#
 # Usage in a flake:
-#   outputs = { self, nixpkgs, substrate, ... }:
-#     (import "${substrate}/lib/zig-tool-release-flake.nix" {
+#   outputs = { self, nixpkgs, flake-utils, substrate, ... }:
+#     (import "${substrate}/lib/go-tool-flake.nix" {
 #       inherit nixpkgs;
 #     }) {
-#       toolName = "z9s";
+#       toolName = "kubectl-tree";
+#       version = "0.4.6";
 #       src = self;
-#       repo = "drzln/z9s";
+#       vendorHash = "sha256-...";
 #     };
 #
 # Module trio (NixOS + nix-darwin + home-manager): pass `module = { ... }` to
@@ -28,7 +26,7 @@
   ...
 } @ args:
 let
-  toolArgs = builtins.removeAttrs args [ "systems" "module" ];
+  toolArgs = builtins.removeAttrs args [ "toolName" "systems" "module" ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
   pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   hygiene = import ../../util/flake-hygiene.nix {
@@ -40,11 +38,30 @@ let
     if args ? src && args.src ? inputs then hygiene.enforceAll args.src.inputs
     else true;
 
+  goToolBuilder = import ./tool.nix;
+
   mkPerSystem = system: let
-    zigTool = import ./tool-release.nix {
-      inherit system nixpkgs;
+    pkgs = import nixpkgs { inherit system; };
+    package = goToolBuilder.mkGoTool pkgs ({
+      pname = toolName;
+    } // toolArgs);
+  in {
+    packages = {
+      default = package;
+      ${toolName} = package;
     };
-  in zigTool toolArgs;
+    devShells = {
+      default = pkgs.mkShellNoCC {
+        packages = with pkgs; [ go gopls gotools ];
+      };
+    };
+    apps = {
+      default = {
+        type = "app";
+        program = "${package}/bin/${toolName}";
+      };
+    };
+  };
 
   trio =
     if module == null then null
@@ -66,7 +83,7 @@ in
     inherit systems mkPerSystem;
     extraOutputs = {
       overlays.default = final: prev: {
-        ${toolArgs.toolName} = (mkPerSystem final.system).packages.default;
+        ${toolName} = (mkPerSystem final.system).packages.default;
       };
     } // moduleOutputs;
   }

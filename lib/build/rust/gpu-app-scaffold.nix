@@ -86,6 +86,8 @@
 
     flakeNix = ''
       {
+        description = "${description}";
+
         inputs = {
           nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
           crate2nix.url = "github:nix-community/crate2nix";
@@ -97,19 +99,19 @@
         };
 
         outputs = { self, nixpkgs, crate2nix, flake-utils, substrate, ... }:
-          flake-utils.lib.eachDefaultSystem (system: let
-            pkgs = import nixpkgs { inherit system; };
-          in {
-            packages.default = pkgs.rustPlatform.buildRustPackage {
-              pname = "${kebab}";
-              version = "0.1.0";
-              src = self;
-              cargoLock.lockFile = ./Cargo.lock;
+          (import "''${substrate}/lib/rust-tool-release-flake.nix" {
+            inherit nixpkgs crate2nix flake-utils;
+          }) {
+            toolName = "${kebab}";
+            src = self;
+            repo = "${repo}";
+            module = {
+              description = "${description}";
+              withMcp = ${if hasFeature "mcp" then "true" else "false"};
+              withHttp = false;
+              withSystemDaemon = false;
             };
-            devShells.default = pkgs.mkShellNoCC {
-              packages = with pkgs; [ rustc cargo rust-analyzer clippy ];
-            };
-          });
+          };
       }
     '';
 

@@ -1,0 +1,147 @@
+# Reusable workflow: end-to-end Rust release.
+#
+#   build (matrix of targets)  ->  publish-release (GitHub release with binaries)
+#                              ->  publish-crate   (cargo publish, optional)
+#
+# Usage (from a consumer repo, .github/workflows/release.yml):
+#
+#   on:
+#     push:
+#       tags: ["v*"]
+#     workflow_dispatch: {}
+#
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/rust-release.yml@main
+#       with:
+#         crateName: my-tool
+#         publishCrate: true     # default true; set false for binary-only releases
+#       secrets:
+#         CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+#
+# This workflow intentionally re-implements the four-platform matrix used by
+# `tend`, `hayai`, `guardrail`, `kura`, etc. It does NOT call crates-publish.yml
+# as a sub-workflow because nested `workflow_call` requires the caller to inline
+# the secret plumbing — instead the `publish-crate` job runs the same `cargo
+# publish --allow-dirty` step inline, keeping crates-publish.yml usable on its
+# own as before.
+
+name: rust-release
+
+on:
+  workflow_call:
+    inputs:
+      crateName:
+        description: "Binary / crate name (used for `cargo build --bin` and artefact names)"
+        type: string
+        required: true
+      publishCrate:
+        description: "After binaries are released, also `cargo publish` to crates.io"
+        type: boolean
+        default: true
+      bumpType:
+        description: "Optional: when run via workflow_dispatch on main, bump version (major|minor|patch). Empty = no bump."
+        type: string
+        default: ""
+      runOnTag:
+        description: "Only create a GitHub release when ref is a tag (default true)"
+        type: boolean
+        default: true
+    secrets:
+      CRATES_API_TOKEN:
+        description: "crates.io API token. Required when publishCrate=true."
+        required: false
+
+jobs:
+  build:
+    name: ${{ matrix.slug }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: darwin-arm64
+            runner: macos-14
+            rust_target: aarch64-apple-darwin
+          - slug: darwin-x86_64
+            runner: macos-13
+            rust_target: x86_64-apple-darwin
+          - slug: linux-x86_64
+            runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
+          - slug: linux-arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Build release binary
+        env:
+          CRATE: ${{ inputs.crateName }}
+          TARGET: ${{ matrix.rust_target }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          cargo build --release --bin "$CRATE" --target "$TARGET"
+          cp "target/$TARGET/release/$CRATE" "$CRATE-$SLUG"
+          shasum -a 256 "$CRATE-$SLUG" > "$CRATE-$SLUG.sha256"
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.crateName }}-${{ matrix.slug }}
+          path: |
+            ${{ inputs.crateName }}-${{ matrix.slug }}
+            ${{ inputs.crateName }}-${{ matrix.slug }}.sha256
+
+  publish-release:
+    name: Publish GitHub release
+    if: inputs.runOnTag && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artefact tree
+        env:
+          CRATE: ${{ inputs.crateName }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find dist -type f \( -name "${CRATE}-*" -o -name "${CRATE}-*.sha256" \) -exec cp {} release/ \;
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  publish-crate:
+    name: Publish to crates.io
+    if: inputs.publishCrate && startsWith(github.ref, 'refs/tags/v')
+    needs: publish-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+        run: cargo publish --allow-dirty
