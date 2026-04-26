@@ -35,15 +35,37 @@
 # ── Spec fields ────────────────────────────────────────────────────────────
 #
 #   name              tool/service identifier (string). Drives option namespace
-#                     (programs.<name> for HM, services.<name> for system).
+#                     (<hmNamespace>.<name> for HM, services.<name> for system).
 #   description       human-readable description (string).
 #   binaryName        binary name in ${package}/bin/ (default: name).
 #   packageAttr       overlay attr name (default: name).
+#
+#   hmNamespace       option-tree path for the HM module (default: "programs").
+#                     Other common values: "blackmatter.components", "services".
+#                     Drives where the consumer config lives:
+#                       hmNamespace = "programs"               → programs.<name>
+#                       hmNamespace = "blackmatter.components" → blackmatter.components.<name>
+#                     Use this to match the existing fleet convention without
+#                     adding extraHmOptions. Anvil-MCP / shikumi sub-namespaces
+#                     remain under services.<name>.* regardless.
 #
 #   withMcp           bool — add programs.<name>.enableMcpBin (HM only).
 #                     Writes a ~/.local/bin/<name>-mcp shim that runs
 #                     `<binary> <mcpSubcommand> "$@"`.
 #   mcpSubcommand     subcommand string (default: "mcp").
+#
+#   withAnvilMcp      bool — add services.<name>.mcp.{enable, package, scopes,
+#                     agents} (HM only). Registers the binary with
+#                     blackmatter-anvil so AI agents (Claude Code, Cursor,
+#                     OpenCode) can drive it directly without a PATH shim.
+#                     Emits blackmatter.components.anvil.mcp.servers.<name>.
+#                     Independent of withMcp; both can be true (rare).
+#   anvilArgs         list of args passed to the binary (default: ["<mcpSubcommand>"]
+#                     if mcpSubcommand != "" else []). Override for bare-bones
+#                     binaries that don't take a "mcp" subcommand (e.g. umbra).
+#   anvilEnv          attrset of env vars for the anvil entry (default: {}).
+#   anvilDescription  human-readable description for the anvil entry
+#                     (default: spec.description).
 #
 #   withHttp          bool — add programs.<name>.enableHttpService (HM only).
 #                     Spawns user-level launchd agent (Darwin) or systemd
@@ -52,10 +74,33 @@
 #   httpSubcommand    subcommand string (default: "serve").
 #   defaultHttpAddr   default listen address (default: "127.0.0.1:7860").
 #
-#   withSystemDaemon  bool — add services.<name>.daemon to NixOS + Darwin.
-#                     NixOS: systemd system service via mkNixOSService.
-#                     Darwin: launchd daemon via mkLaunchdDaemon.
+#   withSystemDaemon  bool — add services.<name>.daemon to NixOS + Darwin
+#                     (system-level / root). NixOS: systemd system service
+#                     via mkNixOSService. Darwin: launchd daemon via
+#                     mkLaunchdDaemon. Use this for tools that genuinely
+#                     need root (k3s, networkd, etc.). For per-user
+#                     daemons, prefer withUserDaemon.
 #   daemonSubcommand  subcommand string (default: "daemon").
+#
+#   withUserDaemon    bool — add programs.<name>.daemon (HM only). Spawns a
+#                     user-level launchd agent (Darwin) or systemd user unit
+#                     (Linux). This is the dominant fleet pattern (kekkai,
+#                     shirase, mamorigami, hikki, etc.) — most pleme-io
+#                     daemons don't need root.
+#   userDaemonSubcommand
+#                     subcommand string (default: same as daemonSubcommand).
+#   userDaemonExtraArgs
+#                     list of additional CLI args appended after the
+#                     subcommand (default: []).
+#   userDaemonEnv     attrset of env vars (default: {}).
+#
+#   withShikumiConfig bool — add services.<name>.settings (HM only) and
+#                     deploy a YAML config to ~/.config/<name>/<name>.yaml.
+#                     Used by shikumi-style apps that read a YAML file at
+#                     startup. anvil entries auto-pick up <NAME>_CONFIG env.
+#   shikumiDefaults   attrset of default settings (default: {}).
+#   shikumiConfigPath path string for the YAML, relative to ~ (default:
+#                     ".config/<name>/<name>.yaml").
 #
 #   extraHmOptions    attrset of additional HM options to merge (default: {}).
 #   extraSystemOptions attrset of additional NixOS+Darwin options (default: {}).
@@ -87,8 +132,17 @@ in
       binaryName        = spec.binaryName       or name;
       packageAttr       = spec.packageAttr      or name;
 
+      hmNamespace       = spec.hmNamespace      or "programs";
+      hmNamespacePath   = lib.splitString "." hmNamespace;
+
       withMcp           = spec.withMcp          or false;
       mcpSubcommand     = spec.mcpSubcommand    or "mcp";
+
+      withAnvilMcp      = spec.withAnvilMcp     or false;
+      anvilArgs         = spec.anvilArgs        or
+                          (if mcpSubcommand == "" then [] else [ mcpSubcommand ]);
+      anvilEnv          = spec.anvilEnv         or {};
+      anvilDescription  = spec.anvilDescription or description;
 
       withHttp          = spec.withHttp         or false;
       httpSubcommand    = spec.httpSubcommand   or "serve";
@@ -96,6 +150,17 @@ in
 
       withSystemDaemon  = spec.withSystemDaemon or false;
       daemonSubcommand  = spec.daemonSubcommand or "daemon";
+
+      withUserDaemon       = spec.withUserDaemon       or false;
+      userDaemonSubcommand = spec.userDaemonSubcommand or daemonSubcommand;
+      userDaemonExtraArgs  = spec.userDaemonExtraArgs  or [];
+      userDaemonEnv        = spec.userDaemonEnv        or {};
+
+      withShikumiConfig = spec.withShikumiConfig or false;
+      shikumiDefaults   = spec.shikumiDefaults   or {};
+      shikumiConfigPath = spec.shikumiConfigPath or ".config/${name}/${name}.yaml";
+      shikumiEnvVar     = spec.shikumiEnvVar     or
+                          (lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] name) + "_CONFIG");
 
       extraHmOptions     = spec.extraHmOptions     or {};
       extraSystemOptions = spec.extraSystemOptions or {};
@@ -137,7 +202,77 @@ in
           default = defaultHttpAddr;
           description = "Listen address for the HTTP service.";
         };
+      } // optionalAttrs withUserDaemon {
+        daemon = {
+          enable = mkOption {
+            type = types.bool;
+            default = false;
+            description = ''
+              Run ${binaryName} as a user-level daemon (launchd agent on
+              Darwin, systemd user unit on Linux). The daemon is owned
+              by the logged-in user — for root-level daemons, see
+              services.${name}.daemon (system module).
+            '';
+          };
+          extraArgs = mkOption {
+            type = types.listOf types.str;
+            default = userDaemonExtraArgs;
+            description = "Extra args appended to `${binaryName} ${userDaemonSubcommand}`.";
+          };
+          environment = mkOption {
+            type = types.attrsOf types.str;
+            default = userDaemonEnv;
+            description = "Environment variables for the user daemon.";
+          };
+        };
       } // extraHmOptions;
+
+      # Sub-namespace options for anvil MCP and shikumi config.
+      # Both nest under services.<name>.* — they share the same parent,
+      # so build the inner attrset first, then attach.
+      mkServiceInner = pkgs: {} // optionalAttrs withAnvilMcp {
+        mcp = {
+          enable = mkOption {
+            type = types.bool;
+            default = false;
+            description = ''
+              Register ${binaryName} with blackmatter-anvil so AI agents
+              (Claude Code, Cursor, OpenCode) can invoke it as an MCP
+              server. Emits blackmatter.components.anvil.mcp.servers.${name}.
+            '';
+          };
+          package = mkOption {
+            type = types.package;
+            default = pkgs.${packageAttr};
+            defaultText = literalExpression "pkgs.${packageAttr}";
+            description = "Package providing the MCP server binary.";
+          };
+          scopes = mkOption {
+            type = types.listOf types.str;
+            default = [];
+            description = "Anvil scope filter; empty = available everywhere.";
+          };
+          agents = mkOption {
+            type = types.listOf types.str;
+            default = [];
+            description = "Anvil agent filter; empty = every agent.";
+          };
+        };
+      } // optionalAttrs withShikumiConfig {
+        settings = mkOption {
+          type = (pkgs.formats.yaml {}).type;
+          default = shikumiDefaults;
+          description = ''
+            shikumi-style YAML settings for ${name}. Written to
+            ~/${shikumiConfigPath} on activation. Reachable via
+            ${shikumiEnvVar} env var.
+          '';
+        };
+      };
+
+      hmServiceOptions = pkgs:
+        let inner = mkServiceInner pkgs;
+        in if inner == {} then {} else { services.${name} = inner; };
 
       systemOptions = pkgs: {
         enable = mkEnableOption description;
@@ -167,43 +302,103 @@ in
       # ─── home-manager module ────────────────────────────────────────
       homeManagerModule = { lib, config, pkgs, ... }:
         let
-          cfg = config.programs.${name};
+          cfg = lib.attrByPath (hmNamespacePath ++ [ name ]) {} config;
+          mcpCfg = config.services.${name}.mcp or null;
+          shikumiCfg = config.services.${name}.settings or null;
+          homeDir = config.home.homeDirectory;
+          yamlFormat = pkgs.formats.yaml {};
+          mergedHmOptions = hmOptions pkgs;
+          mergedServiceOptions = hmServiceOptions pkgs;
+          hmOptionsTree = lib.setAttrByPath (hmNamespacePath ++ [ name ]) mergedHmOptions;
         in
         {
-          options.programs.${name} = hmOptions pkgs;
+          options = hmOptionsTree
+            // optionalAttrs (mergedServiceOptions != {}) {
+              services.${name} = (mergedServiceOptions.services.${name} or {});
+            };
 
-          config = mkIf cfg.enable (mkMerge [
-            { home.packages = [ cfg.package ]; }
+          config = mkMerge [
+            (mkIf cfg.enable (mkMerge [
+              { home.packages = [ cfg.package ]; }
 
-            (mkIf (withMcp && (cfg.enableMcpBin or false)) {
-              home.file.".local/bin/${name}-mcp" = {
-                executable = true;
-                text = ''
-                  #!${pkgs.bash}/bin/bash
-                  exec ${cfg.package}/bin/${binaryName} ${mcpSubcommand} "$@"
-                '';
+              (mkIf (withMcp && (cfg.enableMcpBin or false)) {
+                home.file.".local/bin/${name}-mcp" = {
+                  executable = true;
+                  text = ''
+                    #!${pkgs.bash}/bin/bash
+                    exec ${cfg.package}/bin/${binaryName} ${mcpSubcommand} "$@"
+                  '';
+                };
+              })
+
+              (mkIf (withHttp && (cfg.enableHttpService or false)) (
+                if pkgs.stdenv.isDarwin
+                then hmHelpers.mkLaunchdService {
+                  name = "${name}-http";
+                  label = "io.pleme.${name}.http";
+                  command = "${cfg.package}/bin/${binaryName}";
+                  args = [ httpSubcommand "--addr" cfg.httpAddr ];
+                  logDir = "${homeDir}/Library/Logs";
+                }
+                else hmHelpers.mkSystemdService {
+                  name = "${name}-http";
+                  description = "${description} HTTP service";
+                  command = "${cfg.package}/bin/${binaryName}";
+                  args = [ httpSubcommand "--addr" cfg.httpAddr ];
+                }
+              ))
+
+              (mkIf (withUserDaemon && (cfg.daemon.enable or false)) (
+                if pkgs.stdenv.isDarwin
+                then hmHelpers.mkLaunchdService {
+                  name = "${name}-daemon";
+                  label = "io.pleme.${name}.daemon";
+                  command = "${cfg.package}/bin/${binaryName}";
+                  args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
+                  env = cfg.daemon.environment;
+                  logDir = "${homeDir}/Library/Logs";
+                }
+                else hmHelpers.mkSystemdService {
+                  name = "${name}-daemon";
+                  description = "${description} daemon";
+                  command = "${cfg.package}/bin/${binaryName}";
+                  args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
+                  env = cfg.daemon.environment;
+                }
+              ))
+
+              (extraHmConfig cfg)
+            ]))
+
+            # Shikumi YAML — independent of programs.<name>.enable so it
+            # can be deployed as just-config (apps that consume it via
+            # in-cluster pods rather than the local PATH binary).
+            (mkIf (withShikumiConfig && shikumiCfg != null) {
+              home.file.${shikumiConfigPath} = {
+                source = yamlFormat.generate "${name}.yaml" shikumiCfg;
               };
             })
 
-            (mkIf (withHttp && (cfg.enableHttpService or false)) (
-              if pkgs.stdenv.isDarwin
-              then hmHelpers.mkLaunchdService {
-                name = "${name}-http";
-                label = "io.pleme.${name}.http";
-                command = "${cfg.package}/bin/${binaryName}";
-                args = [ httpSubcommand "--addr" cfg.httpAddr ];
-                logDir = "${config.home.homeDirectory}/Library/Logs";
-              }
-              else hmHelpers.mkSystemdService {
-                name = "${name}-http";
-                description = "${description} HTTP service";
-                command = "${cfg.package}/bin/${binaryName}";
-                args = [ httpSubcommand "--addr" cfg.httpAddr ];
+            # Anvil MCP registration — also independent of cfg.enable;
+            # registering the server doesn't require the local binary
+            # (it can resolve from PATH or be invoked over a socket).
+            (mkIf (withAnvilMcp && mcpCfg != null && mcpCfg.enable) (
+              hmHelpers.mkAnvilRegistration {
+                inherit name;
+                command = "${mcpCfg.package}/bin/${binaryName}";
+                args = anvilArgs;
+                env = anvilEnv // (
+                  if withShikumiConfig
+                  then { ${shikumiEnvVar} = "${homeDir}/${shikumiConfigPath}"; }
+                  else {}
+                );
+                description = anvilDescription;
+                scopes = mcpCfg.scopes;
+                agents = mcpCfg.agents;
+                package = mcpCfg.package;
               }
             ))
-
-            (extraHmConfig cfg)
-          ]);
+          ];
         };
 
       # ─── NixOS module (system-level systemd) ────────────────────────
