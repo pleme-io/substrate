@@ -229,17 +229,37 @@ in
       # Convert a field spec ({ type = "int"; default = X; description = "..."; })
       # into an mkOption call. Strings name primitive Nix types; raw
       # types.* expressions pass through unchanged.
+      #
+      # Type alias dictionary (covers ~95% of fleet config field shapes):
+      #   primitives:    int | str | bool | float | path
+      #   nullable:      nullOrStr | nullOrInt | nullOrBool | nullOrPath
+      #   collections:   listOfStr | listOfInt | listOfBool | listOfPath
+      #                  attrsOfStr | attrsOfInt | attrsOfBool | attrs
+      #   constrained:   intRange (with field.min / field.max)
+      #   anything else: pass field.type as a raw types.* expression.
       resolveFieldType = field:
         if field ? type then
           if builtins.isString field.type then
-            if field.type == "int" then types.int
-            else if field.type == "str" then types.str
-            else if field.type == "bool" then types.bool
-            else if field.type == "float" then types.float
-            else if field.type == "path" then types.path
-            else if field.type == "intRange" then
+            if      field.type == "int"          then types.int
+            else if field.type == "str"          then types.str
+            else if field.type == "bool"         then types.bool
+            else if field.type == "float"        then types.float
+            else if field.type == "path"         then types.path
+            else if field.type == "nullOrStr"    then types.nullOr types.str
+            else if field.type == "nullOrInt"    then types.nullOr types.int
+            else if field.type == "nullOrBool"   then types.nullOr types.bool
+            else if field.type == "nullOrPath"   then types.nullOr types.path
+            else if field.type == "listOfStr"    then types.listOf types.str
+            else if field.type == "listOfInt"    then types.listOf types.int
+            else if field.type == "listOfBool"   then types.listOf types.bool
+            else if field.type == "listOfPath"   then types.listOf types.path
+            else if field.type == "attrsOfStr"   then types.attrsOf types.str
+            else if field.type == "attrsOfInt"   then types.attrsOf types.int
+            else if field.type == "attrsOfBool"  then types.attrsOf types.bool
+            else if field.type == "attrs"        then types.attrs
+            else if field.type == "intRange"     then
               types.ints.between (field.min or 0) (field.max or 65535)
-            else throw "module-trio: unknown shikumiTypedGroup field type '${field.type}' (use int|str|bool|float|path|intRange or pass a types.* expression directly)"
+            else throw "module-trio: unknown shikumiTypedGroup field type '${field.type}' — see the type-alias dictionary in module-trio.nix's resolveFieldType, or pass field.type as a raw types.* expression."
           else field.type
         else types.unspecified;
 
