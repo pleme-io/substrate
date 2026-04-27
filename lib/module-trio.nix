@@ -263,7 +263,18 @@ in
         };
       } // optionalAttrs withShikumiConfig {
         settings = mkOption {
-          type = (pkgs.formats.yaml {}).type;
+          # `lib.types.attrs` instead of `(pkgs.formats.yaml {}).type` —
+          # the latter forces `pkgs` evaluation when the module system
+          # walks option types to compute `_module.freeformType` of the
+          # enclosing HM submodule, and `pkgs` in this scope comes from
+          # `_module.args.pkgs` which depends on `config`, which depends
+          # on `freeformType` … infinite recursion. The pkgs-derived
+          # YAML schema added a small amount of static validation; we
+          # trade it for module-system tractability. The downstream
+          # validation (`yamlFormat.generate` in the config block,
+          # below) still uses pkgs and runs at activation, where pkgs
+          # is fully resolved.
+          type = lib.types.attrs;
           default = shikumiDefaults;
           description = ''
             shikumi-style YAML settings for ${name}. Written to
@@ -334,41 +345,48 @@ in
                 };
               })
 
-              (mkIf (withHttp && (cfg.enableHttpService or false)) (
-                if pkgs.stdenv.isDarwin
-                then hmHelpers.mkLaunchdService {
+              # Platform branches as TWO mkIfs — never as `if pkgs… then A
+              # else B` inside an mkIf body. The latter forces module-system
+              # type-walk to evaluate the body to determine its shape (A vs
+              # B differ in attr structure), which forces `pkgs` from
+              # `_module.args`, which depends on `config`, which depends
+              # on `freeformType` of this same submodule. Two mkIfs make
+              # the body shape predictable per platform; the platform
+              # selector lives in the *condition*, which mkIf is allowed
+              # to defer.
+              (mkIf (withHttp && (cfg.enableHttpService or false) && pkgs.stdenv.isDarwin)
+                (hmHelpers.mkLaunchdService {
                   name = "${name}-http";
                   label = "io.pleme.${name}.http";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = [ httpSubcommand "--addr" cfg.httpAddr ];
                   logDir = "${homeDir}/Library/Logs";
-                }
-                else hmHelpers.mkSystemdService {
+                }))
+              (mkIf (withHttp && (cfg.enableHttpService or false) && !pkgs.stdenv.isDarwin)
+                (hmHelpers.mkSystemdService {
                   name = "${name}-http";
                   description = "${description} HTTP service";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = [ httpSubcommand "--addr" cfg.httpAddr ];
-                }
-              ))
+                }))
 
-              (mkIf (withUserDaemon && (cfg.daemon.enable or false)) (
-                if pkgs.stdenv.isDarwin
-                then hmHelpers.mkLaunchdService {
+              (mkIf (withUserDaemon && (cfg.daemon.enable or false) && pkgs.stdenv.isDarwin)
+                (hmHelpers.mkLaunchdService {
                   name = "${name}-daemon";
                   label = "io.pleme.${name}.daemon";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
                   logDir = "${homeDir}/Library/Logs";
-                }
-                else hmHelpers.mkSystemdService {
+                }))
+              (mkIf (withUserDaemon && (cfg.daemon.enable or false) && !pkgs.stdenv.isDarwin)
+                (hmHelpers.mkSystemdService {
                   name = "${name}-daemon";
                   description = "${description} daemon";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
-                }
-              ))
+                }))
 
               (extraHmConfig cfg)
             ]))
