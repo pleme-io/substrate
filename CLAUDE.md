@@ -1,5 +1,16 @@
 # Substrate
 
+> **★★★ CSE / Knowable Construction.** Substrate is the *primary
+> rendering layer* of Constructive Substrate Engineering — the typed
+> primitives here (rust-tool-release-flake, module-trio, helm builders,
+> etc.) are how typed source becomes concrete artifact across every
+> environment. Per the Compounding Directive's renderer-reliability
+> requirements, every helper here ships with named contracts +
+> property-based tests + round-trip + differential + snapshot tests.
+> Canonical methodology spec:
+> [`pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md`](https://github.com/pleme-io/theory/blob/main/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md).
+> Operational directive: org-level pleme-io/CLAUDE.md ★★★ section.
+
 <!-- Blackmatter alignment: pillars 8, 9 -->
 <!-- See ~/code/github/pleme-io/BLACKMATTER.md for pillar definitions. -->
 
