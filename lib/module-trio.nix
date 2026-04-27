@@ -105,8 +105,54 @@
 #   extraHmOptions    attrset of additional HM options to merge (default: {}).
 #   extraSystemOptions attrset of additional NixOS+Darwin options (default: {}).
 #   extraHmConfig     cfg → config attrset, merged into HM module (default: _: {}).
+#                     Legacy positional form. For pkgs-aware extras, prefer
+#                     extraHmConfigFn below.
+#   extraHmConfigFn   { cfg, pkgs, lib, config } → config (default: _: {}).
+#                     Same as extraHmConfig but receives pkgs/lib/config so
+#                     consumers can install additional packages, generate
+#                     YAML, or reference helpers without re-importing them.
+#                     Both extraHmConfig and extraHmConfigFn run if both set.
 #   extraNixosConfig  cfg → config attrset, merged into NixOS module (default: _: {}).
 #   extraDarwinConfig cfg → config attrset, merged into Darwin module (default: _: {}).
+#
+#   extraPackages     list of pkgs.<attr> names to install alongside the
+#                     primary package when <hmNamespace>.<name>.enable is
+#                     true (default: []). Useful for apps that ship multiple
+#                     binaries via separate overlay attrs (e.g. wasm-platform
+#                     bundles wasmtime + wasm-tools).
+#
+#   darwinOnly        bool — gate the entire HM/Darwin module on
+#                     pkgs.stdenv.hostPlatform.isDarwin (default: false).
+#                     The package is omitted from home.packages and the
+#                     option tree stays empty on Linux. NixOS module is also
+#                     a no-op. Use for Darwin-exclusive tools (Apple
+#                     framework wrappers, Homebrew bridges, etc.).
+#   linuxOnly         bool — symmetric gate for Linux-only tools.
+#
+#   shikumiTypedGroups (attrset of group → field → spec, default: {})
+#                     Typed nested config surface that round-trips to the
+#                     shikumi YAML. Each group becomes a sub-namespace under
+#                     <hmNamespace>.<name>.<group>; each field becomes a
+#                     typed mkOption. Settings auto-merge into
+#                     services.<name>.settings (when withShikumiConfig is on).
+#                     Spec shape per field:
+#                       { type = "int" | "str" | "bool" | "float" | "path" |
+#                                "intRange" | types.<expr>;
+#                         default = <value>;
+#                         description = "<doc>";
+#                         min = <int>; max = <int>;   # only for intRange
+#                       }
+#                     Example:
+#                       shikumiTypedGroups = {
+#                         appearance = {
+#                           width  = { type = "int"; default = 1280; description = "Window width"; };
+#                           height = { type = "int"; default = 720;  description = "Window height"; };
+#                         };
+#                         storage = {
+#                           notes_dir = { type = "str"; default = "~/notes"; description = "Notes path"; };
+#                         };
+#                       };
+#                     Renders to options.<hmNamespace>.<name>.{appearance,storage}.* and serializes to YAML.
 #
 # ── Returns ────────────────────────────────────────────────────────────────
 #
@@ -168,8 +214,55 @@ in
       extraHmOptions     = spec.extraHmOptions     or {};
       extraSystemOptions = spec.extraSystemOptions or {};
       extraHmConfig      = spec.extraHmConfig      or (_: {});
+      extraHmConfigFn    = spec.extraHmConfigFn    or (_: {});
       extraNixosConfig   = spec.extraNixosConfig   or (_: {});
       extraDarwinConfig  = spec.extraDarwinConfig  or (_: {});
+
+      extraPackages      = spec.extraPackages      or [];
+
+      darwinOnly         = spec.darwinOnly         or false;
+      linuxOnly          = spec.linuxOnly          or false;
+
+      shikumiTypedGroups = spec.shikumiTypedGroups or {};
+
+      # ── Typed-group rendering helpers ────────────────────────────────
+      # Convert a field spec ({ type = "int"; default = X; description = "..."; })
+      # into an mkOption call. Strings name primitive Nix types; raw
+      # types.* expressions pass through unchanged.
+      resolveFieldType = field:
+        if field ? type then
+          if builtins.isString field.type then
+            if field.type == "int" then types.int
+            else if field.type == "str" then types.str
+            else if field.type == "bool" then types.bool
+            else if field.type == "float" then types.float
+            else if field.type == "path" then types.path
+            else if field.type == "intRange" then
+              types.ints.between (field.min or 0) (field.max or 65535)
+            else throw "module-trio: unknown shikumiTypedGroup field type '${field.type}' (use int|str|bool|float|path|intRange or pass a types.* expression directly)"
+          else field.type
+        else types.unspecified;
+
+      mkTypedField = name: field: mkOption ({
+        type = resolveFieldType field;
+      } // optionalAttrs (field ? default) {
+        inherit (field) default;
+      } // optionalAttrs (field ? description) {
+        inherit (field) description;
+      });
+
+      # Group spec → { <field> = mkOption ...; }
+      mkTypedGroupOptions = group: lib.mapAttrs mkTypedField group;
+
+      # All typed-group options as { <group>.<field> = mkOption ...; }
+      typedGroupsOptions = lib.mapAttrs (_: mkTypedGroupOptions) shikumiTypedGroups;
+
+      # Extract typed-group values from cfg as { <group> = { <field> = value; }; }
+      # for serialization into the shikumi YAML.
+      typedGroupsValues = cfg:
+        lib.mapAttrs (groupName: groupSpec:
+          lib.mapAttrs (fieldName: _: cfg.${groupName}.${fieldName} or null) groupSpec
+        ) shikumiTypedGroups;
 
       mkPackageOption = pkgs: mkOption {
         type = types.package;
@@ -181,7 +274,7 @@ in
       hmOptions = pkgs: {
         enable = mkEnableOption description;
         package = mkPackageOption pkgs;
-      } // optionalAttrs withMcp {
+      } // typedGroupsOptions // optionalAttrs withMcp {
         enableMcpBin = mkOption {
           type = types.bool;
           default = false;
@@ -318,12 +411,28 @@ in
         let
           cfg = lib.attrByPath (hmNamespacePath ++ [ name ]) {} config;
           mcpCfg = config.services.${name}.mcp or null;
-          shikumiCfg = config.services.${name}.settings or null;
+          # Merge typed-group field values into the shikumi YAML payload.
+          # Authored settings (services.<name>.settings) take priority;
+          # typed-group values fill gaps. This means consumers can either
+          # set the typed fields or override the whole settings tree.
+          authoredShikumi = config.services.${name}.settings or null;
+          typedShikumi    = if shikumiTypedGroups == {} then null
+                            else typedGroupsValues cfg;
+          shikumiCfg =
+            if authoredShikumi != null && typedShikumi != null
+            then lib.recursiveUpdate typedShikumi authoredShikumi
+            else if authoredShikumi != null then authoredShikumi
+            else typedShikumi;
           homeDir = config.home.homeDirectory;
           yamlFormat = pkgs.formats.yaml {};
           mergedHmOptions = hmOptions pkgs;
           mergedServiceOptions = hmServiceOptions pkgs;
           hmOptionsTree = lib.setAttrByPath (hmNamespacePath ++ [ name ]) mergedHmOptions;
+
+          # Platform gate: composes with cfg.enable.
+          platformOk =
+            (!darwinOnly || pkgs.stdenv.hostPlatform.isDarwin)
+            && (!linuxOnly || pkgs.stdenv.hostPlatform.isLinux);
         in
         {
           # recursiveUpdate, not //, so when hmNamespace = "services" the
@@ -332,8 +441,11 @@ in
           options = lib.recursiveUpdate hmOptionsTree mergedServiceOptions;
 
           config = mkMerge [
-            (mkIf cfg.enable (mkMerge [
-              { home.packages = [ cfg.package ]; }
+            (mkIf (cfg.enable && platformOk) (mkMerge [
+              {
+                home.packages = [ cfg.package ]
+                  ++ map (n: pkgs.${n}) extraPackages;
+              }
 
               (mkIf (withMcp && (cfg.enableMcpBin or false)) {
                 home.file.".local/bin/${name}-mcp" = {
@@ -389,6 +501,7 @@ in
                 }))
 
               (extraHmConfig cfg)
+              (extraHmConfigFn { inherit cfg pkgs lib config; })
             ]))
 
             # Shikumi YAML — independent of <hmNamespace>.<name>.enable by
