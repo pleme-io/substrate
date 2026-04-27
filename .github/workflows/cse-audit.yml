@@ -1,0 +1,98 @@
+# Reusable CSE adherence audit workflow.
+#
+# Constructive Substrate Engineering (CSE) is the pleme-io fleet's
+# operating methodology — see
+# pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md.
+# This workflow runs `cse-lint audit --strict` against the consumer
+# repo's workspace and fails the build if any CSE invariant is
+# violated. Adopting this gate prevents CSE regressions from landing.
+#
+# Consumer usage:
+#
+#   # .github/workflows/cse-audit.yml
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#
+#   jobs:
+#     cse-audit:
+#       uses: pleme-io/substrate/.github/workflows/cse-audit.yml@main
+#       with:
+#         workspace_root: "."   # default; the repo's own working tree
+#       secrets: inherit
+#
+# Inputs:
+#
+#   workspace_root  Path to the workspace root the audit walks. For a
+#                   single-repo audit, "." is correct (the consumer
+#                   repo's checkout root). For a multi-repo aggregator
+#                   workspace, point at the directory containing the
+#                   org's repos.
+#                   Default: "."
+#
+#   strict          If true, exit non-zero on any violation. If false,
+#                   the audit reports but the workflow still succeeds —
+#                   useful for adoption phase before the fleet is
+#                   100% clean.
+#                   Default: true
+#
+#   only            Comma-separated repo names to audit (passed to
+#                   `cse-lint audit --only`). Default: all repos in
+#                   workspace_root.
+#
+# Notes:
+#   - cse-lint is consumed via `nix run github:pleme-io/cse-lint --`,
+#     which builds it on-demand from substrate's rust-tool-release-flake
+#     output. No prebuilt binary required.
+#   - The workflow uses the same nix-installer + magic-cache action set
+#     as the rest of substrate's reusable workflows, for cache reuse
+#     across all CI jobs.
+
+name: CSE Audit (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      workspace_root:
+        type: string
+        default: "."
+      strict:
+        type: boolean
+        default: true
+      only:
+        type: string
+        default: ""
+
+jobs:
+  cse-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run cse-lint audit
+        env:
+          ROOT: ${{ inputs.workspace_root }}
+          STRICT: ${{ inputs.strict }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          ARGS="audit"
+          if [ -n "$ONLY" ]; then
+            ARGS="$ARGS --only $ONLY"
+          fi
+          if [ "$STRICT" = "true" ]; then
+            ARGS="$ARGS --strict"
+          fi
+          ARGS="$ARGS $ROOT"
+          # nix run resolves cse-lint from pleme-io/cse-lint flake output.
+          # The repo's flake.nix uses substrate's rust-tool-release-flake,
+          # which auto-emits the appropriate apps/<system>/default.
+          nix run github:pleme-io/cse-lint -- $ARGS
