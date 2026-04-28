@@ -1122,6 +1122,27 @@ in rec {
   repoFlakeBuilder = ./util/repo-flake.nix;
 
   # ============================================================================
+  # MONOREPO FLAKE AGGREGATOR (standalone import path)
+  # ============================================================================
+  # Aggregate N sub-flakes (each with their own flake.nix) into a single root
+  # flake. Generalises the `mkSubTool` pattern that originated in
+  # pleme-io/dev-tools. One entry in `subTools` adds a sub-tool everywhere.
+  #
+  # Usage:
+  #   outputs = { self, nixpkgs, flake-utils, crate2nix, substrate, ... }@inputs:
+  #     (import "${inputs.substrate}/lib/util/monorepo-flake.nix" {
+  #       inherit (inputs) nixpkgs flake-utils;
+  #     }) {
+  #       inherit self;
+  #       sharedInputs = { inherit nixpkgs flake-utils crate2nix substrate; };
+  #       subTools = {
+  #         nix-post-build-hook = "nix-hooks";
+  #         nix-codesign        = "nix-codesign";
+  #       };
+  #     };
+  monorepoFlakeBuilder = ./util/monorepo-flake.nix;
+
+  # ============================================================================
   # SKILL DEPLOYMENT HELPERS (standalone import path)
   # ============================================================================
   # Auto-discovery and deployment of Claude Code skills from a skills/ directory.
