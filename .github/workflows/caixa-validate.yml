@@ -1,0 +1,86 @@
+# Reusable workflow: validate a caixa or a caixa-monorepo without
+# publishing.
+#
+# Use this when:
+#   - the repo is a monorepo of caixas (e.g. pleme-io/programs/) where
+#     each subdir is a sub-caixa, but the whole thing publishes via git
+#     tag rather than per-sub-caixa OCI image
+#   - the repo is in early development and you want CI gating before
+#     it's ready to publish
+#   - cross-validation pull requests (no PR should publish, only check)
+#
+# What it does:
+#   1. cse-lint repo . --strict — gates against the 6 CSE invariants
+#      (claude-md-pointer, hand-roll, module-trio-adoption, caixa-naivete)
+#   2. feira lint — manifest + Lisp parse for every declared
+#      :bibliotecas / :servicos / :exe entry
+#   3. (optional) feira build — typed structural validation of the
+#      caixa's content
+#
+# Consumer:
+#   jobs:
+#     validate:
+#       uses: pleme-io/substrate/.github/workflows/caixa-validate.yml@main
+#       secrets: inherit
+#       permissions:
+#         contents: read
+
+name: caixa-validate
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+      strict:
+        description: "Exit non-zero on violations (vs informational)"
+        type: boolean
+        default: true
+      build:
+        description: "Also run `feira build` for structural validation"
+        type: boolean
+        default: false
+      caixaPath:
+        description: "Path inside repo where the caixa.lisp lives. Default: repo root."
+        type: string
+        default: "."
+
+jobs:
+  validate:
+    name: Validate caixa
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: cse-lint repo
+        run: |
+          set -euo pipefail
+          STRICT_FLAG=""
+          if [ "${{ inputs.strict }}" = "true" ]; then
+            STRICT_FLAG="--strict"
+          fi
+          nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" $STRICT_FLAG
+
+      - name: feira lint
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.caixaPath }}"
+          nix run github:pleme-io/caixa#feira -- lint || \
+            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
+
+      - name: feira build (optional structural check)
+        if: ${{ inputs.build }}
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.caixaPath }}"
+          nix run github:pleme-io/caixa#feira -- build

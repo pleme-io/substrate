@@ -64,10 +64,14 @@ jobs:
   publish:
     name: Publish caixa
     runs-on: ${{ inputs.runner }}
+    # Only the two scopes the steps actually use:
+    #   contents: write — git tag + push
+    #   packages: write — ghcr.io image push
+    # No OIDC sigstore signing yet; revisit when the attestation chain
+    # (tameshi BLAKE3 → sigstore co-sign) lands.
     permissions:
       contents: write
       packages: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,9 +119,11 @@ jobs:
           fi
 
           tag="${PREFIX}${versao}"
-          echo "name=$name"     >> "$GITHUB_OUTPUT"
-          echo "versao=$versao" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag"       >> "$GITHUB_OUTPUT"
+          {
+            echo "name=$name"
+            echo "versao=$versao"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
 
           echo "::notice::caixa $name v$versao → tag=$tag"
 

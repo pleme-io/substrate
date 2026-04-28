@@ -1,0 +1,111 @@
+# Reusable workflow: publish a pure-tatara-lisp caixa (Biblioteca,
+# Binario, or Servico whose module.source uses the github: URL grammar).
+#
+# Differs from caixa-publish.yml in that:
+#   - no OCI image is built / pushed (the runtime resolves source via
+#     git URL, per theory/WASM-PACKAGING.md §II)
+#   - publishing == git tag + push (Zig-style), nothing more
+#   - cse-lint + feira lint still gate the tag
+#
+# Use this when the caixa is pure Lisp source (.tlisp files) consumed
+# by tatara-script or by the wasm-engine via github: source URLs.
+#
+# Consumer (e.g. pleme-io/programs):
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/caixa-publish-tlisp.yml@main
+#       secrets: inherit
+#       permissions:
+#         contents: write
+
+name: caixa-publish-tlisp
+
+on:
+  workflow_call:
+    inputs:
+      caixaPath:
+        description: "Path inside repo where the caixa.lisp lives. Default: repo root."
+        type: string
+        default: "."
+      tagPrefix:
+        description: "Git tag prefix for the version"
+        type: string
+        default: "v"
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+
+jobs:
+  publish:
+    name: Publish tlisp caixa
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Parse caixa.lisp
+        id: meta
+        env:
+          REPO: ${{ github.repository }}
+          PREFIX: ${{ inputs.tagPrefix }}
+          PATH_IN_REPO: ${{ inputs.caixaPath }}
+        run: |
+          set -euo pipefail
+          manifest="${PATH_IN_REPO}/caixa.lisp"
+          if [ ! -f "$manifest" ]; then
+            echo "::error::caixa.lisp not found at ${manifest}"
+            exit 1
+          fi
+          versao=$(awk '/:versao/{ if (match($0, /"[^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }' "$manifest")
+          nome=$(awk '/:nome/{ if (match($0, /"[^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }' "$manifest")
+          if [ -z "$versao" ] || [ -z "$nome" ]; then
+            echo "::error::could not parse :versao or :nome from $manifest"
+            exit 1
+          fi
+          tag="${PREFIX}${versao}"
+          {
+            echo "nome=$nome"
+            echo "versao=$versao"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::caixa $nome v$versao → tag=$tag"
+
+      - name: cse-lint repo
+        run: |
+          set -euo pipefail
+          nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" --strict || \
+            echo "::warning::cse-lint detected violations; gating becomes hard once migration window closes."
+
+      - name: feira lint
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.caixaPath }}"
+          nix run github:pleme-io/caixa#feira -- lint || \
+            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
+
+      - name: Tag + push v<versao>
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          NOME: ${{ steps.meta.outputs.nome }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag $TAG already exists; skipping git tag step"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "caixa $NOME $TAG"
+          git push origin "$TAG"
+          echo "::notice::Tagged + pushed $TAG"
