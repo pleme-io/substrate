@@ -427,10 +427,52 @@ These are imported directly from substrate (not via `lib.${system}`):
 |---------|--------|-------------|
 | `rust-tool-release-flake.nix` | `build/rust/tool-release-flake.nix` | CLI tool with 4-target GitHub releases |
 | `rust-tool-image-flake.nix` | `build/rust/tool-image-flake.nix` | CLI tool as Docker image for K8s CronJobs/init containers |
+| `rust-action-release-flake.nix` | `build/rust/action-release-flake.nix` | pleme-io GitHub Action — Rust binary + composite action.yml |
 | `rust-workspace-release-flake.nix` | `build/rust/tool-release-flake.nix` | Workspace CLI with `packageName` member selection |
 | `rust-service-flake.nix` | `build/rust/service-flake.nix` | Dockerized microservice |
 | `rust-library.nix` | `build/rust/library.nix` | crates.io library (check + test) |
 | `leptos-build-flake.nix` | `build/rust/leptos-build-flake.nix` | Zero-boilerplate Leptos PWA flake |
+
+##### rust-action-release Pattern
+
+For pleme-io GitHub Actions whose behavior is implemented as a Rust binary.
+Wraps `rust-tool-release-flake.nix` with two extra outputs:
+
+- `packages.<system>.action-yml` — the composite `action.yml` rendered as a
+  single-file derivation
+- `apps.<system>.write-action-yml` — `nix run .#write-action-yml` writes
+  `./action.yml` directly to the consumer's repo root
+
+Inputs to `action` are typed (name, description, required, default) +
+the renderer hoists every `${{ inputs.<name> }}` to an `INPUT_<UPPER>` env
+var per the `yaml.github-actions.security.run-shell-injection` rule.
+
+```nix
+outputs = (import "${substrate}/lib/build/rust/action-release-flake.nix" {
+  inherit nixpkgs crate2nix flake-utils;
+}) {
+  toolName = "terragrunt-apply";
+  src = self;
+  repo = "pleme-io/terragrunt-apply";
+  action = {
+    description = "Run terragrunt plan/apply/destroy with typed inputs";
+    inputs = [
+      { name = "working-directory"; description = "Leaf dir"; required = true; }
+      { name = "action"; description = "Mode"; default = "plan"; }
+    ];
+    outputs = [
+      { name = "plan-summary"; description = "Counts"; }
+    ];
+  };
+};
+```
+
+The action's binary reads inputs via `pleme_actions_shared::Input::from_env()`
+(see `pleme-io/pleme-actions-shared`). Mirrors the typed `Action` domain
+in `arch-synthesizer/src/action_domain/` 1:1, so the same typed declaration
+can render via either Rust (canonical, in arch-synthesizer) or Nix (this
+builder, when a consumer flake needs to emit action.yml without going
+through arch-synthesizer's CLI).
 
 ##### rust-tool-image Pattern
 
