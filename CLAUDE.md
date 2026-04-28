@@ -17,7 +17,40 @@
 ## Blackmatter pillars upheld
 
 - **Pillar 8** (Image building): `substrate/lib/oci-image-*.nix` patterns are THE way every pleme-io container image is built. No Dockerfiles. Hardened minimal roots.
-- **Pillar 9** (SDLC): `rust-tool-release-flake.nix`, `rust-workspace-release-flake.nix`, `rust-service-flake.nix`, `rust-library.nix`, `ruby-gem-flake.nix` — every repo's `flake.nix` anchors on one of these. `nix run .#app` / `nix run .#test` / `nix run .#release` uniformity comes from here.
+- **Pillar 9** (SDLC): `rust-tool-release-flake.nix`, `rust-workspace-release-flake.nix`, `rust-service-flake.nix`, `rust-library.nix`, `ruby-gem-flake.nix`, `wasi-service-flake.nix`, `wasi-service-flux-flake.nix`, `tatara/program-flake.nix` — every repo's `flake.nix` anchors on one of these. `nix run .#app` / `nix run .#test` / `nix run .#release` uniformity comes from here.
+
+## ★ Reusable CI workflows (`.github/workflows/caixa-*.yml`)
+
+Every pleme-io caixa repo's CI is **5–10 lines** pointing at one of
+four reusable workflows shipped from this repo:
+
+| workflow | for | gates |
+|---|---|---|
+| `caixa-publish.yml` | `:kind Servico` (Rust→wasm) | feira lint → cse-lint repo --strict → nix build dockerImage → ghcr push (`v<versao>` + `:latest`) → git tag v<versao> |
+| `caixa-publish-tlisp.yml` | pure-Lisp Servico/Biblioteca/Binario (github: source URL) | same gates, no OCI image, only git tag (Zig-style) |
+| `caixa-validate.yml` | monorepos (programs/), PRs, dev branches | non-publishing gate: cse-lint --strict + feira lint |
+| `caixa-forge.yml` | caixas with OpenAPI specs | runs forge-gen → auto-PR on drift |
+
+Caller workflow shape is identical across all four:
+
+```yaml
+name: release
+on: { push: { branches: [main] }, workflow_dispatch: {} }
+jobs:
+  release:
+    uses: pleme-io/substrate/.github/workflows/<workflow>.yml@main
+    secrets: inherit
+    permissions: { contents: write, packages: write }
+```
+
+The `cse-lint repo --strict` gate enforces the 6 CSE invariants
+(claude-md-pointer, hand-roll, manifest-membership,
+module-trio-adoption, deployment-coverage, **caixa-naivete**) on every
+commit. A regression on any invariant fails CI before publish — the
+SDLC standardization is structurally enforced.
+
+**Skill:** `caixa-author` — for authoring or migrating any caixa,
+this is the first reference.
 
 Reusable Nix build patterns consumed by all pleme-io product and library repos.
 
