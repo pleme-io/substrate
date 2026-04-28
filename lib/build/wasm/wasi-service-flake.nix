@@ -79,6 +79,10 @@ let
       name = serviceName;
       src = self;
     });
+
+    # Local-run app is mode-aware too — serve vs run.
+    serviceKind = serviceArgs.serviceKind or "http";
+    port = serviceArgs.port or 8080;
   in {
     packages = {
       default = result.dockerImage;
@@ -93,13 +97,22 @@ let
     apps = {
       default = {
         type = "app";
-        program = toString (pkgs.writeShellScript "run-${serviceName}" ''
-          set -euo pipefail
-          echo "Running ${serviceName} via wasmtime..."
-          ${pkgs.wasmtime}/bin/wasmtime run \
-            ${builtins.concatStringsSep " " (map (cap: "--wasi inherit-${cap}") (serviceArgs.wasiCapabilities or [ "network" "env" ]))} \
-            ${result.wasmModule}/lib/${serviceName}.wasm "$@"
-        '');
+        program = toString (pkgs.writeShellScript "run-${serviceName}" (
+          if serviceKind == "http" then ''
+            set -euo pipefail
+            echo "Serving ${serviceName} on http://127.0.0.1:${toString port} via wasmtime serve..."
+            exec ${pkgs.wasmtime}/bin/wasmtime serve \
+              --addr "127.0.0.1:${toString port}" \
+              -S cli=y,inherit-env=y,http=y \
+              ${result.wasmModule}/lib/${serviceName}.wasm
+          '' else ''
+            set -euo pipefail
+            echo "Running ${serviceName} via wasmtime run..."
+            exec ${pkgs.wasmtime}/bin/wasmtime run \
+              ${builtins.concatStringsSep " " (map (cap: "--wasi inherit-${cap}") (serviceArgs.wasiCapabilities or [ "network" "env" ]))} \
+              ${result.wasmModule}/lib/${serviceName}.wasm "$@"
+          ''
+        ));
       };
     };
   };

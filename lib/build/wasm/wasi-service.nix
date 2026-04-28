@@ -39,9 +39,19 @@
   extraContents ? [],
   tag ? "latest",
   architecture ? "amd64",
+  # "cli"  — `wasmtime run` Entrypoint, suitable for batch/oneShot/cron
+  #          components that export `wasi:cli/run`.
+  # "http" — `wasmtime serve` Entrypoint, suitable for proxy-world
+  #          components that export `wasi:http/incoming-handler`.
+  #          Maps directly onto the canonical wstd `#[http_server]`
+  #          shape.
+  serviceKind ? "http",
+  port ? 8080,
 }: let
   versions = import ../../util/versions.nix;
   dockerHelpers = import ../../util/docker-helpers.nix;
+
+  wasmtime = pkgs.wasmtime;
 
   # Build the WASI Rust toolchain from fenix
   wasiToolchain = fenix.combine [
@@ -153,23 +163,40 @@ EOF
     maxLayers = versions.docker.maxLayers;
 
     contents = [
-      pkgs.wasmtime
+      wasmtime
       pkgs.cacert
       wasmModule
     ] ++ extraContents;
 
     config = {
-      Entrypoint = [
-        "${pkgs.wasmtime}/bin/wasmtime"
-        "run"
-      ] ++ (if capabilityFlags != "" then pkgs.lib.splitString " " capabilityFlags else [])
-        ++ [ "/lib/${name}.wasm" ];
+      Entrypoint =
+        if serviceKind == "http" then
+          # HTTP proxy components — wasmtime serve. -S cli=y links the
+          # WASI cli APIs (environment, exit, etc.) that wit-bindgen 0.46+
+          # always imports even from proxy worlds. -S inherit-env=y lets
+          # the component see container env vars (PORT, app config, …),
+          # -S http=y enables the wasi-http imports and outbound calls.
+          [ "${wasmtime}/bin/wasmtime" "serve"
+            "--addr" "0.0.0.0:${toString port}"
+            "-S" "cli=y,inherit-env=y,http=y"
+            "/lib/${name}.wasm"
+          ]
+        else
+          # CLI components — `wasmtime run` with the legacy capability
+          # flags wired off `wasiCapabilities`.
+          [ "${wasmtime}/bin/wasmtime" "run" ]
+          ++ (if capabilityFlags != "" then pkgs.lib.splitString " " capabilityFlags else [])
+          ++ [ "/lib/${name}.wasm" ];
       Env = [
         (dockerHelpers.mkSslEnv pkgs)
         "RUST_LOG=info"
-      ];
+      ] ++ pkgs.lib.optional (serviceKind == "http") "PORT=${toString port}";
       WorkingDir = "/";
       User = "65534:65534";
+    } // pkgs.lib.optionalAttrs (serviceKind == "http") {
+      # Expose the listening port at image-config level so K8s probes
+      # and `docker run -P` map naturally.
+      ExposedPorts = { "${toString port}/tcp" = {}; };
     };
   };
 
@@ -179,7 +206,7 @@ EOF
   devShell = pkgs.mkShell {
     buildInputs = [
       wasiToolchain
-      pkgs.wasmtime
+      wasmtime
       pkgs.wasm-tools
       pkgs.wasmer
       pkgs.binaryen
