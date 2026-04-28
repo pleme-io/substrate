@@ -35,7 +35,11 @@
 } @ args:
 let
   serviceArgs = builtins.removeAttrs args [
-    "self" "systems" "module"
+    # Wrapper-level args that wasi-service.nix doesn't accept and
+    # would reject as unknown. wasi-service.nix expects: name, src,
+    # plus build-shape attrs (wasiCapabilities, dockerImageConfig,
+    # crateNixOverrides, ...).
+    "self" "systems" "module" "serviceName"
   ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
   pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
