@@ -946,14 +946,13 @@ in rec {
   #     ];
   #   };
   inherit (helmBuildModule)
-    mkHelmLintApp
-    mkHelmPackageApp
-    mkHelmPushApp
-    mkHelmReleaseApp
-    mkHelmTemplateApp
     mkHelmBumpApp
     mkHelmSdlcApps
-    mkHelmAllApps;
+    mkHelmAllApps
+    mkHelmChartPackages;
+  # Note: mkHelmLintApp/PackageApp/PushApp/ReleaseApp/TemplateApp were
+  # listed historically but never defined in helm-build.nix; the typed
+  # SDLC entry points are mkHelmSdlcApps + mkHelmAllApps.
 
   # ============================================================================
   # RUST DEV ENVIRONMENT (from rust-devenv.nix)

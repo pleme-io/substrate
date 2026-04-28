@@ -3,9 +3,10 @@
 # All commands delegate to `forge` (Rust CLI) — no generated shell scripts.
 #
 # Functions:
-#   mkHelmBumpApp       - Version bump library chart + update all dependents
-#   mkHelmSdlcApps      - Per-chart SDLC apps: lint, package, push, release, template
-#   mkHelmAllApps       - Aggregate apps across multiple charts + per-chart apps
+#   mkHelmBumpApp        - Version bump library chart + update all dependents
+#   mkHelmSdlcApps       - Per-chart SDLC apps: lint, package, push, release, template
+#   mkHelmAllApps        - Aggregate apps across multiple charts + per-chart apps
+#   mkHelmChartPackages  - Build chart tarballs as Nix packages (CI cacheable)
 {
   pkgs,
   forgeCmd ? "forge",
@@ -173,4 +174,38 @@ in
       template = { type = "app"; program = "${templateApp}/bin/helm-template"; };
       bump = bumpApp;
     };
+
+  # Build chart tarballs as Nix packages (for CI caching).
+  # Returns an attrset of { <chart-name> = derivation; ... } where each
+  # derivation is a `helm package`'d chart with `helm dependency update`
+  # already resolved against the supplied library chart.
+  #
+  # charts: list of { name, chartDir }
+  # libChartDir: path to the library chart (e.g. pleme-lib) — symlinked
+  #              into build/<libChartName> so `dependencies:` in Chart.yaml
+  #              resolves locally
+  # libChartName: directory name to copy libChartDir into (default: "pleme-lib")
+  #
+  # Usage:
+  #   packages = substrateLib.mkHelmChartPackages {
+  #     charts = chartDefs;
+  #     libChartDir = ./charts/pleme-lib;
+  #   };
+  mkHelmChartPackages = {
+    charts,
+    libChartDir,
+    libChartName ? "pleme-lib",
+  }:
+    pkgs.lib.foldl' (acc: chart: acc // {
+      ${chart.name} = pkgs.runCommand "helm-chart-${chart.name}" {
+        nativeBuildInputs = [ helm ];
+      } ''
+        mkdir -p $out build
+        cp -r ${chart.chartDir} build/${chart.name}
+        cp -r ${libChartDir} build/${libChartName}
+        chmod -R u+w build
+        helm dependency update build/${chart.name}
+        helm package build/${chart.name} --destination $out
+      '';
+    }) {} charts;
 }
