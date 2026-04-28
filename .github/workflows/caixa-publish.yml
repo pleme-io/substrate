@@ -121,6 +121,18 @@ jobs:
 
           echo "::notice::caixa $name v$versao → tag=$tag"
 
+      - name: CSE adherence gate (cse-lint repo --strict)
+        run: |
+          set -euo pipefail
+          # Single-repo CI gate against the 6 CSE invariants
+          # (claude-md-pointer, hand-roll, module-trio-adoption,
+          # caixa-naivete + others where applicable). Soft-fail today —
+          # `|| true` keeps existing repos publishable while the
+          # migration window closes. Drop the suffix once the fleet is
+          # caixa-clean.
+          nix run github:pleme-io/cse-lint -- repo . --strict 2>&1 || \
+            echo "::warning::cse-lint detected violations; will become a hard gate after the caixa migration window."
+
       - name: Lint manifest (feira lint)
         run: |
           set -euo pipefail
