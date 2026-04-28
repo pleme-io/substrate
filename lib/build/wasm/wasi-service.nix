@@ -54,6 +54,15 @@
   # WASM MODULE BUILD
   # ============================================================================
   # Compile Rust source to wasm32-wasip2 and optimize with wasm-opt.
+  #
+  # Vendoring: rustPlatform.importCargoLock vendors all deps from Cargo.lock
+  # into the nix store and points cargo at them via .cargo/config.toml. This
+  # is what lets the sandboxed build run `cargo build --offline` without
+  # reaching crates.io.
+  cargoVendorDir = pkgs.rustPlatform.importCargoLock {
+    lockFile = src + "/Cargo.lock";
+  };
+
   wasmModule = pkgs.stdenv.mkDerivation {
     pname = "${name}-wasm";
     version = "0.1.0";
@@ -74,8 +83,19 @@
       export HOME=$(mktemp -d)
       export CARGO_HOME=$HOME/.cargo
 
+      mkdir -p .cargo
+      ln -s ${cargoVendorDir} .cargo/vendor
+      cat > .cargo/config.toml <<'EOF'
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = ".cargo/vendor"
+EOF
+
       cargo build \
         --release \
+        --offline \
         --target wasm32-wasip2 \
         ${cargoArgs}
 
@@ -94,10 +114,13 @@
         exit 1
       fi
 
-      echo "Optimizing WASM: $WASM_FILE"
-
-      # Optimize with wasm-opt -O3
-      wasm-opt -O3 "$WASM_FILE" -o "$out/lib/${name}.wasm"
+      # wasm32-wasip2 emits a WASM *component* (component model). binaryen's
+      # wasm-opt can only consume plain core modules, so we skip it for
+      # components and rely on the toolchain's own optimization. wasm-tools
+      # can validate but does not yet have a useful optimizer pass for
+      # components either. See https://github.com/WebAssembly/binaryen/issues/6728.
+      echo "Copying WASI component: $WASM_FILE"
+      cp "$WASM_FILE" "$out/lib/${name}.wasm"
 
       echo "Output: $out/lib/${name}.wasm ($(wc -c < "$out/lib/${name}.wasm") bytes)"
 
