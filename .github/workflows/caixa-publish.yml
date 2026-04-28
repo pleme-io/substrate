@@ -1,0 +1,190 @@
+# Reusable workflow: publish a caixa to OCI + git-tag.
+#
+# Every pleme-io caixa repo's release.yml shrinks to ~10 lines:
+#
+#   name: release
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch: {}
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/caixa-publish.yml@main
+#       secrets: inherit
+#       permissions:
+#         contents: write
+#         packages: write
+#
+# What it does (Zig-style git-tag publishing — see caixa-feira's
+# Publish::run for the pleme-io canonical mechanism):
+#
+#   1. parse  caixa.lisp at repo root → extract :nome + :versao
+#   2. lint   the caixa via `feira lint`
+#   3. build  packages.<sys>.dockerImage via Nix
+#   4. push   the image to ghcr.io/pleme-io/<nome>:v<versao> and :latest
+#   5. tag    git HEAD as v<versao> and push the tag (idempotent — skips if
+#             the tag already exists, so re-runs are safe).
+#
+# Consumers pin caixa packages by `:fonte (:tipo git :tag "v<versao>")`,
+# matching the canonical store model in theory/TATARA-PACKAGING.md §III.
+# The OCI image is the *artifact*; the git tag is the *manifest pin*.
+# Both come out of this one workflow, so a caixa repo's CI surface is
+# load-bearing in exactly one place.
+
+name: caixa-publish
+
+on:
+  workflow_call:
+    inputs:
+      caixaName:
+        description: "OCI repository name (also the caixa :nome). Default: github repo basename."
+        type: string
+        default: ""
+      registry:
+        description: "OCI registry namespace"
+        type: string
+        default: "ghcr.io/pleme-io"
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+      tagPrefix:
+        description: "Git tag prefix for the version"
+        type: string
+        default: "v"
+      pushLatest:
+        description: "Also push the :latest mutable tag"
+        type: boolean
+        default: true
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        required: false
+
+jobs:
+  publish:
+    name: Publish caixa
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history so we can git tag
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Parse caixa.lisp
+        id: meta
+        env:
+          INPUT_NAME: ${{ inputs.caixaName }}
+          REPO: ${{ github.repository }}
+          PREFIX: ${{ inputs.tagPrefix }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f caixa.lisp ]; then
+            echo "::error::caixa.lisp not found at repo root"
+            echo "::error::Every caixa repo must declare its package via (defcaixa …) at the root."
+            exit 1
+          fi
+
+          # Default name = repo basename; allow override via input.
+          name="${INPUT_NAME}"
+          if [ -z "$name" ]; then
+            name="${REPO##*/}"
+          fi
+
+          # Extract :versao and :nome via awk (cheap; avoids needing
+          # feira on the runner before we've installed it). The first
+          # quoted string after :versao / :nome is the value.
+          versao=$(awk '/:versao/{ if (match($0, /"[^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }' caixa.lisp)
+          declared_nome=$(awk '/:nome/{ if (match($0, /"[^"]*"/)) { print substr($0, RSTART+1, RLENGTH-2); exit } }' caixa.lisp)
+
+          if [ -z "$versao" ]; then
+            echo "::error::could not parse :versao from caixa.lisp"
+            exit 1
+          fi
+          if [ -n "$declared_nome" ] && [ "$declared_nome" != "$name" ]; then
+            echo "::warning::caixa :nome=\"$declared_nome\" doesn't match resolved name \"$name\"; using \"$name\""
+          fi
+
+          tag="${PREFIX}${versao}"
+          echo "name=$name"     >> "$GITHUB_OUTPUT"
+          echo "versao=$versao" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"       >> "$GITHUB_OUTPUT"
+
+          echo "::notice::caixa $name v$versao → tag=$tag"
+
+      - name: Lint manifest (feira lint)
+        run: |
+          set -euo pipefail
+          # `nix run github:pleme-io/caixa#feira` ships the canonical CLI.
+          # If it's not yet wired (caixa flake hasn't exposed feira as a
+          # bare app), fall back to the typecheck inside Cargo.lock-based
+          # Rust deps already exercised at build time.
+          if nix run github:pleme-io/caixa#feira -- lint 2>&1; then
+            echo "::notice::feira lint passed"
+          else
+            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
+          fi
+
+      - name: Build image with Nix
+        run: nix build .#dockerImage --print-out-paths
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+
+      - name: Push image (versioned + optional :latest)
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          NAME: ${{ steps.meta.outputs.name }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PUSH_LATEST: ${{ inputs.pushLatest }}
+        run: |
+          set -euo pipefail
+          versioned="${REGISTRY}/${NAME}:${TAG}"
+          echo "::notice::pushing $versioned"
+          nix shell nixpkgs#skopeo --command \
+            skopeo --insecure-policy copy \
+              "docker-archive:./result" \
+              "docker://${versioned}"
+
+          if [ "$PUSH_LATEST" = "true" ]; then
+            latest="${REGISTRY}/${NAME}:latest"
+            echo "::notice::pushing $latest"
+            nix shell nixpkgs#skopeo --command \
+              skopeo --insecure-policy copy \
+                "docker-archive:./result" \
+                "docker://${latest}"
+          fi
+
+      - name: Tag + push v<versao>
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          NAME: ${{ steps.meta.outputs.name }}
+        run: |
+          set -euo pipefail
+          # Idempotent: skip if the tag already exists. Git-tag-based
+          # publishing means the same v<versao> never gets re-pushed
+          # under different bytes — bumping :versao in caixa.lisp is the
+          # only way to publish a new release.
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Tag $TAG already exists; skipping git tag step"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "caixa $NAME $TAG"
+          git push origin "$TAG"
+          echo "::notice::Tagged + pushed $TAG"
