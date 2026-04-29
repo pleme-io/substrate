@@ -73,14 +73,18 @@ let
     else entry
   ) rawGemset;
 
-  # ruby-nix expects a path on disk; materialise the rewritten gemset
-  # into a tiny derivation so the builder can import it.
-  gemsetDrv = pkgs.writeText "${name}-gemset.nix" (lib.generators.toPretty {} rewritten);
-
+  # ruby-nix accepts gemset as EITHER a path OR a pre-evaluated attrset
+  # (see github:inscapist/ruby-nix default.nix:
+  # `if builtins.typeOf gemset == "set" then gemset else import gemset`).
+  # Pass the rewritten attrset directly — avoids a toPretty
+  # round-trip, which doesn't preserve path-type values for
+  # flake-input sources (would otherwise serialize them as
+  # `<derivation /nix/store/...>` strings that ruby-nix then
+  # interprets as Booleans, breaking the build).
   rnix = ruby-nix.lib pkgs;
   rnix-env = rnix {
     inherit name;
-    gemset = gemsetDrv;
+    gemset = rewritten;
   };
   env = rnix-env.env;
   ruby = rnix-env.ruby;
