@@ -276,6 +276,22 @@ in rec {
   wasiServiceFlakeBuilder = ./build/wasm/wasi-service-flake.nix;
 
   # ============================================================================
+  # WASM APP FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a Yew/WASM web application.
+  # Wraps mkWasmBuild + mkWasmDockerImage{,WithHanabi} + mkWasmDevShell +
+  # eachSystem + overlays + flake-hygiene for zero-boilerplate consumer flakes.
+  # Missing dual to leptosBuildFlakeBuilder — Leptos has it, Yew didn't.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/build/wasm/app-flake.nix" {
+  #     inherit nixpkgs substrate fenix crate2nix;
+  #   }) { inherit self; name = "my-yew-app"; };
+  #
+  # See lib/build/wasm/app-flake.nix for the full parameter list.
+  wasmAppFlakeBuilder = ./build/wasm/app-flake.nix;
+
+  # ============================================================================
   # WEB DOCKER & DEPLOYMENT (from web-docker.nix)
   # ============================================================================
   inherit (webDockerModule)
