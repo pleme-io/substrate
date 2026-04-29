@@ -517,6 +517,54 @@ in rec {
   leptosBuildFlakeBuilder = ./build/rust/leptos-build-flake.nix;
 
   # ============================================================================
+  # CLOUDFLARE WORKER FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Complete multi-system flake outputs for a worker-rs Cloudflare Worker.
+  # Wraps a `crate-type = ["cdylib"]` Rust crate into a flake that produces
+  # a deployable Worker artifact (WASM + JS shim) via worker-build, plus
+  # build / deploy / dev / secret-put apps and a fenix-based dev shell.
+  # Companion: cloudflareHeadlessBlogTemplate (in infra/) for the matching
+  # Pangea infra body.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/build/rust/cloudflare-worker-flake.nix" {
+  #     inherit nixpkgs substrate fenix;
+  #   }) { inherit self; name = "my-webhook"; cratePath = "crates/my-webhook"; };
+  cloudflareWorkerFlakeBuilder = ./build/rust/cloudflare-worker-flake.nix;
+
+  # ============================================================================
+  # RUST STATIC SITE FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Generic Rust → static HTML site generator pattern. Wraps a Rust binary
+  # that, when run, fetches from a CMS and emits a `dist/` directory of
+  # static HTML + assets suitable for Cloudflare Pages / Netlify / S3.
+  # Pairs with cloudflarePagesDeployHelpers below for the deploy half.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/build/rust/rust-static-site-flake.nix" {
+  #     inherit nixpkgs substrate fenix;
+  #   }) { inherit self; name = "my-blog"; sitegenBin = "my-blog-sitegen";
+  #        sitegenCrate = "my-blog-app"; };
+  rustStaticSiteFlakeBuilder = ./build/rust/rust-static-site-flake.nix;
+
+  # ============================================================================
+  # CLOUDFLARE PAGES DEPLOY HELPERS (standalone import path)
+  # ============================================================================
+  # Pure wrapper over `wrangler pages deploy` exposed as Nix apps. No build
+  # logic of its own — composes with rustStaticSiteFlakeBuilder which
+  # produces `dist/`. Provides mkDeployApp, mkDeployAppFromDrv, and
+  # mkDeployHookApp for the three common deploy shapes.
+  #
+  # Usage (inside consumer's mkPerSystem):
+  #   pagesDeploy = import "${substrate}/lib/build/web/cloudflare-pages-deploy.nix" {
+  #     inherit pkgs;
+  #   };
+  #   apps.pages-deploy = pagesDeploy.mkDeployApp {
+  #     projectName = "zuihitsu"; distDir = "dist"; branch = "main";
+  #   };
+  cloudflarePagesDeployHelpers = ./build/web/cloudflare-pages-deploy.nix;
+
+  # ============================================================================
   # LEPTOS APP SCAFFOLD (standalone import path)
   # ============================================================================
   # Generate a complete Leptos PWA project structure from a declaration.
