@@ -664,6 +664,21 @@ in rec {
   rustToolReleaseFlakeBuilder = ./build/rust/tool-release-flake.nix;
 
   # ============================================================================
+  # MCP SERVER FLAKE BUILDER (standalone import path)
+  # ============================================================================
+  # Thin specialization of rustToolReleaseFlakeBuilder that bakes in
+  # kaname-based MCP-server-flavored defaults (withMcp=true, mcpSubcommand="mcp",
+  # description prefix). Pre-fills the trio's HM module so consumers get the
+  # `<toolName>-mcp` shim wired automatically via
+  # `programs.<toolName>.enableMcpBin = true;`.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/mcp-server-flake.nix" {
+  #     inherit nixpkgs crate2nix flake-utils;
+  #   }) { toolName = "narsil-mcp"; src = self; repo = "pleme-io/narsil-mcp"; };
+  mcpServerFlakeBuilder = ./build/rust/mcp-server-flake.nix;
+
+  # ============================================================================
   # RUST LAMBDA BUILDER (from build/rust/lambda.nix)
   # ============================================================================
   # Package a cross-compiled `bootstrap` binary into an AWS Lambda zip.
