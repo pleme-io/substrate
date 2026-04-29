@@ -73,6 +73,7 @@
         # Standalone import paths for consumer flakes
         rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;
         rustToolImageFlakeBuilder = ./lib/build/rust/tool-image-flake.nix;
+        rustLibraryFlakeBuilder = ./lib/build/rust/library-flake.nix;
         zigToolReleaseFlakeBuilder = ./lib/build/zig/tool-release-flake.nix;
 
         # Rust overlay module for direct import

@@ -650,6 +650,20 @@ in rec {
   rustLibraryBuilder = ./build/rust/library.nix;
 
   # ============================================================================
+  # RUST LIBRARY FLAKE BUILDER (multi-system, zero-boilerplate)
+  # ============================================================================
+  # Companion to rustToolReleaseFlakeBuilder — emits packages/devShells/apps
+  # across all 4 systems plus overlays.default in one call. Replaces the
+  # ~30-line eachSystem boilerplate every Rust library flake currently carries
+  # (and the single-system bug those flakes accidentally encoded).
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/rust-library-flake.nix" {
+  #     inherit nixpkgs crate2nix fenix;
+  #   }) { libraryName = "shikumi"; src = self; };
+  rustLibraryFlakeBuilder = ./build/rust/library-flake.nix;
+
+  # ============================================================================
   # RUST TOOL RELEASE BUILDER (standalone import path)
   # ============================================================================
   # Cross-platform CLI tool builds + GitHub releases.
