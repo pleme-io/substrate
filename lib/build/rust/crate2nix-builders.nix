@@ -252,6 +252,11 @@ in {
     # e.g. when serviceName=pangea-operator-embedded but the actual
     # binary is `pangea-operator`.
     binaryName ? null,
+    # Extra image-level env vars appended to the standard set
+    # (RUST_LOG, HEALTH_PORT, GIT_SHA, PORT, PATH, SSL_CERT_FILE).
+    # Use for service-specific defaults that aren't already overridden
+    # by the deployment's helm values. Format: ["KEY=value", ...].
+    extraEnv ? [],
   }: let
     resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
     resolvedBinaryName = if binaryName != null then binaryName else serviceName;
@@ -355,7 +360,8 @@ in {
         # The actual git SHA should be injected by the release pipeline
         "GIT_SHA=nix-build"
       ] ++ serviceTypeEnvVars
-        ++ pkgs.lib.optional (extras != []) "PATH=${pkgs.lib.makeBinPath ([serviceBinary] ++ extras)}";
+        ++ pkgs.lib.optional (extras != []) "PATH=${pkgs.lib.makeBinPath ([serviceBinary] ++ extras)}"
+        ++ extraEnv;
       WorkingDir = "/app";
       User = "65534:65534";
     };

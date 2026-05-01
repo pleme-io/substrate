@@ -96,6 +96,10 @@ in {
   # under a different image tag from the same workspace binary.
   imageName ? null,
   binaryName ? null,
+  # Extra image-level env vars appended to the standard set. Format:
+  # ["KEY=value", ...]. Use for service-specific defaults that helm
+  # values won't override.
+  extraEnv ? [],
 }: let
   _ = check.all [
     (check.nonEmptyStr "serviceName" serviceName)
@@ -133,7 +137,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName extraEnv;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;
