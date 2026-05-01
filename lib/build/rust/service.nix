@@ -85,6 +85,11 @@ in {
   # Example: pkgs: with pkgs; [ opentofu git busybox ]
   extraContents ? (_pkgs: []),
   crateOverrides ? {},
+  # Optional: list of Cargo features active at the root crate. Threads
+  # through to crate2nix's `rootFeatures`. Use to build feature-gated
+  # service variants (e.g. ["default" "embedded_ruby"]). Defaults to
+  # null (preserve crate2nix's own default — `["default"]`).
+  rootFeatures ? null,
 }: let
   _ = check.all [
     (check.nonEmptyStr "serviceName" serviceName)
@@ -122,7 +127,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;

@@ -4,7 +4,16 @@
 
 let check = import ../../types/assertions.nix;
 in {
-  # Build Rust project using crate2nix for granular per-crate caching
+  # Build Rust project using crate2nix for granular per-crate caching.
+  #
+  # Optional knobs that thread through to crate2nix's project import:
+  #   rootFeatures: list of Cargo features active at the root crate.
+  #     `null` (default) preserves crate2nix's default behavior, which
+  #     activates only `["default"]`. Pass `["default" "embedded_ruby"]`
+  #     etc. to build feature-gated variants.
+  #   crateOverrides: per-crate build-input/env overrides merged into
+  #     defaultCrateOverrides. Useful for crates that need extra
+  #     buildInputs (libclang for bindgen, libruby for magnus, etc.).
   mkCrate2nixProject = {
     serviceName,
     src,
@@ -15,18 +24,21 @@ in {
     nativeBuildInputs ? [],
     crateOverrides ? {},
     enableAwsSdk ? false,
+    rootFeatures ? null,
   }: let
     crate2nixTools = import "${crate2nix}/tools.nix" {inherit pkgs;};
     generatedCargoNix =
       if builtins.pathExists cargoNix then cargoNix
       else crate2nixTools.generatedCargoNix { name = serviceName; inherit src; };
 
-    project = import generatedCargoNix {
+    projectArgs = {
       inherit pkgs;
       defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         ${serviceName} = oldAttrs: { inherit buildInputs nativeBuildInputs; };
       } // crateOverrides;
-    };
+    } // (if rootFeatures == null then {} else { inherit rootFeatures; });
+
+    project = import generatedCargoNix projectArgs;
   in project;
 
   # Build standalone CLI tools using crate2nix with per-crate caching
@@ -225,6 +237,10 @@ in {
     # Function: pkgs -> [packages] to include in Docker image at runtime.
     # Example: pkgs: with pkgs; [ opentofu git ]
     extraContents ? (_pkgs: []),
+    # Optional Cargo features for the root crate (threads through to
+    # crate2nix's `rootFeatures`). Default null preserves crate2nix's
+    # own default behavior (`["default"]`).
+    rootFeatures ? null,
   }: let
     _ = check.all [
       (check.nonEmptyStr "serviceName" serviceName)
@@ -240,7 +256,7 @@ in {
     targetEnvNameUpper = pkgs.lib.toUpper (pkgs.lib.replaceStrings ["-"] ["_"] muslTarget);
     targetEnvNameLower = pkgs.lib.replaceStrings ["-"] ["_"] muslTarget;
 
-    project = import cargoNix {
+    projectArgs = {
       inherit pkgs;
       defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         tonic-build = oldAttrs: {
@@ -278,6 +294,7 @@ in {
         };
       } // crateOverrides;
     };
+    project = import cargoNix (projectArgs // (if rootFeatures == null then {} else { inherit rootFeatures; }));
 
     serviceBinary =
       if project ? workspaceMembers then
