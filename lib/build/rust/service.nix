@@ -90,6 +90,12 @@ in {
   # service variants (e.g. ["default" "embedded_ruby"]). Defaults to
   # null (preserve crate2nix's own default — `["default"]`).
   rootFeatures ? null,
+  # Optional override for the OCI image name (default
+  # "${serviceName}-service") and the entrypoint binary name (default
+  # serviceName). Used when building feature-gated variants that ship
+  # under a different image tag from the same workspace binary.
+  imageName ? null,
+  binaryName ? null,
 }: let
   _ = check.all [
     (check.nonEmptyStr "serviceName" serviceName)
@@ -127,7 +133,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;

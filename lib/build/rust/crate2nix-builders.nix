@@ -241,7 +241,20 @@ in {
     # crate2nix's `rootFeatures`). Default null preserves crate2nix's
     # own default behavior (`["default"]`).
     rootFeatures ? null,
+    # Optional override for the OCI image name. Defaults to
+    # `${serviceName}-service` (preserves existing behavior). Use
+    # this when building a feature-gated variant that needs a
+    # distinct registry tag (e.g. `pangea-operator-embedded`).
+    imageName ? null,
+    # Optional override for the entrypoint binary name. Defaults to
+    # `serviceName` (preserves existing behavior). Use this when the
+    # binary name in the workspace differs from the image name —
+    # e.g. when serviceName=pangea-operator-embedded but the actual
+    # binary is `pangea-operator`.
+    binaryName ? null,
   }: let
+    resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
+    resolvedBinaryName = if binaryName != null then binaryName else serviceName;
     _ = check.all [
       (check.nonEmptyStr "serviceName" serviceName)
       (check.architecture "architecture" architecture)
@@ -324,11 +337,11 @@ in {
       ];
     extras = extraContents pkgs;
   in pkgs.dockerTools.buildLayeredImage {
-    name = "${serviceName}-service";
+    name = resolvedImageName;
     inherit tag architecture;
     contents = with pkgs; [cacert serviceBinary] ++ extras;
     config = let dockerHelpers = import ../../util/docker-helpers.nix; in {
-      Entrypoint = ["${serviceBinary}/bin/${serviceName}"];
+      Entrypoint = ["${serviceBinary}/bin/${resolvedBinaryName}"];
       ExposedPorts = builtins.listToAttrs (
         builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
           (pkgs.lib.unique [ mainPort ports.health ports.metrics ])
