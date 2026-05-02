@@ -395,6 +395,11 @@ in rec {
     atticSsm ? null,          # SSM parameter with Attic AMI ID
     atticInstanceType ? "t3.medium",
     atticCacheName ? "nexus",
+    # When true, ami-forge adds a public LaunchPermission (Group=all)
+    # after promoting to SSM. Lets any AWS account launch the AMI
+    # without per-account shares. Use only for AMIs known to carry no
+    # secrets — privkeys must arrive at runtime (e.g. SSM, IMDSv2).
+    makePublic ? false,
   }: let
     # Generate pipeline config as YAML via Nix (JSON is valid YAML)
     pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON ({
@@ -406,6 +411,7 @@ in rec {
       skip_cluster_test = skipClusterTest;
       cluster_test_instance_type = clusterTestInstanceType;
       cluster_test_timeout = clusterTestTimeout;
+      make_public = makePublic;
     } // (if skipClusterTest || clusterTestConfig == null then {}
       else { cluster_test = { config = "${clusterTestConfig}"; }; })
     // (if atticSsm == null then {}
@@ -540,6 +546,7 @@ in rec {
     atticSsm ? null,
     atticInstanceType ? "t3.medium",
     atticCacheName ? "nexus",
+    makePublic ? false,
   }: let
     # Reuse the single-arch builder for each arch in the list, and
     # rewrite the resulting attribute keys to be arch-suffixed so
@@ -549,7 +556,7 @@ in rec {
       apps = mkAmiBuildPipeline {
         inherit forgePackage region awsProfile extraBinaries
           skipClusterTest clusterTestInstanceType clusterTestTimeout
-          atticSsm atticInstanceType atticCacheName;
+          atticSsm atticInstanceType atticCacheName makePublic;
         buildTemplate = buildTemplateFor arch;
         testTemplate  = testTemplateFor arch;
         ssmParameter  = ssmParameterFor arch;
