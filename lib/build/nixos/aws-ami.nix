@@ -137,7 +137,7 @@ let
   # Caller overrides via runTagOverrides (merged last-wins).
   defaultRunTags = {
     Name                     = "${amiName}-builder";
-    ManagedBy                = "ami-forge";
+    ManagedBy                = "pangea";
     "ami-forge:purpose"      = "ami-build";
     "ami-forge:ttl-hours"    = "4";
   };

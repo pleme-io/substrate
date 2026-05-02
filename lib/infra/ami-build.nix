@@ -191,13 +191,13 @@ in rec {
         force_delete_snapshot = true;
         tags = {
           Name = "\${var.ami_name}";
-          ManagedBy = "ami-forge";
+          ManagedBy = "pangea";
           BuildTimestamp = "{{timestamp}}";
           SourceFlake = "\${var.flake_ref}";
         } // extraTags;
         run_tags = {
           Name = "ami-forge-builder";
-          ManagedBy = "ami-forge";
+          ManagedBy = "pangea";
           "ami-forge:purpose" = "ami-build";
           "ami-forge:ttl-hours" = "4";
         };
@@ -262,7 +262,7 @@ in rec {
         skip_create_ami = true;
         run_tags = {
           Name = "ami-forge-test";
-          ManagedBy = "ami-forge";
+          ManagedBy = "pangea";
           "ami-forge:purpose" = "ami-test";
           "ami-forge:ttl-hours" = "2";
         };
@@ -343,12 +343,12 @@ in rec {
         force_delete_snapshot = !skipCreateAmi;
         tags = {
           Name = "\${var.ami_name}";
-          ManagedBy = "ami-forge";
+          ManagedBy = "pangea";
           BuildTimestamp = "{{timestamp}}";
         } // extraTags;
         run_tags = {
           Name = "ami-forge-layer-builder";
-          ManagedBy = "ami-forge";
+          ManagedBy = "pangea";
           "ami-forge:purpose" = "layer-build";
           "ami-forge:ttl-hours" = "4";
         };

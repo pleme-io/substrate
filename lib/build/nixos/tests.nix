@@ -198,7 +198,7 @@ in runTests [
     "snapshot_tags default to amiTags when snapshotTags is null")
 
   (mkTest "packer-run-tags-default"
-    ((firstBuilder packerArm64).run_tags.ManagedBy == "ami-forge"
+    ((firstBuilder packerArm64).run_tags.ManagedBy == "pangea"
      && (firstBuilder packerArm64).run_tags."ami-forge:purpose" == "ami-build")
     "default run_tags identify the ephemeral builder instance")
 
@@ -209,7 +209,7 @@ in runTests [
   (mkTest "packer-run-tags-override-merged"
     ((firstBuilder packerWithRunOverride).run_tags."ami-forge:purpose" == "layer-build"
      && (firstBuilder packerWithRunOverride).run_tags."ami-forge:ttl-hours" == "8"
-     && (firstBuilder packerWithRunOverride).run_tags.ManagedBy == "ami-forge")
+     && (firstBuilder packerWithRunOverride).run_tags.ManagedBy == "pangea")
     "runTagOverrides merge last-wins over defaults")
 
   # ════════════════════════════════════════════════════════════════════
