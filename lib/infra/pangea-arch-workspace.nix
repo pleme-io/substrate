@@ -95,9 +95,12 @@
   # pkgs.gh, pkgs.curl, pkgs.jq.
   extraDeps ? [],
 
-  # Verbs to expose. Defaults to all six. Drop ones you don't need by
-  # passing a smaller list (e.g. [ "plan" "deploy" "test" ]).
-  verbs ? [ "plan" "deploy" "destroy" "synth" "test" "import" ],
+  # Verbs to expose. Defaults to all seven. Drop ones you don't need
+  # by passing a smaller list (e.g. [ "plan" "deploy" "test" ]).
+  # `apply` is a tofu-native alias for `deploy` — same underlying
+  # `pangea apply <template>` invocation, just the name operators
+  # familiar with terraform/tofu reach for instinctively.
+  verbs ? [ "plan" "deploy" "apply" "destroy" "synth" "test" "import" ],
 
   # Workspace-specific extra apps beyond the canonical six. Use for
   # AMI build/sweep/commission/verify steps that aren't a pangea verb.
@@ -127,11 +130,15 @@ let
 
   rubyEnv = [ ruby pkgs.opentofu ] ++ extraDeps;
 
-  # Map verb → underlying pangea subcommand. `deploy` is operator
-  # ergonomics for `apply`; `synth` is the read-only render.
+  # Map verb → underlying pangea subcommand. `deploy` and `apply` both
+  # resolve to `pangea apply` — `deploy` is the original operator
+  # ergonomics (matches the .#flow-deploy-* convention in root flakes),
+  # `apply` is a tofu-native alias for the same operation.
+  # `synth` is the read-only render.
   pangeaSubcommand = {
     plan    = "plan";
     deploy  = "apply";
+    apply   = "apply";
     destroy = "destroy";
     synth   = "synth";
   };
