@@ -16,6 +16,16 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Fleet source-of-truth for devenv. Consumers of
+    # rust-{tool,service,library}-flake.nix should set
+    # `inputs.devenv.follows = "substrate/devenv"` rather than carry
+    # their own URL. Recent devenv revs (bc8b216 / c429c11 / c58faa9)
+    # eval-fail with `config.shell // {…}` on this nixpkgs pin;
+    # a3ebee0 is the rev cartorio + lacre run on cleanly.
+    devenv = {
+      url = "github:cachix/devenv/a3ebee0b80ce56ae4acba2c971c09ee6eca75338";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs @ {
