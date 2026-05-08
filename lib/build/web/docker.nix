@@ -52,7 +52,10 @@
           "8080/tcp" = {};
         };
         Env = [
-          (import ../../util/docker-helpers.nix).mkSslEnv pkgs
+          # Parens force the function application; without them the
+          # list contains the function value + the pkgs attrset as
+          # separate elements and toJSON of Env explodes.
+          ((import ../../util/docker-helpers.nix).mkSslEnv pkgs)
           "NODE_ENV=production"
         ];
         WorkingDir = "/app/static";
