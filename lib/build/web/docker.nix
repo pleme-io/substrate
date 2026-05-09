@@ -60,6 +60,16 @@
         ];
         WorkingDir = "/app/static";
         User = "web";
+        # ★ Phase E2 — OCI Image Spec v1.1 reserved annotations. Same
+        # shape as mkCrate2nixDockerImage; sourced from the shared
+        # mkStandardLabels helper so the FedRAMP-High image pack
+        # passes on Node web images too.
+        Labels = (import ../../util/docker-helpers.nix).mkStandardLabels {
+          serviceName = appName;
+          inherit tag;
+          description =
+            "${appName} — pleme-io substrate-built Node.js web app (Hanabi BFF)";
+        };
       };
     };
 

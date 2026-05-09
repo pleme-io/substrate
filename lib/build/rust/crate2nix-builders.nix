@@ -341,27 +341,12 @@ in {
         "GRAPHQL_PORT=${toString mainPort}"
       ];
     extras = extraContents pkgs;
-    # Phase E2 — OCI Image Spec v1.1 reserved annotations. The
-    # FedRAMP-High image pack (provas v3) requires the
-    # org.opencontainers.image.* keys be present + non-empty +
-    # parseable. Operators can override / extend via `extraImageLabels`.
-    # Source URL is derived from `serviceName` + the org-fleet
-    # convention (github.com/pleme-io/${serviceName}); operators
-    # building forks override `extraImageLabels`.
-    fleetSourceUrl = "https://github.com/pleme-io/${serviceName}";
-    standardLabels = {
-      "org.opencontainers.image.title" = serviceName;
-      "org.opencontainers.image.description" =
-        "${serviceName} — pleme-io substrate-built Rust service";
-      "org.opencontainers.image.vendor" = "Pleme.io";
-      "org.opencontainers.image.source" = fleetSourceUrl;
-      "org.opencontainers.image.url" = fleetSourceUrl;
-      "org.opencontainers.image.documentation" = "${fleetSourceUrl}#readme";
-      "org.opencontainers.image.licenses" = "MIT";
-      "org.opencontainers.image.version" = tag;
-      # `revision` is the git commit; injected at release time via
-      # extraImageLabels (the substrate doesn't see git state during
-      # the Nix build for hermeticity).
+    # ★ Phase E2 — OCI Image Spec v1.1 reserved annotations. Sourced
+    # from the shared `mkStandardLabels` helper so EVERY substrate
+    # builder (Rust + Node + Ruby + Wasm) emits the same shape.
+    standardLabels = (import ../../util/docker-helpers.nix).mkStandardLabels {
+      inherit serviceName tag;
+      description = "${serviceName} — pleme-io substrate-built Rust service";
     };
   in pkgs.dockerTools.buildLayeredImage {
     name = resolvedImageName;

@@ -33,4 +33,46 @@
 
   # Base container contents for services that need TLS + basic shell
   mkBaseContents = pkgs: with pkgs; [ cacert busybox ];
+
+  # ★ Phase E2 (Pillar 12 — generation over composition).
+  # OCI Image Spec v1.1 reserved annotations. The FedRAMP-High image
+  # pack (provas v3) requires the org.opencontainers.image.* keys be
+  # present + non-empty + parseable on every published image, not
+  # just Rust services. Centralized here so every builder
+  # (mkCrate2nixDockerImage, mkNodeDockerImage, …) emits the same
+  # shape — single source of truth for fleet-wide annotations.
+  #
+  # Args:
+  #   serviceName  — used for `title` + derives `source`/`url`/`documentation`.
+  #                  Convention: matches the github.com/pleme-io/${serviceName}
+  #                  repo URL. Operators publishing forks override via
+  #                  callsite (this helper returns plain attrs).
+  #   tag          — image tag → `version` annotation.
+  #   description  — optional human description (defaults to a
+  #                  substrate-built blurb when omitted).
+  #
+  # Returns: an attrset suitable for spreading into Docker `config.Labels`.
+  # The Nix evaluator's strictness rejects empty strings on these keys
+  # at the provas pack site, so all values are pre-validated non-empty.
+  mkStandardLabels = {
+    serviceName,
+    tag,
+    description ? null,
+    fleetSourceUrl ? "https://github.com/pleme-io/${serviceName}",
+  }: {
+    "org.opencontainers.image.title" = serviceName;
+    "org.opencontainers.image.description" =
+      if description != null
+      then description
+      else "${serviceName} — pleme-io substrate-built service";
+    "org.opencontainers.image.vendor" = "Pleme.io";
+    "org.opencontainers.image.source" = fleetSourceUrl;
+    "org.opencontainers.image.url" = fleetSourceUrl;
+    "org.opencontainers.image.documentation" = "${fleetSourceUrl}#readme";
+    "org.opencontainers.image.licenses" = "MIT";
+    "org.opencontainers.image.version" = tag;
+    # `revision` is the git commit; injected at release time via the
+    # release pipeline (the substrate doesn't see git state during
+    # the Nix build for hermeticity).
+  };
 }
