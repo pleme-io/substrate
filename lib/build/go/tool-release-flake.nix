@@ -83,7 +83,7 @@ in
     inherit systems mkPerSystem;
     extraOutputs = {
       overlays.default = final: prev: {
-        ${toolName} = (mkPerSystem final.system).packages.default;
+        ${toolName} = (mkPerSystem final.stdenv.hostPlatform.system).packages.default;
       };
     } // moduleOutputs;
   }

@@ -122,7 +122,7 @@ in
       } else {})
       // {
         overlays.default = final: prev: {
-          ${name} = self.packages.${final.system}.default;
+          ${name} = self.packages.${final.stdenv.hostPlatform.system}.default;
         };
       };
   }

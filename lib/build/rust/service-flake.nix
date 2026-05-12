@@ -80,7 +80,7 @@ in
       } else {})
       // {
         overlays.default = final: prev: {
-          ${serviceName} = self.packages.${final.system}.default;
+          ${serviceName} = self.packages.${final.stdenv.hostPlatform.system}.default;
         };
       }
       // moduleOutputs;

@@ -106,7 +106,7 @@ in
     inherit systems mkPerSystem;
     extraOutputs = {
       overlays.default = final: prev: {
-        ${libraryName} = (mkPerSystem final.system).packages.default;
+        ${libraryName} = (mkPerSystem final.stdenv.hostPlatform.system).packages.default;
       };
     } // moduleOutputs;
   }

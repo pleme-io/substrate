@@ -105,7 +105,7 @@ in
     inherit systems mkPerSystem;
     extraOutputs = {
       overlays.default = final: prev: {
-        ${packageAttr} = (mkPerSystem final.system).packages.default;
+        ${packageAttr} = (mkPerSystem final.stdenv.hostPlatform.system).packages.default;
       };
     } // moduleOutputs;
   }

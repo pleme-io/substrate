@@ -66,7 +66,7 @@ in
     inherit systems mkPerSystem;
     extraOutputs = {
       overlays.default = final: prev: {
-        ${toolArgs.toolName} = (mkPerSystem final.system).packages.default;
+        ${toolArgs.toolName} = (mkPerSystem final.stdenv.hostPlatform.system).packages.default;
       };
     } // moduleOutputs;
   }
