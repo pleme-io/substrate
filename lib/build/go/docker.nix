@@ -22,6 +22,17 @@
 #   };
 {
   # Build a layered Docker image from a Go binary.
+  #
+  # FedRAMP-High knobs (Phase 2 hardening, 2026-05):
+  #   distroless    — drop busybox; use cacert (+ tini) only. Smaller
+  #                   attack surface, no shell, no coreutils.
+  #   labels        — operator-supplied labels merged with the
+  #                   default OCI annotation set from mkStandardLabels.
+  #   created       — ISO timestamp for OCI `created` annotation.
+  #                   Default 1970-01-01T00:00:01Z (reproducibility).
+  #   tini          — when distroless=true, include tini as PID 1
+  #                   (Go programs typically handle signals themselves,
+  #                    but tini is cheap insurance against zombie procs).
   mkGoDockerImage = pkgs: {
     name,
     binary,
@@ -33,9 +44,18 @@
     workDir ? "/app",
     entrypoint ? null,
     extraContents ? [],
+    # ─── Phase 2 hardening knobs ───────────────────────────────────
+    distroless ? false,
+    tini ? true,
+    labels ? {},
+    description ? null,
+    fleetSourceUrl ? null,
+    created ? "1970-01-01T00:00:01Z",
   }: let
     inherit (pkgs) lib dockerTools cacert busybox;
     check = import ../../types/assertions.nix;
+    helpers = import ../../util/docker-helpers.nix;
+    distrolessHelper = import ./distroless.nix;
     _ = check.all [
       (check.nonEmptyStr "name" name)
       (check.str "tag" tag)
@@ -57,10 +77,31 @@
     ) ports;
 
     defaultEntrypoint = [ "${binary}/bin/${name}" ];
+
+    # Base contents — distroless drops busybox.
+    baseContents =
+      if distroless
+      then distrolessHelper.mkDistrolessBase pkgs { withTini = tini; withCacert = true; }
+      else [ cacert busybox ];
+
+    # OCI annotations auto-injected for every image. Operators can
+    # override + extend via `labels`.
+    standardLabels = helpers.mkStandardLabels {
+      serviceName = name;
+      inherit tag;
+      description = if description != null then description
+                    else "${name} — pleme-io substrate-built service";
+    } // (if fleetSourceUrl != null
+          then { "org.opencontainers.image.source" = fleetSourceUrl;
+                 "org.opencontainers.image.url" = fleetSourceUrl;
+                 "org.opencontainers.image.documentation" = "${fleetSourceUrl}#readme"; }
+          else {})
+      // { "org.opencontainers.image.created" = created; }
+      // labels;
   in
   dockerTools.buildLayeredImage {
-    inherit name tag architecture;
-    contents = [ binary cacert busybox ] ++ extraContents;
+    inherit name tag architecture created;
+    contents = [ binary ] ++ baseContents ++ extraContents;
     config = {
       Entrypoint = if entrypoint != null then entrypoint else defaultEntrypoint;
       ExposedPorts = exposedPorts;
@@ -70,6 +111,7 @@
       ] ++ env;
       WorkingDir = workDir;
       User = user;
+      Labels = standardLabels;
     };
   };
 
