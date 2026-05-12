@@ -93,9 +93,9 @@ let
     # The OCI image for THIS system's arch.
     image = goDocker.mkGoDockerImage pkgs {
       name = serviceName;
-      inherit binary architecture ports env user workDir entrypoint
+      inherit binary ports env user workDir entrypoint
               distroless tini labels description fleetSourceUrl;
-      tag = "amd64-latest";  # arch label only; release-time tag is what counts
+      tag = "${arch}-latest";  # release-time pipeline rewrites
       architecture = arch;
     };
   in {
