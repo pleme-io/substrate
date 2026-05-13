@@ -81,6 +81,16 @@ let
     # Build the Go binary. FIPS build option enables BoringCrypto
     # at toolchain level (defense-in-depth; some workloads also
     # activate FIPS via runtime ldflag).
+    #
+    # The buildPhase is overridden to use raw `go install ./<subPackage>`
+    # against the in-tree `vendor/`. The default `buildGoModule`
+    # `buildPhase` runs an extra vendor-consistency pre-check that
+    # rejects certain valid Akeyless vendoring patterns (e.g. transitive
+    # imports of `github.com/microsoft/go-mssqldb` via a single dot-import).
+    # The raw `go install` path mirrors plain `go build -mod=vendor`,
+    # which we've verified works on the same source. Output is collected
+    # from `$GOPATH/bin/<GOOS>_<GOARCH>/` (cross-compile) or `$GOPATH/bin/`
+    # (host build).
     binary = pkgs.buildGoModule {
       pname = serviceName;
       inherit version src vendorHash subPackages ldflags buildInputs;
@@ -88,6 +98,27 @@ let
         // (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
       doCheck = false;
       meta.mainProgram = serviceName;
+      # Skip buildGoModule's strict pre-check; use raw `go install` with
+      # GOFLAGS=-mod=vendor (already exported by buildGoModule).
+      buildPhase = ''
+        runHook preBuild
+        for pkg in $subPackages; do
+          echo "Building subPackage ./$pkg"
+          go install -ldflags="$ldflags" ./$pkg
+        done
+        runHook postBuild
+      '';
+      # Cross-compile binaries land in $GOPATH/bin/$GOOS_$GOARCH/.
+      installPhase = ''
+        runHook preInstall
+        mkdir -p $out/bin
+        if [ -d "$GOPATH/bin/''${GOOS}_''${GOARCH}" ]; then
+          cp -v $GOPATH/bin/''${GOOS}_''${GOARCH}/* $out/bin/
+        elif [ -d "$GOPATH/bin" ]; then
+          cp -v $GOPATH/bin/* $out/bin/
+        fi
+        runHook postInstall
+      '';
     };
 
     # The OCI image for THIS system's arch.
