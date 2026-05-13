@@ -108,6 +108,14 @@
       Env = [
         sslEnv
         "GIT_SHA=nix-build"
+        # USER/HOME defaults for distroless+numeric-uid images. Go's
+        # `os/user.Current()` (and several libraries that chain through
+        # it) falls back to `$USER` when /etc/passwd has no entry for
+        # the running uid. Without these, any binary touching that
+        # codepath panics at startup. Consumer-supplied `env` (below)
+        # can override.
+        "USER=app"
+        "HOME=${workDir}"
       ] ++ env;
       WorkingDir = workDir;
       User = user;
