@@ -664,6 +664,26 @@ in rec {
   rustLibraryFlakeBuilder = ./build/rust/library-flake.nix;
 
   # ============================================================================
+  # RUST LIBRARY WORKSPACE BUILDER (multi-crate, no binary)
+  # ============================================================================
+  # The dual of rustWorkspaceReleaseBuilder on the library side: a Cargo
+  # workspace where every member is a library (umbrella + types + domain
+  # crates), no binary. Exposes per-member packages plus workspace-wide
+  # check-all/regenerate apps.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/rust-library-workspace-flake.nix" {
+  #     inherit nixpkgs crate2nix fenix;
+  #   }) {
+  #     workspaceName = "shigoto";
+  #     members = [ "shigoto" "shigoto-types" "shigoto-dag" ... ];
+  #     defaultMember = "shigoto";
+  #     src = self;
+  #   };
+  rustLibraryWorkspaceBuilder = ./build/rust/library-workspace.nix;
+  rustLibraryWorkspaceFlakeBuilder = ./build/rust/library-workspace-flake.nix;
+
+  # ============================================================================
   # RUST TOOL RELEASE BUILDER (standalone import path)
   # ============================================================================
   # Cross-platform CLI tool builds + GitHub releases.
