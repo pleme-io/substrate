@@ -123,12 +123,59 @@
   # Ruby version. Defaults to the gemfile-pinned 3.3 that pangea-core
   # requires; bumping should be coordinated with the gem ecosystem.
   ruby ? pkgs.ruby_3_3,
+
+  # Executor to use for plan/deploy/apply/destroy. Default is "tofu":
+  # `bundle exec pangea <verb> <template>` shells to opentofu. Setting
+  # to "magma" switches to the pleme-io Rust-native executor — Pangea
+  # Ruby still synthesizes the JSON, magma consumes it. M0 path uses a
+  # disk intermediary at `.pangea/rendered.tf.json`; the in-memory
+  # magnus-driven flow (theory/MAGMA.md §II.9) lands once magma's
+  # `magnus` feature is wired into the helper.
+  #
+  # When executor == "magma", the consumer must thread the magma
+  # package into the helper via `magmaPackage`.
+  executor ? "tofu",
+
+  # Magma package (required when executor == "magma"). Thread via the
+  # consumer flake's magma input: `magmaPackage = magma.packages.${system}.default;`.
+  magmaPackage ? null,
+
+  # Capability requirements for this workspace. Validated at eval time
+  # against the selected executor via substrate/lib/infra/pangea-backend.nix.
+  # Failing to satisfy a requirement raises a typed Nix error before
+  # any apps are produced — operator can't accidentally run a
+  # tofu-incompatible workspace under tofu.
+  #
+  # Recognized keys:
+  #   feature        — string, one of "in_memory_pipeline" | "workspace_chain"
+  #   input_format   — string, one of "hcl2" | "terraform-json" | "pangea-ruby-inprocess"
+  #
+  # Example: a Pangea-Ruby workspace that relies on in-memory chains:
+  #   requires = { feature = "in_memory_pipeline"; input_format = "pangea-ruby-inprocess"; };
+  requires ? { },
 }:
 
 let
   lib = pkgs.lib;
 
-  rubyEnv = [ ruby pkgs.opentofu ] ++ extraDeps;
+  isMagma = executor == "magma";
+
+  # Build the typed backend selector via substrate's central helper.
+  # Single source of truth for both validation + capability probing.
+  backend = (import ./pangea-backend.nix { inherit pkgs; }) {
+    name         = executor;
+    magmaPackage = magmaPackage;
+    tofuPackage  = pkgs.opentofu;
+  };
+
+  # Verify the chosen executor supports every requirement the workspace
+  # declares. Fails the eval with a typed error on mismatch.
+  _verifyResult = backend.verify { inherit requires; };
+
+  rubyEnv =
+    [ ruby ]
+    ++ backend.runtimeInputs
+    ++ extraDeps;
 
   # Map verb → underlying pangea subcommand. `deploy` and `apply` both
   # resolve to `pangea apply` — `deploy` is the original operator
@@ -166,6 +213,17 @@ let
     mkdir -p vendor/bundle && echo "$RUBY_STORE" > "$MARKER"
   '';
 
+  # Map verb → magma subcommand. Pangea Ruby still renders the JSON
+  # (via `pangea synth`); magma consumes it. For executor=magma, the
+  # `synth` verb stays Pangea-only (it doesn't need an executor).
+  magmaSubcommand = {
+    plan    = "plan";
+    deploy  = "apply";
+    apply   = "apply";
+    destroy = "destroy";
+    # synth is handled separately (Pangea-only render).
+  };
+
   mkPangeaApp = verb: pkgs.writeShellApplication {
     name = "${name}-${verb}";
     runtimeInputs = rubyEnv;
@@ -173,6 +231,30 @@ let
     text = ''
       ${prologue}
       bundle exec pangea ${pangeaSubcommand.${verb}} ${lib.escapeShellArg template} "$@"
+    '';
+  };
+
+  # Magma executor app: Pangea Ruby synthesizes to a disk intermediary,
+  # magma consumes it. Per theory/MAGMA.md §VI.M5, this is the
+  # workspace-level migration path — opt in workspace-by-workspace,
+  # keep tofu as the fallback. In-memory magnus flow (no disk file)
+  # lands once magma's `magnus` feature is consumed here.
+  mkMagmaApp = verb: pkgs.writeShellApplication {
+    name = "${name}-${verb}";
+    runtimeInputs = rubyEnv;
+    excludeShellChecks = [ "SC2086" "SC2046" ];
+    text = ''
+      ${prologue}
+      # `synth` is a Pangea-only render; pass through unchanged.
+      ${if verb == "synth" then "bundle exec pangea synth ${lib.escapeShellArg template} \"$@\""
+        else ''
+          mkdir -p .pangea
+          # Render Pangea Ruby → Terraform JSON (disk intermediary; the
+          # in-memory magnus path is M0.x).
+          bundle exec pangea synth ${lib.escapeShellArg template} > .pangea/rendered.tf.json
+          # magma <verb> against the rendered workspace dir.
+          magma ${magmaSubcommand.${verb}} .pangea "$@"
+        ''}
     '';
   };
 
@@ -206,6 +288,7 @@ let
   appFor = verb:
     if verb == "test" then mkTestApp
     else if verb == "import" then mkImportApp
+    else if isMagma then mkMagmaApp verb
     else mkPangeaApp verb;
 
   mkExtraApp = verb: spec: pkgs.writeShellApplication {
