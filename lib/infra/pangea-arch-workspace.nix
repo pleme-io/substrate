@@ -100,7 +100,7 @@
   # `apply` is a tofu-native alias for `deploy` — same underlying
   # `pangea apply <template>` invocation, just the name operators
   # familiar with terraform/tofu reach for instinctively.
-  verbs ? [ "plan" "deploy" "apply" "destroy" "synth" "test" "import" ],
+  verbs ? [ "plan" "deploy" "apply" "destroy" "synth" "test" "test-magma" "import" ],
 
   # Workspace-specific extra apps beyond the canonical six. Use for
   # AMI build/sweep/commission/verify steps that aren't a pangea verb.
@@ -285,8 +285,33 @@ let
     '';
   };
 
+  # `test-magma` — render Pangea Ruby → JSON, then verify via
+  # `magma fixture verify-dir`. Requires the `magma` binary on PATH
+  # (auto-included in runtimeInputs when executor = "magma";
+  # consumers running this under executor = "tofu" must provide
+  # `magmaPackage` explicitly via extraDeps to get the magma binary
+  # accessible).
+  mkTestMagmaApp = pkgs.writeShellApplication {
+    name = "${name}-test-magma";
+    runtimeInputs = rubyEnv ++ (if !isMagma && magmaPackage != null
+                                then [ magmaPackage ]
+                                else []);
+    excludeShellChecks = [ "SC2086" ];
+    text = ''
+      ${prologue}
+      # Render Pangea Ruby → typed JSON in .pangea/.
+      mkdir -p .pangea
+      bundle exec pangea synth ${lib.escapeShellArg template} > .pangea/rendered.tf.json
+      # Verify the rendered workspace through magma's typed pipeline.
+      # Emits a typed JSON report on stdout; exit 0 = passes magma's
+      # plan-cleanly assertion, exit 1 = something doesn't.
+      magma fixture verify-dir .pangea
+    '';
+  };
+
   appFor = verb:
     if verb == "test" then mkTestApp
+    else if verb == "test-magma" then mkTestMagmaApp
     else if verb == "import" then mkImportApp
     else if isMagma then mkMagmaApp verb
     else mkPangeaApp verb;
