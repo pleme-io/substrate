@@ -1,0 +1,45 @@
+name: nix-tests
+
+# Eval-time tests for substrate's typed Nix functions. Each test
+# expression evaluates to `{ total = N; passed = N; }` on success or
+# throws on the first failure — `nix-instantiate --eval --strict`
+# returns non-zero on throw, so the step fails closed.
+#
+# Add a new entry here for each `tests/*-test.nix` you ship under
+# `lib/build/<area>/tests/`. The pattern is uniform: one Nix
+# expression, exit non-zero on throw, gate on it.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lib/build/estante/**'
+      - '.github/workflows/nix-tests.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'lib/build/estante/**'
+      - '.github/workflows/nix-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  estante-loaders:
+    name: estante — loader + verifier eval tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: lockfile-loader-test.nix
+        run: nix-instantiate --eval --strict lib/build/estante/tests/lockfile-loader-test.nix
+
+      - name: receipt-loader-test.nix
+        run: nix-instantiate --eval --strict lib/build/estante/tests/receipt-loader-test.nix
+
+      - name: mk-receipt-verifier-test.nix
+        run: nix-instantiate --eval --strict lib/build/estante/tests/mk-receipt-verifier-test.nix
