@@ -63,6 +63,7 @@ let
 in
 {
   inherit (import ./lockfile-loader.nix { inherit lib; }) loadLockfile;
+  inherit (import ./receipt-loader.nix { inherit lib; }) loadReceipt loadDigests;
   inherit (import ./mk-shell-package.nix { inherit pkgs; }) mkShellPackage;
   inherit (import ./mk-shell-env.nix { inherit pkgs; }) mkShellEnv mkPackageDerivation;
   inherit (import ./mk-script-binary.nix { inherit pkgs; }) mkScriptBinary;
