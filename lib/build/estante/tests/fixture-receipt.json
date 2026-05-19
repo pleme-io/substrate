@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "estante": {
+    "version": "0.1.0"
+  },
+  "manifest": {
+    "path": "shellpkg.lisp",
+    "blake3": "6a1148128d931a0c5e5201e0df319a67029541b4fa91a1797ecc5e17c177e68e"
+  },
+  "lockfile": {
+    "path": "shellpkg.lock.lisp",
+    "blake3": "e0d2bf346b8c459956cb9367efe130f2759f8fcd37fc5cecdccbef055697bbc5"
+  },
+  "entries": [
+    {
+      "name": "eta",
+      "blake3": "4d3c3ca011b6584b8fd64e337c7fa7b72a06cb88cb4cadd334f995eb18a25243",
+      "placement": "cache",
+      "materializedExists": true
+    }
+  ]
+}

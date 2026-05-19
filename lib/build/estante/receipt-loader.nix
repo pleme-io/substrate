@@ -106,10 +106,15 @@ in
         inherit schemaVersion estante manifest lockfile entries;
       };
     in
-      # Force the validation booleans before returning so failures
-      # are raised immediately, not deferred behind lazy attribute
-      # access.
-      builtins.seq checkedTop (builtins.seq checkedSchema result);
+      # Eagerly force the entire validated shape — `builtins.deepSeq`
+      # walks every attribute and list element so missing-field,
+      # bad-schema, and per-entry errors all surface at loadReceipt
+      # time rather than lazily on field access.
+      builtins.seq checkedTop (
+        builtins.seq checkedSchema (
+          builtins.deepSeq result result
+        )
+      );
 
   # Convenience: load receipt + return ONLY its BLAKE3 digests, for
   # quick consumer-side cross-checks. Order matches the receipt's
