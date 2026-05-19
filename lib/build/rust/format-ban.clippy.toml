@@ -1,0 +1,22 @@
+# pleme-io typed-emission enforcement.
+#
+# Canonical: https://github.com/pleme-io/theory/blob/main/TYPED-EMISSION.md
+# Operationalized by: pleme-io/substrate/lib/build/rust/format-ban.nix
+#
+# `format!()` is banned across pleme-io Rust crates. Use:
+#   - `write!()` / `writeln!()` inside `Display`/`Debug`/`Serialize` impls
+#   - typed logging macros (`tracing::*`)
+#   - typed error macros (`anyhow::anyhow!()` / `anyhow::bail!()`)
+#   - typed AST renderers (`nix-synthesizer::NixValue`, `serde_yaml`,
+#     arch-synthesizer's `Action` / `GoNode` domains, etc.)
+#   - typed value builders (`PathBuf::join`, `url::Url::parse_with_params`,
+#     `Command::arg`, `sea-orm` query builders, etc.)
+#
+# Adopt by copying or symlinking this file to your repo root as
+# `clippy.toml`, OR by depending on the Nix helper from
+# `substrate/lib/build/rust/format-ban.nix` to render it at build time.
+
+disallowed-macros = [
+  { path = "std::format",
+    reason = "format!() is banned per pleme-io/theory/TYPED-EMISSION.md. Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer. Free-form string composition is a substrate gap; close it." },
+]
