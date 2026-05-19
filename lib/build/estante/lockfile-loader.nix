@@ -54,7 +54,11 @@ let
   };
 in
 {
-  # Read a lockfile from disk (path) or accept an already-imported attrset.
+  # Read a lockfile from disk (path) or accept an already-imported
+  # attrset. Validates eagerly via `builtins.deepSeq` so per-entry
+  # errors surface at loadLockfile time, not lazily when a downstream
+  # field is touched. Mirrors the receipt-loader's pattern — both
+  # estante artifacts (lockfile, receipt) fail-fast on bad input.
   loadLockfile = pathOrAttrs:
     let
       raw =
@@ -63,14 +67,15 @@ in
         else throw "loadLockfile: argument must be a path or attrset";
 
       schemaVersion = raw.schemaVersion or 0;
-      _ =
-        if schemaVersion == 1 then null
+      checkedSchema =
+        if schemaVersion == 1 then true
         else throw "estante lockfile schemaVersion must be 1, got ${toString schemaVersion}";
 
       packages = map (p: fillDefaults (validate p)) (raw.packages or []);
-    in {
-      inherit schemaVersion packages;
-    };
+
+      result = { inherit schemaVersion packages; };
+    in
+      builtins.seq checkedSchema (builtins.deepSeq result result);
 
   # Convenience: load a lockfile and return its packages list directly.
   loadPackages = pathOrAttrs:
