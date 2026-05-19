@@ -172,10 +172,30 @@ let
   # Regenerate Cargo.nix — delegates to forge tool regenerate
   regenerateApp = {
     type = "app";
-    program = toString (hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
-      set -euo pipefail
-      exec ${forgeCmd} tool regenerate --language rust
-    '');
+    # If forge IS passed by the caller, use its richer `tool regenerate`
+    # flow (handles cross-platform locks + sibling registry updates).
+    # Otherwise fall back to a direct crate2nix invocation — the canonical
+    # operation regenerate-cargo-nix performs. Without the fallback,
+    # callers that don't pass `forge` get `exec: forge: not found` per
+    # the bug surfaced in pleme-io/kikai during 2026-05-18 engenho-local
+    # bring-up (substrate Task #17 in the operator's tracker).
+    program = toString (
+      if forge != null then
+        hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
+          set -euo pipefail
+          exec ${forgeCmd} tool regenerate --language rust
+        ''
+      else
+        hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
+          set -euo pipefail
+          echo "regenerate-cargo-nix: using crate2nix fallback (no forge passed)"
+          # rm-then-regenerate to defeat crate2nix's package-version
+          # cache (it keys narHashes by `git+url#0.1.0` not by git rev,
+          # so a revision-only bump tricks the cache).
+          ${hostPkgs.coreutils}/bin/rm -f crate-hashes.json
+          exec ${hostPkgs.nix}/bin/nix run nixpkgs#crate2nix -- generate
+        ''
+    );
   };
 
   checkAllApp = releaseHelpers.mkCheckAllApp {
