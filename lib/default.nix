@@ -1139,6 +1139,41 @@ in rec {
   inherit ((import ./build/python/uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
 
   # ============================================================================
+  # ESTANTE BUILDERS (shell-package manager)
+  # ============================================================================
+  # estante is the pleme-io cargo-for-shell — Nix-native, git-as-registry,
+  # Rust + Tatara-Lisp shell-package manager. The substrate side exposes
+  # three builders + a HM helper:
+  #
+  #   - mkShellPackage      → build one (defshellpkg …) as a Nix derivation
+  #   - mkShellEnv          → materialize a whole shellpkg.lock.nix into one
+  #                            symlinkJoin tree consumable by frost-lisp::defload
+  #   - mkScriptBinary      → wrap a tatara-lisp script with its declared
+  #                            deps as an installable binary (the
+  #                            `uv tool install` equivalent)
+  #   - loadLockfile        → parse shellpkg.lock.nix into a typed attrset
+  #   - hmShellpkgHelpers   → declarative HM-component shape for consuming
+  #                            an estante lockfile (profile + per-pkg toggles
+  #                            + extra-scripts)
+  #
+  # Usage (package author flake):
+  #   outputs = (import "${substrate}/lib/build/estante/flake.nix" {
+  #     inherit nixpkgs flake-utils;
+  #   }) { name = "you-should-use"; version = "1.7.4"; src = self; };
+  #
+  # Usage (consumer flake):
+  #   estante = import "${substrate}/lib/build/estante" { inherit pkgs; };
+  #   packages.default = estante.mkShellEnv { lockfile = ./shellpkg.lock.nix; };
+  #
+  # Companion repo: github.com/pleme-io/estante
+  estanteBuilder = ./build/estante;
+
+  inherit ((import ./build/estante { inherit pkgs; })) mkShellPackage mkShellEnv mkScriptBinary loadLockfile;
+
+  # Standalone HM helper — no pkgs needed, just lib.
+  hmShellpkgHelpers = ./hm/shellpkg-helpers.nix;
+
+  # ============================================================================
   # GITHUB ACTION BUILDER (standalone import path)
   # ============================================================================
   # Builds GitHub Actions that use @vercel/ncc to bundle into dist/.
