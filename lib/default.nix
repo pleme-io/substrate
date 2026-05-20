@@ -689,6 +689,32 @@ in rec {
   engateFlakeBuilder = ./build/rust/engate-flake.nix;
 
   # ============================================================================
+  # MAESTRO STACK CONSUMER FLAKE BUILDER (typed whole-stack composition)
+  # ============================================================================
+  # Wraps rustLibraryFlakeBuilder with maestro-specific outputs: per-stack
+  # `nix run .#stack-<name>` launchers + `stack-<name>-verify` attestation
+  # checks, plus a `passthru.stackSpecs` flake attr the fleet-wide
+  # `maestro fleet-audit` job enumerates.
+  #
+  # See `pleme-io/maestro` for the runtime crates + the canonical fleet
+  # default stacks at `pleme-io/maestro/stacks/`. The companion
+  # `engateFlakeBuilder` covers individual producer↔consumer attaches;
+  # `maestroFlakeBuilder` covers the whole-stack composition that contains
+  # many engate attaches plus orchestration.
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/build/rust/maestro-flake.nix" {
+  #     inherit nixpkgs crate2nix fenix substrate;
+  #   }) {
+  #     libraryName = "my-consumer";
+  #     src = self;
+  #     stackSpecs = [
+  #       { name = "mado-default"; path = "stacks/mado-default.yaml"; }
+  #     ];
+  #   };
+  maestroFlakeBuilder = ./build/rust/maestro-flake.nix;
+
+  # ============================================================================
   # RUST LIBRARY WORKSPACE BUILDER (multi-crate, no binary)
   # ============================================================================
   # The dual of rustWorkspaceReleaseBuilder on the library side: a Cargo
