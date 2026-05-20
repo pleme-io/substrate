@@ -715,6 +715,41 @@ in rec {
   maestroFlakeBuilder = ./build/rust/maestro-flake.nix;
 
   # ============================================================================
+  # FLEET APP MODULE TRIO (NixOS + Darwin + HM, single factory call)
+  # ============================================================================
+  # Every operator-facing pleme-io fleet app (mado, tear, frost, frostmourne,
+  # escriba, ayatsuri, namimado, …) ships its module trio via this factory.
+  # Codifies the uniform operator surface:
+  #
+  #   programs.<name>.enable
+  #   programs.<name>.tier         — bare | discovered | default
+  #   programs.<name>.extraSettings — typed YAML overlay
+  #   programs.<name>.manageConfig — write the rendered YAML?
+  #   programs.<name>.package      — override the installed derivation
+  #
+  # Tier semantics match shikumi::TieredConfig — every fleet app's
+  # Rust config struct implements the trait + every fleet app's nix
+  # module passes the tier through via `<NAME>_TIER` env var.
+  #
+  # Theme uniformity: every app's default tier reads from
+  # ishou_tokens::FleetDefaults::prescribed() so the fleet shares one
+  # canonical look + behavior baseline.
+  #
+  # Usage in a fleet app's flake:
+  #
+  #   let trio = (import "${inputs.substrate}/lib/build/nix/fleet-app-module.nix" {
+  #     inherit (inputs.nixpkgs) lib;
+  #   }) {
+  #     name = "escriba";
+  #     package = self.packages.${system}.default;
+  #     configRelPath = "escriba/escriba.yaml";
+  #   };
+  #   in { homeManagerModules.default = trio.homeManager;
+  #         nixosModules.default = trio.nixos;
+  #         darwinModules.default = trio.darwin; }
+  fleetAppModule = ./build/nix/fleet-app-module.nix;
+
+  # ============================================================================
   # RUST LIBRARY WORKSPACE BUILDER (multi-crate, no binary)
   # ============================================================================
   # The dual of rustWorkspaceReleaseBuilder on the library side: a Cargo
