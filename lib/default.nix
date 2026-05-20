@@ -664,6 +664,31 @@ in rec {
   rustLibraryFlakeBuilder = ./build/rust/library-flake.nix;
 
   # ============================================================================
+  # ENGATE CONSUMER FLAKE BUILDER (typed producer↔consumer attach primitive)
+  # ============================================================================
+  # Wraps rustLibraryFlakeBuilder with engate-specific CI gates: enforces
+  # presence of attestation fixtures per declared (defengate ...) spec, adds
+  # a `nix run .#engate-verify` app that re-runs the attestation chain, and
+  # surfaces the engate spec list as a flake attr so the fleet-wide audit job
+  # can enumerate every declared engate point across the org.
+  #
+  # See `pleme-io/engate` for the runtime crates + `pleme-io/CLAUDE.md`
+  # ★★ engate section (engate M5 — pending promotion to canonical fleet-wide
+  # primitive once M6 fleet migration completes).
+  #
+  # Usage:
+  #   outputs = (import "${substrate}/lib/build/rust/engate-flake.nix" {
+  #     inherit nixpkgs crate2nix fenix substrate;
+  #   }) {
+  #     libraryName = "my-engate-consumer";
+  #     src = self;
+  #     engateSpecs = [
+  #       { name = "..."; attestationFixture = "fixtures/...engate.json"; }
+  #     ];
+  #   };
+  engateFlakeBuilder = ./build/rust/engate-flake.nix;
+
+  # ============================================================================
   # RUST LIBRARY WORKSPACE BUILDER (multi-crate, no binary)
   # ============================================================================
   # The dual of rustWorkspaceReleaseBuilder on the library side: a Cargo
