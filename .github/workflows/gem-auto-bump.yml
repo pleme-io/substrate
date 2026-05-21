@@ -1,0 +1,88 @@
+# Ruby gem auto-bump -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/substrate-bump@v1   (polymorphic — detects *.gemspec
+#                                           and calls `.#gem:bump`)
+#
+# Consumer (.github/workflows/auto-bump.yml):
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     bump:
+#       uses: pleme-io/substrate/.github/workflows/gem-auto-bump.yml@main
+#       secrets:
+#         # Optional: pass a PAT so the tag push triggers downstream
+#         # workflows. The default GITHUB_TOKEN cannot trigger another
+#         # workflow run on its own pushes (GH security restriction).
+#         BOT_PAT: ${{ secrets.BOT_PAT }}
+#
+# Skips when the bot itself pushed, or when nothing under lib/ or the
+# gemspec changed since the previous tag. Otherwise: patch-bump (or
+# whatever `bump-type` says), commit, push, tag, push tag.
+#
+# BOT_PAT semantics:
+#   - If the consumer provides BOT_PAT, checkout + push both use it,
+#     which lets the tag push trigger the release workflow.
+#   - If BOT_PAT is absent we fall back to GITHUB_TOKEN; the bump still
+#     succeeds and the tag still lands, but the release workflow must
+#     be triggered manually (`gh workflow run release.yml --ref vX.Y.Z`).
+
+name: gem-auto-bump
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        default: patch
+    secrets:
+      BOT_PAT:
+        required: false
+        description: "Optional PAT for tag pushes to trigger downstream workflows. Falls back to GITHUB_TOKEN if absent."
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - id: changes
+        shell: bash
+        run: |
+          last=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$last" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Skip when nothing under lib/ or the gemspec moved since the
+          # previous tag — those are the only paths a gem-bump should react to.
+          if git diff --quiet "$last" HEAD -- lib/ '*.gemspec'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - if: steps.changes.outputs.skip == 'false'
+        uses: pleme-io/actions/substrate-bump@v1
+        with:
+          bump-type: ${{ inputs.bump-type }}
+
+      - if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        env:
+          GIT_PUSH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          remote_url=$(git remote get-url origin)
+          clean_url=$(echo "$remote_url" | sed -E 's#https://[^@]*@#https://#')
+          git remote set-url origin "${clean_url/https:\/\//https:\/\/x-access-token:$GIT_PUSH_TOKEN@}"
+          git push origin main
+          git push origin --tags

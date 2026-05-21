@@ -1,0 +1,27 @@
+# Ruby gem CI -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/nix-flake-check@v1
+#
+# Consumer (.github/workflows/ci.yml):
+#   on: [push, pull_request]
+#   jobs:
+#     check:
+#       uses: pleme-io/substrate/.github/workflows/gem-ci.yml@main
+#
+# Runs `nix flake check` which (via substrate's ruby-gem-flake helper)
+# evaluates the gemspec, builds the bundlerEnv, and runs whatever
+# checks the consumer's flake exposes. For most pangea-* gems that
+# means rspec via the `.#test` app.
+
+name: gem-ci
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-flake-check@v1
