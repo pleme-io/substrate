@@ -64,7 +64,7 @@ spec-fetch / mock-server hooks.
 |---|---|
 | `ansible-collection-ci.yml` | `nix flake check` with optional OpenAPI spec fetch (`AKEYLESS_OPENAPI_YAML`) |
 | `ansible-collection-release.yml` | build tarball → publish to Galaxy (no-op if token unset) → attach to GH Release on tag |
-| `ansible-collection-auto-bump.yml` | patch-bump galaxy.yml when plugins/meta/galaxy.yml changed since last tag, push, tag |
+| `ansible-collection-auto-bump.yml` | patch-bump galaxy.yml when plugins/meta/galaxy.yml changed since last tag, push, tag (accepts optional `BOT_PAT` secret so tag push triggers downstream release; falls back to `GITHUB_TOKEN` if absent) |
 | `ansible-collection-upstream-watch.yml` | scheduled OpenAPI poller → iac-forge regen → PR labeled `automated` |
 | `ansible-collection-auto-merge.yml` | enable squash auto-merge on PRs labeled `automated` |
 | `ansible-collection-docs-lint.yml` | antsibull-docs lint in `ansible_collections/<ns>/<name>/` layout |

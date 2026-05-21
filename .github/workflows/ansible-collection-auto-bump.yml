@@ -8,10 +8,22 @@
 #   jobs:
 #     bump:
 #       uses: pleme-io/substrate/.github/workflows/ansible-collection-auto-bump.yml@main
+#       secrets:
+#         # Optional: pass a PAT so the tag push triggers downstream
+#         # workflows. The default GITHUB_TOKEN cannot trigger another
+#         # workflow run on its own pushes (GH security restriction).
+#         BOT_PAT: ${{ secrets.BOT_PAT }}
 #
 # Skips when the bot itself pushed, or when nothing under plugins/, meta/, or
 # galaxy.yml changed since the previous tag. Otherwise: patch-bump (or whatever
 # `bump-type` says), commit, push, tag, push tag.
+#
+# BOT_PAT semantics (https://docs.github.com/en/actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow):
+#   - If the consumer provides BOT_PAT, checkout + push both use it, which
+#     lets the tag push trigger the release workflow.
+#   - If BOT_PAT is absent we fall back to GITHUB_TOKEN; the bump still
+#     succeeds and the tag still lands, but the release workflow must be
+#     triggered manually (`gh workflow run release.yml --ref vX.Y.Z`).
 
 name: Ansible collection auto-bump
 
@@ -21,6 +33,10 @@ on:
       bump-type:
         type: string
         default: patch
+    secrets:
+      BOT_PAT:
+        required: false
+        description: "Optional PAT for tag pushes to trigger downstream workflows. Falls back to GITHUB_TOKEN if absent."
 
 permissions:
   contents: write
@@ -33,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - id: changes
         shell: bash
@@ -59,6 +75,15 @@ jobs:
 
       - if: steps.changes.outputs.skip == 'false'
         shell: bash
+        env:
+          GIT_PUSH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
         run: |
+          # Re-set origin URL with the chosen token so the tag push can
+          # trigger downstream workflows (when BOT_PAT is provided).
+          remote_url=$(git remote get-url origin)
+          # Strip any existing https://x-access-token:...@ prefix and
+          # re-add with the chosen token.
+          clean_url=$(echo "$remote_url" | sed -E 's#https://[^@]*@#https://#')
+          git remote set-url origin "${clean_url/https:\/\//https:\/\/x-access-token:$GIT_PUSH_TOKEN@}"
           git push origin main
           git push origin --tags
