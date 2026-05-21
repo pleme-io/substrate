@@ -67,24 +67,17 @@
     python = pkgs.python3;
     collectionName = "${namespace}-${name}-${version}";
 
-    # Resolve tataraScript to a shell-quotable invocation. If a derivation
-    # was passed, point at its bin/tatara-script; otherwise treat it as a
-    # bare command on $PATH.
-    tataraInvocation =
-      if lib.isDerivation tataraScript
-      then "${tataraScript}/bin/tatara-script"
-      else tataraScript;
-
     # Compile a .tlisp source string into a runnable nix-app program.
     # Writes the source to /nix/store, then wraps it in a shell shim that
     # invokes tatara-script <script-file> "$@". The shim is the smallest
     # possible adapter to the apps-take-a-path contract; everything else
     # lives in the .tlisp source.
-    mkTataraScript = scriptName: src: let
-      scriptFile = pkgs.writeText "${scriptName}.tlisp" src;
-    in pkgs.writeShellScript "${scriptName}-wrapper" ''
-      exec ${tataraInvocation} ${scriptFile} "$@"
-    '';
+    #
+    # Extracted to lib/scripting/mkTataraScript.nix for reuse by other
+    # builders that want to ship .tlisp-backed nix apps.
+    mkTataraScript = import ../scripting/mkTataraScript.nix {
+      inherit pkgs tataraScript;
+    };
 
     # Generate galaxy.yml if it doesn't exist
     galaxyYml = pkgs.writeText "galaxy.yml" ''
