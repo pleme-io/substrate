@@ -57,26 +57,14 @@ jobs:
     name: Derive chart version from tag
     runs-on: ${{ inputs.runner }}
     outputs:
-      version: ${{ steps.tag.outputs.version }}
+      version: ${{ steps.derive.outputs.version }}
     steps:
-      - name: Parse tag
-        id: tag
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          # Strip leading "v" if present (`v0.1.0` -> `0.1.0`); pass
-          # through anything else unchanged so dispatch / branch runs
-          # still produce a sensible value.
-          version="${REF_NAME#v}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - id: derive
+        uses: pleme-io/actions/derive-version-from-tag@v1
 
   publish:
     name: Lint, package & push chart
     needs: derive-version
-    # Absolute ref required: relative `./` resolves against the CALLER
-    # repo when this workflow is invoked cross-repo as a reusable, not
-    # against substrate. GHA quirk; surfaces as startup_failure otherwise.
     uses: pleme-io/substrate/.github/workflows/helm-publish.yml@main
     with:
       chartPath: ${{ inputs.chart-path }}

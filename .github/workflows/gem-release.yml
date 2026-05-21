@@ -46,16 +46,10 @@ jobs:
     name: Derive gem version from tag
     runs-on: ${{ inputs.runner }}
     outputs:
-      version: ${{ steps.tag.outputs.version }}
+      version: ${{ steps.derive.outputs.version }}
     steps:
-      - name: Parse tag
-        id: tag
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          version="${REF_NAME#v}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - id: derive
+        uses: pleme-io/actions/derive-version-from-tag@v1
 
   publish:
     name: Build & push to rubygems.org
