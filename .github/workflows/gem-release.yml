@@ -1,11 +1,5 @@
 # Reusable workflow: tag-triggered RubyGems release.
 #
-# Defers to the per-repo `.#gem:push` app provided by ruby-gem-flake.nix
-# (substrate/lib/build/ruby/build.nix → mkRubyGemPushApp), so the actual
-# build/push transaction is governed by `forge gem push`. This workflow
-# is just a thin tag-aware wrapper that authenticates to rubygems via
-# the standard `GEM_HOST_API_KEY` env var.
-#
 # Usage (from a consumer repo, .github/workflows/release.yml):
 #
 #   on:
@@ -16,15 +10,17 @@
 #     gem:
 #       uses: pleme-io/substrate/.github/workflows/gem-release.yml@main
 #       with:
-#         gem-name: pangea-aws    # informational; used to derive constant + sanity-check
+#         gem-name: pangea-aws    # matches <gem-name>.gemspec at repo root
 #       secrets:
 #         RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
 #
-# Sanity-check: the gemspec's VERSION constant must equal the tag's
-# version (`v0.1.0` → `0.1.0`); a mismatch fails the workflow before
-# the push to avoid publishing a phantom version. Substrate-bump
-# keeps these in sync (see ansible-collection-auto-bump.yml for the
-# analogous shape on the Galaxy side).
+# Why not `nix run .#gem:push`? The substrate mkRubyGemPushApp invokes
+# forge with `--working-dir <flake-self>` — which on CI is a /nix/store
+# read-only path. `gem build` writes the .gem alongside the gemspec
+# and aborts with EACCES. Doing the build in $GITHUB_WORKSPACE
+# (writable) and then `gem push`-ing avoids that landmine without
+# requiring a forge change. The substrate flake's .#gem:push remains
+# the local-dev entrypoint where srcDir is writable.
 
 name: gem-release
 
@@ -35,6 +31,10 @@ on:
         description: "Gem name (matches <gem-name>.gemspec at repo root)"
         type: string
         required: true
+      ruby-version:
+        description: "Ruby toolchain version"
+        type: string
+        default: "3.3"
       runner:
         description: "Runner label"
         type: string
@@ -61,21 +61,24 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Build & push via forge
+    name: Build & push to rubygems.org
     needs: derive-version
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          bundler-cache: false
+
       - name: Sanity-check gemspec version matches tag
         env:
           GEM_NAME: ${{ inputs.gem-name }}
           TAG_VERSION: ${{ needs.derive-version.outputs.version }}
         run: |
           set -euo pipefail
-          # Convert gem-name (kebab) → CamelCase module name and read VERSION.
           spec_version="$(ruby -e "
             require_relative 'lib/${GEM_NAME}/version'
             mod = '${GEM_NAME}'.split('-').map { |s| s.capitalize }.join
@@ -86,7 +89,26 @@ jobs:
             exit 1
           fi
 
-      - name: Push gem (forge)
+      - name: Build gem
         env:
+          GEM_NAME: ${{ inputs.gem-name }}
+        run: gem build "${GEM_NAME}.gemspec"
+
+      - name: Push to RubyGems
+        env:
+          GEM_NAME: ${{ inputs.gem-name }}
+          VERSION: ${{ needs.derive-version.outputs.version }}
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: nix run .#gem:push
+        run: |
+          set -euo pipefail
+          gem_file="${GEM_NAME}-${VERSION}.gem"
+          # Tolerate identical-version re-push so the workflow stays
+          # restartable on transient downstream failures.
+          if ! gem push "$gem_file" 2> push.err; then
+            if grep -q 'has already been pushed' push.err; then
+              echo "Version $VERSION already published; treating as success."
+            else
+              cat push.err >&2
+              exit 1
+            fi
+          fi
