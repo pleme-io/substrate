@@ -14,13 +14,10 @@
 #       secrets:
 #         RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
 #
-# Why not `nix run .#gem:push`? The substrate mkRubyGemPushApp invokes
-# forge with `--working-dir <flake-self>` — which on CI is a /nix/store
-# read-only path. `gem build` writes the .gem alongside the gemspec
-# and aborts with EACCES. Doing the build in $GITHUB_WORKSPACE
-# (writable) and then `gem push`-ing avoids that landmine without
-# requiring a forge change. The substrate flake's .#gem:push remains
-# the local-dev entrypoint where srcDir is writable.
+# Delegates the actual sanity-check + build + push to
+# pleme-io/actions/gem-publish (composite action backed by a tatara-
+# lisp script). This workflow only derives the version from the tag
+# and threads the API key through.
 
 name: gem-release
 
@@ -66,52 +63,10 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
+      - uses: pleme-io/actions/gem-publish@v1
         with:
+          gem-name: ${{ inputs.gem-name }}
+          tag-version: ${{ needs.derive-version.outputs.version }}
           ruby-version: ${{ inputs.ruby-version }}
-          bundler-cache: false
-
-      - name: Sanity-check gemspec version matches tag
         env:
-          GEM_NAME: ${{ inputs.gem-name }}
-          TAG_VERSION: ${{ needs.derive-version.outputs.version }}
-        run: |
-          set -euo pipefail
-          spec_version="$(ruby -e "
-            require_relative 'lib/${GEM_NAME}/version'
-            mod = '${GEM_NAME}'.split('-').map { |s| s.capitalize }.join
-            print Object.const_get(mod + '::VERSION')
-          ")"
-          if [ "$spec_version" != "$TAG_VERSION" ]; then
-            echo "Gemspec version ($spec_version) != tag version ($TAG_VERSION)" >&2
-            exit 1
-          fi
-
-      - name: Build gem
-        env:
-          GEM_NAME: ${{ inputs.gem-name }}
-        run: gem build "${GEM_NAME}.gemspec"
-
-      - name: Push to RubyGems
-        env:
-          GEM_NAME: ${{ inputs.gem-name }}
-          VERSION: ${{ needs.derive-version.outputs.version }}
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: |
-          set -euo pipefail
-          gem_file="${GEM_NAME}-${VERSION}.gem"
-          # Tolerate identical-version re-push so the workflow stays
-          # restartable on transient downstream failures. RubyGems has
-          # used two error phrasings over time:
-          #   - "has already been pushed"            (older gem cli)
-          #   - "Repushing of gem versions is not allowed" (current)
-          if ! gem push "$gem_file" 2> push.err; then
-            if grep -qE 'has already been pushed|Repushing of gem versions' push.err; then
-              echo "Version $VERSION already published; treating as success."
-            else
-              cat push.err >&2
-              exit 1
-            fi
-          fi
