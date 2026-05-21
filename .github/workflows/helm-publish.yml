@@ -78,30 +78,11 @@ jobs:
           echo "$TOKEN" | nix shell nixpkgs#kubernetes-helm --command \
             helm registry login "$host" --username "${{ github.actor }}" --password-stdin
 
-      - name: Release chart (forge or helm fallback)
-        env:
-          CHART_PATH: ${{ inputs.chartPath }}
-          REGISTRY: ${{ inputs.registry }}
-          VERSION: ${{ inputs.version }}
-          LIB_CHART_DIR: ${{ inputs.libChartDir }}
-          LIB_CHART_NAME: ${{ inputs.libChartName }}
-        run: |
-          set -euo pipefail
-          if nix run .#forge -- --help >/dev/null 2>&1; then
-            args=( helm release --chart-dir "$CHART_PATH" --registry "$REGISTRY" )
-            [ -n "$VERSION" ]       && args+=( --version "$VERSION" )
-            [ -n "$LIB_CHART_DIR" ] && args+=( --lib-chart-dir "$LIB_CHART_DIR" --lib-chart-name "$LIB_CHART_NAME" )
-            nix run .#forge -- "${args[@]}"
-          else
-            nix shell nixpkgs#kubernetes-helm --command bash -eu <<EOF
-              helm lint "$CHART_PATH"
-              mkdir -p dist
-              if [ -n "$VERSION" ]; then
-                helm package "$CHART_PATH" --destination dist --version "$VERSION"
-              else
-                helm package "$CHART_PATH" --destination dist
-              fi
-              tgz=\$(ls -1 dist/*.tgz | head -n1)
-              helm push "\$tgz" "$REGISTRY"
-          EOF
-          fi
+      - name: Lint, package & push chart
+        uses: pleme-io/actions/helm-oci-publish@v1
+        with:
+          chart-path:     ${{ inputs.chartPath }}
+          registry:       ${{ inputs.registry }}
+          version:        ${{ inputs.version }}
+          lib-chart-dir:  ${{ inputs.libChartDir }}
+          lib-chart-name: ${{ inputs.libChartName }}
