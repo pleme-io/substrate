@@ -74,7 +74,10 @@ jobs:
   publish:
     name: Lint, package & push chart
     needs: derive-version
-    uses: ./.github/workflows/helm-publish.yml
+    # Absolute ref required: relative `./` resolves against the CALLER
+    # repo when this workflow is invoked cross-repo as a reusable, not
+    # against substrate. GHA quirk; surfaces as startup_failure otherwise.
+    uses: pleme-io/substrate/.github/workflows/helm-publish.yml@main
     with:
       chartPath: ${{ inputs.chart-path }}
       registry: ${{ inputs.oci-registry }}
