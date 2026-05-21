@@ -69,33 +69,14 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
 
-      - name: Build
-        env:
-          FEATURES: ${{ inputs.features }}
-          NO_DEFAULTS: ${{ inputs.no-default-features }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          flags=""
-          if [ -n "$FEATURES" ]; then
-            flags="--features $FEATURES"
-          fi
-          if [ "$NO_DEFAULTS" = "true" ]; then
-            flags="$flags --no-default-features"
-          fi
-          # shellcheck disable=SC2086
-          cargo build --release --target "$TARGET" $flags
-
-      - name: Stage artifact
-        env:
-          BIN: ${{ inputs.binary-name }}
-          TARGET: ${{ matrix.target }}
-          SUFFIX: ${{ matrix.suffix }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          cp "target/$TARGET/release/$BIN" "dist/$BIN-$SUFFIX"
-          (cd dist && shasum -a 256 "$BIN-$SUFFIX" > "$BIN-$SUFFIX.sha256")
+      - name: Build + stage
+        uses: pleme-io/actions/rust-cross-build@v1
+        with:
+          binary-name:         ${{ inputs.binary-name }}
+          target:              ${{ matrix.target }}
+          suffix:              ${{ matrix.suffix }}
+          features:            ${{ inputs.features }}
+          no-default-features: ${{ inputs.no-default-features }}
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
