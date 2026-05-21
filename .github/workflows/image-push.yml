@@ -68,14 +68,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-      - name: Resolve image name
-        id: name
-        env:
-          INPUT_NAME: ${{ inputs.imageName }}
-          REPO: ${{ github.repository }}
-        run: |
-          name="${INPUT_NAME:-$REPO}"
-          echo "image=${name}" >> "$GITHUB_OUTPUT"
 
       - name: Build image with Nix
         run: nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths
@@ -87,21 +79,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
 
-      - name: Push image (forge or skopeo fallback)
-        env:
-          REGISTRY: ${{ inputs.registry }}
-          IMAGE: ${{ steps.name.outputs.image }}
-          TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          target="${REGISTRY}/${IMAGE}:${TAG}"
-          if nix run "${{ inputs.flakeRef }}#forge" -- --help >/dev/null 2>&1; then
-            nix run "${{ inputs.flakeRef }}#forge" -- push \
-              --image-tarball ./result \
-              --registry "${target}"
-          else
-            nix shell nixpkgs#skopeo --command \
-              skopeo --insecure-policy copy \
-                "docker-archive:./result" \
-                "docker://${target}"
-          fi
+      - name: Push image
+        uses: pleme-io/actions/oci-image-push@v1
+        with:
+          registry:  ${{ inputs.registry }}
+          image:     ${{ inputs.imageName || github.repository }}
+          tag:       ${{ inputs.tag }}
+          tarball:   ./result
+          flake-ref: ${{ inputs.flakeRef }}
