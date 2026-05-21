@@ -1,0 +1,137 @@
+# Reusable workflow: GitHub Actions repo release.
+#
+# On a vMAJOR.MINOR.PATCH tag push:
+#   1. Validate every action.yml under the repo root (schema sanity)
+#   2. Fast-forward the matching major-version branch (v1.2.3 -> v1) so
+#      consumers pinning `@v1` get the latest minor/patch
+#   3. Create a GitHub Release named after the tag (auto-generated notes)
+#
+# Use this from any GH-Actions monorepo (or single-action repo) — drop
+# a thin wrapper in `.github/workflows/release.yml`:
+#
+#   on:
+#     push:
+#       tags: ['v*.*.*']
+#
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/action-release.yml@main
+#       permissions:
+#         contents: write
+#
+# Trade-off: the matrix discovers action.yml files via `find` rather
+# than a hard-coded list; this keeps the workflow zero-config as the
+# monorepo grows.
+name: Action release
+
+on:
+  workflow_call:
+    inputs:
+      action-glob:
+        type: string
+        default: "**/action.yml"
+        description: "Glob (relative to repo root) used to discover action manifests for schema validation"
+      release-notes:
+        type: string
+        default: "auto"
+        description: "'auto' (use GitHub-generated notes) or literal markdown body"
+
+permissions:
+  contents: write
+
+jobs:
+  # 1. Sanity-check every action.yml so a syntactically broken release
+  #    fails before we tag a major branch to it.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate action.yml manifests
+        env:
+          ACTION_GLOB: ${{ inputs.action-glob }}
+        run: |
+          set -euo pipefail
+          # Find every manifest matching the glob and run a minimal
+          # schema check: must be valid YAML, must have `name:` and
+          # `runs:` keys at the top level. We deliberately do not
+          # depend on a third-party validator — keeping the substrate
+          # workflow dependency-free.
+          python3 - <<'PY'
+          import os
+          import sys
+          import glob
+          import yaml
+          pattern = os.environ['ACTION_GLOB']
+          paths = sorted(glob.glob(pattern, recursive=True))
+          if not paths:
+              print(f"::warning::No action.yml files matched {pattern!r}")
+              sys.exit(0)
+          bad = []
+          for p in paths:
+              with open(p) as fh:
+                  try:
+                      doc = yaml.safe_load(fh) or {}
+                  except yaml.YAMLError as e:
+                      bad.append((p, f"YAML parse error: {e}"))
+                      continue
+              if not isinstance(doc, dict):
+                  bad.append((p, "top-level must be a mapping"))
+                  continue
+              for k in ('name', 'runs'):
+                  if k not in doc:
+                      bad.append((p, f"missing required top-level key {k!r}"))
+              runs = doc.get('runs')
+              if isinstance(runs, dict) and runs.get('using') == 'composite':
+                  steps = runs.get('steps')
+                  if not (isinstance(steps, list) and steps):
+                      bad.append((p, "composite action with empty/missing steps"))
+          for p, msg in bad:
+              print(f"::error file={p}::{msg}")
+          print(f"Validated {len(paths)} action manifest(s); {len(bad)} error(s)")
+          sys.exit(1 if bad else 0)
+          PY
+
+  # 2. Fast-forward the matching major-version branch and 3. cut a Release.
+  release:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract major from tag
+        id: tag
+        run: |
+          set -euo pipefail
+          ref="${GITHUB_REF##refs/tags/}"
+          major="${ref%%.*}"   # v1.2.3 -> v1
+          echo "tag=$ref" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+      - name: Fast-forward major branch
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          MAJOR: ${{ steps.tag.outputs.major }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git push origin "+refs/tags/$TAG:refs/heads/$MAJOR"
+          echo "Pushed $MAJOR -> $TAG"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES: ${{ inputs.release-notes }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; skipping"
+            exit 0
+          fi
+          if [ "$NOTES" = "auto" ]; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          else
+            gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+          fi
