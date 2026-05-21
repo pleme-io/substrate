@@ -77,12 +77,8 @@ jobs:
           bump-type: ${{ inputs.bump-type }}
 
       - if: steps.changes.outputs.skip == 'false'
-        shell: bash
-        env:
-          GIT_PUSH_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          remote_url=$(git remote get-url origin)
-          clean_url=$(echo "$remote_url" | sed -E 's#https://[^@]*@#https://#')
-          git remote set-url origin "${clean_url/https:\/\//https:\/\/x-access-token:$GIT_PUSH_TOKEN@}"
-          git push origin main
-          git push origin --tags
+        uses: pleme-io/actions/git-push-with-token@v1
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
