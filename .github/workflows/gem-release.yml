@@ -1,6 +1,12 @@
 # Reusable workflow: tag-triggered RubyGems release.
 #
-# Usage (from a consumer repo, .github/workflows/release-gem.yml):
+# Defers to the per-repo `.#gem:push` app provided by ruby-gem-flake.nix
+# (substrate/lib/build/ruby/build.nix → mkRubyGemPushApp), so the actual
+# build/push transaction is governed by `forge gem push`. This workflow
+# is just a thin tag-aware wrapper that authenticates to rubygems via
+# the standard `GEM_HOST_API_KEY` env var.
+#
+# Usage (from a consumer repo, .github/workflows/release.yml):
 #
 #   on:
 #     push:
@@ -10,24 +16,15 @@
 #     gem:
 #       uses: pleme-io/substrate/.github/workflows/gem-release.yml@main
 #       with:
-#         gem-name: pangea-aws        # used to locate <gem-name>.gemspec
+#         gem-name: pangea-aws    # informational; used to derive constant + sanity-check
 #       secrets:
 #         RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
 #
-# Strategy:
-#   1. Strip leading `v` from the tag to derive the gem version,
-#      sanity-check it matches the gemspec's VERSION constant.
-#   2. `bundle install` (if Gemfile present) so dev deps are available.
-#   3. `gem build <gem-name>.gemspec` -> <gem-name>-<version>.gem
-#   4. Push to rubygems.org via ~/.gem/credentials (idempotent: a
-#      re-pushed identical version is a no-op error we tolerate so the
-#      workflow stays restartable).
-#
-# The gemspec must already exist at repo root with the canonical
-# pattern (require_relative lib/<gem-name>/version, etc.). The
-# substrate ruby-gem auto-bump primitive will keep VERSION in sync
-# with the tag — see ansible-collection-auto-bump.yml for the
-# analogous pattern.
+# Sanity-check: the gemspec's VERSION constant must equal the tag's
+# version (`v0.1.0` → `0.1.0`); a mismatch fails the workflow before
+# the push to avoid publishing a phantom version. Substrate-bump
+# keeps these in sync (see ansible-collection-auto-bump.yml for the
+# analogous shape on the Galaxy side).
 
 name: gem-release
 
@@ -35,13 +32,9 @@ on:
   workflow_call:
     inputs:
       gem-name:
-        description: "Gem name (used to locate <gem-name>.gemspec at repo root)"
+        description: "Gem name (matches <gem-name>.gemspec at repo root)"
         type: string
         required: true
-      ruby-version:
-        description: "Ruby toolchain to build the gem against"
-        type: string
-        default: "3.3"
       runner:
         description: "Runner label"
         type: string
@@ -68,17 +61,17 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Build & push to rubygems.org
+    name: Build & push via forge
     needs: derive-version
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ inputs.ruby-version }}
-          bundler-cache: false
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Sanity-check gemspec version matches tag
         env:
@@ -86,32 +79,18 @@ jobs:
           TAG_VERSION: ${{ needs.derive-version.outputs.version }}
         run: |
           set -euo pipefail
-          spec_version="$(ruby -e "require_relative 'lib/${GEM_NAME}/version'; print Object.const_get('${GEM_NAME}'.split('-').map { |s| s.capitalize }.join + '::VERSION')")"
+          # Convert gem-name (kebab) → CamelCase module name and read VERSION.
+          spec_version="$(ruby -e "
+            require_relative 'lib/${GEM_NAME}/version'
+            mod = '${GEM_NAME}'.split('-').map { |s| s.capitalize }.join
+            print Object.const_get(mod + '::VERSION')
+          ")"
           if [ "$spec_version" != "$TAG_VERSION" ]; then
             echo "Gemspec version ($spec_version) != tag version ($TAG_VERSION)" >&2
             exit 1
           fi
 
-      - name: Build gem
+      - name: Push gem (forge)
         env:
-          GEM_NAME: ${{ inputs.gem-name }}
-        run: gem build "${GEM_NAME}.gemspec"
-
-      - name: Push to RubyGems
-        env:
-          GEM_NAME: ${{ inputs.gem-name }}
-          VERSION: ${{ needs.derive-version.outputs.version }}
           GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-        run: |
-          set -euo pipefail
-          gem_file="${GEM_NAME}-${VERSION}.gem"
-          # Tolerate a re-push of an identical version so the workflow
-          # remains restartable on transient downstream failures.
-          if ! gem push "$gem_file" 2> push.err; then
-            if grep -q 'has already been pushed' push.err; then
-              echo "Version $VERSION already published; treating as success."
-            else
-              cat push.err >&2
-              exit 1
-            fi
-          fi
+        run: nix run .#gem:push
