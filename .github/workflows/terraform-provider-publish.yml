@@ -1,0 +1,128 @@
+# Reusable workflow: tag-triggered Terraform provider publish.
+#
+# Usage (from a consumer repo, .github/workflows/release-provider.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     provider:
+#       uses: pleme-io/substrate/.github/workflows/terraform-provider-publish.yml@main
+#       with:
+#         provider-name: galaxy            # required; final binary is terraform-provider-<name>
+#         namespace: pleme-io              # required; HashiCorp registry namespace
+#       secrets:
+#         TF_REGISTRY_GPG_PRIVATE_KEY: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+#         TF_REGISTRY_GPG_PASSPHRASE:  ${{ secrets.TF_REGISTRY_GPG_PASSPHRASE }}
+#
+# Pipeline:
+#   goreleaser (canonical for terraform providers) builds cross-arch
+#   binaries, signs them with the registry GPG key, then uploads the
+#   binaries + checksums + signature to the GitHub Release. The
+#   Terraform Registry's webhook subscription auto-detects the new
+#   release on its next poll cycle (≤30 minutes typical).
+#
+# One-time manual step per provider:
+#   - Register the provider on https://registry.terraform.io/
+#     (Sign in with GitHub → "Publish" → select repo → confirm the
+#     GPG public key fingerprint matches the one used for signing).
+#   - Add the GPG public key to the Terraform Registry settings for
+#     the namespace; the secret values above MUST correspond to it.
+#
+# If GPG secrets are absent, goreleaser runs in dry-run mode (build +
+# package only, no signing or upload). Useful for testing the pipeline
+# before registering the provider.
+
+name: terraform-provider-publish
+
+on:
+  workflow_call:
+    inputs:
+      provider-name:
+        description: "Provider short name (e.g. 'galaxy' for terraform-provider-galaxy)"
+        type: string
+        required: true
+      namespace:
+        description: "Terraform Registry namespace (e.g. 'pleme-io')"
+        type: string
+        required: true
+      goreleaser-config:
+        description: "Path to .goreleaser.yml relative to repo root"
+        type: string
+        default: ".goreleaser.yml"
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      TF_REGISTRY_GPG_PRIVATE_KEY:
+        description: "GPG private key (ASCII-armored) registered on Terraform Registry"
+        required: false
+      TF_REGISTRY_GPG_PASSPHRASE:
+        description: "Passphrase for the GPG key"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    name: Build, sign & release Terraform provider
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Import GPG key (if provided)
+        id: gpg
+        if: ${{ env.GPG_KEY != '' }}
+        env:
+          GPG_KEY: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.TF_REGISTRY_GPG_PASSPHRASE }}
+
+      - name: Note missing GPG secrets (dry-run mode)
+        if: ${{ env.GPG_KEY == '' }}
+        env:
+          GPG_KEY: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+        run: |
+          echo "::notice title=Terraform provider publish::TF_REGISTRY_GPG_PRIVATE_KEY not set; running goreleaser in build-only / unsigned mode. To enable signed release uploads, configure TF_REGISTRY_GPG_PRIVATE_KEY + TF_REGISTRY_GPG_PASSPHRASE repo secrets."
+
+      - name: Run GoReleaser (release)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.GPG_KEY != '' }}
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --config ${{ inputs.goreleaser-config }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
+          GPG_KEY: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+
+      - name: Run GoReleaser (snapshot / build-only)
+        if: ${{ env.GPG_KEY == '' }}
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean --config ${{ inputs.goreleaser-config }}
+        env:
+          GPG_KEY: ${{ secrets.TF_REGISTRY_GPG_PRIVATE_KEY }}
+
+      - name: Summary
+        env:
+          PROVIDER: ${{ inputs.provider-name }}
+          NS: ${{ inputs.namespace }}
+        run: |
+          echo "::notice title=Terraform Registry::After the GH Release is published, the Terraform Registry will auto-detect terraform-provider-${PROVIDER} under namespace ${NS} on its next webhook poll (≤30 min). First-time providers require manual registration at https://registry.terraform.io/publish/provider."

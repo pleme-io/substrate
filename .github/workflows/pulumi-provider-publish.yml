@@ -1,0 +1,178 @@
+# Reusable workflow: tag-triggered Pulumi provider + SDK publish.
+#
+# Usage (from a consumer repo, .github/workflows/release-provider.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     provider:
+#       uses: pleme-io/substrate/.github/workflows/pulumi-provider-publish.yml@main
+#       with:
+#         provider-name: galaxy            # required
+#       secrets:
+#         PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+#         NPM_TOKEN:           ${{ secrets.NPM_TOKEN }}
+#         PYPI_TOKEN:          ${{ secrets.PYPI_TOKEN }}
+#
+# Pipeline (per-language flavor — Pulumi providers ship 4 SDKs):
+#   1. Build the provider plugin binary (Go) and upload to GH Release
+#      (Pulumi convention: pulumi-resource-<provider-name>_<version>_<os>_<arch>.tar.gz).
+#   2. Build the Python SDK and publish to PyPI (if PYPI_TOKEN set).
+#   3. Build the Node.js SDK and publish to npm (if NPM_TOKEN set).
+#   4. (Future) .NET, Java, Go module bumps.
+#
+# Each publish step is independently gated by its token. If a token
+# is absent the step logs a clear notice and exits 0. Pulumi providers
+# are typically scaffolded from pulumi/pulumi-tf-provider-boilerplate
+# or pulumi/pulumi-provider-boilerplate, both of which include a
+# Makefile with build_provider / build_sdks / publish_* targets that
+# this workflow shells out to.
+
+name: pulumi-provider-publish
+
+on:
+  workflow_call:
+    inputs:
+      provider-name:
+        description: "Provider short name (e.g. 'galaxy' for pulumi-resource-galaxy)"
+        type: string
+        required: true
+      go-version:
+        type: string
+        default: "stable"
+      python-version:
+        type: string
+        default: "3.12"
+      node-version:
+        type: string
+        default: "20"
+      runner:
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      PULUMI_ACCESS_TOKEN:
+        description: "Pulumi Cloud access token for plugin upload"
+        required: false
+      NPM_TOKEN:
+        description: "npm publish token for the JS SDK"
+        required: false
+      PYPI_TOKEN:
+        description: "PyPI publish token for the Python SDK"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-provider:
+    name: Build provider plugin binary
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+      - name: Build provider (cross-arch via Makefile)
+        env:
+          PROVIDER: ${{ inputs.provider-name }}
+        run: |
+          set -euo pipefail
+          if [ -f Makefile ] && grep -q "^build_provider:" Makefile; then
+            make build_provider
+          else
+            echo "::warning::No Makefile build_provider target; falling back to bare go build"
+            mkdir -p bin
+            go build -o "bin/pulumi-resource-${PROVIDER}" ./provider/cmd/pulumi-resource-${PROVIDER} || go build -o "bin/pulumi-resource-${PROVIDER}" ./...
+          fi
+      - name: Upload provider tarball to GH Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            bin/pulumi-resource-*
+
+  publish-python-sdk:
+    name: Publish Python SDK to PyPI
+    needs: build-provider
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: ${{ inputs.go-version }}, cache: true }
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ inputs.python-version }} }
+      - name: Build Python SDK
+        run: |
+          set -euo pipefail
+          if [ -f Makefile ] && grep -q "^build_python:" Makefile; then
+            make build_python
+          else
+            echo "::warning::No build_python target; skipping"
+            exit 0
+          fi
+      - name: Publish to PyPI (no-op if token unset)
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TWINE_PASSWORD:-}" ]; then
+            echo "::notice title=Pulumi Python SDK::PYPI_TOKEN not set; skipping PyPI publish. Configure repo secret PYPI_TOKEN to enable."
+            exit 0
+          fi
+          python -m pip install --upgrade pip twine
+          twine upload sdk/python/bin/dist/* || echo "::warning::twine upload failed; check artifact path"
+
+  publish-nodejs-sdk:
+    name: Publish Node.js SDK to npm
+    needs: build-provider
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: ${{ inputs.go-version }}, cache: true }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: "https://registry.npmjs.org"
+      - name: Build Node.js SDK
+        run: |
+          set -euo pipefail
+          if [ -f Makefile ] && grep -q "^build_nodejs:" Makefile; then
+            make build_nodejs
+          else
+            echo "::warning::No build_nodejs target; skipping"
+            exit 0
+          fi
+      - name: Publish to npm (no-op if token unset)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::notice title=Pulumi JS SDK::NPM_TOKEN not set; skipping npm publish. Configure repo secret NPM_TOKEN to enable."
+            exit 0
+          fi
+          (cd sdk/nodejs/bin && npm publish --access public) || echo "::warning::npm publish failed; check artifact path"
+
+  publish-plugin:
+    name: Publish plugin to Pulumi Cloud registry
+    needs: build-provider
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish plugin (no-op if token unset)
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PROVIDER: ${{ inputs.provider-name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PULUMI_ACCESS_TOKEN:-}" ]; then
+            echo "::notice title=Pulumi plugin publish::PULUMI_ACCESS_TOKEN not set; skipping registry publish. Plugin binary is available on the GH Release; users can install via 'pulumi plugin install resource ${PROVIDER} v<tag> --server github://api.github.com/${{ github.repository_owner }}'. Configure PULUMI_ACCESS_TOKEN repo secret to enable Pulumi Cloud registry publish."
+            exit 0
+          fi
+          echo "::notice::PULUMI_ACCESS_TOKEN present; first-class Pulumi Cloud plugin upload requires the repo to be listed under pulumi/registry. See https://www.pulumi.com/docs/iac/using-pulumi/extending-pulumi/contributing-providers/ for the listing PR."

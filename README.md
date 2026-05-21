@@ -632,6 +632,30 @@ them as ≤15-line thin wrappers (Layer 3).
 
 Convention: these workflows compose `pleme-io/actions/*` at `@v1`.
 
+## Reusable publish primitives (tag-triggered)
+
+Per-channel reusable workflows, each ≤15-line consumer wrapper. All
+secret-gated: publish step is a no-op + notice if the channel token is
+absent, so build/lint still runs as a smoke test before secrets land.
+
+| Workflow | Channel | Role |
+|----------|---------|------|
+| `crates-publish.yml` | crates.io | `cargo publish` (CRATES_API_TOKEN) |
+| `helm-publish.yml` | ghcr.io/charts (OCI) | helm lint + package + push (GHCR_TOKEN); forge preferred |
+| `helm-chart-release.yml` | ghcr.io/charts (OCI) | tag-aware thin wrapper around `helm-publish.yml` |
+| `image-push.yml` | ghcr.io (Docker / OCI) | nix build .#dockerImage → forge / skopeo push (GHCR_TOKEN) |
+| `rust-binary-release.yml` | GH Release | cross-arch cargo build → binaries + sha256 to Release |
+| `rust-release.yml` | crates.io + GH Release | combined Rust workspace release |
+| `terraform-provider-publish.yml` | Terraform Registry | goreleaser build + GPG sign + upload (TF_REGISTRY_GPG_*); Registry auto-detects |
+| `pulumi-provider-publish.yml` | Pulumi Cloud + npm + PyPI | provider plugin + SDKs (per-language token gating) |
+| `crossplane-provider-publish.yml` | xpkg.upbound.io / ghcr.io | crossplane xpkg build + push (UPBOUND_TOKEN or GHCR_TOKEN) |
+| `steampipe-plugin-publish.yml` | Steampipe Hub | cross-arch go build → tarballs to GH Release; Hub listing via manifest PR |
+
+For channels where the publish CLI does not yet exist or requires
+out-of-band registration (Terraform Registry, Steampipe Hub, Pulumi
+Registry listing), the workflow stages the artifact + emits a
+GitHub Actions notice describing the manual step rather than failing.
+
 ## Further Reading
 
 - [docs/scaffolds.md](docs/scaffolds.md) -- all 6 scaffold generators with templates

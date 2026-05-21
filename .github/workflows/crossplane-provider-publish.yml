@@ -1,0 +1,149 @@
+# Reusable workflow: tag-triggered Crossplane provider XPKG publish.
+#
+# Usage (from a consumer repo, .github/workflows/release-provider.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     xpkg:
+#       uses: pleme-io/substrate/.github/workflows/crossplane-provider-publish.yml@main
+#       with:
+#         provider-name: galaxy            # required; XPKG repo is .../provider-<name>
+#         registry: xpkg.upbound.io        # or ghcr.io
+#         org: pleme-io                    # XPKG repo owner
+#       secrets:
+#         UPBOUND_TOKEN: ${{ secrets.UPBOUND_TOKEN }}     # xpkg.upbound.io
+#         GHCR_TOKEN:    ${{ secrets.GHCR_TOKEN }}         # ghcr.io fallback
+#
+# Pipeline:
+#   1. Resolve crossplane CLI from nixpkgs (no global install dependency).
+#   2. `crossplane xpkg build` against `package/` (Crossplane convention)
+#      producing a `*.xpkg` OCI artifact.
+#   3. `crossplane xpkg push` to <registry>/<org>/provider-<name>:<tag>.
+#
+# ArtifactHub indexes xpkg.upbound.io packages automatically (Crossplane
+# repository type). For ghcr.io-hosted XPKGs, add a repository entry on
+# ArtifactHub (one-time setup).
+
+name: crossplane-provider-publish
+
+on:
+  workflow_call:
+    inputs:
+      provider-name:
+        description: "Provider short name (provider-<name> repo on the registry)"
+        type: string
+        required: true
+      registry:
+        description: "OCI registry hostname (xpkg.upbound.io or ghcr.io)"
+        type: string
+        default: "xpkg.upbound.io"
+      org:
+        description: "Registry org / namespace"
+        type: string
+        default: "pleme-io"
+      package-dir:
+        description: "Directory containing crossplane.yaml + CRDs to package"
+        type: string
+        default: "package"
+      runner:
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      UPBOUND_TOKEN:
+        description: "Upbound robot token (xpkg.upbound.io)"
+        required: false
+      GHCR_TOKEN:
+        description: "ghcr.io token (fallback). Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & push XPKG
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Magic Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Derive image reference
+        id: ref
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          ORG: ${{ inputs.org }}
+          PROVIDER: ${{ inputs.provider-name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="${REF_NAME#v}"
+          image="${REGISTRY}/${ORG}/provider-${PROVIDER}:${tag}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Registry login (Upbound or GHCR)
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          UPBOUND_TOKEN: ${{ secrets.UPBOUND_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          case "$REGISTRY" in
+            xpkg.upbound.io)
+              if [ -z "${UPBOUND_TOKEN:-}" ]; then
+                echo "::notice title=Crossplane publish::UPBOUND_TOKEN not set; skipping login + push. Configure UPBOUND_TOKEN repo secret (Upbound robot token from https://accounts.upbound.io/). The XPKG build still runs as a smoke-test."
+                echo "SKIP_PUSH=true" >> "$GITHUB_ENV"
+              else
+                nix shell nixpkgs#crossplane-cli --command \
+                  crossplane xpkg login -t "$UPBOUND_TOKEN"
+              fi
+              ;;
+            ghcr.io)
+              echo "$GHCR_TOKEN" | nix shell nixpkgs#crossplane-cli --command \
+                crossplane xpkg login -u "${{ github.actor }}" --password-stdin -r ghcr.io
+              ;;
+            *)
+              echo "::warning::Unknown registry '$REGISTRY'; skipping login (push may fail)."
+              ;;
+          esac
+
+      - name: Build XPKG
+        env:
+          PACKAGE_DIR: ${{ inputs.package-dir }}
+        run: |
+          set -euo pipefail
+          if [ ! -d "$PACKAGE_DIR" ]; then
+            echo "::error title=Crossplane build::package directory '$PACKAGE_DIR' does not exist; create $PACKAGE_DIR/crossplane.yaml and CRD manifests."
+            exit 1
+          fi
+          nix shell nixpkgs#crossplane-cli --command \
+            crossplane xpkg build --package-root "$PACKAGE_DIR" --package-file out.xpkg
+
+      - name: Push XPKG
+        if: env.SKIP_PUSH != 'true'
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+        run: |
+          set -euo pipefail
+          nix shell nixpkgs#crossplane-cli --command \
+            crossplane xpkg push -f out.xpkg "$IMAGE"
+
+      - name: Summary
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          if [ "${SKIP_PUSH:-}" = "true" ]; then
+            echo "::notice title=Crossplane publish::XPKG built (out.xpkg) but not pushed — token missing. Once secret is configured, re-running the workflow will push to ${IMAGE}."
+          else
+            echo "::notice title=Crossplane publish::Pushed ${IMAGE}. ArtifactHub auto-indexes ${REGISTRY} packages within ~30 min."
+          fi

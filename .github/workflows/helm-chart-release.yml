@@ -1,0 +1,86 @@
+# Reusable workflow: tag-triggered Helm chart release.
+#
+# Usage (from a consumer repo, .github/workflows/release-chart.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     chart:
+#       uses: pleme-io/substrate/.github/workflows/helm-chart-release.yml@main
+#       with:
+#         chart-path: ./charts/my-chart      # default: "./charts"
+#         oci-registry: oci://ghcr.io/pleme-io/charts
+#       secrets:
+#         GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}  # optional, falls back to GITHUB_TOKEN
+#
+# This workflow is a thin tag-aware wrapper around `helm-publish.yml`:
+# it strips the leading `v` from the tag name to derive the chart
+# version, then delegates the lint/package/push transaction to
+# `helm-publish.yml`. ArtifactHub indexes the resulting OCI artifact
+# automatically (once the repository is registered on ArtifactHub —
+# one-time manual step per org/registry).
+
+name: helm-chart-release
+
+on:
+  workflow_call:
+    inputs:
+      chart-path:
+        description: "Path to the Helm chart directory (containing Chart.yaml)"
+        type: string
+        default: "./charts"
+      oci-registry:
+        description: "OCI registry URL (oci:// scheme)"
+        type: string
+        default: "oci://ghcr.io/pleme-io/charts"
+      lib-chart-dir:
+        description: "External library chart directory for file:// deps"
+        type: string
+        default: ""
+      lib-chart-name:
+        description: "Library chart name"
+        type: string
+        default: "pleme-lib"
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages. Falls back to GITHUB_TOKEN."
+        required: false
+
+jobs:
+  derive-version:
+    name: Derive chart version from tag
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Parse tag
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Strip leading "v" if present (`v0.1.0` -> `0.1.0`); pass
+          # through anything else unchanged so dispatch / branch runs
+          # still produce a sensible value.
+          version="${REF_NAME#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Lint, package & push chart
+    needs: derive-version
+    uses: ./.github/workflows/helm-publish.yml
+    with:
+      chartPath: ${{ inputs.chart-path }}
+      registry: ${{ inputs.oci-registry }}
+      version: ${{ needs.derive-version.outputs.version }}
+      libChartDir: ${{ inputs.lib-chart-dir }}
+      libChartName: ${{ inputs.lib-chart-name }}
+      runner: ${{ inputs.runner }}
+    secrets:
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}

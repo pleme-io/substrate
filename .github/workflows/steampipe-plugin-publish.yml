@@ -1,0 +1,121 @@
+# Reusable workflow: tag-triggered Steampipe plugin publish.
+#
+# Usage (from a consumer repo, .github/workflows/release-plugin.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     plugin:
+#       uses: pleme-io/substrate/.github/workflows/steampipe-plugin-publish.yml@main
+#       with:
+#         plugin-name: galaxy              # required; final binary is steampipe-plugin-<name>
+#         org: pleme-io                    # optional; defaults to ${{ github.repository_owner }}
+#       secrets:
+#         STEAMPIPE_REGISTRY_TOKEN: ${{ secrets.STEAMPIPE_REGISTRY_TOKEN }}
+#
+# Pipeline:
+#   1. Cross-arch build of `plugin/main.go` (steampipe-plugin-sdk).
+#   2. Tarball + checksum upload to GitHub Release.
+#   3. Hub publish: Steampipe Hub (https://hub.steampipe.io) auto-indexes
+#      via GitHub Release webhook IF the plugin is registered. Registration
+#      is a one-time PR to turbot/steampipe-plugins-hub manifest registry.
+#
+# At time of writing (2026-05), the `steampipe plugin publish` CLI flow
+# is operator-facing only — there's no headless publish API. The publish
+# step therefore stages tarballs + emits a `notice` describing the
+# manual `turbot/steampipe-plugins-hub` PR required for first listings.
+# Subsequent releases on a registered plugin are auto-picked-up.
+
+name: steampipe-plugin-publish
+
+on:
+  workflow_call:
+    inputs:
+      plugin-name:
+        description: "Plugin short name (steampipe-plugin-<name>)"
+        type: string
+        required: true
+      org:
+        description: "GitHub org / namespace (defaults to repo owner)"
+        type: string
+        default: ""
+      go-version:
+        type: string
+        default: "stable"
+      runner:
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      STEAMPIPE_REGISTRY_TOKEN:
+        description: "Reserved for future Steampipe Hub headless publish API"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,  goarch: amd64,  suffix: linux-amd64 }
+          - { goos: linux,  goarch: arm64,  suffix: linux-arm64 }
+          - { goos: darwin, goarch: amd64,  suffix: darwin-amd64 }
+          - { goos: darwin, goarch: arm64,  suffix: darwin-arm64 }
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: ${{ inputs.go-version }}, cache: true }
+      - name: Build plugin
+        env:
+          PLUGIN: ${{ inputs.plugin-name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          out="dist/steampipe-plugin-${PLUGIN}-${SUFFIX}"
+          if [ -f Makefile ] && grep -q "^build:" Makefile; then
+            GOOS=$GOOS GOARCH=$GOARCH make build OUTPUT_DIR=dist OUTPUT_BIN="${out##*/}"
+          else
+            go build -o "$out" ./plugin || go build -o "$out" ./...
+          fi
+          tar -C dist -czf "${out}.tar.gz" "$(basename "$out")"
+          (cd dist && shasum -a 256 "$(basename "$out").tar.gz" > "$(basename "$out").tar.gz.sha256")
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/steampipe-plugin-${{ inputs.plugin-name }}-${{ matrix.suffix }}.tar.gz
+            dist/steampipe-plugin-${{ inputs.plugin-name }}-${{ matrix.suffix }}.tar.gz.sha256
+
+  hub-publish:
+    name: Steampipe Hub publish (notice)
+    needs: build
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Resolve org
+        id: org
+        env:
+          INPUT_ORG: ${{ inputs.org }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: echo "org=${INPUT_ORG:-$REPO_OWNER}" >> "$GITHUB_OUTPUT"
+
+      - name: Hub publish (stub — manual registration required)
+        env:
+          PLUGIN: ${{ inputs.plugin-name }}
+          ORG: ${{ steps.org.outputs.org }}
+          TOKEN: ${{ secrets.STEAMPIPE_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::notice title=Steampipe Hub publish::Plugin tarballs are attached to the GH Release. Steampipe Hub does NOT currently expose a headless publish API — listings are managed via a manifest PR to turbot/steampipe-plugins-hub. For first publish: open a PR adding plugins/${ORG}/steampipe-plugin-${PLUGIN}.yaml. Subsequent releases on a registered plugin are auto-detected from the GH Release feed."
+            exit 0
+          fi
+          echo "::notice title=Steampipe Hub publish::STEAMPIPE_REGISTRY_TOKEN provided — reserved for the future headless publish API. Listing still requires manual registration today; see turbot/steampipe-plugins-hub."

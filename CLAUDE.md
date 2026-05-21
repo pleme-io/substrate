@@ -78,6 +78,37 @@ floating major). No inlined shell beyond what is strictly project-specific
 (OpenAPI fetch URL, mock-server bootstrap). Collection-repo wrappers stay
 ≤15 lines.
 
+## ★ Reusable publish primitives (per-channel)
+
+Tag-triggered reusable workflows for each artifact channel. Caller is
+always a ≤15-line wrapper. Every workflow is **secret-gated** (publish
+step is a no-op + clear notice when the channel token is absent), so
+the same `release.yml` can be merged before secrets are configured and
+the build half still runs as a smoke test.
+
+| workflow | channel | one-line role |
+|---|---|---|
+| `crates-publish.yml` | crates.io | `cargo publish` (CRATES_API_TOKEN) |
+| `ansible-collection-release.yml` | Galaxy + GH Release | build tarball → publish to Galaxy (no-op if token unset) → attach to GH Release |
+| `helm-publish.yml` | ghcr.io/charts (OCI) | helm lint + package + push, forge preferred (GHCR_TOKEN) |
+| `helm-chart-release.yml` | ghcr.io/charts (OCI) | tag-aware thin wrapper around `helm-publish.yml`: parses chart version from `v*` tag, delegates publish |
+| `image-push.yml` | ghcr.io (Docker / OCI) | nix build .#dockerImage → forge push / skopeo copy (GHCR_TOKEN) |
+| `rust-binary-release.yml` | GH Release | cross-arch (linux/macOS × x86_64/aarch64) feature-aware cargo build → attach binaries + .sha256 to Release |
+| `rust-release.yml` | crates.io + GH Release | combined Rust workspace release primitive |
+| `terraform-provider-publish.yml` | Terraform Registry | goreleaser builds + GPG-signs the provider, uploads to GH Release; Registry auto-detects via webhook (TF_REGISTRY_GPG_PRIVATE_KEY + TF_REGISTRY_GPG_PASSPHRASE). First-time providers require manual registration at registry.terraform.io |
+| `pulumi-provider-publish.yml` | Pulumi Cloud + npm + PyPI | builds Go provider binary + Python SDK + Node.js SDK; per-language publish gated by PYPI_TOKEN / NPM_TOKEN / PULUMI_ACCESS_TOKEN. Plugin tarballs always land on GH Release |
+| `crossplane-provider-publish.yml` | xpkg.upbound.io / ghcr.io | `crossplane xpkg build` + push (UPBOUND_TOKEN or GHCR_TOKEN); ArtifactHub auto-indexes xpkg.upbound.io |
+| `steampipe-plugin-publish.yml` | Steampipe Hub | cross-arch go build → tarball + checksum to GH Release. Hub listing requires manual PR to turbot/steampipe-plugins-hub; subsequent releases auto-detected |
+
+Conventions:
+- `workflow_call` trigger + typed inputs + typed `secrets:` block.
+- Header comment with one-line consumer usage.
+- Publish step is **idempotent** + **secret-gated** (token absent → notice + exit 0).
+- For channels where the publish CLI does not yet exist or requires
+  out-of-band registration (Terraform Registry, Steampipe Hub, Pulumi
+  Registry listing), the workflow stages the artifact + emits a notice
+  describing the manual step rather than failing.
+
 Reusable Nix build patterns consumed by all pleme-io product and library repos.
 
 Implements the **Unified Infrastructure Theory**: Nix as the universal
