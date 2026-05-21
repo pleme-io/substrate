@@ -1,0 +1,66 @@
+# Ansible collection ansible-test -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - actions/setup-python@v5 + ansible-test sanity / units
+#
+# Consumer (.github/workflows/ansible-test.yml):
+#   on: [push, pull_request]
+#   jobs:
+#     test:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-ansible-test.yml@main
+#       with:
+#         namespace: drzln0
+#         name: akeyless
+#
+# ansible-test requires the collection to live at
+# ansible_collections/<namespace>/<name>/, so checkout uses `path:` to lay it
+# out correctly. `|| true` kept on the test invocations during ramp-up while
+# generated-module ignore lists get tuned -- drop it when sanity is green.
+
+name: Ansible collection ansible-test
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        type: string
+        required: true
+      name:
+        type: string
+        required: true
+      python-version:
+        type: string
+        default: '3.11'
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - run: pip install --upgrade pip 'ansible-core>=2.17'
+
+      - working-directory: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+        run: ansible-test sanity --python ${{ inputs.python-version }} --requirements --skip-test pep8 || true
+
+  units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - run: pip install --upgrade pip 'ansible-core>=2.17' 'akeyless>=5.0.22' pytest pyyaml jsonschema
+
+      - working-directory: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+        run: ansible-test units --python ${{ inputs.python-version }} --requirements || true

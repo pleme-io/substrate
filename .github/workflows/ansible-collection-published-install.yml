@@ -1,0 +1,51 @@
+# Ansible collection published-install -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - actions/setup-python@v5 + pip-install ansible + akeyless
+#   - ansible-galaxy collection install + ansible-doc smoke
+#
+# Consumer (.github/workflows/published-install.yml):
+#   on: { schedule: [{ cron: '23 6 * * *' }], workflow_dispatch: {} }
+#   jobs:
+#     install:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-published-install.yml@main
+#       with:
+#         collection: drzln0.akeyless
+#
+# Verifies the *published* Galaxy artifact still installs cleanly and that
+# every named module surfaces through ansible-doc. Defaults to a baked-in
+# sample (role, auth_method_api_key, uid_generate_token, secret_value_info)
+# representing the four module families.
+
+name: Ansible collection published-install
+
+on:
+  workflow_call:
+    inputs:
+      collection:
+        type: string
+        required: true
+      modules:
+        type: string
+        default: ""
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install ansible 'akeyless>=5.0.22'
+
+      - run: ansible-galaxy collection install ${{ inputs.collection }} --force
+
+      - shell: bash
+        run: |
+          mods="${{ inputs.modules }}"
+          [ -z "$mods" ] && mods="role auth_method_api_key uid_generate_token secret_value_info"
+          for m in $mods; do
+            ansible-doc -t module "${{ inputs.collection }}.$m" >/dev/null \
+              && echo "OK $m" || (echo "FAIL $m" && exit 1)
+          done

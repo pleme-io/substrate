@@ -611,6 +611,27 @@ nix eval --impure --expr '(import ./lib/util/tests.nix).summary'
 | HM | 65 | All home-manager helpers work correctly |
 | Util | 22 | Utility functions work correctly |
 
+## Reusable workflows (`.github/workflows/ansible-collection-*.yml`)
+
+Nine composite workflows for ansible-collection repos. Each composes
+`pleme-io/actions/*@v1` custom actions (Layer 1). Collection repos consume
+them as ≤15-line thin wrappers (Layer 3).
+
+| Workflow | Role |
+|----------|------|
+| `ansible-collection-ci.yml` | `nix flake check` with optional OpenAPI spec fetch |
+| `ansible-collection-release.yml` | Build tarball, publish to Galaxy, attach to GH Release on tag |
+| `ansible-collection-auto-bump.yml` | Patch-bump galaxy.yml when plugins/meta/galaxy.yml changes |
+| `ansible-collection-upstream-watch.yml` | Scheduled OpenAPI poller → regen → automated PR |
+| `ansible-collection-auto-merge.yml` | Enable squash auto-merge on PRs labeled `automated` |
+| `ansible-collection-docs-lint.yml` | antsibull-docs lint in proper collection layout |
+| `ansible-collection-published-install.yml` | Install from Galaxy + ansible-doc smoke (scheduled) |
+| `ansible-collection-matrix.yml` | Python × ansible-core × OS compatibility matrix |
+| `ansible-collection-ansible-test.yml` | `ansible-test sanity` + `units` in proper layout |
+| `ansible-collection-integration-live.yml` | Python mock akeyless gateway + example playbooks in `--check` |
+
+Convention: these workflows compose `pleme-io/actions/*` at `@v1`.
+
 ## Further Reading
 
 - [docs/scaffolds.md](docs/scaffolds.md) -- all 6 scaffold generators with templates

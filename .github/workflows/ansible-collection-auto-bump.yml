@@ -1,0 +1,64 @@
+# Ansible collection auto-bump -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/substrate-bump@v1
+#
+# Consumer (.github/workflows/auto-bump.yml):
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     bump:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-auto-bump.yml@main
+#
+# Skips when the bot itself pushed, or when nothing under plugins/, meta/, or
+# galaxy.yml changed since the previous tag. Otherwise: patch-bump (or whatever
+# `bump-type` says), commit, push, tag, push tag.
+
+name: Ansible collection auto-bump
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: changes
+        shell: bash
+        run: |
+          last=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$last" ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --quiet "$last" HEAD -- plugins/ meta/ galaxy.yml; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - if: steps.changes.outputs.skip == 'false'
+        uses: pleme-io/actions/substrate-bump@v1
+        with:
+          bump-type: ${{ inputs.bump-type }}
+
+      - if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        run: |
+          git push origin main
+          git push origin --tags

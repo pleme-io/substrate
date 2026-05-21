@@ -52,6 +52,32 @@ SDLC standardization is structurally enforced.
 **Skill:** `caixa-author` — for authoring or migrating any caixa,
 this is the first reference.
 
+## ★ Reusable CI workflows (`.github/workflows/ansible-collection-*.yml`)
+
+Layer 2 of the ansible-collection SDLC: nine composite workflows that
+**compose `pleme-io/actions/*@v1`** (Layer 1 custom actions) and that
+collection repos (`ansible-akeyless`, `ansible-akeyless-gen`) consume as
+≤15-line wrappers (Layer 3). Zero inlined shell beyond the project-specific
+spec-fetch / mock-server hooks.
+
+| workflow | one-line role |
+|---|---|
+| `ansible-collection-ci.yml` | `nix flake check` with optional OpenAPI spec fetch (`AKEYLESS_OPENAPI_YAML`) |
+| `ansible-collection-release.yml` | build tarball → publish to Galaxy (no-op if token unset) → attach to GH Release on tag |
+| `ansible-collection-auto-bump.yml` | patch-bump galaxy.yml when plugins/meta/galaxy.yml changed since last tag, push, tag |
+| `ansible-collection-upstream-watch.yml` | scheduled OpenAPI poller → iac-forge regen → PR labeled `automated` |
+| `ansible-collection-auto-merge.yml` | enable squash auto-merge on PRs labeled `automated` |
+| `ansible-collection-docs-lint.yml` | antsibull-docs lint in `ansible_collections/<ns>/<name>/` layout |
+| `ansible-collection-published-install.yml` | install from Galaxy + ansible-doc smoke per module (scheduled) |
+| `ansible-collection-matrix.yml` | Python × ansible-core × OS compatibility matrix |
+| `ansible-collection-ansible-test.yml` | `ansible-test sanity` + `units` in proper layout |
+| `ansible-collection-integration-live.yml` | Python mock akeyless gateway + example playbooks in `--check` mode |
+
+Convention: these workflows compose `pleme-io/actions/*` at `@v1` (the
+floating major). No inlined shell beyond what is strictly project-specific
+(OpenAPI fetch URL, mock-server bootstrap). Collection-repo wrappers stay
+≤15 lines.
+
 Reusable Nix build patterns consumed by all pleme-io product and library repos.
 
 Implements the **Unified Infrastructure Theory**: Nix as the universal

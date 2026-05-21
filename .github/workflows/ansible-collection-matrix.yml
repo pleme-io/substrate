@@ -1,0 +1,61 @@
+# Ansible collection matrix -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - actions/setup-python@v5 across Python x ansible-core x OS
+#
+# Consumer (.github/workflows/matrix.yml):
+#   on: [push, pull_request]
+#   jobs:
+#     matrix:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-matrix.yml@main
+#       with:
+#         openapi-spec-url: https://raw.githubusercontent.com/akeylesslabs/akeyless-go/master/api/openapi.yaml
+#
+# Excludes track ansible-core support windows:
+#   - py3.10 dropped from 2.18 (2.18 supports 3.11-3.13)
+#   - py3.13 dropped from 2.14/2.15 (those support up to 3.11)
+
+name: Ansible collection matrix
+
+on:
+  workflow_call:
+    inputs:
+      openapi-spec-url:
+        type: string
+        default: ""
+
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+        ansible: ['2.14', '2.15', '2.16', '2.17', '2.18']
+        os: [ubuntu-latest, macos-latest]
+        exclude:
+          - { python: '3.10', ansible: '2.18' }
+          - { python: '3.13', ansible: '2.14' }
+          - { python: '3.13', ansible: '2.15' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - shell: bash
+        run: |
+          pip install --upgrade pip
+          pip install 'ansible-core>=${{ matrix.ansible }},<${{ matrix.ansible }}.99' pytest pyyaml jsonschema 'akeyless>=5.0.22'
+
+      - if: inputs.openapi-spec-url != ''
+        shell: bash
+        run: |
+          mkdir -p tests/openapi
+          curl -fsSL "${{ inputs.openapi-spec-url }}" -o tests/openapi/openapi.yaml
+          echo "AKEYLESS_OPENAPI_YAML=$(pwd)/tests/openapi/openapi.yaml" >> "$GITHUB_ENV"
+
+      - run: python3 tests/sanity/smoke.py
+      - run: pytest tests/unit/ -q
+      - run: pytest tests/openapi/ -q

@@ -1,0 +1,34 @@
+# Ansible collection auto-merge -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - peter-evans/enable-pull-request-automerge@v3
+#
+# Consumer (.github/workflows/auto-merge.yml):
+#   on: { pull_request: { types: [opened, labeled, synchronize] } }
+#   jobs:
+#     enable:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-auto-merge.yml@main
+#
+# Enables squash auto-merge on any PR carrying the `automated` label (set by
+# upstream-watch and any other bot PRs). Requires repo Settings -> General ->
+# Pull Requests -> "Allow auto-merge" to be enabled (one-time human action).
+
+name: Ansible collection auto-merge
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'automated')
+    steps:
+      - uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: squash

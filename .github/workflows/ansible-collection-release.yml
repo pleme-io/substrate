@@ -1,0 +1,56 @@
+# Ansible collection release -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/ansible-collection-build@v1
+#   - pleme-io/actions/ansible-collection-publish@v1
+#   - softprops/action-gh-release@v2 (GitHub Release on tag pushes)
+#
+# Consumer (.github/workflows/release.yml):
+#   on: { push: { tags: ['v*'] }, workflow_dispatch: {} }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-release.yml@main
+#       secrets:
+#         ANSIBLE_GALAXY_TOKEN: ${{ secrets.ANSIBLE_GALAXY_TOKEN }}
+#
+# Publish gating: GitHub Actions DOES NOT permit referencing `secrets.X` inside
+# an `if:` expression on reusable-workflow-called jobs (the secret name is not
+# resolved at expression-eval time). We therefore inline-gate the publish step
+# inside its run script -- the substrate publish action itself short-circuits
+# cleanly when ANSIBLE_GALAXY_TOKEN is empty, so the step is always safe to run.
+
+name: Ansible collection release
+
+on:
+  workflow_call:
+    secrets:
+      ANSIBLE_GALAXY_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: build
+        uses: pleme-io/actions/ansible-collection-build@v1
+
+      - name: Publish to Ansible Galaxy (no-op if token unset)
+        uses: pleme-io/actions/ansible-collection-publish@v1
+        env:
+          ANSIBLE_GALAXY_TOKEN: ${{ secrets.ANSIBLE_GALAXY_TOKEN }}
+
+      - shell: bash
+        run: sha256sum ${{ steps.build.outputs.tarball-path }} | tee collection.sha256
+
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ steps.build.outputs.tarball-path }}
+            collection.sha256

@@ -1,0 +1,47 @@
+# Ansible collection docs-lint -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - actions/setup-python@v5 + pip-install antsibull-docs
+#
+# Consumer (.github/workflows/docs-lint.yml):
+#   on: [push, pull_request]
+#   jobs:
+#     lint:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-docs-lint.yml@main
+#       with:
+#         namespace: drzln0
+#         name: akeyless
+#
+# antsibull-docs requires the collection to live at
+# ansible_collections/<namespace>/<name>/, which we set up via checkout `path:`.
+
+name: Ansible collection docs-lint
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        type: string
+        required: true
+      name:
+        type: string
+        required: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install ansible antsibull-docs
+
+      - working-directory: ansible_collections/${{ inputs.namespace }}/${{ inputs.name }}
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}
+        run: antsibull-docs lint-collection-docs --plugin-docs .

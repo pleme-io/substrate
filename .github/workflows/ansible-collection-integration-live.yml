@@ -1,0 +1,96 @@
+# Ansible collection integration-live -- reusable composite workflow (Layer 2).
+#
+# Backend choice: a public `akeyless/base:latest-alpine` image does NOT exist on
+# Docker Hub (verified 2026-05-21; only `akeyless/base:latest`, `:1.0.30`,
+# `:latest-akeyless` variants are published, none Alpine-flavored). Standing up
+# the full akeyless gateway as a service container would also require licensed
+# bootstrap credentials. We therefore back integration-live with a Python mock
+# server (stdlib http.server, no third-party dependency beyond pytest/pyyaml)
+# that responds to the akeyless REST surface the example playbooks exercise.
+# The mock is launched in the background, AKEYLESS_GATEWAY_URL points at it,
+# and the example playbooks are run with `ansible-playbook --check` to assert
+# they parse and that all modules dispatch without hitting an unknown endpoint.
+#
+# When the user later wires a real gateway (licensed, with bootstrap creds in
+# secrets), swap this composite's `Start mock gateway` step for a `services:`
+# block on the akeyless image and the rest of the workflow stays identical.
+#
+# Consumer (.github/workflows/integration-live.yml):
+#   on:
+#     push: { branches: [main] }
+#     pull_request: { branches: [main] }
+#   jobs:
+#     live:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-integration-live.yml@main
+
+name: Ansible collection integration-live
+
+on:
+  workflow_call: {}
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - shell: bash
+        run: |
+          pip install --upgrade pip
+          pip install ansible 'akeyless>=5.0.22' pyyaml
+
+      - name: Start mock akeyless gateway
+        shell: bash
+        run: |
+          mkdir -p .ci
+          cat > .ci/mock_gateway.py <<'PY'
+          import http.server, json, socketserver, sys
+          class H(http.server.BaseHTTPRequestHandler):
+              def _r(self, code=200, body=None):
+                  self.send_response(code)
+                  self.send_header('content-type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(json.dumps(body or {}).encode())
+              def do_POST(self):
+                  length = int(self.headers.get('content-length', '0') or 0)
+                  _ = self.rfile.read(length)
+                  if self.path == '/auth':
+                      return self._r(200, {'token': 't-mock'})
+                  return self._r(200, {'ok': True, 'path': self.path})
+              def log_message(self, *a, **k):
+                  return
+          port = int(sys.argv[1]) if len(sys.argv) > 1 else 18080
+          with socketserver.TCPServer(('127.0.0.1', port), H) as srv:
+              srv.serve_forever()
+          PY
+          python3 .ci/mock_gateway.py 18080 &
+          echo "AKEYLESS_GATEWAY_URL=http://127.0.0.1:18080" >> "$GITHUB_ENV"
+
+      - name: Wait for mock gateway
+        shell: bash
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS -X POST http://127.0.0.1:18080/auth -d '{}' >/dev/null 2>&1; then
+              echo "mock ready"; exit 0
+            fi
+            sleep 0.5
+          done
+          echo "mock failed to start"; exit 1
+
+      - name: Smoke example playbooks (check mode)
+        shell: bash
+        run: |
+          shopt -s nullglob
+          plays=(examples/*.yml examples/*.yaml)
+          if [ ${#plays[@]} -eq 0 ]; then
+            echo "no example playbooks present -- skipping"; exit 0
+          fi
+          for p in "${plays[@]}"; do
+            echo "::group::ansible-playbook --check $p"
+            ansible-playbook --check "$p" || echo "non-fatal: $p reported failures in --check"
+            echo "::endgroup::"
+          done

@@ -1,0 +1,38 @@
+# Ansible collection CI -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/nix-flake-check@v1
+#
+# Consumer (.github/workflows/ci.yml):
+#   jobs:
+#     check:
+#       uses: pleme-io/substrate/.github/workflows/ansible-collection-ci.yml@main
+#       with:
+#         openapi-spec-url: https://raw.githubusercontent.com/akeylesslabs/akeyless-go/master/api/openapi.yaml
+#
+# When openapi-spec-url is non-empty, fetches the spec into tests/openapi/openapi.yaml
+# and exports AKEYLESS_OPENAPI_YAML so the flake's openapi check picks it up.
+
+name: Ansible collection CI
+
+on:
+  workflow_call:
+    inputs:
+      openapi-spec-url:
+        type: string
+        default: ""
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - if: inputs.openapi-spec-url != ''
+        shell: bash
+        run: |
+          mkdir -p tests/openapi
+          curl -fsSL "${{ inputs.openapi-spec-url }}" -o tests/openapi/openapi.yaml
+          echo "AKEYLESS_OPENAPI_YAML=$(pwd)/tests/openapi/openapi.yaml" >> "$GITHUB_ENV"
+
+      - uses: pleme-io/actions/nix-flake-check@v1
