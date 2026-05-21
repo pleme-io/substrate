@@ -49,10 +49,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Parse caixa.lisp
         id: meta
         env:

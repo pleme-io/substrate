@@ -69,10 +69,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Sanity-check gemspec version matches tag
         env:
           GEM_NAME: ${{ inputs.gem-name }}

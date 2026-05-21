@@ -72,10 +72,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       - name: Derive image reference
         id: ref
         env:
