@@ -158,12 +158,16 @@
         type = "app";
         program = toString (pkgs.writeShellScript "${namespace}-${name}-install" ''
           set -euo pipefail
-          if [ ! -f ${collectionName}.tar.gz ]; then
-            echo "Collection not built yet. Run: nix run .#build"
+          # Read version from galaxy.yml at runtime so install picks up
+          # whatever `nix run .#bump` just wrote, not the flake-baked default.
+          v=$(grep -E '^version:' galaxy.yml | head -1 | awk '{print $2}' | tr -d '"')
+          tarball="${namespace}-${name}-''${v}.tar.gz"
+          if [ ! -f "$tarball" ]; then
+            echo "Collection not built yet: $tarball missing. Run: nix run .#build"
             exit 1
           fi
-          ${ansible}/bin/ansible-galaxy collection install ${collectionName}.tar.gz --force
-          echo "Installed: ${namespace}.${name} ${version}"
+          ${ansible}/bin/ansible-galaxy collection install "$tarball" --force
+          echo "Installed: ${namespace}.${name} $v"
         '');
       };
 
@@ -175,12 +179,16 @@
             echo "Error: ANSIBLE_GALAXY_TOKEN is not set."
             exit 1
           fi
-          if [ ! -f ${collectionName}.tar.gz ]; then
-            echo "Collection not built yet. Run: nix run .#build"
+          # Read version from galaxy.yml at runtime to avoid drift between
+          # the flake-baked default and what `nix run .#bump` last wrote.
+          v=$(grep -E '^version:' galaxy.yml | head -1 | awk '{print $2}' | tr -d '"')
+          tarball="${namespace}-${name}-''${v}.tar.gz"
+          if [ ! -f "$tarball" ]; then
+            echo "Collection not built yet: $tarball missing. Run: nix run .#build"
             exit 1
           fi
-          ${ansible}/bin/ansible-galaxy collection publish ${collectionName}.tar.gz --token "$ANSIBLE_GALAXY_TOKEN"
-          echo "Published: ${namespace}.${name} ${version}"
+          ${ansible}/bin/ansible-galaxy collection publish "$tarball" --token "$ANSIBLE_GALAXY_TOKEN"
+          echo "Published: ${namespace}.${name} $v"
         '');
       };
 
