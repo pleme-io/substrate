@@ -103,9 +103,12 @@ jobs:
           set -euo pipefail
           gem_file="${GEM_NAME}-${VERSION}.gem"
           # Tolerate identical-version re-push so the workflow stays
-          # restartable on transient downstream failures.
+          # restartable on transient downstream failures. RubyGems has
+          # used two error phrasings over time:
+          #   - "has already been pushed"            (older gem cli)
+          #   - "Repushing of gem versions is not allowed" (current)
           if ! gem push "$gem_file" 2> push.err; then
-            if grep -q 'has already been pushed' push.err; then
+            if grep -qE 'has already been pushed|Repushing of gem versions' push.err; then
               echo "Version $VERSION already published; treating as success."
             else
               cat push.err >&2
