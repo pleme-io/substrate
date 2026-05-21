@@ -35,6 +35,15 @@ on:
         type: string
         default: "auto"
         description: "'auto' (use GitHub-generated notes) or literal markdown body"
+      major-ref:
+        type: string
+        default: ""
+        description: |
+          Floating-major ref to fast-forward. Empty (default) means derive
+          from the semver tag (v1.2.3 -> v1, v0.2.0 -> v0). Set to a
+          literal like `v1` to track an explicit major across 0.x and
+          1.x lines (useful when consumers pinned `@v1` before the repo
+          hit 1.0).
 
 permissions:
   contents: write
@@ -101,12 +110,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Extract major from tag
+      - name: Resolve refs
         id: tag
+        env:
+          MAJOR_REF_INPUT: ${{ inputs.major-ref }}
         run: |
           set -euo pipefail
           ref="${GITHUB_REF##refs/tags/}"
-          major="${ref%%.*}"   # v1.2.3 -> v1
+          if [ -n "$MAJOR_REF_INPUT" ]; then
+            major="$MAJOR_REF_INPUT"
+          else
+            major="${ref%%.*}"   # v1.2.3 -> v1
+          fi
           echo "tag=$ref" >> "$GITHUB_OUTPUT"
           echo "major=$major" >> "$GITHUB_OUTPUT"
       - name: Fast-forward major branch
