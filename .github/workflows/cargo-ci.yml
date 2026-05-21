@@ -1,0 +1,27 @@
+# Rust crate CI -- reusable composite workflow (Layer 2).
+#
+# Composes:
+#   - pleme-io/actions/nix-flake-check@v1
+#
+# Consumer (.github/workflows/ci.yml):
+#   on: [push, pull_request]
+#   jobs:
+#     check:
+#       uses: pleme-io/substrate/.github/workflows/cargo-ci.yml@main
+#
+# Runs `nix flake check` which (via substrate's rust-workspace-release-flake
+# helper) evaluates the crate's Cargo.nix, builds via crate2nix, and runs
+# whatever `checks.<system>.*` the flake exposes (usually `cargo test`
+# via the substrate baseline).
+
+name: cargo-ci
+
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-flake-check@v1

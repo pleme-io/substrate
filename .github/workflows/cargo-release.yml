@@ -1,0 +1,51 @@
+# Reusable workflow: tag-triggered crates.io release for a Rust crate.
+#
+# Usage (from a consumer repo, .github/workflows/release.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#
+#   jobs:
+#     crate:
+#       uses: pleme-io/substrate/.github/workflows/cargo-release.yml@main
+#       secrets:
+#         CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+#
+# Mirrors the shape of gem-release.yml: derive-version pulls the
+# version from the tag, then a publish job runs cargo publish via
+# the existing crates-publish.yml reusable.
+#
+# For workspace crates, the consumer's release.yml may need to
+# orchestrate publish order — this workflow handles a single crate.
+
+name: cargo-release
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      CRATES_API_TOKEN:
+        description: "crates.io API token with publish permission"
+        required: true
+
+jobs:
+  derive-version:
+    name: Derive crate version from tag
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      version: ${{ steps.derive.outputs.version }}
+    steps:
+      - id: derive
+        uses: pleme-io/actions/derive-version-from-tag@v1
+
+  publish:
+    name: Publish to crates.io
+    needs: derive-version
+    uses: pleme-io/substrate/.github/workflows/crates-publish.yml@main
+    secrets:
+      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
