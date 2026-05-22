@@ -100,6 +100,12 @@ jobs:
       # workflow. (No more `non-fatal:` tolerance hiding broken examples.)
       - name: Smoke example playbooks (check mode)
         shell: bash
+        env:
+          # Mock credentials so the per-module precondition checks pass.
+          # The mock gateway accepts any auth payload; these values
+          # never leave the runner.
+          AKEYLESS_ACCESS_ID: p-mock
+          AKEYLESS_ACCESS_KEY: mock-key
         run: |
           set -euo pipefail
           shopt -s nullglob
