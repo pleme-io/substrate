@@ -59,3 +59,9 @@ jobs:
       - run: python3 tests/sanity/smoke.py
       - run: pytest tests/unit/ -q
       - run: pytest tests/openapi/ -q
+      # Full module-coverage smoke — every plugins/modules/*.py file
+      # gets loaded, argspec-parsed, and dispatched against an in-process
+      # mock server. Catches argspec breakage / unhandled exceptions /
+      # import errors across the entire module surface.
+      - if: hashFiles('tests/mock/test_every_module_loads.py') != ''
+        run: pytest tests/mock/test_every_module_loads.py -q
