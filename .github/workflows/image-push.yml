@@ -46,6 +46,10 @@ on:
         description: "Flake ref to build from"
         type: string
         default: "."
+      additionalTags:
+        description: "Space-separated extra tags to push alongside `tag` (e.g. 'latest v1')"
+        type: string
+        default: "latest"
       runner:
         description: "Runner label"
         type: string
@@ -96,12 +100,24 @@ jobs:
           REGISTRY: ${{ inputs.registry }}
           IMAGE:    ${{ inputs.imageName || github.repository }}
           TAG:      ${{ inputs.tag }}
+          ADDITIONAL_TAGS: ${{ inputs.additionalTags }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          target="${REGISTRY}/${IMAGE}:${TAG}"
-          nix shell nixpkgs#skopeo --command \
-            skopeo --insecure-policy copy \
-              --dest-creds "${{ github.actor }}:${GHCR_TOKEN}" \
-              "docker-archive:./image.tar.gz" \
-              "docker://${target}"
+          # Push primary tag, then each additionalTag, all as copies
+          # of the same content-addressed image (skopeo copy is cheap
+          # — server-side mount when blobs already exist).
+          push_one() {
+            local t="$1"
+            local target="${REGISTRY}/${IMAGE}:${t}"
+            nix shell nixpkgs#skopeo --command \
+              skopeo --insecure-policy copy \
+                --dest-creds "${{ github.actor }}:${GHCR_TOKEN}" \
+                "docker-archive:./image.tar.gz" \
+                "docker://${target}"
+          }
+          push_one "$TAG"
+          # shellcheck disable=SC2086 — splitting on whitespace is intended
+          for extra in $ADDITIONAL_TAGS; do
+            push_one "$extra"
+          done
