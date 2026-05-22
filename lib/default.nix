@@ -1224,6 +1224,18 @@ in rec {
 
   inherit ((import ./build/python/uv.nix)) mkUvPythonPackage mkUvPythonPackageOverlay mkUvDevShell;
 
+  # Reusable shell prelude for any flake app whose body wants to invoke
+  # uv-locked Python tools (pytest / ansible / etc.) without re-resolving
+  # deps every run. Materializes the venv from `uv.lock` into a per-host
+  # cache (keyed by lockhash, so re-runs are no-ops), exports `.venv/bin`
+  # to PATH, and hands off to whatever the app does next. The "what the
+  # app does next" should be `exec ${mkTataraScript "name" (builtins.
+  # readFile ./run.tlisp)}` -- this snippet is the ONE shell line CSE
+  # permits in a tlisp-driven app.
+  #
+  # See lib/build/python/uv-test-runner.nix for full attr docs.
+  inherit ((import ./build/python/uv-test-runner.nix)) mkUvSyncSnippet;
+
   # ============================================================================
   # ESTANTE BUILDERS (shell-package manager)
   # ============================================================================
