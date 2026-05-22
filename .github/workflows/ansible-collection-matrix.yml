@@ -56,12 +56,18 @@ jobs:
           curl -fsSL "${{ inputs.openapi-spec-url }}" -o tests/openapi/openapi.yaml
           echo "AKEYLESS_OPENAPI_YAML=$(pwd)/tests/openapi/openapi.yaml" >> "$GITHUB_ENV"
 
-      - run: python3 tests/sanity/smoke.py
-      - run: pytest tests/unit/ -q
-      - run: pytest tests/openapi/ -q
+      # Each pytest step independent (if: always()) so a regression in
+      # one suite doesn't mask the others. The matrix fails if ANY of
+      # them fails, but the full diagnostic surfaces in one run.
+      - if: always()
+        run: python3 tests/sanity/smoke.py
+      - if: always()
+        run: pytest tests/unit/ -q
+      - if: always()
+        run: pytest tests/openapi/ -q
       # Full module-coverage smoke — every plugins/modules/*.py file
       # gets loaded, argspec-parsed, and dispatched against an in-process
       # mock server. Catches argspec breakage / unhandled exceptions /
       # import errors across the entire module surface.
-      - if: hashFiles('tests/mock/test_every_module_loads.py') != ''
+      - if: always() && hashFiles('tests/mock/test_every_module_loads.py') != ''
         run: pytest tests/mock/test_every_module_loads.py -q
