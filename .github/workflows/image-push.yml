@@ -69,8 +69,15 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
+      # `nix build` writes ./result as a symlink into /nix/store/...
+      # The oci-image-push Docker action doesn't have /nix/store mounted,
+      # so the symlink dereferences to nothing inside the container.
+      # Materialize the actual tarball into the workspace (a real file
+      # under /github/workspace) before handing off.
       - name: Build image with Nix
-        run: nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths
+        run: |
+          nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths
+          cp -L result image.tar.gz
 
       - name: Login to registry
         uses: docker/login-action@v3
@@ -82,8 +89,7 @@ jobs:
       - name: Push image
         uses: pleme-io/actions/oci-image-push@v1
         with:
-          registry:  ${{ inputs.registry }}
-          image:     ${{ inputs.imageName || github.repository }}
-          tag:       ${{ inputs.tag }}
-          tarball:   ./result
-          flake-ref: ${{ inputs.flakeRef }}
+          registry: ${{ inputs.registry }}
+          image:    ${{ inputs.imageName || github.repository }}
+          tag:      ${{ inputs.tag }}
+          tarball:  ./image.tar.gz
