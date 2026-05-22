@@ -86,10 +86,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
 
-      - name: Push image
-        uses: pleme-io/actions/oci-image-push@v1
-        with:
-          registry: ${{ inputs.registry }}
-          image:    ${{ inputs.imageName || github.repository }}
-          tag:      ${{ inputs.tag }}
-          tarball:  ./image.tar.gz
+      # Direct host-nix skopeo push. Originally went through
+      # pleme-io/actions/oci-image-push@v1, but that's itself a Docker
+      # action whose base image (tatara-script) is published by THIS
+      # workflow — a bootstrap cycle. Host-nix skopeo breaks the
+      # cycle and stays a single-purpose, self-contained step.
+      - name: Push image (host nix skopeo)
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE:    ${{ inputs.imageName || github.repository }}
+          TAG:      ${{ inputs.tag }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          target="${REGISTRY}/${IMAGE}:${TAG}"
+          nix shell nixpkgs#skopeo --command \
+            skopeo --insecure-policy copy \
+              --dest-creds "${{ github.actor }}:${GHCR_TOKEN}" \
+              "docker-archive:./image.tar.gz" \
+              "docker://${target}"
