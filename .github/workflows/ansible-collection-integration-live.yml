@@ -5,23 +5,19 @@
 # `:latest-akeyless` variants are published, none Alpine-flavored). Standing up
 # the full akeyless gateway as a service container would also require licensed
 # bootstrap credentials. We therefore back integration-live with a Python mock
-# server (stdlib http.server, no third-party dependency beyond pytest/pyyaml)
-# that responds to the akeyless REST surface the example playbooks exercise.
-# The mock is launched in the background, AKEYLESS_GATEWAY_URL points at it,
-# and the example playbooks are run with `ansible-playbook --check` to assert
-# they parse and that all modules dispatch without hitting an unknown endpoint.
+# server (stdlib http.server) that responds to the akeyless REST surface the
+# example playbooks exercise.
+#
+# What this workflow proves:
+#   1. The collection BUILDS via `ansible-galaxy collection build`.
+#   2. The built tarball INSTALLS via `ansible-galaxy collection install`.
+#   3. Every example playbook PARSES + passes `ansible-playbook --check`
+#      against the mock gateway. Any module name typo / FQCN mismatch /
+#      missing dependency / invalid task syntax fails the workflow.
 #
 # When the user later wires a real gateway (licensed, with bootstrap creds in
 # secrets), swap this composite's `Start mock gateway` step for a `services:`
 # block on the akeyless image and the rest of the workflow stays identical.
-#
-# Consumer (.github/workflows/integration-live.yml):
-#   on:
-#     push: { branches: [main] }
-#     pull_request: { branches: [main] }
-#   jobs:
-#     live:
-#       uses: pleme-io/substrate/.github/workflows/ansible-collection-integration-live.yml@main
 
 name: Ansible collection integration-live
 
@@ -38,10 +34,27 @@ jobs:
         with:
           python-version: '3.11'
 
-      - shell: bash
+      - name: Install ansible + collection runtime deps
+        shell: bash
         run: |
           pip install --upgrade pip
           pip install ansible 'akeyless>=5.0.22' pyyaml
+
+      # Build + install the collection so examples that reference
+      # `drzln0.akeyless.<module>` actually resolve. Without this step
+      # ansible reports "No module named 'ansible_collections.drzln0'"
+      # and the --check below would have nothing to validate against.
+      - name: Build + install collection locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          ansible-galaxy collection build --force --output-path .build
+          tarball=$(ls -1 .build/*.tar.gz | head -n1)
+          if [ -z "$tarball" ]; then
+            echo "::error::collection build produced no tarball"
+            exit 1
+          fi
+          ansible-galaxy collection install "$tarball" --force
 
       - name: Start mock akeyless gateway
         shell: bash
@@ -81,16 +94,32 @@ jobs:
           done
           echo "mock failed to start"; exit 1
 
+      # Real test: run every example playbook with --check. Each must
+      # successfully parse, resolve the collection's modules, and pass
+      # task syntax + arg validation. ANY example failure fails the
+      # workflow. (No more `non-fatal:` tolerance hiding broken examples.)
       - name: Smoke example playbooks (check mode)
         shell: bash
         run: |
+          set -euo pipefail
           shopt -s nullglob
           plays=(examples/*.yml examples/*.yaml)
           if [ ${#plays[@]} -eq 0 ]; then
             echo "no example playbooks present -- skipping"; exit 0
           fi
+          failures=0
           for p in "${plays[@]}"; do
             echo "::group::ansible-playbook --check $p"
-            ansible-playbook --check "$p" || echo "non-fatal: $p reported failures in --check"
+            if ansible-playbook --check "$p"; then
+              echo "ok: $p"
+            else
+              failures=$((failures + 1))
+              echo "::error file=$p::ansible-playbook --check failed"
+            fi
             echo "::endgroup::"
           done
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures example(s) failed --check"
+            exit 1
+          fi
+          echo "all ${#plays[@]} example(s) passed --check"
