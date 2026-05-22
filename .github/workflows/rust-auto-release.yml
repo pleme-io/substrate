@@ -1,0 +1,120 @@
+name: rust-auto-release
+
+# Reusable workflow: on push to main, bump the workspace patch
+# version + commit + tag + push + ship every workspace member to
+# the upstream registry. Auto-renames conflicts, auto-skips
+# already-published, auto-sleeps on rate-limits, auto-defers
+# crates whose deps aren't yet on the registry.
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
+#       secrets: inherit
+#
+# Three lines of operator config. Everything else is pure
+# composition of pleme-io/actions/* primitives (each backed by
+# Rust + tatara-lisp).
+#
+# secrets passed through:
+#   CRATES_API_TOKEN — org-level secret; this workflow bridges to
+#                      CARGO_REGISTRY_TOKEN env that cargo reads.
+#   BOT_PAT          — optional PAT with `repo` scope. If present,
+#                      tag pushes can trigger downstream workflows.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        type: string
+        required: false
+        default: patch
+      source-paths:
+        description: "Space-separated globs the skip-detector inspects for changes since the last tag. Default fits a typical workspace layout; override for non-default layouts."
+        type: string
+        required: false
+        default: "Cargo.toml Cargo.lock"
+      add-paths:
+        description: "Space-separated git pathspecs the bump commit stages. Default covers root + all workspace member Cargo.toml files."
+        type: string
+        required: false
+        default: "Cargo.toml Cargo.lock Cargo.nix"
+      rename-prefix:
+        description: "Prefix used when auto-renaming a conflicting crate at registry-publish time."
+        type: string
+        required: false
+        default: "pleme-io-"
+      no-verify:
+        description: "Skip cargo publish's verification compile step."
+        type: string
+        required: false
+        default: "true"
+    secrets:
+      CRATES_API_TOKEN:
+        required: true
+        description: "Registry publish token (crates.io API token with publish scope)."
+      BOT_PAT:
+        required: false
+        description: "Optional PAT with repo scope for cross-workflow tag triggers."
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Bump workspace + tag
+    runs-on: ubuntu-latest
+    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops).
+    if: github.actor != 'github-actions[bot]'
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - id: bump
+        uses: pleme-io/actions/rust-workspace-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          source-paths: ${{ inputs.source-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.bump.outputs.new-version }}
+          add-paths: ${{ inputs.add-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
+
+  ship:
+    name: Ship workspace to registry
+    needs: bump
+    runs-on: ubuntu-latest
+    if: needs.bump.outputs.bumped == 'true'
+    steps:
+      # Re-checkout to pick up the bumped Cargo.toml from main.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/rust-workspace-publish@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+          rename-prefix: ${{ inputs.rename-prefix }}
+        env:
+          # Org-level secret name is CRATES_API_TOKEN; cargo reads
+          # CARGO_REGISTRY_TOKEN. Bridge the names here.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
