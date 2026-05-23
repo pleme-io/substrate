@@ -162,6 +162,24 @@
       backend = "tatara-lisp";
       role = "git log → CHANGELOG.md (markdown / keepachangelog / conventional)";
     };
+    docs-publish = {
+      uses = "pleme-io/actions/docs-publish@main";
+      backend = "tatara-lisp";
+      role = "polymorphic doc gen + deploy to gh-pages (cargo doc / mkdocs / typedoc)";
+    };
+  };
+
+  delivery = {
+    slack-notify = {
+      uses = "pleme-io/actions/slack-notify@main";
+      backend = "tatara-lisp";
+      role = "post typed release event to Slack webhook with attachments + fields";
+    };
+    onboard-auto-release = {
+      uses = "pleme-io/actions/onboard-auto-release@main";
+      backend = "tatara-lisp";
+      role = "scaffold the canonical 3-workflow surface into a repo + optional PR open";
+    };
   };
 
   validation = {
