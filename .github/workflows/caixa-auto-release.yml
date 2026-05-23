@@ -1,0 +1,86 @@
+name: caixa-auto-release
+
+# Reusable workflow: on push to main, bump a (defcaixa ...) form,
+# re-render cluster artifacts via feira, commit, tag, push, and
+# publish the rendered Helm chart to the OCI registry.
+#
+# Consumer:
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/caixa-auto-release.yml@main
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        required: false
+        default: patch
+      caixa-path:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    outputs:
+      bumped: ${{ steps.b.outputs.bumped }}
+      new-version: ${{ steps.b.outputs.new-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - id: b
+        uses: pleme-io/actions/caixa-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          caixa-path: ${{ inputs.caixa-path }}
+
+      - if: steps.b.outputs.bumped == 'true'
+        uses: pleme-io/actions/caixa-render@main
+        with:
+          caixa-path: ${{ inputs.caixa-path }}
+          output-dir: rendered/
+
+      - if: steps.b.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.b.outputs.new-version }}
+          add-paths: "*.tlisp *.lisp rendered/"
+
+      - if: steps.b.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
+
+  ship:
+    needs: bump
+    runs-on: ubuntu-latest
+    if: needs.bump.outputs.bumped == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, ref: main }
+      - uses: pleme-io/actions/caixa-render@main
+        with:
+          caixa-path: ${{ inputs.caixa-path }}
+          output-dir: rendered/
+      - uses: pleme-io/actions/caixa-publish@main
+        with:
+          rendered-dir: rendered/
+        env:
+          GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}

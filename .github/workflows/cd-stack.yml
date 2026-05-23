@@ -1,0 +1,106 @@
+name: cd-stack
+
+# Turnkey CD pipeline. Composes:
+#   helm-deploy           → upgrade --install --wait
+#   flux-reconcile        → force-converge (optional)
+#   k8s-rollout-wait      → fine-grained gate
+#   slack-notify          → post deploy outcome (optional)
+#
+# Consumer:
+#   jobs:
+#     deploy:
+#       uses: pleme-io/substrate/.github/workflows/cd-stack.yml@main
+#       with:
+#         release: myapp
+#         chart: oci://ghcr.io/pleme-io/helm/myapp
+#         namespace: prod
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        type: string
+        required: true
+      chart:
+        type: string
+        required: true
+      namespace:
+        type: string
+        required: false
+        default: "default"
+      values-files:
+        type: string
+        required: false
+        default: ""
+      reconcile-after:
+        type: string
+        required: false
+        default: "false"
+      reconcile-kind:
+        type: string
+        required: false
+        default: "helmrelease"
+      notify-slack:
+        type: string
+        required: false
+        default: "false"
+    secrets:
+      KUBECONFIG_B64:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      deployed: ${{ steps.h.outputs.deployed }}
+      revision: ${{ steps.h.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Materialize kubeconfig
+        shell: bash
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - id: h
+        uses: pleme-io/actions/helm-deploy@main
+        with:
+          release: ${{ inputs.release }}
+          chart: ${{ inputs.chart }}
+          namespace: ${{ inputs.namespace }}
+          values-files: ${{ inputs.values-files }}
+
+  reconcile:
+    needs: deploy
+    if: inputs.reconcile-after == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Materialize kubeconfig
+        shell: bash
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - uses: pleme-io/actions/flux-reconcile@main
+        with:
+          kind: ${{ inputs.reconcile-kind }}
+          name: ${{ inputs.release }}
+          namespace: ${{ inputs.namespace }}
+
+  notify:
+    needs: [deploy, reconcile]
+    if: always() && inputs.notify-slack == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/slack-notify@main
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          title: ${{ format('CD: {0} → {1}', inputs.release, needs.deploy.outputs.deployed == 'true' && 'deployed' || 'FAILED') }}
+          body: ${{ format('chart={0} ns={1} revision={2}', inputs.chart, inputs.namespace, needs.deploy.outputs.revision) }}
+          color: ${{ needs.deploy.outputs.deployed == 'true' && 'good' || 'danger' }}

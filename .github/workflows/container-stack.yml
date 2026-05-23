@@ -1,0 +1,96 @@
+name: container-stack
+
+# Turnkey container pipeline. Composes 4 primitives:
+#   docker-build-and-push  → ghcr.io image
+#   sbom-generate          → cyclonedx SBOM (artifact)
+#   provenance-attest      → cosign keyless signature
+#   image-scan             → trivy vuln gate
+#
+# Consumer (.github/workflows/container-stack.yml):
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch:
+#   jobs:
+#     stack:
+#       uses: pleme-io/substrate/.github/workflows/container-stack.yml@main
+#       with:
+#         image: ghcr.io/pleme-io/myapp
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: false
+        default: ""
+      platforms:
+        type: string
+        required: false
+        default: "linux/amd64,linux/arm64"
+      scan-fail-on:
+        type: string
+        required: false
+        default: "HIGH"
+      sbom-format:
+        type: string
+        required: false
+        default: "cyclonedx-json"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write   # for cosign keyless
+
+jobs:
+  build:
+    name: 'build + push'
+    runs-on: ubuntu-latest
+    outputs:
+      image-ref: ${{ steps.b.outputs.image-ref }}
+      digest: ${{ steps.b.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: b
+        uses: pleme-io/actions/docker-build-and-push@main
+        with:
+          image: ${{ inputs.image }}
+          tag: ${{ inputs.tag }}
+          platforms: ${{ inputs.platforms }}
+
+  sbom:
+    name: 'sbom'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: s
+        uses: pleme-io/actions/sbom-generate@main
+        with:
+          output-format: ${{ inputs.sbom-format }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+
+  attest:
+    name: 'cosign sign'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/provenance-attest@main
+        with:
+          artifact-path: ${{ needs.build.outputs.image-ref }}
+
+  scan:
+    name: 'trivy scan'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/image-scan@main
+        with:
+          image-ref: ${{ needs.build.outputs.image-ref }}
+          fail-on-severity: ${{ inputs.scan-fail-on }}
