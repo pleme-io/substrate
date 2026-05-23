@@ -47,7 +47,7 @@ jobs:
       - shell: bash
         run: |
           pip install --upgrade pip
-          pip install 'ansible-core>=${{ matrix.ansible }},<${{ matrix.ansible }}.99' pytest pyyaml jsonschema 'akeyless>=5.0.22'
+          pip install 'ansible-core>=${{ matrix.ansible }},<${{ matrix.ansible }}.99' pytest pyyaml jsonschema 'akeyless>=5.0.22' hypothesis
 
       - if: inputs.openapi-spec-url != ''
         shell: bash
