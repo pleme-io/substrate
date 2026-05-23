@@ -46,8 +46,6 @@ on:
         required: false
       PYPI_API_TOKEN:
         required: false
-      GHCR_PAT:
-        required: false
       BOT_PAT:
         required: false
 
@@ -88,18 +86,42 @@ jobs:
       CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
       BOT_PAT: ${{ secrets.BOT_PAT }}
 
-  # ── Pending per-language routes (each follows the same pattern):
-  # ──   needs: detect
-  # ──   if:    needs.detect.outputs.repo-type == 'XXX'
-  # ──   uses:  pleme-io/substrate/.github/workflows/<XXX>-auto-release.yml@main
-  # ──
-  # ── Future:
-  # ──   npm                → ./npm-auto-release.yml
-  # ──   python             → ./python-auto-release.yml
-  # ──   helm               → ./helm-auto-release.yml
-  # ──   ansible-collection → ./ansible-collection-auto-bump.yml (exists)
-  # ──   ruby-gem           → ./gem-release.yml (exists)
-  # ──   github-action      → ./action-release.yml (exists)
+  npm:
+    name: 'npm · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'npm'
+    uses: pleme-io/substrate/.github/workflows/npm-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+
+  python:
+    name: 'python · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'python'
+    uses: pleme-io/substrate/.github/workflows/python-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+
+  helm:
+    name: 'helm · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'helm'
+    uses: pleme-io/substrate/.github/workflows/helm-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets:
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+
+  # ── Future routes (existing workflows that pre-date this dispatcher):
+  # ──   ansible-collection → ./ansible-collection-auto-bump.yml
+  # ──   ruby-gem           → ./gem-release.yml
+  # ──   github-action      → ./action-release.yml
   unsupported:
     name: 'unsupported repo type'
     needs: detect
