@@ -175,7 +175,24 @@
       backend = "tatara-lisp";
       role = "nix flake check + lock verification";
     };
-    # pending — see docs/RECIPES.md backlog
+    rust-gate = {
+      uses = "pleme-io/actions/rust-gate@main";
+      backend = "tatara-lisp";
+      ecosystem = "rust-workspace + rust-single-crate";
+      role = "cargo fmt --check + cargo clippy + cargo test";
+    };
+    npm-gate = {
+      uses = "pleme-io/actions/npm-gate@main";
+      backend = "tatara-lisp";
+      ecosystem = "npm";
+      role = "prettier/lint/test (conditional on package.json scripts)";
+    };
+    python-gate = {
+      uses = "pleme-io/actions/python-gate@main";
+      backend = "tatara-lisp";
+      ecosystem = "python";
+      role = "ruff format --check + ruff check + pytest";
+    };
   };
 
   build = {

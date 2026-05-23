@@ -1,0 +1,123 @@
+name: pre-merge-gate
+
+# Comprehensive PR-time quality gate. Detects repo type +
+# dispatches to the right per-language gate AND runs the
+# universal verifiers (auto-release-verify dry-run, tlisp-lint
+# when applicable).
+#
+# Consumer (.github/workflows/pre-merge-gate.yml):
+#   on:
+#     pull_request:
+#       branches: [main]
+#   jobs:
+#     gate:
+#       uses: pleme-io/substrate/.github/workflows/pre-merge-gate.yml@main
+#       secrets: inherit
+#
+# Bundles:
+#   detect-repo-type     → routes to per-language gate
+#   <lang>-gate          → fmt + lint + test for the repo's language
+#   auto-release-verify  → dry-run the publish (catches metadata bugs)
+#   tlisp-lint           → paren/balance check (when *.tlisp files exist)
+#
+# Each gate runs independently; PR fails if any gate fails. No
+# cascading short-circuit so the operator sees all problems at once.
+
+on:
+  workflow_call:
+    inputs:
+      run-rust-gate:
+        type: string
+        required: false
+        default: "true"
+      run-npm-gate:
+        type: string
+        required: false
+        default: "true"
+      run-python-gate:
+        type: string
+        required: false
+        default: "true"
+      run-tlisp-lint:
+        type: string
+        required: false
+        default: "true"
+      run-publish-verify:
+        type: string
+        required: false
+        default: "true"
+    secrets:
+      CRATES_API_TOKEN:
+        required: false
+      NPM_TOKEN:
+        required: false
+      PYPI_API_TOKEN:
+        required: false
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect repo type
+    runs-on: ubuntu-latest
+    outputs:
+      repo-type: ${{ steps.detect.outputs.repo-type }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: pleme-io/actions/detect-repo-type@main
+
+  rust-quality:
+    name: 'rust · fmt + clippy + test'
+    needs: detect
+    if: |
+      inputs.run-rust-gate == 'true' &&
+      (needs.detect.outputs.repo-type == 'rust-workspace' ||
+       needs.detect.outputs.repo-type == 'rust-single-crate')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/rust-gate@main
+
+  npm-quality:
+    name: 'npm · fmt + lint + test'
+    needs: detect
+    if: inputs.run-npm-gate == 'true' && needs.detect.outputs.repo-type == 'npm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/npm-gate@main
+
+  python-quality:
+    name: 'python · fmt + lint + test'
+    needs: detect
+    if: inputs.run-python-gate == 'true' && needs.detect.outputs.repo-type == 'python'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/python-gate@main
+
+  tlisp-balance:
+    name: 'universal · tlisp-lint'
+    needs: detect
+    if: inputs.run-tlisp-lint == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/tlisp-lint@main
+        with:
+          fail-on-unbalanced: "true"
+
+  publish-dry-run:
+    name: 'universal · auto-release-verify'
+    needs: detect
+    if: inputs.run-publish-verify == 'true' && needs.detect.outputs.repo-type != 'unknown'
+    uses: pleme-io/substrate/.github/workflows/auto-release-verify.yml@main
+    secrets:
+      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
