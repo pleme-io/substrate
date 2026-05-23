@@ -86,14 +86,137 @@
     ...)
 
 ;; ─────────────────────────────────────────────────────────────────
-;; The renderer produces 3 files per (defaction ...):
-;;   <name>/action.yml   — 5 canonical sections from the typed Action
-;;   <name>/run.tlisp    — stdlib loader + :body content
-;;   <name>/README.md    — auto-generated table from :inputs/:outputs
+;; (defworkflow ...) — typed composition of actions into a reusable
+;; workflow. M2 of the migration roadmap. Renders to substrate's
+;; .github/workflows/<name>.yml. Sister of (defaction ...).
 ;;
-;; The renderer produces N file-triples per (defaction-suite ...).
+;; Crucially: every :uses-action / :uses-workflow ref is TYPED.
+;; The renderer validates against the action catalog at build time.
+;; ─────────────────────────────────────────────────────────────────
+
+(defworkflow auto-release
+  :description "Polymorphic dispatcher — push to main → per-language bump+publish."
+  :triggers    [ (:push :branches [ "main" ])
+                 (:workflow-dispatch
+                   :inputs { :bump-type { :default "patch" } }) ]
+  :permissions { :contents :write
+                 :packages :write }
+  :secrets     [ :CRATES_API_TOKEN :NPM_TOKEN :PYPI_API_TOKEN :BOT_PAT ]
+  :jobs
+    [ (:job detect
+        :uses-action :detect-repo-type
+        :outputs     [ :repo-type ])
+      (:job rust-workspace
+        :needs detect
+        :when (= (output detect :repo-type) "rust-workspace")
+        :uses-workflow :rust-auto-release
+        :with { :bump-type (input :bump-type) })
+      (:job rust-single-crate
+        :needs detect
+        :when (= (output detect :repo-type) "rust-single-crate")
+        :uses-workflow :cargo-auto-release)
+      (:job npm
+        :needs detect
+        :when (= (output detect :repo-type) "npm")
+        :uses-workflow :npm-auto-release)
+      (:job python
+        :needs detect
+        :when (= (output detect :repo-type) "python")
+        :uses-workflow :python-auto-release)
+      (:job helm
+        :needs detect
+        :when (= (output detect :repo-type) "helm")
+        :uses-workflow :helm-auto-release)
+      (:job caixa
+        :needs detect
+        :when (= (output detect :repo-type) "caixa")
+        :uses-workflow :caixa-auto-release) ])
+
+;; ─────────────────────────────────────────────────────────────────
+;; (defworkflow ...) with COMPOSED jobs — pre-merge-gate.yml
+;; Demonstrates how :uses-action / :uses-workflow / direct :run
+;; tlisp bodies compose in one form.
+;; ─────────────────────────────────────────────────────────────────
+
+(defworkflow pre-merge-gate
+  :description "PR-time quality + security gate (polymorphic by repo type)."
+  :triggers    [ (:pull-request :branches [ "main" ]) ]
+  :jobs
+    [ (:job detect          :uses-action :detect-repo-type)
+      (:job rust-quality
+        :when (or (= (output detect :repo-type) "rust-workspace")
+                  (= (output detect :repo-type) "rust-single-crate"))
+        :uses-action :rust-gate)
+      (:job npm-quality
+        :when (= (output detect :repo-type) "npm")
+        :uses-action :npm-gate)
+      (:job python-quality
+        :when (= (output detect :repo-type) "python")
+        :uses-action :python-gate)
+      (:job tlisp-balance   :uses-action :tlisp-lint)
+      (:job action-shell-ban
+        :when (= (output detect :repo-type) "github-action")
+        :uses-action :action-shell-lint
+        :with { :threshold "15" :fail-on-violation "true" })
+      (:job publish-dry-run
+        :when (!= (output detect :repo-type) "unknown")
+        :uses-workflow :auto-release-verify) ])
+
+;; ─────────────────────────────────────────────────────────────────
+;; (defworkflow ...) for caixa-aware actions
+;; The renderer validates that :uses-action refs exist in the
+;; action catalog + that their :expects-caixa-kind matches the
+;; caixa context.
+;; ─────────────────────────────────────────────────────────────────
+
+(defworkflow cd-stack
+  :description "Turnkey CD pipeline: helm-deploy + flux-reconcile + slack-notify."
+  :triggers    [ (:workflow-call
+                   :inputs { :release   { :type :string :required true }
+                             :chart     { :type :string :required true }
+                             :namespace { :type :string :default  "default" } }
+                   :secrets [ :KUBECONFIG_B64 :SLACK_WEBHOOK_URL ]) ]
+  :jobs
+    [ (:job deploy
+        :uses-action :helm-deploy
+        :with { :release (input :release)
+                :chart   (input :chart)
+                :namespace (input :namespace) }
+        :outputs [ :deployed :revision ])
+      (:job reconcile
+        :needs deploy
+        :when (= (input :reconcile-after) "true")
+        :uses-action :flux-reconcile
+        :with { :kind :helmrelease :name (input :release) :namespace (input :namespace) })
+      (:job notify
+        :needs [ deploy reconcile ]
+        :when (always)
+        :uses-action :slack-notify
+        :with { :webhook-url (secret :SLACK_WEBHOOK_URL)
+                :title (format "CD: {} → {}" (input :release)
+                          (if (= (output deploy :deployed) "true") "deployed" "FAILED"))
+                :body  (format "chart={} ns={} revision={}" (input :chart)
+                          (input :namespace) (output deploy :revision))
+                :color (if (= (output deploy :deployed) "true") "good" "danger") }) ])
+
+;; ─────────────────────────────────────────────────────────────────
+;; Renderer summary:
 ;;
-;; The renderer validates caixa-aware actions against the typed
-;; caixa schema at build-time; mismatches are compile-time errors,
-;; not runtime errors at action invocation.
+;;   (defaction X)            → pleme-io/actions/X/{action.yml, run.tlisp, README.md}
+;;                              + patterns.nix entry
+;;                              + skill table row
+;;                              + example-config.toml schema
+;;
+;;   (defaction-suite X)      → N action triples + shared :installs
+;;
+;;   (defworkflow X)          → pleme-io/substrate/.github/workflows/X.yml
+;;                              + patterns.nix workflows entry
+;;
+;;   (defcaixa X)             → adopting-repo .github/workflows/{auto-release,
+;;                                pre-merge-gate, security-gate}.yml
+;;                              + .pleme-io-release.toml
+;;
+;; The renderer is one binary: arch-synthesizer render --in <X>.lisp --out <dir>
+;; Per the prime directive: hand-authoring is the FALLBACK. Every
+;; downstream artifact is mechanically derived from typed Lisp.
 ;; ─────────────────────────────────────────────────────────────────
