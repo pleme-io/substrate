@@ -1,0 +1,113 @@
+name: auto-release
+
+# Polymorphic auto-release. Detects the repo type at the start
+# (via pleme-io/actions/detect-repo-type) + dispatches to the
+# appropriate per-type pipeline (bump + commit + tag + push +
+# publish). Every pleme-io repo regardless of language uses the
+# same 3-line consumer shim:
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/auto-release.yml@main
+#       secrets: inherit
+#
+# The repo type is inferred from manifest presence:
+#   Cargo.toml + [workspace]  → rust-workspace
+#   Cargo.toml + [package]    → rust-single-crate
+#   pyproject.toml            → python    (R-PYTHON.1 — pending)
+#   package.json              → npm       (R-NPM.1 — pending)
+#   Chart.yaml                → helm      (R-HELM.1 — pending)
+#   galaxy.yml                → ansible-collection (already covered)
+#   *.gemspec                 → ruby-gem  (already covered)
+#   action.yml                → github-action (already covered)
+#
+# Each per-type job is gated by the detect output; only one
+# branch runs per invocation.
+#
+# secrets passed through:
+#   CRATES_API_TOKEN — crates.io publish token
+#   NPM_TOKEN        — npmjs publish token   (pending)
+#   PYPI_API_TOKEN   — pypi publish token    (pending)
+#   GHCR_PAT         — ghcr push token       (pending)
+#   BOT_PAT          — optional, for cross-workflow tag triggers
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        required: false
+        default: patch
+    secrets:
+      CRATES_API_TOKEN:
+        required: false
+      NPM_TOKEN:
+        required: false
+      PYPI_API_TOKEN:
+        required: false
+      GHCR_PAT:
+        required: false
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    name: Detect repo type
+    runs-on: ubuntu-latest
+    outputs:
+      repo-type: ${{ steps.detect.outputs.repo-type }}
+      manifest-path: ${{ steps.detect.outputs.manifest-path }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: pleme-io/actions/detect-repo-type@main
+
+  rust-workspace:
+    name: 'rust-workspace · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'rust-workspace'
+    uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets:
+      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+
+  rust-single-crate:
+    name: 'rust-single-crate · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'rust-single-crate'
+    uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets:
+      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+
+  # ── Pending per-language routes (each follows the same pattern):
+  # ──   needs: detect
+  # ──   if:    needs.detect.outputs.repo-type == 'XXX'
+  # ──   uses:  pleme-io/substrate/.github/workflows/<XXX>-auto-release.yml@main
+  # ──
+  # ── Future:
+  # ──   npm                → ./npm-auto-release.yml
+  # ──   python             → ./python-auto-release.yml
+  # ──   helm               → ./helm-auto-release.yml
+  # ──   ansible-collection → ./ansible-collection-auto-bump.yml (exists)
+  # ──   ruby-gem           → ./gem-release.yml (exists)
+  # ──   github-action      → ./action-release.yml (exists)
+  unsupported:
+    name: 'unsupported repo type'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'unknown'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail with diagnostic
+        run: |
+          echo "::error::detect-repo-type returned 'unknown' — no manifest at root recognized"
+          echo "::error::see pleme-io/actions/detect-repo-type for the supported manifest list"
+          exit 1
