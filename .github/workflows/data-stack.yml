@@ -1,0 +1,54 @@
+name: data-stack
+
+# Composes data pipeline primitives: dbt build + dagster materialize
+# + datadog event + grafana annotation. Use for warehouse repos.
+
+on:
+  workflow_call:
+    inputs:
+      dbt-profile:      { type: string, required: false, default: "default" }
+      dagster-asset:    { type: string, required: false, default: "" }
+    secrets:
+      DD_API_KEY:       { required: false }
+      GRAFANA_URL:      { required: false }
+      GRAFANA_TOKEN:    { required: false }
+
+permissions:
+  contents: read
+
+jobs:
+  dbt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/dbt-build@main
+        with:
+          profile: ${{ inputs.dbt-profile }}
+
+  dagster:
+    if: inputs.dagster-asset != ''
+    needs: dbt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/dagster-materialize@main
+        with:
+          asset-key: ${{ inputs.dagster-asset }}
+
+  notify:
+    needs: [dbt, dagster]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: secrets.DD_API_KEY != ''
+        uses: pleme-io/actions/datadog-event@main
+        with:
+          api-key: ${{ secrets.DD_API_KEY }}
+          title: 'data-stack run'
+          text: ${{ format('dbt={0} dagster={1}', needs.dbt.result, needs.dagster.result) }}
+      - if: secrets.GRAFANA_URL != ''
+        uses: pleme-io/actions/grafana-annotation@main
+        with:
+          url: ${{ secrets.GRAFANA_URL }}
+          api-token: ${{ secrets.GRAFANA_TOKEN }}
+          text: 'data-stack run'

@@ -1,0 +1,72 @@
+name: observability-deploy
+
+# Composes observability primitives that fire on deploy:
+#   sentry-release + grafana-annotation + datadog-event +
+#   newrelic-deploy-marker + posthog-event + opentelemetry-trace-emit.
+#
+# Use as a post-deploy step in any CD pipeline.
+
+on:
+  workflow_call:
+    inputs:
+      version:        { type: string, required: true }
+      service-name:   { type: string, required: true }
+    secrets:
+      SENTRY_AUTH_TOKEN:    { required: false }
+      SENTRY_ORG:           { required: false }
+      SENTRY_PROJECT:       { required: false }
+      DD_API_KEY:           { required: false }
+      GRAFANA_URL:          { required: false }
+      GRAFANA_TOKEN:        { required: false }
+      NR_API_KEY:           { required: false }
+      NR_APP_ID:            { required: false }
+      POSTHOG_API_KEY:      { required: false }
+      POSTHOG_PROJECT_ID:   { required: false }
+      OTLP_ENDPOINT:        { required: false }
+
+permissions:
+  contents: read
+
+jobs:
+  fan-out:
+    runs-on: ubuntu-latest
+    steps:
+      - if: secrets.SENTRY_AUTH_TOKEN != ''
+        uses: pleme-io/actions/sentry-release@main
+        with:
+          auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          org: ${{ secrets.SENTRY_ORG }}
+          project: ${{ secrets.SENTRY_PROJECT }}
+          version: ${{ inputs.version }}
+      - if: secrets.DD_API_KEY != ''
+        uses: pleme-io/actions/datadog-event@main
+        with:
+          api-key: ${{ secrets.DD_API_KEY }}
+          title: ${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}
+          text: ${{ format('Deployed {0} version {1}', inputs.service-name, inputs.version) }}
+      - if: secrets.GRAFANA_URL != ''
+        uses: pleme-io/actions/grafana-annotation@main
+        with:
+          url: ${{ secrets.GRAFANA_URL }}
+          api-token: ${{ secrets.GRAFANA_TOKEN }}
+          text: ${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}
+          tags: ${{ format('deploy,{0}', inputs.service-name) }}
+      - if: secrets.NR_API_KEY != ''
+        uses: pleme-io/actions/newrelic-deploy-marker@main
+        with:
+          api-key: ${{ secrets.NR_API_KEY }}
+          app-id: ${{ secrets.NR_APP_ID }}
+          revision: ${{ inputs.version }}
+      - if: secrets.POSTHOG_API_KEY != ''
+        uses: pleme-io/actions/posthog-event@main
+        with:
+          api-key: ${{ secrets.POSTHOG_API_KEY }}
+          project-id: ${{ secrets.POSTHOG_PROJECT_ID }}
+          event: 'deploy'
+          distinct-id: ${{ inputs.service-name }}
+      - if: secrets.OTLP_ENDPOINT != ''
+        uses: pleme-io/actions/opentelemetry-trace-emit@main
+        with:
+          endpoint: ${{ secrets.OTLP_ENDPOINT }}
+          service-name: ${{ inputs.service-name }}
+          span-name: ${{ format('deploy.{0}', inputs.version) }}

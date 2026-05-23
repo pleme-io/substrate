@@ -1,0 +1,66 @@
+name: ai-stack
+
+# Composes the AI/ML pipeline primitives the new catalog absorbed.
+# Use for repos shipping models: train → push → deploy → notify.
+#
+# Consumer (.github/workflows/ai-stack.yml):
+#   on:
+#     push: { branches: [main] }
+#   jobs:
+#     ai:
+#       uses: pleme-io/substrate/.github/workflows/ai-stack.yml@main
+#       with:
+#         hf-repo: my-org/my-model
+#         modal-entry: app.py
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      hf-repo:        { type: string, required: false, default: "" }
+      modal-entry:    { type: string, required: false, default: "" }
+      posthog-event:  { type: string, required: false, default: "ai.deploy" }
+    secrets:
+      HF_TOKEN:               { required: false }
+      MODAL_TOKEN_ID:         { required: false }
+      MODAL_TOKEN_SECRET:     { required: false }
+      POSTHOG_API_KEY:        { required: false }
+      POSTHOG_PROJECT_ID:     { required: false }
+
+permissions:
+  contents: read
+
+jobs:
+  hf-upload:
+    if: inputs.hf-repo != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/hf-hub-upload@main
+        with:
+          repo-id: ${{ inputs.hf-repo }}
+          token: ${{ secrets.HF_TOKEN }}
+          local-path: .
+
+  modal-deploy:
+    if: inputs.modal-entry != ''
+    needs: hf-upload
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/modal-deploy@main
+        with:
+          token-id: ${{ secrets.MODAL_TOKEN_ID }}
+          token-secret: ${{ secrets.MODAL_TOKEN_SECRET }}
+          entry: ${{ inputs.modal-entry }}
+
+  posthog:
+    needs: [hf-upload, modal-deploy]
+    if: always() && secrets.POSTHOG_API_KEY != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/posthog-event@main
+        with:
+          api-key: ${{ secrets.POSTHOG_API_KEY }}
+          project-id: ${{ secrets.POSTHOG_PROJECT_ID }}
+          event: ${{ inputs.posthog-event }}

@@ -1,0 +1,68 @@
+name: compliance-attest
+
+# Composes the supply-chain attestation primitives:
+#   sbom-generate → cyclonedx-merge → syft-attest → cosign-verify →
+#   provenance-attest → slsa-attest
+#
+# For repos shipping SLSA-Level-3 attested artifacts.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-path:   { type: string, required: true }
+      image-ref:       { type: string, required: false, default: "" }
+    secrets: {}
+
+permissions:
+  contents: read
+  id-token: write       # cosign keyless
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/sbom-generate@main
+        with:
+          output-format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.cyclonedx.json }
+
+  sign:
+    needs: sbom
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/provenance-attest@main
+        with:
+          artifact-path: ${{ inputs.artifact-path }}
+
+  slsa:
+    needs: sign
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/slsa-attest@main
+        with:
+          artifact-path: ${{ inputs.artifact-path }}
+
+  scan:
+    if: inputs.image-ref != ''
+    needs: sign
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/image-scan@main
+        with:
+          image-ref: ${{ inputs.image-ref }}
+          fail-on-severity: HIGH
+
+  verify-and-attest:
+    needs: [slsa, scan]
+    if: always() && inputs.image-ref != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/cosign-verify@main
+        with:
+          artifact: ${{ inputs.image-ref }}
+          certificate-identity: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/compliance-attest.yml@${{ github.ref }}

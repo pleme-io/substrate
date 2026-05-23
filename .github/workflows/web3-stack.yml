@@ -1,0 +1,46 @@
+name: web3-stack
+
+# Composes web3 primitives: test → deploy → notify.
+
+on:
+  workflow_call:
+    inputs:
+      tool:      { type: string, required: false, default: "hardhat" }   # hardhat | foundry | anchor
+      network:   { type: string, required: false, default: "sepolia" }
+    secrets:
+      DEPLOYER_PRIVATE_KEY:  { required: false }
+      SLACK_WEBHOOK_URL:     { required: false }
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - if: inputs.tool == 'foundry'
+        uses: pleme-io/actions/foundry-test@main
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - if: inputs.tool == 'hardhat'
+        uses: pleme-io/actions/hardhat-deploy@main
+        with:
+          network: ${{ inputs.network }}
+      - if: inputs.tool == 'anchor'
+        uses: pleme-io/actions/anchor-build@main
+
+  notify:
+    needs: deploy
+    if: always() && secrets.SLACK_WEBHOOK_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pleme-io/actions/slack-notify@main
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          title: ${{ format('web3 deploy: {0}', needs.deploy.result) }}
+          color: ${{ needs.deploy.result == 'success' && 'good' || 'danger' }}
