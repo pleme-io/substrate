@@ -40,6 +40,10 @@ on:
 
 permissions:
   contents: write
+  # actions: write lets the post-bump step `gh workflow run release.yml
+  # --ref vX.Y.Z` succeed under the default GITHUB_TOKEN so consumers
+  # don't need a PAT to get the end-to-end Galaxy publish loop.
+  actions: write
 
 jobs:
   bump:
@@ -68,7 +72,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - if: steps.changes.outputs.skip == 'false'
+      - id: bump
+        if: steps.changes.outputs.skip == 'false'
         uses: pleme-io/actions/substrate-bump@v1
         with:
           bump-type: ${{ inputs.bump-type }}
@@ -79,3 +84,28 @@ jobs:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
+
+      # The default GITHUB_TOKEN cannot trigger downstream workflows via
+      # plain tag pushes (GH security restriction), but `gh workflow run`
+      # IS allowed under the same token with `actions: write`. So we
+      # explicitly dispatch the release workflow on the freshly-cut tag.
+      # When BOT_PAT is configured, the tag push above would have already
+      # triggered the release workflow; calling dispatch a second time
+      # would create a duplicate, so skip in that case.
+      - if: steps.changes.outputs.skip == 'false' && env.HAS_BOT_PAT != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAS_BOT_PAT: ${{ secrets.BOT_PAT != '' && 'true' || 'false' }}
+        shell: bash
+        run: |
+          new_tag=$(git describe --tags --abbrev=0)
+          if [ -z "$new_tag" ]; then
+            echo "[auto-bump] no tag found; skipping release dispatch" >&2
+            exit 0
+          fi
+          if [ -f .github/workflows/release.yml ]; then
+            echo "[auto-bump] dispatching release.yml for $new_tag"
+            gh workflow run release.yml --ref "$new_tag"
+          else
+            echo "[auto-bump] no .github/workflows/release.yml found; skipping dispatch"
+          fi
