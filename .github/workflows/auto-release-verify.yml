@@ -1,0 +1,128 @@
+name: auto-release-verify
+
+# PR-time verify gate. Catches the metadata bug class BEFORE
+# merge: missing version fields, unresolvable workspace.deps,
+# invalid manifest shapes, missing license / description /
+# repository — anything that would cause auto-release.yml to
+# fail mid-publish post-merge.
+#
+# Consumer (.github/workflows/auto-release-verify.yml):
+#   on:
+#     pull_request:
+#       branches: [main]
+#   jobs:
+#     verify:
+#       uses: pleme-io/substrate/.github/workflows/auto-release-verify.yml@main
+#       secrets: inherit
+#
+# Mirrors the polymorphic dispatcher pattern of auto-release.yml,
+# but every per-language `ship` action runs with dry-run=true.
+# No tags created, no commits pushed, no upstream upload. Just
+# verify the repo IS publishable in its current state.
+
+on:
+  workflow_call:
+    secrets:
+      CRATES_API_TOKEN:
+        required: false
+      NPM_TOKEN:
+        required: false
+      PYPI_API_TOKEN:
+        required: false
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect repo type
+    runs-on: ubuntu-latest
+    outputs:
+      repo-type: ${{ steps.detect.outputs.repo-type }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: pleme-io/actions/detect-repo-type@main
+
+  verify-rust-workspace:
+    name: 'rust-workspace · verify (dry-run)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'rust-workspace'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/rust-workspace-publish@main
+        with:
+          dry-run: "true"
+          no-verify: "true"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+
+  verify-rust-single-crate:
+    name: 'rust-single-crate · verify (dry-run)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'rust-single-crate'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/cargo-publish-crate@main
+        with:
+          dry-run: "true"
+          no-verify: "true"
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+
+  verify-npm:
+    name: 'npm · verify (dry-run)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'npm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/npm-publish@main
+        with:
+          dry-run: "true"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  verify-python:
+    name: 'python · verify (dry-run)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'python'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/python-publish@main
+        with:
+          dry-run: "true"
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+  verify-helm:
+    name: 'helm · verify (dry-run)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'helm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/helm-publish@main
+        with:
+          dry-run: "true"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Pending parity per directive table:
+  # ──   ansible-collection (uses ansible-collection-publish)
+  # ──   ruby-gem            (uses gem-publish)
+  # ──   github-action       (uses action-release validation step)
+  verify-unsupported:
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'unknown'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnose
+        run: |
+          echo "::warning::detect-repo-type returned 'unknown' — verify gate skipped"
+          echo "::warning::add a recognized manifest at root or skip-auto-release waiver"
