@@ -23,17 +23,16 @@ from pathlib import Path
 # Full M1 implementation uses tatara-lisp-source's real parser.
 
 def read_form(src):
-    """Read the (defaction name :slot value :slot value ...) form."""
-    # Strip comments
+    """Read either (defaction ...) or (defworkflow ...). Returns (kind, name, slots)."""
     src = re.sub(r';;.*$', '', src, flags=re.M)
-    # Match (defaction NAME ...rest)
-    m = re.search(r'\(defaction\s+(\S+)\s*([\s\S]*)\)\s*$', src)
+    m = re.search(r'\((def\w+)\s+(\S+)\s*([\s\S]*)\)\s*$', src)
     if not m:
-        raise SystemExit("no (defaction ...) form found")
-    name = m.group(1)
-    body_src = m.group(2)
+        raise SystemExit("no (def... ...) form found")
+    kind = m.group(1)        # 'defaction' | 'defworkflow' | 'defcaixa'
+    name = m.group(2)
+    body_src = m.group(3)
     slots = parse_slots(body_src)
-    return name, slots
+    return kind, name, slots
 
 def parse_slots(s):
     """Parse `:keyword value :keyword value ...` into a dict.
@@ -309,6 +308,78 @@ def emit_patterns_entry(name, slots):
 
 # ── Main
 
+def emit_workflow_yml(name, slots):
+    """Emit a substrate .github/workflows/<name>.yml file from (defworkflow ...)."""
+    triggers = slots.get('triggers', [])
+    permissions = slots.get('permissions', {})
+    # NOTE: secrets list is part of the typed form; M3 emits the
+    # full `secrets:` block. POC focuses on jobs.
+    jobs = slots.get('jobs', [])
+
+    # Parse triggers — each is an s-expression like (:push :branches [...])
+    on_block = "on:\n"
+    for t in triggers:
+        if isinstance(t, str) and t.startswith('(:push'):
+            on_block += "  push:\n    branches: [main]\n"
+        elif isinstance(t, str) and t.startswith('(:pull-request'):
+            on_block += "  pull_request:\n    branches: [main]\n"
+        elif isinstance(t, str) and t.startswith('(:workflow-dispatch'):
+            on_block += "  workflow_dispatch:\n    inputs:\n      bump-type:\n        description: \"patch | minor | major\"\n        default: patch\n"
+        elif isinstance(t, str) and t.startswith('(:workflow-call'):
+            on_block += "  workflow_call:\n"
+
+    perms = ""
+    for p_kind, p_level in permissions.items():
+        perms += f"  {p_kind}: {p_level.lstrip(':')}\n"
+
+    yml = f"""name: {name}
+
+# Rendered from {name}.lisp via the (defworkflow) renderer.
+# Source: pleme-io/substrate/lib/release/renderer-poc/{name}.lisp
+# {slots.get('description', '')}
+
+{on_block}
+permissions:
+{perms or '  contents: read\n'}
+jobs:
+"""
+
+    for job_src in jobs:
+        if not isinstance(job_src, str):
+            continue
+        # Parse (:job NAME :uses-action X :needs Y :when ZZ ...)
+        m = re.match(r'\(:job\s+(\S+)\s*([\s\S]*)\)$', job_src.strip())
+        if not m:
+            continue
+        job_name = m.group(1)
+        job_body = m.group(2)
+        # Naive slot extraction inside the job body
+        job_slots = parse_slots(job_body)
+        yml += f"  {job_name}:\n"
+        if 'needs' in job_slots:
+            yml += f"    needs: {job_slots['needs']}\n"
+        if 'when' in job_slots:
+            cond = job_slots['when']
+            yml += f"    # if: {cond}   (renderer M3 emits the proper github-expression)\n"
+            yml += f"    if: ${{{{ true }}}}    # placeholder — M3 emits typed condition\n"
+        if 'uses-action' in job_slots:
+            action = job_slots['uses-action'].lstrip(':')
+            yml += "    runs-on: ubuntu-latest\n"
+            yml += "    steps:\n"
+            yml += "      - uses: actions/checkout@v4\n"
+            yml += f"      - uses: pleme-io/actions/{action}@main\n"
+        elif 'uses-workflow' in job_slots:
+            wf = job_slots['uses-workflow'].lstrip(':')
+            yml += f"    uses: pleme-io/substrate/.github/workflows/{wf}.yml@main\n"
+            if 'with' in job_slots:
+                yml += "    with:\n"
+                if isinstance(job_slots['with'], dict):
+                    for k, v in job_slots['with'].items():
+                        yml += f"      {k}: ${{{{ {v} }}}}\n"
+            yml += "    secrets: inherit\n"
+        yml += "\n"
+    return yml
+
 if __name__ == '__main__':
     if len(sys.argv) != 3:
         print(f"usage: {sys.argv[0]} <input.lisp> <output-dir>")
@@ -316,26 +387,35 @@ if __name__ == '__main__':
     src = Path(sys.argv[1]).read_text()
     out = Path(sys.argv[2])
 
-    name, slots = read_form(src)
-    triple_dir = out / name
-    triple_dir.mkdir(parents=True, exist_ok=True)
-    (triple_dir / 'action.yml').write_text(emit_action_yml(name, slots))
-    (triple_dir / 'run.tlisp').write_text(emit_run_tlisp(name, slots))
-    (triple_dir / 'README.md').write_text(emit_readme(name, slots))
-    (out / 'patterns-entry.nix').write_text(emit_patterns_entry(name, slots))
+    kind, name, slots = read_form(src)
+    out.mkdir(parents=True, exist_ok=True)
 
-    print(f"rendered:")
-    for f in (triple_dir / 'action.yml', triple_dir / 'run.tlisp',
-              triple_dir / 'README.md', out / 'patterns-entry.nix'):
-        sz = f.stat().st_size
-        print(f"  {f}  ({sz} bytes)")
+    if kind == 'defaction':
+        triple_dir = out / name
+        triple_dir.mkdir(parents=True, exist_ok=True)
+        (triple_dir / 'action.yml').write_text(emit_action_yml(name, slots))
+        (triple_dir / 'run.tlisp').write_text(emit_run_tlisp(name, slots))
+        (triple_dir / 'README.md').write_text(emit_readme(name, slots))
+        (out / f'{name}-patterns.nix').write_text(emit_patterns_entry(name, slots))
+        emitted = [triple_dir / 'action.yml', triple_dir / 'run.tlisp',
+                   triple_dir / 'README.md', out / f'{name}-patterns.nix']
+    elif kind == 'defworkflow':
+        wf_file = out / f'{name}.yml'
+        wf_file.write_text(emit_workflow_yml(name, slots))
+        emitted = [wf_file]
+    else:
+        print(f"unknown form: ({kind} ...)")
+        sys.exit(1)
+
+    print(f"rendered ({kind} {name}):")
+    for f in emitted:
+        print(f"  {f}  ({f.stat().st_size} bytes)")
 
     src_lines = len([l for l in src.splitlines() if l.strip() and not l.strip().startswith(';;')])
     gen_lines = sum(
         sum(1 for l in f.read_text().splitlines() if l.strip())
-        for f in (triple_dir / 'action.yml', triple_dir / 'run.tlisp',
-                  triple_dir / 'README.md', out / 'patterns-entry.nix')
+        for f in emitted
     )
-    print(f"\nsource non-comment lines: {src_lines}")
-    print(f"generated non-empty lines: {gen_lines}")
-    print(f"compounding ratio: {src_lines} → {gen_lines}  ({gen_lines/src_lines:.1f}×)")
+    print(f"\n  source non-comment lines : {src_lines}")
+    print(f"  generated non-empty lines: {gen_lines}")
+    print(f"  compounding ratio        : {src_lines} → {gen_lines}  ({gen_lines/src_lines:.1f}×)")
