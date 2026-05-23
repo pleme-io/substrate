@@ -180,6 +180,11 @@
       backend = "tatara-lisp";
       role = "scaffold the canonical 3-workflow surface into a repo + optional PR open";
     };
+    coverage-upload = {
+      uses = "pleme-io/actions/coverage-upload@main";
+      backend = "tatara-lisp";
+      role = "polymorphic coverage gen + Codecov upload (tarpaulin / npm / pytest --cov)";
+    };
   };
 
   validation = {
@@ -268,6 +273,16 @@
       uses = "pleme-io/actions/license-header-check@main";
       backend = "tatara-lisp";
       role = "SPDX-License-Identifier header sweep, configurable extensions";
+    };
+    provenance-attest = {
+      uses = "pleme-io/actions/provenance-attest@main";
+      backend = "tatara-lisp";
+      role = "sigstore/cosign keyless OIDC signing for any artifact";
+    };
+    image-scan = {
+      uses = "pleme-io/actions/image-scan@main";
+      backend = "tatara-lisp";
+      role = "trivy container scan, configurable fail-on-severity";
     };
   };
 
