@@ -111,6 +111,18 @@ jobs:
         with:
           fail-on-unbalanced: "true"
 
+  action-shell-ban:
+    name: 'universal · action-shell-lint (★★ NO-SHELL)'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'github-action'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/action-shell-lint@main
+        with:
+          threshold: "15"
+          fail-on-violation: "true"
+
   publish-dry-run:
     name: 'universal · auto-release-verify'
     needs: detect
