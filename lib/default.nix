@@ -1763,6 +1763,7 @@ in rec {
   # (pleme-io/CLAUDE.md). Human-readable mirror: docs/RECIPES.md.
   release = {
     catalog = import ./release/catalog.nix;
+    patterns = import ./release/patterns.nix;
   };
 
   # ============================================================================
