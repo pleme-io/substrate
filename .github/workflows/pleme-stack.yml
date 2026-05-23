@@ -1,0 +1,101 @@
+name: pleme-stack
+
+# THE ULTIMATE single-file consumer shim. ONE workflow file
+# adopting this gives a repo:
+#   - PR-time:   pre-merge-gate + security-gate + caixa-render drift check
+#   - Push:      auto-release + caixa-render drift heal
+#   - Scheduled: security-gate (weekly) + adoption-audit (weekly)
+#
+# Bundles every layer of the pleme-io directive into one
+# workflow_call. Repos adopting via this shim NEVER touch yaml
+# again — they edit the .caixa.lisp source-of-truth + push.
+#
+# Consumer:
+#   .github/workflows/pleme.yml
+#   ─────────────────────────────────────────────
+#   name: pleme
+#   on:
+#     push: { branches: [main] }
+#     pull_request: { branches: [main] }
+#     schedule: [ { cron: '0 6 * * 1' } ]
+#   jobs:
+#     stack:
+#       uses: pleme-io/substrate/.github/workflows/pleme-stack.yml@main
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      build-container:
+        type: string
+        required: false
+        default: "false"
+      image:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      CRATES_API_TOKEN: { required: false }
+      NPM_TOKEN:        { required: false }
+      PYPI_API_TOKEN:   { required: false }
+      BOT_PAT:          { required: false }
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  # ─── PR-time ────────────────────────────────────────────────
+  pre-merge:
+    if: github.event_name == 'pull_request'
+    uses: pleme-io/substrate/.github/workflows/pre-merge-gate.yml@main
+    secrets: inherit
+
+  security-pr:
+    if: github.event_name == 'pull_request'
+    uses: pleme-io/substrate/.github/workflows/security-gate.yml@main
+    secrets: inherit
+
+  caixa-drift-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/caixa-render-pr@main
+        with:
+          open-pr: "false"   # PR-time = just signal drift, don't open meta-PRs
+        continue-on-error: true
+
+  # ─── Push to main ───────────────────────────────────────────
+  release:
+    if: github.event_name == 'push'
+    uses: pleme-io/substrate/.github/workflows/auto-release.yml@main
+    secrets: inherit
+
+  caixa-render:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/caixa-render-pr@main
+        with:
+          open-pr: "true"    # Push time = heal drift via PR
+
+  container:
+    needs: release
+    if: |
+      github.event_name == 'push' &&
+      inputs.build-container == 'true' &&
+      inputs.image != ''
+    uses: pleme-io/substrate/.github/workflows/container-stack.yml@main
+    with:
+      image: ${{ inputs.image }}
+    secrets: inherit
+
+  # ─── Scheduled ──────────────────────────────────────────────
+  security-scheduled:
+    if: github.event_name == 'schedule'
+    uses: pleme-io/substrate/.github/workflows/security-gate.yml@main
+    secrets: inherit

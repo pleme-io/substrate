@@ -198,10 +198,69 @@ power comes from the LOOP, not from any individual feature.
 
 ## Status
 
-**Locked.** These four patterns are now load-bearing across the
-fleet (~500 repos, 192 actions, 14 reusable workflows, 6 example
-caixas, 6+ self-publishing tools, 6+ institutional skills, 4 CI
-gates).
+**Locked + verified.** These four patterns are now load-bearing
+across the fleet (~500 repos, 193 actions, 15 reusable workflows,
+6 example caixas, 6+ self-publishing tools, 7+ institutional
+skills, 4 CI gates, 1 mega-bundle).
+
+## Derived secondary patterns (mined from the catalog)
+
+Each is a COMPOSITION of the 4 irreducibles, named here for
+operator vocabulary. Adding any of these to a new action means
+"I'm composing the 4 in shape X" — never adding a 5th irreducible.
+
+| Pattern | Where it shows up |
+|---|---|
+| **MAGIC-MARKER UPSERT** (typed marker IDs idempotent posts) | pr-comment / issue-create / slack-notify |
+| **SKIP-WHEN-NO-SOURCE-CHANGES** (change-detection prevents version churn) | every bump action |
+| **3-TIER CONFIG PRECEDENCE** (env > .pleme-io-release.toml > hardcoded) | config-resolve helper |
+| **SKIP-ALREADY-PUBLISHED** (registry probe before publish) | every publish action |
+| **RATE-LIMIT SLEEP+RETRY** (typed retry policy) | publish actions, registry-bound calls |
+| **MULTI-PASS DEP-ORDER** (re-trigger until dep landscape settles) | rust-workspace-publish |
+| **AUTO-RENAME ON CONFLICT** (typed rewrite of manifest) | rust-workspace-publish |
+| **DRY-RUN VERIFY-MODE** (one shape, two execution modes) | auto-release-verify.yml |
+| **TYPED EXIT CODES + OUTPUTS** (downstream consumers branch on them) | every action |
+| **FAIL-OPEN VS FAIL-CLOSED GATES** (configurable per-gate policy) | security-audit / secrets-scan |
+| **DRIFT-DETECT + AUTO-HEAL-VIA-PR** (CI catches + heals via PR) | caixa-render-pr |
+| **POLYMORPHIC DISPATCHER MEGA-BUNDLE** (one trigger, N event branches) | pleme-stack.yml |
+| **WEEKLY-CRON AUDIT SIGNAL** (scheduled trigger emits typed counts) | adoption-audit |
+| **THREE-LINE CONSUMER SHIM** (substrate reusable as entry point) | every adopting repo |
+
+These are vocabulary, not theory. The theory is the 4
+irreducibles. Adding the 15th derived pattern doesn't grow the
+core; it grows the COMPOSITION SURFACE.
+
+## The ultimate consumer surface
+
+After ACTION-AS-CAIXA M5, an adopting repo's COMPLETE pleme-io
+infra surface is:
+
+```
+github.com/pleme-io/my-repo/
+  my-repo.caixa.lisp           ← TYPED DECLARATION (~25 lines)
+  src/...                       ← actual code
+  .github/workflows/pleme.yml  ← THREE-LINE CONSUMER SHIM (pleme-stack.yml)
+```
+
+Two files of "infra adoption" beyond actual source. Everything
+else (Cargo.toml / package.json / .pleme-io-release.toml /
+auto-release.yml / pre-merge-gate.yml / security-gate.yml /
+README.md / patterns.nix entry) is RENDERED.
+
+Operator workflow forever:
+
+```bash
+edit my-repo.caixa.lisp        # 1 file of source-of-truth
+edit src/...                    # actual code
+git commit && git push
+# Watch caixa-render-pr regen rendered artifacts (auto-PR on drift)
+# Watch auto-release publish to upstream registry
+# Watch security-gate audit + sign
+# Watch catalog refresh (patterns-full.nix auto-rendered)
+# Watch adoption-audit count this repo as adopted
+# All on free public CI. $0 marginal cost.
+```
 
 This doc is the canonical reduction. Any new abstraction that
-doesn't decompose into these four is a refactoring opportunity.
+doesn't decompose into these four irreducibles is a refactoring
+opportunity — never an additional fifth pattern.

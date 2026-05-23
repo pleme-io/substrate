@@ -84,6 +84,11 @@
       backend = "shell";
       role = "Render cluster artifacts (Helm chart + Kubernetes manifests + Flux + CI workflows) from a (defcaixa ...) form via the `feira` CLI.";
     };
+    "caixa-render-pr" = {
+      uses = "pleme-io/actions/caixa-render-pr@main";
+      backend = "tatara-lisp";
+      role = "Render every .caixa.lisp at the repo root via pleme-doc-gen + open a PR if the rendered artifacts drift from on-disk files. The META-PRIMITIVE that closes the typed-source → mechanical-render → PR loop without operator intervention.";
+    };
   };
   cloud = {
     "aws-assume-role" = {
