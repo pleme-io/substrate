@@ -314,6 +314,76 @@
     };
   };
 
+  container = {
+    docker-build-and-push = {
+      uses = "pleme-io/actions/docker-build-and-push@main";
+      backend = "tatara-lisp";
+      role = "multi-arch buildx + push to ghcr (or any OCI registry)";
+    };
+  };
+
+  k8s = {
+    kubectl-apply = {
+      uses = "pleme-io/actions/kubectl-apply@main";
+      backend = "tatara-lisp";
+      role = "apply manifests + wait for rollout (deploy/sts/ds)";
+    };
+    helm-deploy = {
+      uses = "pleme-io/actions/helm-deploy@main";
+      backend = "tatara-lisp";
+      role = "helm upgrade --install --wait (in-cluster install — not registry push)";
+    };
+    flux-reconcile = {
+      uses = "pleme-io/actions/flux-reconcile@main";
+      backend = "tatara-lisp";
+      role = "trigger flux reconcile on HelmRelease / Kustomization / *Repository";
+    };
+    kustomize-render = {
+      uses = "pleme-io/actions/kustomize-render@main";
+      backend = "shell";
+      role = "kustomize build → rendered manifests";
+    };
+  };
+
+  cloud = {
+    aws-assume-role = {
+      uses = "pleme-io/actions/aws-assume-role@main";
+      backend = "shell";
+      role = "OIDC IAM role assumption (no long-lived creds)";
+    };
+    cloudflare-pages-deploy = {
+      uses = "pleme-io/actions/cloudflare-pages-deploy@main";
+      backend = "shell";
+      role = "wrangler pages deploy any static build dir";
+    };
+    fly-deploy = {
+      uses = "pleme-io/actions/fly-deploy@main";
+      backend = "shell";
+      role = "flyctl deploy with strategy + region";
+    };
+  };
+
+  comms = {
+    slack-notify = {
+      uses = "pleme-io/actions/slack-notify@main";
+      backend = "tatara-lisp";
+      role = "POST embed to Slack incoming webhook";
+    };
+    discord-notify = {
+      uses = "pleme-io/actions/discord-notify@main";
+      backend = "tatara-lisp";
+      role = "POST embed to Discord incoming webhook";
+    };
+  };
+
+  quality = {
+    secrets-scan = {
+      uses = "pleme-io/actions/secrets-scan@main";
+      backend = "tatara-lisp";
+      role = "gitleaks-driven repo secret scan with fail-on-found gate";
+    };
+  };
+
   # ── Pending primitives — mined backlog for next iterations ────
   # Each is a focused 1-action PR following the established
   # template (action.yml + run.tlisp + README + auto-balances).
