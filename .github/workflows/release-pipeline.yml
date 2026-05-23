@@ -1,0 +1,72 @@
+name: release-pipeline
+
+# The mega-pipeline. Composes:
+#   auto-release-verify  (PR)
+#   pre-merge-gate       (PR)
+#   security-gate        (PR + scheduled)
+#   auto-release         (push to main)
+#   container-stack      (after release, if image manifest exists)
+#
+# Consumer (.github/workflows/release-pipeline.yml):
+#   on:
+#     push: { branches: [main] }
+#     pull_request: { branches: [main] }
+#     schedule: [{ cron: '0 6 * * 1' }]
+#   jobs:
+#     pipeline:
+#       uses: pleme-io/substrate/.github/workflows/release-pipeline.yml@main
+#       secrets: inherit
+#
+# This is the SINGLE workflow file an opinionated pleme-io repo
+# needs. Replaces pre-merge-gate.yml + security-gate.yml +
+# auto-release.yml with one file when those simpler shims aren't
+# enough.
+
+on:
+  workflow_call:
+    inputs:
+      build-container:
+        type: string
+        required: false
+        default: "false"
+      image:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      CRATES_API_TOKEN: { required: false }
+      NPM_TOKEN:        { required: false }
+      PYPI_API_TOKEN:   { required: false }
+      BOT_PAT:          { required: false }
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  pre-merge:
+    if: github.event_name == 'pull_request'
+    uses: pleme-io/substrate/.github/workflows/pre-merge-gate.yml@main
+    secrets: inherit
+
+  security:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    uses: pleme-io/substrate/.github/workflows/security-gate.yml@main
+    secrets: inherit
+
+  release:
+    if: github.event_name == 'push'
+    uses: pleme-io/substrate/.github/workflows/auto-release.yml@main
+    secrets: inherit
+
+  container:
+    needs: release
+    if: |
+      github.event_name == 'push' &&
+      inputs.build-container == 'true' &&
+      inputs.image != ''
+    uses: pleme-io/substrate/.github/workflows/container-stack.yml@main
+    with:
+      image: ${{ inputs.image }}
+    secrets: inherit
