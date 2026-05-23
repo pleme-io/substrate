@@ -1,0 +1,92 @@
+name: cargo-auto-release
+
+# Reusable workflow: on push to main, bump a single-crate Rust
+# repo's package.version, commit, tag, push, publish to crates.io.
+#
+# Use this for non-workspace Rust repos (single library or single
+# binary). For workspace repos use rust-auto-release.yml instead.
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        required: false
+        default: patch
+      source-paths:
+        type: string
+        required: false
+        default: "src Cargo.toml Cargo.lock"
+      add-paths:
+        type: string
+        required: false
+        default: "Cargo.toml Cargo.lock Cargo.nix"
+      no-verify:
+        type: string
+        required: false
+        default: "true"
+    secrets:
+      CRATES_API_TOKEN:
+        required: true
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - id: bump
+        uses: pleme-io/actions/cargo-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          source-paths: ${{ inputs.source-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.bump.outputs.new-version }}
+          add-paths: ${{ inputs.add-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
+
+  ship:
+    needs: bump
+    runs-on: ubuntu-latest
+    if: needs.bump.outputs.bumped == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/cargo-publish-crate@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
