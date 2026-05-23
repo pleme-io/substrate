@@ -286,21 +286,65 @@
     };
   };
 
-  # ── Pending primitives (planned, not yet shipped) ──────────────
-  # These extend the catalog without changing existing entries.
-  # Add a `pleme-io/actions/<name>/` dir + entry here as each lands.
+  sdlc = {
+    dependency-update = {
+      uses = "pleme-io/actions/dependency-update@main";
+      backend = "tatara-lisp";
+      role = "polymorphic lockfile refresh + auto-PR (cargo / npm / uv / nix)";
+    };
+    nix-flake-update = {
+      uses = "pleme-io/actions/nix-flake-update@main";
+      backend = "tatara-lisp";
+      role = "nix flake update + auto-PR (specific case of dependency-update)";
+    };
+    pr-comment = {
+      uses = "pleme-io/actions/pr-comment@main";
+      backend = "tatara-lisp";
+      role = "idempotent PR comment via magic marker (upsert, no spam)";
+    };
+    issue-create = {
+      uses = "pleme-io/actions/issue-create@main";
+      backend = "tatara-lisp";
+      role = "create or reuse GH issue (title-match dedup for auto-reporting)";
+    };
+    status-badge = {
+      uses = "pleme-io/actions/status-badge@main";
+      backend = "tatara-lisp";
+      role = "shields.io-style SVG badge renderer (universal)";
+    };
+  };
+
+  # ── Pending primitives — mined backlog for next iterations ────
+  # Each is a focused 1-action PR following the established
+  # template (action.yml + run.tlisp + README + auto-balances).
   #
-  # security:
-  #   provenance-attest   sigstore / cosign sign
-  #   image-scan          trivy / grype container scan
+  # container:
+  #   docker-build-and-push / ko-build / nixos-image-build /
+  #   buildkit-cache-warm
   #
-  # delivery:
-  #   slack-notify        post release to slack
-  #   discord-notify      post release to discord
-  #   docs-publish        cargo doc / mkdocs / typedoc → ghpages
-  #   coverage-upload     codecov / coveralls
-  #   yank-version        rollback a published version
+  # k8s:
+  #   kubectl-apply / helm-deploy / flux-reconcile / argocd-sync /
+  #   kustomize-render / k8s-rollout-wait
   #
-  # validation:
-  #   typecheck-gate      mypy / tsc / cargo check
+  # cloud:
+  #   aws-assume-role / aws-s3-upload / cloudflare-pages-deploy /
+  #   cloudflare-worker-deploy / fly-deploy / gcp-auth
+  #
+  # akeyless suite:
+  #   akeyless-auth / akeyless-secret-fetch / akeyless-rotate /
+  #   akeyless-export-config / akeyless-injector-validate
+  #
+  # comms extras:
+  #   discord-notify / pagerduty-notify / email-notify
+  #
+  # quality extras:
+  #   mutation-test / benchmark-runner / flaky-test-detector /
+  #   secrets-scan
+  #
+  # docs extras:
+  #   api-spec-diff / toc-update / example-runner
+  #
+  # delivery extras:
+  #   yank-version / release-promote
+  #
 }

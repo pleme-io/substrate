@@ -1,0 +1,75 @@
+# .pleme-io-release.toml — typed per-repo defaults for every
+# pleme-io action that adopts the auto-release directive.
+#
+# Operators drop this file at the repo root. Every action's
+# inputs follow the 3-tier precedence:
+#
+#   1. workflow_dispatch env var   (highest priority, runtime override)
+#   2. .pleme-io-release.toml      (this file — repo-level defaults)
+#   3. hardcoded action.yml default (lowest priority, fleet-wide fallback)
+#
+# Every key here is OPTIONAL. The hardcoded defaults are
+# fleet-tested and ergonomic — only override when your repo
+# genuinely deviates.
+#
+# Schema is keyed by category (matching substrate's
+# lib/release/patterns.nix). Fields are kebab-case mirroring
+# the matching action.yml input names.
+
+# ──────────────────────────────────────────────────────────────
+# Bump behavior (rust-workspace-bump, cargo-bump, npm-bump,
+# python-bump, helm-bump all read these)
+# ──────────────────────────────────────────────────────────────
+[bump]
+default-type = "patch"                # patch | minor | major
+skip-when-no-source-changes = true
+source-paths = ""                     # empty = action's own default
+                                      # (varies by ecosystem)
+
+# ──────────────────────────────────────────────────────────────
+# Publish behavior (rust-workspace-publish, cargo-publish-crate,
+# npm-publish, python-publish, helm-publish)
+# ──────────────────────────────────────────────────────────────
+[publish]
+no-verify = true
+dry-run = false
+rename-prefix = "pleme-io-"           # only used by rust-workspace-publish
+
+# ──────────────────────────────────────────────────────────────
+# Validation gates (rust-gate / npm-gate / python-gate)
+# ──────────────────────────────────────────────────────────────
+[validation]
+run-fmt = true
+run-lint = true
+run-test = true
+rust-toolchain = "stable"             # stable | nightly | 1.89.0
+
+# ──────────────────────────────────────────────────────────────
+# Security (security-audit, sbom-generate, license-header-check,
+# image-scan, provenance-attest)
+# ──────────────────────────────────────────────────────────────
+[security]
+fail-on-severity = "high"             # low | medium | high | critical | none
+check-license-headers = true
+license = "MIT"                       # SPDX expression
+sbom-format = "cyclonedx-json"        # cyclonedx-json | spdx-json | syft-json
+image-scan-fail-on = "HIGH"           # LOW | MEDIUM | HIGH | CRITICAL | none
+
+# ──────────────────────────────────────────────────────────────
+# Delivery (slack-notify, coverage-upload, docs-publish,
+# onboard-auto-release)
+# ──────────────────────────────────────────────────────────────
+[delivery]
+slack-webhook-secret = ""             # name of the GH secret holding the webhook URL
+codecov-token-secret = ""             # empty = tokenless (public repos)
+docs-target-branch = "gh-pages"
+docs-force-tool = ""                  # empty = auto-detect
+
+# ──────────────────────────────────────────────────────────────
+# GitHub release (gh-release-create, changelog-generate)
+# ──────────────────────────────────────────────────────────────
+[gh]
+release-draft = false
+release-prerelease = false
+release-if-exists = "skip"            # skip | update | fail
+changelog-format = "markdown"         # markdown | keepachangelog | conventional
