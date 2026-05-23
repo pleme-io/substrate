@@ -1756,6 +1756,16 @@ in rec {
   convergenceTypestate = ./types/convergence.nix;
 
   # ============================================================================
+  # AUTO-RELEASE RECIPE CATALOG
+  # ============================================================================
+  # Queryable index of every recipe substrate's auto-release.yml
+  # dispatcher routes to. Per the ★★ AUTO-RELEASE prime directive
+  # (pleme-io/CLAUDE.md). Human-readable mirror: docs/RECIPES.md.
+  release = {
+    catalog = import ./release/catalog.nix;
+  };
+
+  # ============================================================================
   # SHARED CROSS-CUTTING MIDDLEWARE (from build/shared/)
   # ============================================================================
   # Language-agnostic typed builders for Docker images, release apps, and devShells.
