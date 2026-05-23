@@ -1,9 +1,6 @@
 # auto-generated from pleme-io/actions/*/action.yml
-# regenerate via:
-#   python3 pleme-io/actions/_gen-patterns.py > patterns-generated.nix
-# DO NOT EDIT — this file is mechanically derived from the action catalog.
-# See substrate/docs/INTERLOCK.md for the vision; lib/release/patterns.nix
-# is the curated mirror; this file is the FULL surface.
+# regenerate: pleme-doc-gen --actions-dir <repo> patterns > patterns-full.nix
+# See substrate/docs/INTERLOCK.md for the vision.
 
 {
   akeyless = {
