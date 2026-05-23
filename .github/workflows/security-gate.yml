@@ -1,0 +1,71 @@
+name: security-gate
+
+# PR-time + scheduled security gate. Three layers:
+#   security-audit       polymorphic dependency vuln scan
+#   sbom-generate        cyclonedx SBOM as artifact
+#   license-header-check SPDX header sweep
+#
+# Consumer (.github/workflows/security-gate.yml):
+#   on:
+#     pull_request:
+#       branches: [main]
+#     schedule:
+#       - cron: '0 6 * * 1'   # weekly Mon 06:00 UTC
+#   jobs:
+#     gate:
+#       uses: pleme-io/substrate/.github/workflows/security-gate.yml@main
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      fail-on-severity:
+        type: string
+        required: false
+        default: "high"
+      license:
+        type: string
+        required: false
+        default: "MIT"
+      check-license-headers:
+        type: string
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: 'dependency vulnerabilities'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/security-audit@main
+        with:
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+
+  sbom:
+    name: 'SBOM generation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: sbom
+        uses: pleme-io/actions/sbom-generate@main
+        with:
+          output-format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+
+  license-headers:
+    name: 'SPDX header sweep'
+    runs-on: ubuntu-latest
+    if: inputs.check-license-headers == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/license-header-check@main
+        with:
+          license: ${{ inputs.license }}

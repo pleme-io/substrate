@@ -234,22 +234,30 @@
     };
   };
 
+  security = {
+    security-audit = {
+      uses = "pleme-io/actions/security-audit@main";
+      backend = "tatara-lisp";
+      role = "polymorphic dep-vuln scan (cargo-audit / npm-audit / pip-audit)";
+      configurable = "fail-on-severity threshold + ignore-list";
+    };
+    sbom-generate = {
+      uses = "pleme-io/actions/sbom-generate@main";
+      backend = "tatara-lisp";
+      role = "syft-backed CycloneDX/SPDX SBOM, universal source-tree input";
+    };
+    license-header-check = {
+      uses = "pleme-io/actions/license-header-check@main";
+      backend = "tatara-lisp";
+      role = "SPDX-License-Identifier header sweep, configurable extensions";
+    };
+  };
+
   # ── Pending primitives (planned, not yet shipped) ──────────────
   # These extend the catalog without changing existing entries.
   # Add a `pleme-io/actions/<name>/` dir + entry here as each lands.
   #
-  # validation:
-  #   format-check        polymorphic fmt --check (rustfmt / prettier / black / ruff)
-  #   lint-gate           polymorphic linter (clippy / eslint / ruff / shellcheck)
-  #   test-gate           polymorphic test runner (cargo test / npm test / pytest)
-  #   license-header-check  SPDX header verifier across language families
-  #   typecheck-gate      mypy / tsc / cargo check
-  #
   # security:
-  #   cargo-audit         cargo audit + report
-  #   npm-audit           npm audit + report
-  #   pip-audit           pip-audit / safety
-  #   sbom-generate       syft / cyclonedx generation
   #   provenance-attest   sigstore / cosign sign
   #   image-scan          trivy / grype container scan
   #
@@ -259,4 +267,7 @@
   #   docs-publish        cargo doc / mkdocs / typedoc → ghpages
   #   coverage-upload     codecov / coveralls
   #   yank-version        rollback a published version
+  #
+  # validation:
+  #   typecheck-gate      mypy / tsc / cargo check
 }
