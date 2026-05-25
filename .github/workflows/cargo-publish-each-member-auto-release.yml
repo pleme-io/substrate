@@ -1,0 +1,92 @@
+name: cargo-publish-each-member-auto-release
+
+# Reusable workflow for multi-crate workspaces WITHOUT a shared
+# [workspace.package].version. Each member has its own [package].version
+# and gets bumped/tagged/published independently.
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/cargo-publish-each-member-auto-release.yml@main
+#       secrets: inherit
+#
+# Patterns handled: rust-url, bindgen, dirs-next, ratatui, proptest,
+# insta, anything where cargo metadata returns >1 member but
+# [workspace.package].version is absent.
+#
+# Differences vs rust-auto-release.yml:
+#   - no workspace-level bump (each member bumps in-place)
+#   - tag convention: <member-name>-v<version> (per-member tags)
+#   - skip-when-no-source-changes uses per-member git diff against
+#     the latest <member>-v* tag
+#
+# secrets passed through:
+#   CRATES_API_TOKEN — same as rust-auto-release.yml; bridged to
+#                      CARGO_REGISTRY_TOKEN inside the action.
+#   BOT_PAT          — optional; cross-workflow tag triggers.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major (per-member bump)"
+        type: string
+        required: false
+        default: patch
+      dry-run:
+        description: "cargo publish --dry-run only (no upload)"
+        type: string
+        required: false
+        default: "false"
+      no-verify:
+        description: "Skip cargo publish's verification compile."
+        type: string
+        required: false
+        default: "true"
+      skip-when-no-source-changes:
+        description: "Per-member: skip when no member-dir changes since the previous <member>-v* tag."
+        type: string
+        required: false
+        default: "true"
+    secrets:
+      CRATES_API_TOKEN:
+        required: true
+        description: "crates.io publish token."
+      BOT_PAT:
+        required: false
+        description: "Optional PAT for cross-workflow tag triggers."
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish each workspace member
+    runs-on: ubuntu-latest
+    # Skip when the bot itself pushed (avoids tag-push -> publish -> tag-push loops).
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/cargo-publish-each-member@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          dry-run: ${{ inputs.dry-run }}
+          no-verify: ${{ inputs.no-verify }}
+          skip-when-no-source-changes: ${{ inputs.skip-when-no-source-changes }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+          CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+
+      - name: Push per-member tags
+        if: success()
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
