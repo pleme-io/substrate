@@ -27,10 +27,33 @@
   # This overlay:
   # 1. Configures buildRustCrate to use fenix's rustc (critical for edition 2024)
   # 2. Exposes fenix toolchain via fenixRustToolchain for direct use in devShells
-  mkRustOverlay = { fenix, system }: let
-    rustToolchain = fenix.packages.${system}.stable.withComponents [
-      "rustc" "cargo" "rust-src" "clippy" "rustfmt"
-    ];
+  #   targets: optional list of extra Rust target triples (e.g.
+  #     ["x86_64-unknown-linux-musl"]). Each contributes a PREBUILT
+  #     `rust-std` from fenix so cross-compiling to that target never
+  #     rebuilds rustc/LLVM from source — the host rustc runs on the
+  #     build machine and emits the target's objects. Defaults to []
+  #     (host-only — preserves existing behavior).
+  mkRustOverlay = { fenix, system, targets ? [] }: let
+    # Optional cross targets: each contributes a prebuilt rust-std.
+    # Static-musl builds via pkgsStatic otherwise drag in a from-source
+    # rustc + LLVM (a ~30-min build that also hits a static-link bug on
+    # recent LLVM); the prebuilt std makes the host rustc cross-compile
+    # straight to the target.
+    crossStds = builtins.map
+      (t: fenix.packages.${system}.targets.${t}.stable.rust-std)
+      targets;
+    rustToolchain =
+      if targets == []
+      then fenix.packages.${system}.stable.withComponents [
+        "rustc" "cargo" "rust-src" "clippy" "rustfmt"
+      ]
+      else fenix.packages.${system}.combine ([
+        fenix.packages.${system}.stable.rustc
+        fenix.packages.${system}.stable.cargo
+        fenix.packages.${system}.stable.rust-src
+        fenix.packages.${system}.stable.clippy
+        fenix.packages.${system}.stable.rustfmt
+      ] ++ crossStds);
   in final: prev: let
     # unwrapped derivation provides configureFlags for buildRustCrate target detection
     rustcUnwrapped = prev.stdenv.mkDerivation {
@@ -76,7 +99,12 @@
     # This is what crate2nix uses to build our services.
     buildRustCrate = prev.buildRustCrate.override {
       rustc = rustcWrapper;
-      cargo = cargoWrapped;
+      # Host builds use the PATH-suffixed cargo wrapper (proven). Cross/
+      # static targets pass the combined fenix toolchain directly as cargo
+      # — rustc is co-located in the same bin/, so no PATH wrapper is
+      # needed, and this avoids makeWrapper, whose setup-hook assertion
+      # trips under the pkgsStatic stdenv (the static-musl release path).
+      cargo = if targets == [] then cargoWrapped else rustToolchain;
     };
 
     # Expose fenix toolchain for devShells and direct cargo/clippy use

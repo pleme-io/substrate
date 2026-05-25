@@ -53,7 +53,28 @@
   # ============================================================================
   # Linux static binaries via pkgsStatic (musl). Darwin binaries via standard
   # pkgs — Rosetta handles x86_64-darwin on aarch64 hosts.
-  mkLinuxStaticPkgs = targetSystem: (import nixpkgs { system = targetSystem; }).pkgsStatic;
+  #
+  # When fenix is available we overlay buildRustCrate with a fenix
+  # toolchain carrying the musl target's PREBUILT rust-std, so the static
+  # build cross-compiles with the host rustc instead of building rustc +
+  # LLVM from source under pkgsStatic (the from-source build costs ~30 min
+  # and hits a static-link bug on recent nixpkgs/LLVM). The overlay
+  # propagates into `.pkgsStatic`, so the static C stdenv (crt-static) is
+  # preserved and only the toolchain is swapped. fenix == null keeps the
+  # legacy from-source pkgsStatic path (zero impact on non-fenix consumers).
+  mkLinuxStaticPkgs = targetSystem: muslTarget:
+    if fenix == null
+    then (import nixpkgs { system = targetSystem; }).pkgsStatic
+    else (import nixpkgs {
+      system = targetSystem;
+      overlays = [
+        (rustOverlay.mkRustOverlay {
+          inherit fenix;
+          system = targetSystem;
+          targets = [ muslTarget ];
+        })
+      ];
+    }).pkgsStatic;
   mkDarwinPkgs = targetSystem: import nixpkgs { system = targetSystem; };
 
   targets = {
@@ -66,11 +87,11 @@
       isDarwin = true;
     };
     "x86_64-unknown-linux-musl" = {
-      pkgs = mkLinuxStaticPkgs "x86_64-linux";
+      pkgs = mkLinuxStaticPkgs "x86_64-linux" "x86_64-unknown-linux-musl";
       isDarwin = false;
     };
     "aarch64-unknown-linux-musl" = {
-      pkgs = mkLinuxStaticPkgs "aarch64-linux";
+      pkgs = mkLinuxStaticPkgs "aarch64-linux" "aarch64-unknown-linux-musl";
       isDarwin = false;
     };
   };
