@@ -33,6 +33,11 @@ on:
         type: string
         required: false
         default: "true"
+      regenerate-cargo-nix:
+        description: "Regenerate Cargo.nix via crate2nix after bump. Set false for path-dep crates."
+        type: string
+        required: false
+        default: "true"
     secrets:
       CRATES_API_TOKEN:
         required: true
@@ -60,6 +65,7 @@ jobs:
         with:
           bump-type: ${{ inputs.bump-type }}
           source-paths: ${{ inputs.source-paths }}
+          regenerate-cargo-nix: ${{ inputs.regenerate-cargo-nix }}
 
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-commit-tag@main
