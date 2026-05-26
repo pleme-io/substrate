@@ -1,8 +1,42 @@
 # Crate2nix Builders - Project, Tool, Docker Image Builders
 # Per-crate derivation caching with Attic for 60-80% faster CI/CD builds
+#
+# Each builder accepts an opt-in `useLockfileBuilder` flag that swaps
+# the import-from-generated-Cargo.nix path for substrate's pure-Nix
+# `lockfile-builder` (reads Cargo.lock at eval, eliminates the
+# regenerate step). Same project-attrset shape; same caller API.
+# Default `false` — production stays on crate2nix until the
+# lockfile-builder's resolver layer lands (see file header for status).
 { pkgs, crate2nix }:
 
-let check = import ../../types/assertions.nix;
+let
+  check = import ../../types/assertions.nix;
+  lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs; };
+
+  # Common dispatch: when `useLockfileBuilder = true`, skip the
+  # generated-Cargo.nix import and call lockfile-builder.mkProject
+  # with the same projectArgs the crate2nix path would have used.
+  buildProject = {
+    useLockfileBuilder ? false,
+    src,
+    cargoNix,
+    serviceName,
+    projectArgs,
+  }: if useLockfileBuilder then
+       lockfileBuilder.mkProject {
+         inherit src;
+         name = serviceName;
+         defaultCrateOverrides = projectArgs.defaultCrateOverrides;
+         buildRustCrateForPkgs = projectArgs.buildRustCrateForPkgs or (pkgs: pkgs.buildRustCrate);
+       } // (if projectArgs ? rootFeatures
+             then { _rootFeatures = projectArgs.rootFeatures; } else {})
+     else
+       let generatedCargoNix =
+             if builtins.pathExists cargoNix then cargoNix
+             else (import "${crate2nix}/tools.nix" {inherit pkgs;}).generatedCargoNix {
+               name = serviceName; inherit src;
+             };
+       in import generatedCargoNix projectArgs;
 in {
   # Build Rust project using crate2nix for granular per-crate caching.
   #
@@ -25,21 +59,17 @@ in {
     crateOverrides ? {},
     enableAwsSdk ? false,
     rootFeatures ? null,
+    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
+    # importing a generated Cargo.nix. Same project-attrset shape.
+    useLockfileBuilder ? false,
   }: let
-    crate2nixTools = import "${crate2nix}/tools.nix" {inherit pkgs;};
-    generatedCargoNix =
-      if builtins.pathExists cargoNix then cargoNix
-      else crate2nixTools.generatedCargoNix { name = serviceName; inherit src; };
-
     projectArgs = {
       inherit pkgs;
       defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         ${serviceName} = oldAttrs: { inherit buildInputs nativeBuildInputs; };
       } // crateOverrides;
     } // (if rootFeatures == null then {} else { inherit rootFeatures; });
-
-    project = import generatedCargoNix projectArgs;
-  in project;
+  in buildProject { inherit useLockfileBuilder src cargoNix serviceName projectArgs; };
 
   # Build standalone CLI tools using crate2nix with per-crate caching
   mkCrate2nixTool = {
@@ -50,17 +80,19 @@ in {
     nativeBuildInputs ? [],
     runtimeDeps ? [],
     crateOverrides ? {},
+    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
+    # importing a generated Cargo.nix. Same project-attrset shape.
+    useLockfileBuilder ? false,
   }: let
-    crate2nixTools = import "${crate2nix}/tools.nix" {inherit pkgs;};
-    generatedCargoNix =
-      if builtins.pathExists cargoNix then cargoNix
-      else crate2nixTools.generatedCargoNix { name = toolName; inherit src; };
-
-    project = import generatedCargoNix {
+    projectArgs = {
       inherit pkgs;
       defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         ${toolName} = oldAttrs: { inherit buildInputs nativeBuildInputs; };
       } // crateOverrides;
+    };
+    project = buildProject {
+      inherit useLockfileBuilder src cargoNix projectArgs;
+      serviceName = toolName;
     };
 
     toolBinary = project.rootCrate.build;
@@ -257,6 +289,9 @@ in {
     # Use for service-specific defaults that aren't already overridden
     # by the deployment's helm values. Format: ["KEY=value", ...].
     extraEnv ? [],
+    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
+    # importing a generated Cargo.nix. Same project-attrset shape.
+    useLockfileBuilder ? false,
   }: let
     resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
     resolvedBinaryName = if binaryName != null then binaryName else serviceName;
@@ -312,7 +347,10 @@ in {
         };
       } // crateOverrides;
     };
-    project = import cargoNix (projectArgs // (if rootFeatures == null then {} else { inherit rootFeatures; }));
+    project = buildProject {
+      inherit useLockfileBuilder src cargoNix serviceName;
+      projectArgs = projectArgs // (if rootFeatures == null then {} else { inherit rootFeatures; });
+    };
 
     serviceBinary =
       if project ? workspaceMembers then
