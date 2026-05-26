@@ -70,6 +70,14 @@ let
       spec = loadBuildSpec src;
       buildRustCrate = buildRustCrateForPkgs pkgs;
 
+      # Workspace members get their declared bins; transitive deps
+      # get crateBin=[] to suppress auto-discovery of broken
+      # example/test bins under src/bin/ (e.g. alloc-no-stdlib's
+      # heap_alloc.rs which uses #![no_std] + no main).
+      memberKeys = builtins.listToAttrs
+        (map (k: { name = k; value = true; }) spec.workspace_members);
+      isWorkspaceMember = key: memberKeys ? ${key};
+
       # MEMOIZED per-crate-key build via attrset materialization.
       #
       # PRIOR BUG: `buildByKey = key: let ... in buildRustCrate ...;`
@@ -84,6 +92,10 @@ let
       built = lib.mapAttrs (key: crate: let
           deps = map (d: built.${d.package_key}) crate.runtime_dependencies;
           buildDeps = map (d: built.${d.package_key}) crate.build_dependencies;
+          binList =
+            if isWorkspaceMember key
+            then map (b: { name = b.name; path = b.path; }) (crate.binaries or [])
+            else [];
           baseArgs = {
             crateName = crate.name;
             version = crate.version;
@@ -93,6 +105,7 @@ let
             crateRenames = crate.crate_renames;
             dependencies = deps;
             buildDependencies = buildDeps;
+            crateBin = binList;
             release = true;
           }
           // (if crate.proc_macro then { procMacro = true; } else {})
