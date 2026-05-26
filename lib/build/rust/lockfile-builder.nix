@@ -7,8 +7,8 @@
 #     activations + renames + target predicates + sha256s, writes one
 #     typed JSON.
 #   - Nix (this file) owns DISPATCH: one fromJSON read, per-crate
-#     buildRustCrate calls, attrset assembly. No parsing, no string
-#     splitting, no semantic decisions.
+#     buildRustCrate calls, dep-graph walk, crateRenames synthesis.
+#     No parsing, no string splitting, no semantic decisions.
 #
 # Returns the same project-attrset shape crate2nix produces
 # (`{ rootCrate, workspaceMembers, allWorkspaceMembers, crates }`),
@@ -49,8 +49,6 @@ let
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
     else
-      # Path source — workspace member or local path. relative_path
-      # is relative to the workspace root.
       lib.cleanSourceWith {
         src = if spec.source.relative_path == "." || spec.source.relative_path == ""
               then workspaceSrc
@@ -58,42 +56,94 @@ let
         filter = path: type: !(lib.hasSuffix ".nix" path);
       };
 
-  # ── buildRustCrate entry assembly ──────────────────────────────
+  # ── crateRenames synthesis ─────────────────────────────────────
+  #
+  # nixpkgs's buildRustCrate consumes `crateRenames` as an attrset
+  # mapping canonical-published-name → [{ version; rename; }, ...].
+  # The local alias (`extern crate <name>`) lives in our spec's
+  # CrateDepSpec.name; the canonical package key tells us the
+  # published name + version.
+  #
+  # Example: rustix declares `errno = { package = "libc_errno", ... }`
+  # — wait, actually the inverse: rustix declares
+  # `libc_errno = { package = "errno", version = "0.3" }`.
+  # Then Spec.name = "libc_errno" (local), Spec.package_key =
+  # "errno-0.3.14" (canonical). The rename is "libc_errno"; the
+  # crateRenames entry needs to be keyed by canonical "errno" with
+  # the rename "libc_errno".
+  crateRenamesFor = spec: depEntries:
+    let
+      depWithRename = filter (d:
+        let canonical = (spec.crates.${d.package_key}).name;
+        in d.name != canonical
+      ) depEntries;
+      grouped = lib.groupBy (d: (spec.crates.${d.package_key}).name) depWithRename;
+    in
+      lib.mapAttrs (canonical: deps:
+        map (d: {
+          version = (spec.crates.${d.package_key}).version;
+          rename = d.name;
+        }) deps
+      ) grouped;
 
-  mkBuildArgs = workspaceSrc: spec:
-    {
-      crateName = spec.name;
-      version = spec.version;
-      edition = spec.edition;
-      src = srcOf workspaceSrc spec;
-      features = spec.features;
-    } // (if spec.proc_macro then { procMacro = true; } else {});
+  # ── Dep filtering ──────────────────────────────────────────────
+  #
+  # Spec.dependencies includes normal + build deps. Filter into the
+  # two buckets buildRustCrate expects.
+  isNormal = d: (d.kind or "normal") == "normal";
+  isBuild = d: (d.kind or "normal") == "build";
+
+  # cfg() expressions are RESOLVED BY RUST. gen lock-build calls
+  # `cargo metadata --filter-platform=<host>` so the spec's
+  # dependencies list ONLY contains deps active for the target.
+  # Nix never evaluates cfg() — that's the correct line between Rust
+  # (semantic decisions) and Nix (dispatch).
+  #
+  # The `target` field is still emitted on dep entries for diagnostics
+  # and cross-target re-rendering (gen lock-build --target ...), but
+  # the Nix side trusts the resolver and includes every dep present.
 
   # ── Top-level entrypoint ───────────────────────────────────────
 
   mkProject = {
     src,
-    name ? null,                              # ignored — root_crate carries it
+    name ? null,
     defaultCrateOverrides ? pkgs.defaultCrateOverrides,
-    buildRustCrateForPkgs ? (pkgs: pkgs.buildRustCrate),
+    buildRustCrateForPkgs ? (p: p.buildRustCrate),
   }: let
       spec = loadBuildSpec src;
       buildRustCrate = buildRustCrateForPkgs pkgs;
 
-      # Memoized per-crate-key build. The dep graph is walked via
-      # package_key, which uniquely identifies a resolved crate.
+      # Memoized per-crate-key build. Walks the dep graph; each
+      # package_key resolves to one derivation.
       buildByKey = key:
         let
           crate = spec.crates.${key} or (throw ''
             lockfile-builder: crate key `${key}` not in Cargo.build-spec.json
           '');
-          depDrvs = lib.map (d: buildByKey d.package_key) crate.dependencies;
-          baseArgs = mkBuildArgs src crate // { dependencies = depDrvs; };
+
+          # The Rust side already filtered to host-active deps.
+          normalDeps = filter isNormal crate.dependencies;
+          buildDeps = filter isBuild crate.dependencies;
+
+          dependencies = map (d: buildByKey d.package_key) normalDeps;
+          buildDependencies = map (d: buildByKey d.package_key) buildDeps;
+          crateRenames = crateRenamesFor spec (normalDeps ++ buildDeps);
+
+          baseArgs = {
+            crateName = crate.name;
+            version = crate.version;
+            edition = crate.edition;
+            src = srcOf src crate;
+            features = crate.features;
+            inherit dependencies buildDependencies crateRenames;
+            release = true;
+          } // (if crate.proc_macro then { procMacro = true; } else {});
+
           overrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
         in buildRustCrate (baseArgs // overrideFn baseArgs);
 
-      # Workspace members exposed as { <pkg-name>.{ packageId, build, debug } }
-      workspaceMembers = builtins.listToAttrs (lib.map (key:
+      workspaceMembers = builtins.listToAttrs (map (key:
         let c = spec.crates.${key}; in {
           name = c.name;
           value = {
@@ -116,10 +166,10 @@ let
       crates = spec.crates;
       allWorkspaceMembers = pkgs.symlinkJoin {
         name = "all-workspace-members";
-        paths = lib.map (m: m.build) (builtins.attrValues workspaceMembers);
+        paths = map (m: m.build) (builtins.attrValues workspaceMembers);
       };
     };
 
 in {
-  inherit mkProject loadBuildSpec;
+  inherit mkProject loadBuildSpec crateRenamesFor;
 }

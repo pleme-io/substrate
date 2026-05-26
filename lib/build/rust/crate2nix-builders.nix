@@ -1,12 +1,17 @@
 # Crate2nix Builders - Project, Tool, Docker Image Builders
 # Per-crate derivation caching with Attic for 60-80% faster CI/CD builds
 #
-# Each builder accepts an opt-in `useLockfileBuilder` flag that swaps
-# the import-from-generated-Cargo.nix path for substrate's pure-Nix
-# `lockfile-builder` (reads Cargo.lock at eval, eliminates the
-# regenerate step). Same project-attrset shape; same caller API.
-# Default `false` — production stays on crate2nix until the
-# lockfile-builder's resolver layer lands (see file header for status).
+# Default path: `useLockfileBuilder = true` — substrate reads
+# Cargo.lock + Cargo.build-spec.json at eval via the pure-Nix
+# lockfile-builder. No Cargo.nix regeneration step. Operators run
+# `gen lock-build .` whenever Cargo.lock changes; the JSON sidecar
+# is committed alongside Cargo.lock and the substrate flake reads
+# both at eval.
+#
+# Legacy path: `useLockfileBuilder = false` — imports a generated
+# Cargo.nix via crate2nix's tools.nix (the pre-2026 behavior).
+# Kept as an explicit opt-out for repos in transition or with
+# resolver edge cases.
 { pkgs, crate2nix }:
 
 let
@@ -59,9 +64,11 @@ in {
     crateOverrides ? {},
     enableAwsSdk ? false,
     rootFeatures ? null,
-    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
-    # importing a generated Cargo.nix. Same project-attrset shape.
-    useLockfileBuilder ? false,
+    # Default: read Cargo.lock + Cargo.build-spec.json at eval via
+    # lockfile-builder (eliminates the Cargo.nix regeneration step).
+    # Operators flip to false to fall back to the legacy
+    # crate2nix-generated-Cargo.nix path.
+    useLockfileBuilder ? true,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -80,9 +87,11 @@ in {
     nativeBuildInputs ? [],
     runtimeDeps ? [],
     crateOverrides ? {},
-    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
-    # importing a generated Cargo.nix. Same project-attrset shape.
-    useLockfileBuilder ? false,
+    # Default: read Cargo.lock + Cargo.build-spec.json at eval via
+    # lockfile-builder (eliminates the Cargo.nix regeneration step).
+    # Operators flip to false to fall back to the legacy
+    # crate2nix-generated-Cargo.nix path.
+    useLockfileBuilder ? true,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -289,9 +298,11 @@ in {
     # Use for service-specific defaults that aren't already overridden
     # by the deployment's helm values. Format: ["KEY=value", ...].
     extraEnv ? [],
-    # Opt-in: read Cargo.lock at eval via lockfile-builder instead of
-    # importing a generated Cargo.nix. Same project-attrset shape.
-    useLockfileBuilder ? false,
+    # Default: read Cargo.lock + Cargo.build-spec.json at eval via
+    # lockfile-builder (eliminates the Cargo.nix regeneration step).
+    # Operators flip to false to fall back to the legacy
+    # crate2nix-generated-Cargo.nix path.
+    useLockfileBuilder ? true,
   }: let
     resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
     resolvedBinaryName = if binaryName != null then binaryName else serviceName;
