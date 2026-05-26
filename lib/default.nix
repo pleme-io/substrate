@@ -320,6 +320,9 @@ in rec {
   mkRustWorkspace = args: (import ./build/rust/mk-rust-workspace.nix args) { inherit pkgs; };
   # Direct access to the lockfile-builder primitive for advanced uses.
   lockfileBuilder = import ./build/rust/lockfile-builder.nix { inherit pkgs; };
+  # Nix-side invariant check — mirrors gen-cargo's invariants module.
+  # Pass it a parsed spec; returns the violation list (empty on success).
+  rustSpecInvariants = import ./build/rust/spec-invariants.nix;
 
   # ============================================================================
   # CRATE2NIX SERVICE APPS (from crate2nix-apps.nix)
