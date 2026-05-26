@@ -44,7 +44,12 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@main
 
       - name: Publish to FlakeHub
-        uses: DeterminateSystems/flakehub-push@main
+        # Pin to v6 (latest tagged release, 2025-07-15) — @main
+        # started enumerating devShell stdenv-internal attrs
+        # (__darwinAllowLocalNetworking, __structuredAttrs, …) and
+        # erroring on missing `.name`. v6 is the last known-good.
+        uses: DeterminateSystems/flakehub-push@v6
         with:
           visibility: ${{ inputs.visibility }}
           rolling: ${{ inputs.rolling }}
+          directory: ${{ inputs.directory }}
