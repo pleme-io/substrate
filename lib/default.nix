@@ -309,6 +309,19 @@ in rec {
     mkRustTestImage;
 
   # ============================================================================
+  # GEN LOCKFILE-BUILDER (the modern Rust path — no Cargo.nix)
+  # ============================================================================
+  # Single-binary tool wrapper. Consumer says "I have a Rust tool" +
+  # gets back a derivation with bin/<name>. No knowledge of
+  # Cargo.build-spec.json or lockfile-builder ceremony required.
+  mkRustTool = args: (import ./build/rust/mk-rust-tool.nix args) { inherit pkgs; };
+  # Workspace wrapper — returns { workspaceMembers, allWorkspaceMembers,
+  # binaryOf, ... } so consumers can pick specific members by name.
+  mkRustWorkspace = args: (import ./build/rust/mk-rust-workspace.nix args) { inherit pkgs; };
+  # Direct access to the lockfile-builder primitive for advanced uses.
+  lockfileBuilder = import ./build/rust/lockfile-builder.nix { inherit pkgs; };
+
+  # ============================================================================
   # CRATE2NIX SERVICE APPS (from crate2nix-apps.nix)
   # ============================================================================
   inherit (crate2nixAppsModule) mkCrate2nixServiceApps mkImagePushApp;
