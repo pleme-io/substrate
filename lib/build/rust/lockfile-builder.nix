@@ -90,7 +90,9 @@ let
             crateRenames = crate.crate_renames;
             inherit dependencies buildDependencies;
             release = true;
-          } // (if crate.proc_macro then { procMacro = true; } else {});
+          }
+          // (if crate.proc_macro then { procMacro = true; } else {})
+          // (if crate.build_script != null then { build = crate.build_script; } else {});
           overrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
         in buildRustCrate (baseArgs // overrideFn baseArgs);
 
