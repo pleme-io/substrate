@@ -70,17 +70,20 @@ let
       spec = loadBuildSpec src;
       buildRustCrate = buildRustCrateForPkgs pkgs;
 
-      # Memoized per-crate-key build. Walks the dep graph; each
-      # package_key resolves to one derivation. The dep-list / build-
-      # dep-list / crateRenames fields come pre-shaped from the spec
-      # — no Nix-side derivation, no synthesis.
-      buildByKey = key:
-        let
-          crate = spec.crates.${key} or (throw ''
-            lockfile-builder: crate key `${key}` not in Cargo.build-spec.json
-          '');
-          dependencies = map (d: buildByKey d.package_key) crate.runtime_dependencies;
-          buildDependencies = map (d: buildByKey d.package_key) crate.build_dependencies;
+      # MEMOIZED per-crate-key build via attrset materialization.
+      #
+      # PRIOR BUG: `buildByKey = key: let ... in buildRustCrate ...;`
+      # is a function — each invocation re-evaluates. With high dep
+      # re-use (serde depended on by 50 crates → buildByKey "serde"
+      # computed 50 times → each of those triggers serde's own deps
+      # recursively → exponential).
+      #
+      # FIX: build an attrset once via mapAttrs over spec.crates. Each
+      # value is a thunk computed lazily ONCE; subsequent reads hit
+      # the cached value. O(N) eval cost across the entire graph.
+      built = lib.mapAttrs (key: crate: let
+          deps = map (d: built.${d.package_key}) crate.runtime_dependencies;
+          buildDeps = map (d: built.${d.package_key}) crate.build_dependencies;
           baseArgs = {
             crateName = crate.name;
             version = crate.version;
@@ -88,13 +91,19 @@ let
             src = srcOf src crate;
             features = crate.features;
             crateRenames = crate.crate_renames;
-            inherit dependencies buildDependencies;
+            dependencies = deps;
+            buildDependencies = buildDeps;
             release = true;
           }
           // (if crate.proc_macro then { procMacro = true; } else {})
           // (if crate.build_script != null then { build = crate.build_script; } else {});
           overrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
-        in buildRustCrate (baseArgs // overrideFn baseArgs);
+        in buildRustCrate (baseArgs // overrideFn baseArgs)
+      ) spec.crates;
+
+      buildByKey = key: built.${key} or (throw ''
+        lockfile-builder: crate key `${key}` not in Cargo.build-spec.json
+      '');
 
       workspaceMembers = builtins.listToAttrs (map (key:
         let c = spec.crates.${key}; in {
