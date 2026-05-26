@@ -15,22 +15,16 @@ name: auto-release
 # The repo type is inferred from manifest presence:
 #   Cargo.toml + [workspace]  → rust-workspace
 #   Cargo.toml + [package]    → rust-single-crate
-#   pyproject.toml            → python    (R-PYTHON.1 — pending)
-#   package.json              → npm       (R-NPM.1 — pending)
-#   Chart.yaml                → helm      (R-HELM.1 — pending)
-#   galaxy.yml                → ansible-collection (already covered)
-#   *.gemspec                 → ruby-gem  (already covered)
-#   action.yml                → github-action (already covered)
+#   pyproject.toml            → python
+#   package.json              → npm
+#   Chart.yaml                → helm
 #
 # Each per-type job is gated by the detect output; only one
 # branch runs per invocation.
 #
-# secrets passed through:
-#   CRATES_API_TOKEN — crates.io publish token
-#   NPM_TOKEN        — npmjs publish token   (pending)
-#   PYPI_API_TOKEN   — pypi publish token    (pending)
-#   GHCR_PAT         — ghcr push token       (pending)
-#   BOT_PAT          — optional, for cross-workflow tag triggers
+# secrets: inherit at every layer — propagates whatever the
+# operator's repo has access to without having to enumerate per-
+# language-specific tokens here.
 
 on:
   workflow_call:
@@ -39,15 +33,8 @@ on:
         type: string
         required: false
         default: patch
-    secrets:
-      CRATES_API_TOKEN:
-        required: false
-      NPM_TOKEN:
-        required: false
-      PYPI_API_TOKEN:
-        required: false
-      BOT_PAT:
-        required: false
+    # No `secrets:` block — `secrets: inherit` from the consumer
+    # passes everything down; inner `uses:` calls also use `inherit`.
 
 permissions:
   contents: write
@@ -71,9 +58,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
-    secrets:
-      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+    secrets: inherit
 
   rust-single-crate:
     name: 'rust-single-crate · release'
@@ -82,9 +67,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
-    secrets:
-      CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+    secrets: inherit
 
   npm:
     name: 'npm · release'
@@ -93,9 +76,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/npm-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+    secrets: inherit
 
   python:
     name: 'python · release'
@@ -104,9 +85,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/python-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
-    secrets:
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+    secrets: inherit
 
   helm:
     name: 'helm · release'
@@ -115,13 +94,8 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/helm-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
-    secrets:
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+    secrets: inherit
 
-  # ── Future routes (existing workflows that pre-date this dispatcher):
-  # ──   ansible-collection → ./ansible-collection-auto-bump.yml
-  # ──   ruby-gem           → ./gem-release.yml
-  # ──   github-action      → ./action-release.yml
   unsupported:
     name: 'unsupported repo type'
     needs: detect
