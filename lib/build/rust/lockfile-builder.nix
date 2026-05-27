@@ -92,9 +92,14 @@ let
       then workspaceSrc
       else workspaceSrc + "/${spec.source.relative_path}";
 
+  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
   mkProject = {
     src,
-    defaultCrateOverrides ? pkgs.defaultCrateOverrides,
+    # Substrate guarantee: every fleet-wide buildRustCrate quirk in
+    # plemeCrateOverrides applies by default. Callers can still pass an
+    # explicit `defaultCrateOverrides` to extend — the merge order is
+    # nixpkgs defaults → pleme overrides → caller overrides (later wins).
+    defaultCrateOverrides ? (pkgs.defaultCrateOverrides // plemeCrateOverrides),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
     # Optional: substrate-bound gen package. When supplied, the
     # build-spec is derived on demand via IFD instead of read from
@@ -140,7 +145,22 @@ let
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
           else {});
 
-    overrideFor = name: defaultCrateOverrides.${name} or (oldAttrs: oldAttrs);
+    # Always layer plemeCrateOverrides in — even when the caller passed
+    # their own `defaultCrateOverrides`. Consumers that import
+    # lockfile-builder directly (escriba's flake.nix is the canonical
+    # example) would otherwise silently drop every fleet-wide quirk we
+    # ship (wgpu-hal cfg, openraft BTreeSet patch, document-features
+    # lib_target, etc.). Compose per-crate: pleme rules apply first,
+    # caller wins on key collision.
+    overrideFor = name:
+      let
+        pleme  = plemeCrateOverrides.${name}  or null;
+        caller = defaultCrateOverrides.${name} or null;
+      in
+        if pleme == null && caller == null then (oldAttrs: oldAttrs)
+        else if pleme == null then caller
+        else if caller == null then pleme
+        else (attrs: (pleme attrs) // (caller attrs));
 
     # Lazy memoization: each thunk is computed once via mapAttrs.
     built = lib.mapAttrs (key: crate: let
