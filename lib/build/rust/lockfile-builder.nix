@@ -96,8 +96,17 @@ let
     src,
     defaultCrateOverrides ? pkgs.defaultCrateOverrides,
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
+    # Optional: substrate-bound gen package. When supplied, the
+    # build-spec is derived on demand via IFD instead of read from
+    # the committed `Cargo.build-spec.json`. Consumers stop
+    # committing the JSON; bumping gen propagates fleet-wide.
+    gen ? null,
   }: let
-    spec = loadBuildSpec src;
+    specSrc =
+      if gen != null
+      then import ./mk-build-spec.nix { inherit pkgs gen src; }
+      else src;
+    spec = loadBuildSpec specSrc;
     buildRustCrate = buildRustCrateForPkgs pkgs;
 
     workspaceKeys = builtins.listToAttrs
