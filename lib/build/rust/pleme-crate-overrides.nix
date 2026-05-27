@@ -46,16 +46,17 @@
   # again, re-evaluate.
   proc-macro-crate = _: { postPatch = ""; };
 
-  # wgpu-hal 25.0.2: cargo metadata filters out the `portable-atomic`
-  # optional dep on platforms with native 64-bit atomics (aarch64,
-  # x86_64) via a target-cfg gate, but the feature flag `portable-
-  # atomic` stays enabled in the resolve graph. wgpu-hal's
-  # `src/noop/mod.rs` then references `use portable_atomic::*` and
-  # fails to compile because the extern is missing. Drop the
-  # feature entirely — every target where mado/namimado run has
-  # native 64-bit atomics, so the `noop/mod.rs` code path uses
-  # the std AtomicU64 path. Upstream fix is in wgpu-hal's gating.
-  wgpu-hal = attrs: {
-    features = builtins.filter (f: f != "portable-atomic") (attrs.features or []);
+  # wgpu-hal 25.0.2: build.rs uses `cfg_aliases` to compute a
+  # `supports_64bit_atomics` cfg from `target_has_atomic = "64"`.
+  # The build script's `cargo:rustc-cfg=supports_64bit_atomics`
+  # output isn't being captured by buildRustCrate's build-script
+  # runner, so the cfg never reaches the lib build. The `src/noop/
+  # mod.rs` then falls back to the portable-atomic code path
+  # (`#[cfg(not(supports_64bit_atomics))]`) which fails because
+  # portable-atomic isn't in the dep graph. Set the cfg explicitly
+  # via extraRustcOpts — every host where mado/namimado runs
+  # (aarch64-darwin, x86_64-darwin/linux) has native 64-bit atomics.
+  wgpu-hal = _: {
+    extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
   };
 }
