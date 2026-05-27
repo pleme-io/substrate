@@ -167,9 +167,19 @@ let
     # `dependencies` / `buildDependencies`. For older specs that
     # predate the field, reconstruct from the legacy fields so the
     # transition is silent.
+    # Rustc crate-name = `[lib].name` when set, else package name with
+    # `-` → `_`. Used to set CARGO_CRATE_NAME universally for crates
+    # that read it at compile time (rmcp etc). Matches gen-cargo's
+    # computation for `build_rust_crate_args.preBuild`.
+    rustcCrateName = crate:
+      if (crate.lib_target or null) != null
+      then crate.lib_target.name
+      else builtins.replaceStrings [ "-" ] [ "_" ] crate.name;
+
     legacyArgs = crate:
       { crateName = crate.name; version = crate.version; edition = crate.edition;
-        features = crate.features; crateRenames = crate.crate_renames; release = true; }
+        features = crate.features; crateRenames = crate.crate_renames; release = true;
+        preBuild = "export CARGO_CRATE_NAME=${rustcCrateName crate};"; }
       // (if crate.proc_macro then { procMacro = true; } else {})
       // (if crate.build_script != null then { build = crate.build_script; } else {})
       // (if (crate.links or null) != null then { links = crate.links; } else {})
