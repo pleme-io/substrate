@@ -9,11 +9,17 @@
 #   {
 #     inputs.substrate.url = "github:pleme-io/substrate";
 #     outputs = i: i.substrate.mkRustToolFlake {
-#       inherit (i) self;
 #       inputs = i;
+#       src = ./.;                            # MUST be `./.`, not `i.self`
 #       packageName = "<workspace member>";   # only when workspace
 #     };
 #   }
+#
+# NOTE: `src` must be a literal source path (`./.`) — passing
+# `inputs.self` triggers a flake-outputs evaluation cycle because this
+# helper reads `Cargo.build-spec.json` from `src` at eval time. The
+# literal path resolves directly to the consumer's source tree without
+# going through the outputs attrset.
 #
 # Single-crate workspaces don't need `packageName` — the spec's
 # `root_crate` field identifies the only buildable. Per-consumer overrides
