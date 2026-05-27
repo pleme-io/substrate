@@ -95,6 +95,19 @@
     '';
   };
 
+  # document-features 0.2.12 ships with `[lib] path = "lib.rs"` (no `src/`
+  # prefix). buildRustCrate's auto-detection walks `src/lib.rs` only,
+  # so when the consumer's Cargo.build-spec.json lacks a typed
+  # `lib_target` (older gen-cargo emitters), the lib build runs against
+  # nothing, leaving the proc-macro `.dylib` unbuilt. Hard-pin libName
+  # + libPath via override so the build path is correct regardless of
+  # spec freshness; remove this entry once every fleet build-spec is
+  # regenerated through gen ≥ 50623e4.
+  document-features = _: {
+    libName = "document_features";
+    libPath = "lib.rs";
+  };
+
   # mime_guess 2.0.x's build.rs does `extern crate unicase;` — unicase is a
   # *build-dependency*. Same nested-build-dep drop as clang-sys above: when
   # mime_guess is pulled as a transitive build-dep (e.g. via pleme-tend, fumi),
