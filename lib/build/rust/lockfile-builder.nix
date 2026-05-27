@@ -46,6 +46,16 @@ let
   # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen
   # — `stripUrlQuery` is belt-and-suspenders for the documented gen
   # `?branch=main`-leak class.
+  #
+  # Workspace-subdir narrowing for git deps: gen-cargo emits one
+  # `source` entry per crate, but multiple crates can share the same
+  # git rev when the repo is a Cargo workspace (e.g. tatara-lisp
+  # ships tatara-lisp + tatara-lisp-derive + 14 others at the same
+  # rev). For those, the fetched tarball is the workspace root, not
+  # the crate root. We narrow by name when `${full}/${crateName}/
+  # Cargo.toml` exists — that's the conventional layout. Falls
+  # through to the unnarrowed root when the repo is a single-crate
+  # source.
   srcOf = workspaceSrc: spec:
     if spec.source.kind == "registry" then
       pkgs.fetchurl {
@@ -54,11 +64,17 @@ let
         name = spec.source.name_with_ext;
       }
     else if spec.source.kind == "git" then
-      pkgs.fetchgit {
-        url = stripUrlQuery spec.source.url;
-        rev = spec.source.rev;
-        sha256 = spec.source.sha256 or lib.fakeSha256;
-      }
+      let
+        full = pkgs.fetchgit {
+          url = stripUrlQuery spec.source.url;
+          rev = spec.source.rev;
+          sha256 = spec.source.sha256 or lib.fakeSha256;
+        };
+        subdir = full + "/${spec.name}";
+      in
+        if builtins.pathExists (subdir + "/Cargo.toml")
+        then subdir
+        else full
     else
       if spec.source.relative_path == "." || spec.source.relative_path == ""
       then workspaceSrc
