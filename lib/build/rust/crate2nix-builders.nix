@@ -68,12 +68,11 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
-    # driven Cargo.nix path is the proven correct path for feature-
-    # gated optional deps. Lockfile-builder (gen-cargo) currently
-    # misses several classes of optional deps. Operators opt back into
-    # lockfile-builder explicitly when gen-cargo is fixed.
-    useLockfileBuilder ? false,
+    # Default kept at `true`: substrate's gen-cargo build-spec is the
+    # forward path. Operators force the legacy crate2nix Cargo.nix
+    # path explicitly via `useLockfileBuilder = false` when their
+    # repo's build-spec is missing/stale.
+    useLockfileBuilder ? true,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -96,12 +95,11 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
-    # driven Cargo.nix path is the proven correct path for feature-
-    # gated optional deps. Lockfile-builder (gen-cargo) currently
-    # misses several classes of optional deps. Operators opt back into
-    # lockfile-builder explicitly when gen-cargo is fixed.
-    useLockfileBuilder ? false,
+    # Default kept at `true`: substrate's gen-cargo build-spec is the
+    # forward path. Operators force the legacy crate2nix Cargo.nix
+    # path explicitly via `useLockfileBuilder = false` when their
+    # repo's build-spec is missing/stale.
+    useLockfileBuilder ? true,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -312,12 +310,11 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
-    # driven Cargo.nix path is the proven correct path for feature-
-    # gated optional deps. Lockfile-builder (gen-cargo) currently
-    # misses several classes of optional deps. Operators opt back into
-    # lockfile-builder explicitly when gen-cargo is fixed.
-    useLockfileBuilder ? false,
+    # Default kept at `true`: substrate's gen-cargo build-spec is the
+    # forward path. Operators force the legacy crate2nix Cargo.nix
+    # path explicitly via `useLockfileBuilder = false` when their
+    # repo's build-spec is missing/stale.
+    useLockfileBuilder ? true,
   }: let
     resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
     resolvedBinaryName = if binaryName != null then binaryName else serviceName;
