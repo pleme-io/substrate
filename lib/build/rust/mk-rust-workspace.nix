@@ -19,6 +19,7 @@
 }: { pkgs, lib ? pkgs.lib }:
 let
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
+  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
 
   _ = assert (builtins.pathExists (src + "/Cargo.build-spec.json")) ||
         throw ''
@@ -30,7 +31,7 @@ let
   project = lockfileBuilder.mkProject {
     inherit src;
     name = name;
-    defaultCrateOverrides = pkgs.defaultCrateOverrides // crateOverrides;
+    defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // crateOverrides;
     inherit buildRustCrateForPkgs;
   };
 in {
