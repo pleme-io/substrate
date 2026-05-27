@@ -24,7 +24,28 @@ let
       Run `gen build .` in the workspace root to produce it.
     '';
 
-  # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen.
+  # Strip any `?branch=…` / `?ref=…` query string from a git URL.
+  #
+  # gen is supposed to pre-clean URLs into pkgs.fetchgit's expected
+  # shape, but historically it has lifted the literal Cargo.lock
+  # `source` URL (which is `git+https://host/repo?branch=main#<rev>`)
+  # and emitted `https://host/repo?branch=main` into Cargo.build-spec.
+  # json. git CLI then interprets the `?branch=main` as part of the
+  # repo path — `git ls-remote https://github.com/foo/bar?branch=main`
+  # asks GitHub for the repo named `bar?branch=main`, which 404s.
+  #
+  # The substrate's load-bearing fix is here: normalize the URL once
+  # before handing to fetchgit, so every consumer (namimado, nami,
+  # future Cargo.build-spec.json builds) is immune to that gen bug
+  # class without touching individual repos. Per the prime-directive
+  # "fix upstream, not the local symptom" rule.
+  stripUrlQuery = url:
+    let m = builtins.match "([^?]+)\\?.*" url; in
+    if m == null then url else builtins.head m;
+
+  # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen
+  # — `stripUrlQuery` is belt-and-suspenders for the documented gen
+  # `?branch=main`-leak class.
   srcOf = workspaceSrc: spec:
     if spec.source.kind == "registry" then
       pkgs.fetchurl {
@@ -34,7 +55,7 @@ let
       }
     else if spec.source.kind == "git" then
       pkgs.fetchgit {
-        url = spec.source.url;
+        url = stripUrlQuery spec.source.url;
         rev = spec.source.rev;
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
