@@ -318,6 +318,10 @@ in rec {
   # Workspace wrapper — returns { workspaceMembers, allWorkspaceMembers,
   # binaryOf, ... } so consumers can pick specific members by name.
   mkRustWorkspace = args: (import ./build/rust/mk-rust-workspace.nix args) { inherit pkgs; };
+  # Overlay factory — produces a `(final: prev: { ${name} = ...; })`
+  # snippet for consumer flakes that expose a Rust binary at
+  # pkgs.<name>. Compound over mkRustTool.
+  mkRustOverlay = import ./build/rust/mk-rust-overlay.nix;
   # Direct access to the lockfile-builder primitive for advanced uses.
   lockfileBuilder = import ./build/rust/lockfile-builder.nix { inherit pkgs; };
   # Nix-side invariant check — mirrors gen-cargo's invariants module.

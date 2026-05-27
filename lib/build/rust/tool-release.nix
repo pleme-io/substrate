@@ -104,6 +104,10 @@ in {
   buildInputs ? [],
   nativeBuildInputs ? [],
   crateOverrides ? {},
+  # Build-mode switch. `auto` = lockfile-builder when Cargo.build-spec.json
+  # exists, else crate2nix Cargo.nix. `lockfile` = force lockfile-builder
+  # (errors if spec missing). `cargo-nix` = force the legacy crate2nix path.
+  buildMode ? "auto",
   ...
 }:
 let
@@ -118,30 +122,57 @@ let
   # Crate name for defaultCrateOverrides: workspace member when set, else toolName.
   crateKey = if packageName != null then packageName else toolName;
 
+  # ── Build-mode resolution ────────────────────────────────────────
+  # Per gen's algorithmic discipline: every consumer auto-uses the
+  # lockfile-native pipeline when its Cargo.build-spec.json sidecar
+  # exists. No per-consumer opt-in required. Falls back to crate2nix
+  # only for unmigrated repos that don't yet have a spec.
+  hasBuildSpec = builtins.pathExists (src + "/Cargo.build-spec.json");
+  effectiveMode =
+    if buildMode == "auto"
+    then (if hasBuildSpec then "lockfile" else "cargo-nix")
+    else buildMode;
+  _modeAssert =
+    if effectiveMode == "lockfile" && !hasBuildSpec
+    then throw ''
+      substrate/rust-release: buildMode = "lockfile" but
+      ${toString src}/Cargo.build-spec.json is missing. Run
+      `gen build .` in the workspace root first.
+    ''
+    else null;
+
   # ============================================================================
   # BINARY BUILDER
   # ============================================================================
   mkBinary = _targetName: targetInfo: let
     targetPkgs = targetInfo.pkgs;
-    project = import cargoNix {
-      pkgs = targetPkgs;
-      defaultCrateOverrides = targetPkgs.defaultCrateOverrides // {
-        # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time
-        # (src/model.rs:860). Cargo sets this per-crate but nixpkgs'
-        # buildRustCrate only exports the CARGO_PKG_* / CARGO_CFG_* /
-        # CARGO_MANIFEST_* families — a top-level attr does not reach
-        # the rustc child, so inject via preBuild which runs in the
-        # same shell as buildCrate.
-        rmcp = _: { preBuild = "export CARGO_CRATE_NAME=rmcp"; };
-        ${crateKey} = attrs: {
-          buildInputs = (attrs.buildInputs or [])
-            ++ buildInputs
-            ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
-          nativeBuildInputs = (attrs.nativeBuildInputs or [])
-            ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
-        };
-      } // crateOverrides;
-    };
+    # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time
+    # (src/model.rs:860). Cargo sets this per-crate but nixpkgs'
+    # buildRustCrate only exports the CARGO_PKG_* / CARGO_CFG_* /
+    # CARGO_MANIFEST_* families — a top-level attr does not reach
+    # the rustc child, so inject via preBuild which runs in the
+    # same shell as buildCrate.
+    consumerOverrides = targetPkgs.defaultCrateOverrides // {
+      rmcp = _: { preBuild = "export CARGO_CRATE_NAME=rmcp"; };
+      ${crateKey} = attrs: {
+        buildInputs = (attrs.buildInputs or [])
+          ++ buildInputs
+          ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
+        nativeBuildInputs = (attrs.nativeBuildInputs or [])
+          ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
+      };
+    } // crateOverrides;
+
+    project =
+      if effectiveMode == "lockfile"
+      then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject {
+        inherit src;
+        defaultCrateOverrides = consumerOverrides;
+      }
+      else import cargoNix {
+        pkgs = targetPkgs;
+        defaultCrateOverrides = consumerOverrides;
+      };
   in
     if packageName != null then
       if project ? workspaceMembers && project.workspaceMembers ? "${packageName}" then
@@ -151,7 +182,7 @@ let
           substrate/rust-release: packageName "${packageName}" not found.
           ${if project ? workspaceMembers
             then "Available members: ${builtins.concatStringsSep ", " (builtins.attrNames project.workspaceMembers)}"
-            else "Project has no workspaceMembers — is ${toString cargoNix} a workspace Cargo.nix?"}
+            else "Project has no workspaceMembers — is the source a workspace?"}
         ''
     else
       project.rootCrate.build;
