@@ -131,19 +131,17 @@ let
     # Per-crate overrides in `pleme-crate-overrides.nix` are no
     # longer needed for the alloc-no-stdlib / brotli class of bug —
     # the fix is uniform here.
+    # crateBin is the one buildRustCrate arg that depends on
+    # workspace-membership context (Nix-side knowledge), so it's
+    # computed here rather than in gen. Workspace members keep their
+    # declared bins; transitive deps get `crateBin = []` to suppress
+    # buildRustCrate's `src/bin/*.rs` auto-detection.
     binsFor = key: crate:
       let bins = map (b: { inherit (b) name path; }) (crate.binaries or []);
       in
         if isWorkspaceMember key
         then (if bins != [] then { crateBin = bins; } else {})
         else { crateBin = []; };
-
-    extraFor = crate:
-      (if crate.proc_macro then { procMacro = true; } else {})
-      // (if crate.build_script != null then { build = crate.build_script; } else {})
-      // (if (crate.lib_target or null) != null
-          then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
-          else {});
 
     # Always layer plemeCrateOverrides in — even when the caller passed
     # their own `defaultCrateOverrides`. Consumers that import
@@ -162,19 +160,32 @@ let
         else if caller == null then pleme
         else (attrs: (pleme attrs) // (caller attrs));
 
+    # gen ≥ 3e9fbc6 emits `build_rust_crate_args` pre-shaped for
+    # buildRustCrate (procMacro, build, links, libName, libPath, …).
+    # Nix spreads it verbatim and fills only what it must: `src`
+    # (path resolution + workspace narrowing) and the cross-derivation
+    # `dependencies` / `buildDependencies`. For older specs that
+    # predate the field, reconstruct from the legacy fields so the
+    # transition is silent.
+    legacyArgs = crate:
+      { crateName = crate.name; version = crate.version; edition = crate.edition;
+        features = crate.features; crateRenames = crate.crate_renames; release = true; }
+      // (if crate.proc_macro then { procMacro = true; } else {})
+      // (if crate.build_script != null then { build = crate.build_script; } else {})
+      // (if (crate.links or null) != null then { links = crate.links; } else {})
+      // (if (crate.lib_target or null) != null
+          then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
+          else {});
+
     # Lazy memoization: each thunk is computed once via mapAttrs.
     built = lib.mapAttrs (key: crate: let
-      args = {
-        crateName = crate.name;
-        version = crate.version;
-        edition = crate.edition;
+      args = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
+              then crate.build_rust_crate_args
+              else legacyArgs crate) // {
         src = srcOf src crate;
-        features = crate.features;
-        crateRenames = crate.crate_renames;
         dependencies = map (d: built.${d.package_key}) crate.runtime_dependencies;
         buildDependencies = map (d: built.${d.package_key}) crate.build_dependencies;
-        release = true;
-      } // binsFor key crate // extraFor crate;
+      } // binsFor key crate;
     in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
 
     memberRecord = key: let c = spec.crates.${key}; in {
