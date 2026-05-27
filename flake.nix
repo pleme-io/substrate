@@ -8,12 +8,26 @@
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
+    # Consumer-facing surface re-export. Bundled here so consumer
+    # flakes can drop `inputs.flake-utils.url = ...` and `inputs.
+    # crate2nix.url = ...` etc. — substrate's pin propagates.
+    flake-utils.url = "github:numtide/flake-utils";
     crate2nix = {
       url = "github:nix-community/crate2nix";
       flake = false;
     };
     fenix = {
       url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    # gen ships alongside substrate as part of the unified
+    # dep-SDLC + build-SDLC surface. Consumers never declare
+    # `inputs.gen` — substrate's `rust.{shape}` factories close
+    # over substrate's gen pin and expose every `Adapter` verb
+    # (lock / build / plan / confirm / diff / sbom) as flake apps
+    # in the consumer's outputs.
+    gen = {
+      url = "github:pleme-io/gen";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     # Fleet source-of-truth for devenv. Consumers of
@@ -91,6 +105,58 @@
         # flake collapses to:
         #   outputs = i: i.substrate.mkRustToolFlake { src = i.self; inputs = i; };
         mkRustToolFlake = import ./lib/build/rust/mk-rust-tool-flake.nix;
+
+        # Canonical Rust SDLC surface. Consumer flake.nix becomes:
+        #
+        #   {
+        #     inputs.substrate.url = "github:pleme-io/substrate";
+        #     outputs = { substrate, ... }: substrate.rust.tool {
+        #       src = ./.;
+        #     };
+        #   }
+        #
+        # Four lines, total. Substrate pre-binds nixpkgs / crate2nix
+        # / fenix / devenv / flake-utils / gen — every dependency
+        # the build kit needs. Consumer overrides only the
+        # differences (e.g. extra crateOverrides, custom buildInputs,
+        # module spec). Same shape across every Rust variant
+        # (`tool` / `workspace` / `library` / `service` / `binary`)
+        # and (once npm + ruby adapters land) across every
+        # ecosystem.
+        #
+        # The unified surface auto-wires every `Adapter` verb as a
+        # flake app in the consumer's outputs: `nix run .#lock`,
+        # `nix run .#build-spec`, `nix run .#plan`, `nix run .#confirm`,
+        # `nix run .#diff`, `nix run .#sbom`. Six operator verbs for
+        # zero consumer-side declaration.
+        rust = let
+          substrateInputs = {
+            inherit nixpkgs crate2nix fenix;
+            flake-utils = inputs.flake-utils;
+            gen = inputs.gen;
+            devenv = inputs.devenv or null;
+            forge = inputs.forge or null;
+          };
+          callShape = shape: args:
+            import ./lib/build/rust/mk-rust-tool-flake.nix (args // {
+              inputs = (args.inputs or {}) // substrateInputs;
+              shape = shape;
+            });
+        in {
+          tool      = callShape "tool";
+          workspace = callShape "workspace";
+          library   = callShape "library";
+          service   = callShape "service";
+          binary    = callShape "binary";
+        };
+
+        # gen, exposed as a substrate-bound package. Consumers never
+        # declare `inputs.gen` — the bump propagates fleet-wide via a
+        # single substrate bump. Available as a top-level binary and
+        # for IFD invocation inside `mkBuildSpec`.
+        packages = eachSystem (system: {
+          gen = inputs.gen.packages.${system}.default;
+        });
 
         # Rust overlay module for direct import
         rustOverlay = ./lib/build/rust/overlay.nix;

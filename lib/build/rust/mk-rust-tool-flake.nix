@@ -18,7 +18,7 @@
 # `src = ./.` is required (not `inputs.self`) because we read the spec
 # at eval time and `self` triggers an outputs-attrset cycle.
 {
-  inputs,
+  inputs ? {},             # consumer flake inputs; substrate pre-binds defaults
   src,
   member ? null,           # workspace member name (defaults to single member)
   toolName ? null,         # override default_bin from spec
@@ -27,6 +27,7 @@
   buildInputs ? [],
   nativeBuildInputs ? [],
   module ? null,           # optional HM/NixOS/Darwin module trio spec
+  shape ? "tool",          # tool | workspace | library | service | binary
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
