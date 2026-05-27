@@ -36,4 +36,13 @@
   # Gen-side proper fix: emit `links` into the build-spec so
   # lockfile-builder can pass it directly without an override.
   ring = _: { links = "ring_core_0_17_14_"; };
+
+  # proc-macro-crate 3.5.0+ no longer has the literal
+  # `env::var("CARGO")` string nixpkgs' default override tries to
+  # substitute via `--replace-fail`. The substitution fails the
+  # patchPhase. Override clears `postPatch` since v3.x's code path
+  # no longer needs the cargo-binary inlining (it uses
+  # `CARGO_MANIFEST_DIR` env-only). When proc-macro-crate updates
+  # again, re-evaluate.
+  proc-macro-crate = _: { postPatch = ""; };
 }
