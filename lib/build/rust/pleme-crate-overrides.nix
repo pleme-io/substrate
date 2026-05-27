@@ -45,4 +45,17 @@
   # `CARGO_MANIFEST_DIR` env-only). When proc-macro-crate updates
   # again, re-evaluate.
   proc-macro-crate = _: { postPatch = ""; };
+
+  # wgpu-hal 25.0.2: cargo metadata filters out the `portable-atomic`
+  # optional dep on platforms with native 64-bit atomics (aarch64,
+  # x86_64) via a target-cfg gate, but the feature flag `portable-
+  # atomic` stays enabled in the resolve graph. wgpu-hal's
+  # `src/noop/mod.rs` then references `use portable_atomic::*` and
+  # fails to compile because the extern is missing. Drop the
+  # feature entirely — every target where mado/namimado run has
+  # native 64-bit atomics, so the `noop/mod.rs` code path uses
+  # the std AtomicU64 path. Upstream fix is in wgpu-hal's gating.
+  wgpu-hal = attrs: {
+    features = builtins.filter (f: f != "portable-atomic") (attrs.features or []);
+  };
 }
