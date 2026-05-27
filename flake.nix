@@ -158,6 +158,46 @@
           gen = inputs.gen.packages.${system}.default;
         });
 
+        # Sibling ecosystem surfaces. Same shape as `rust` — every
+        # ecosystem's Adapter implementations expose the same six
+        # operator verbs through the same gen-driven IFD pipeline.
+        # v1: routing stubs; substrate.{npm,ruby}.<shape> evaluates
+        # but the per-ecosystem build wrappers are pending (they
+        # follow the same tool-release / library / service shapes
+        # as the rust side).
+        #
+        # The consumer-facing contract — same as rust — is:
+        #
+        #   {
+        #     inputs.substrate.url = "github:pleme-io/substrate";
+        #     outputs = { substrate, ... }: substrate.npm.tool { src = ./.; };
+        #   }
+        #
+        # gen-npm + gen-bundler ship Adapter stubs today; when their
+        # `build` impls land, every consumer that opts in lights up
+        # without per-repo migration.
+        npm = let
+          shapeStub = shape: _args:
+            throw "substrate.npm.${shape}: pending — gen-npm Adapter build impl lands in M1.";
+        in {
+          tool      = shapeStub "tool";
+          workspace = shapeStub "workspace";
+          library   = shapeStub "library";
+          service   = shapeStub "service";
+          binary    = shapeStub "binary";
+        };
+
+        ruby = let
+          shapeStub = shape: _args:
+            throw "substrate.ruby.${shape}: pending — gen-bundler Adapter build impl lands in M1.";
+        in {
+          tool      = shapeStub "tool";
+          workspace = shapeStub "workspace";
+          library   = shapeStub "library";
+          service   = shapeStub "service";
+          binary    = shapeStub "binary";
+        };
+
         # Rust overlay module for direct import
         rustOverlay = ./lib/build/rust/overlay.nix;
 
