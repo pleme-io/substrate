@@ -58,6 +58,7 @@ let
     fenix = inputs.fenix or null;
     devenv = inputs.devenv or null;
     forge = inputs.forge or null;
+    gen = inputs.gen or null;
   };
 in toolFlake (
   {

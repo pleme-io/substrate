@@ -34,6 +34,11 @@
   fenix ? null,
   devenv ? null,
   forge ? null,
+  # Substrate-bound gen package. When supplied, the resulting
+  # consumer flake exposes every Adapter verb as an app:
+  # `nix run .#{lock,build-spec,plan,confirm,diff,sbom}`. Single
+  # substrate change, six operator verbs in every consumer.
+  gen ? null,
 }: let
   check = import ../../types/assertions.nix;
   darwinHelpers = import ../../util/darwin.nix;
@@ -302,5 +307,30 @@ in {
     regenerate-cargo-nix = regenerateApp;
     check-all = checkAllApp;
     lock-platform = lockPlatformApp;
-  };
+  } // (
+    # Adapter verbs — one app per `gen` verb, auto-wired when substrate
+    # supplies `gen`. Each `gen <verb>` runs on the current directory,
+    # which (when the operator runs `nix run .#<verb>` from the
+    # consumer's workspace) is the manifest root.
+    if gen == null then {}
+    else (import ./adapter-apps.nix { pkgs = hostPkgs; inherit gen; }).apps
+  );
+
+  # `gen confirm` runs in `nix flake check`. Every consumer gets a
+  # spec-invariant CI gate for free; substrate emits the check when
+  # `gen` is bound. Opt-out with `confirm = false` (TODO when the
+  # consumer-facing flag is wired through).
+  checks =
+    if gen == null then {}
+    else {
+      gen-confirm = hostPkgs.runCommand "gen-confirm" {
+        nativeBuildInputs = [ gen ];
+        src = src;
+      } ''
+        cp -r $src/* .
+        chmod -R u+w .
+        gen confirm .
+        touch $out
+      '';
+    };
 }

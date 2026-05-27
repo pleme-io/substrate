@@ -31,6 +31,10 @@
   fenix ? null,
   devenv ? null,
   forge ? null,
+  # Substrate-bound gen flake input. When supplied, the consumer's
+  # outputs include `apps.{lock,build-spec,plan,confirm,diff,sbom}`
+  # — every Adapter verb wired as a flake app for free.
+  gen ? null,
 }:
 {
   toolName,
@@ -57,6 +61,7 @@ let
       crate2nix = crate2nix.packages.${system}.default;
       fenix = if fenix != null then fenix else null;
       forge = if forge != null then forge.packages.${system}.default else null;
+      gen = if gen != null then gen.packages.${system}.default else null;
     };
   in rustTool toolArgs;
 
