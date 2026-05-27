@@ -128,9 +128,22 @@ let
   # exists. No per-consumer opt-in required. Falls back to crate2nix
   # only for unmigrated repos that don't yet have a spec.
   hasBuildSpec = builtins.pathExists (src + "/Cargo.build-spec.json");
+  hasCargoNix = builtins.pathExists cargoNix;
+  # Auto-mode dispatch:
+  #   1. If Cargo.nix exists, prefer it. crate2nix uses cargo-metadata
+  #      directly and correctly resolves feature-gated optional deps
+  #      (clap on shikumi/cli, glob on clang-sys/static, etc.) that
+  #      gen-cargo's build-spec emitter currently misses.
+  #   2. Otherwise, fall back to lockfile-builder if a build-spec is
+  #      present.
+  #   3. Otherwise, error via the existing _modeAssert.
+  # Operators can force either path explicitly via `buildMode =
+  # "lockfile"` or `buildMode = "cargo-nix"`.
   effectiveMode =
     if buildMode == "auto"
-    then (if hasBuildSpec then "lockfile" else "cargo-nix")
+    then (if hasCargoNix then "cargo-nix"
+          else if hasBuildSpec then "lockfile"
+          else "cargo-nix")
     else buildMode;
   _modeAssert =
     if effectiveMode == "lockfile" && !hasBuildSpec

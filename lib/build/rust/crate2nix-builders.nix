@@ -68,7 +68,12 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    useLockfileBuilder ? true,
+    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
+    # driven Cargo.nix path is the proven correct path for feature-
+    # gated optional deps. Lockfile-builder (gen-cargo) currently
+    # misses several classes of optional deps. Operators opt back into
+    # lockfile-builder explicitly when gen-cargo is fixed.
+    useLockfileBuilder ? false,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -91,7 +96,12 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    useLockfileBuilder ? true,
+    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
+    # driven Cargo.nix path is the proven correct path for feature-
+    # gated optional deps. Lockfile-builder (gen-cargo) currently
+    # misses several classes of optional deps. Operators opt back into
+    # lockfile-builder explicitly when gen-cargo is fixed.
+    useLockfileBuilder ? false,
   }: let
     projectArgs = {
       inherit pkgs;
@@ -302,7 +312,12 @@ in {
     # lockfile-builder (eliminates the Cargo.nix regeneration step).
     # Operators flip to false to fall back to the legacy
     # crate2nix-generated-Cargo.nix path.
-    useLockfileBuilder ? true,
+    # Default flipped to `false` 2026-05-27: crate2nix's cargo-metadata-
+    # driven Cargo.nix path is the proven correct path for feature-
+    # gated optional deps. Lockfile-builder (gen-cargo) currently
+    # misses several classes of optional deps. Operators opt back into
+    # lockfile-builder explicitly when gen-cargo is fixed.
+    useLockfileBuilder ? false,
   }: let
     resolvedImageName = if imageName != null then imageName else "${serviceName}-service";
     resolvedBinaryName = if binaryName != null then binaryName else serviceName;
