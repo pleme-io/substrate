@@ -99,7 +99,14 @@ let
     extraFor = crate:
       (if crate.proc_macro then { procMacro = true; } else {})
       // (if crate.build_script != null then { build = crate.build_script; } else {})
-      // (if crate.lib_target or null != null
+      # libName/libPath dispatch only for non-proc-macro crates.
+      # proc-macro crates have crate-type ["proc-macro", "rlib"] and
+      # buildRustCrate's proc-macro path expects to find the lib at
+      # the default src/lib.rs; explicit libName + libPath forces a
+      # proc-macro-only compile that rejects non-proc-macro fn items
+      # (e.g. tatara-lisp-derive's typed helpers re-exported alongside
+      # the macros).
+      // (if !crate.proc_macro && (crate.lib_target or null) != null
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
           else {});
 
