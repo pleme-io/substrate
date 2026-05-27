@@ -76,12 +76,25 @@ let
       (map (k: { name = k; value = true; }) spec.workspace_members);
     isWorkspaceMember = key: workspaceKeys ? ${key};
 
-    # Workspace members declare [[bin]]s explicitly; transitive deps
-    # leave buildRustCrate's auto-detection in place (passing
-    # `crateBin = []` would suppress library compilation for sys crates).
+    # Workspace members declare their [[bin]]s explicitly from the
+    # spec. Transitive deps get `crateBin = []` to SUPPRESS
+    # buildRustCrate's `src/bin/*.rs` auto-detection — those bin
+    # files (alloc-no-stdlib's `heap_alloc.rs`, brotli's `brotli.rs`,
+    # dotenvy's `dotenvy.rs`, etc.) typically require feature-gated
+    # deps (clap, --extern <crate>) that the substrate doesn't pass
+    # in, so the bin build fails even though every consumer only
+    # ever needs the lib. The explicit `crateBin = []` sets
+    # `hasCrateBin` in buildRustCrate, which short-circuits the
+    # auto-detection and still allows the lib to build normally.
+    # Per-crate overrides in `pleme-crate-overrides.nix` are no
+    # longer needed for the alloc-no-stdlib / brotli class of bug —
+    # the fix is uniform here.
     binsFor = key: crate:
       let bins = map (b: { inherit (b) name path; }) (crate.binaries or []);
-      in if isWorkspaceMember key && bins != [] then { crateBin = bins; } else {};
+      in
+        if isWorkspaceMember key
+        then (if bins != [] then { crateBin = bins; } else {})
+        else { crateBin = []; };
 
     extraFor = crate:
       (if crate.proc_macro then { procMacro = true; } else {})
