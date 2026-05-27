@@ -18,6 +18,16 @@ let
   check = import ../../types/assertions.nix;
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs; };
 
+  # Fleet-wide buildRustCrate quirks (rmcp env, brotli/alloc-no-stdlib
+  # auto-detected-bin suppression, future entries). Layered between
+  # nixpkgs' defaultCrateOverrides and each builder's consumer
+  # overrides so every crate2nix-pathed build (services, docker
+  # images, test images, standalone tools) automatically picks up
+  # the same quirks as the tool-release path. Without this layer the
+  # overrides only reached `rust-tool-release-flake.nix` consumers,
+  # leaving rust-service/docker consumers blind to fleet-wide fixes.
+  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
+
   # Common dispatch: when `useLockfileBuilder = true`, skip the
   # generated-Cargo.nix import and call lockfile-builder.mkProject
   # with the same projectArgs the crate2nix path would have used.
@@ -72,7 +82,7 @@ in {
   }: let
     projectArgs = {
       inherit pkgs;
-      defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+      defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // {
         ${serviceName} = oldAttrs: { inherit buildInputs nativeBuildInputs; };
       } // crateOverrides;
     } // (if rootFeatures == null then {} else { inherit rootFeatures; });
@@ -95,7 +105,7 @@ in {
   }: let
     projectArgs = {
       inherit pkgs;
-      defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+      defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // {
         ${toolName} = oldAttrs: { inherit buildInputs nativeBuildInputs; };
       } // crateOverrides;
     };
@@ -153,7 +163,7 @@ in {
       inherit pkgs;
       # Build with tests enabled - crate2nix's buildRustCrate supports this
       buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override {
-        defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+        defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // {
           # Add build inputs for crates that need them
           "${packageName}" = oldAttrs: {
             inherit buildInputs;
@@ -322,7 +332,7 @@ in {
 
     projectArgs = {
       inherit pkgs;
-      defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+      defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // {
         tonic-build = oldAttrs: {
           nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ [pkgs.protobuf];
         };
