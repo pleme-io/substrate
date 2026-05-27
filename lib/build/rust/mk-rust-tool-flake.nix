@@ -54,10 +54,24 @@ let
          else fromTOML (readFile (head match))
     else rootToml;
 
-  packageBlock = memberToml.package or (throw ''
+  rawPackageBlock = memberToml.package or (throw ''
     mkRustToolFlake: ${toString src}/Cargo.toml has no [package]. If this is
     a workspace, pass `packageName = "<member>"`.
   '');
+
+  # Cargo workspace inheritance: a member field can be `{ workspace = true; }`,
+  # meaning "look up `[workspace.package].<field>` in the workspace root".
+  # Resolve those at parse time so consumers see flat strings.
+  workspacePackage = rootToml.workspace.package or {};
+  resolveInherited = field: value:
+    if builtins.isAttrs value && value ? workspace && value.workspace == true
+    then workspacePackage.${field} or (throw ''
+      mkRustToolFlake: ${packageBlock.name or "<member>"}.${field} inherits from
+      [workspace.package] but ${toString src}/Cargo.toml has no
+      [workspace.package].${field}.
+    '')
+    else value;
+  packageBlock = builtins.mapAttrs resolveInherited rawPackageBlock;
 
   # bin name precedence: explicit toolName arg > first [[bin]].name > package.name
   binTable = if memberToml ? bin && builtins.length memberToml.bin > 0
