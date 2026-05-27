@@ -30,11 +30,12 @@
   # ring 0.17.x's build.rs asserts that `CARGO_MANIFEST_LINKS`
   # matches the `[package] links = "ring_core_X_Y_Z_"` declared in
   # its Cargo.toml. Cargo sets that env var from the manifest;
-  # buildRustCrate doesn't, so the build script panics with
-  # `assertion 'left == right' failed`. Surface the expected value
-  # explicitly here. The hardcoded value tracks ring's version —
-  # bump when ring bumps. Gen-side fix: emit `links` into the
-  # build-spec so lockfile-builder can set CARGO_MANIFEST_LINKS
-  # automatically.
-  ring = _: { CARGO_MANIFEST_LINKS = "ring_core_0_17_14_"; };
+  # buildRustCrate doesn't propagate it to the build script
+  # subprocess even when set at the drv level. `preBuild` runs in
+  # the same shell as buildCrate (same shape as the rmcp override
+  # above) so exporting there reaches the build script's env.
+  # Hardcoded value tracks ring's version — bump when ring bumps.
+  # Gen-side proper fix: emit `links` into the build-spec so
+  # lockfile-builder can wire CARGO_MANIFEST_LINKS automatically.
+  ring = _: { preBuild = ''export CARGO_MANIFEST_LINKS="ring_core_0_17_14_"''; };
 }
