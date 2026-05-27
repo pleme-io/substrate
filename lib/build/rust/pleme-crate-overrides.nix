@@ -95,6 +95,23 @@
     '';
   };
 
+  # openraft 0.9.24's src/metrics/wait.rs:231 uses `let got = ...collect();`
+  # without a type annotation. When rkyv lands in the same project's
+  # target/deps (e.g. via a workspace sibling crate's depgraph),
+  # rustc sees TWO `BTreeSet: PartialEq` impls (`alloc` + `rkyv`'s
+  # `ArchivedBTreeSet`) and rejects the inference. Patch the source to
+  # disambiguate explicitly — upstream openraft 0.9.x has no fix yet.
+  openraft = attrs: {
+    prePatch = (attrs.prePatch or "") + ''
+      if [ -f src/metrics/wait.rs ]; then
+        substituteInPlace src/metrics/wait.rs \
+          --replace-fail \
+          "let got = m.membership_config.membership().voter_ids().collect();" \
+          "let got: std::collections::BTreeSet<_> = m.membership_config.membership().voter_ids().collect();"
+      fi
+    '';
+  };
+
   # document-features 0.2.12 ships with `[lib] path = "lib.rs"` (no `src/`
   # prefix). buildRustCrate's auto-detection walks `src/lib.rs` only,
   # so when the consumer's Cargo.build-spec.json lacks a typed
