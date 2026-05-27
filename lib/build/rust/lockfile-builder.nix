@@ -70,10 +70,22 @@ let
           rev = spec.source.rev;
           sha256 = spec.source.sha256 or lib.fakeSha256;
         };
-        subdir = full + "/${spec.name}";
+        # Conventional workspace-member layouts we look for, in order.
+        # Adding a new layout = one entry here; the first hit wins.
+        # tatara/escriba ship members at `<root>/<name>` (flat); ishou
+        # ships them at `<root>/crates/<name>` (the "crates/" convention).
+        # Tier 3+ repos can opt in by following one of these conventions.
+        candidates = [
+          (full + "/${spec.name}")
+          (full + "/crates/${spec.name}")
+        ];
+        firstMatch = lib.findFirst
+          (p: builtins.pathExists (p + "/Cargo.toml"))
+          null
+          candidates;
       in
-        if builtins.pathExists (subdir + "/Cargo.toml")
-        then subdir
+        if firstMatch != null
+        then firstMatch
         else full
     else
       if spec.source.relative_path == "." || spec.source.relative_path == ""
