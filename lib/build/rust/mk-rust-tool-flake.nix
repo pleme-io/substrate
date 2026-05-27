@@ -1,82 +1,56 @@
 # mkRustToolFlake — zero-argument consumer flake for a Rust binary.
 #
 # Pure dispatch over `Cargo.build-spec.json` (gen-cargo's typed output).
-# Reads `spec.flake_metadata.<packageName>` for the tool name + repo
-# slug — no Cargo.toml parsing in Nix.
+# Reads `spec.flake_metadata.<member>` for tool name + repo slug — all
+# TOML parsing happens in Rust.
 #
-# Consumer flake collapses to:
+# Consumer flake:
 #
 #   {
 #     inputs.substrate.url = "github:pleme-io/substrate";
 #     outputs = i: i.substrate.mkRustToolFlake {
 #       inputs = i;
-#       src = ./.;                            # MUST be `./.`, not `i.self`
-#       packageName = "<workspace member>";   # only when workspace
+#       src = ./.;                           # MUST be `./.`, not `i.self`.
+#       member = "<workspace-member>";       # only when multi-member workspace.
 #     };
 #   }
 #
-# NOTE: `src` must be a literal source path (`./.`) — passing
-# `inputs.self` triggers a flake-outputs evaluation cycle because this
-# helper reads `Cargo.build-spec.json` from `src` at eval time. The
-# literal path resolves directly to the consumer's source tree without
-# going through the outputs attrset.
-#
-# Single-crate workspaces don't need `packageName` — the spec's
-# `root_crate` field identifies the only buildable. Per-consumer overrides
-# (crateOverrides, buildInputs, nativeBuildInputs) pass through verbatim.
+# `src = ./.` is required (not `inputs.self`) because we read the spec
+# at eval time and `self` triggers an outputs-attrset cycle.
 {
   inputs,
   src,
-  packageName ? null,    # required when the workspace has multiple members
-  toolName ? null,       # override autodetected default-bin
-  repo ? null,           # override autodetected owner/name
-  systems ? null,
-  module ? null,
+  member ? null,           # workspace member name (defaults to single member)
+  toolName ? null,         # override default_bin from spec
+  repo ? null,             # override repo from spec
   crateOverrides ? {},
   buildInputs ? [],
   nativeBuildInputs ? [],
-  buildMode ? "auto",
-  ...
-} @ args:
+  module ? null,           # optional HM/NixOS/Darwin module trio spec
+}:
 let
-  inherit (builtins) fromJSON readFile pathExists;
+  inherit (builtins) fromJSON readFile pathExists length;
 
-  specPath = src + "/Cargo.build-spec.json";
   spec =
-    if pathExists specPath
-    then fromJSON (readFile specPath)
-    else throw ''
-      mkRustToolFlake: ${toString src}/Cargo.build-spec.json is missing.
-      Run `gen build .` in the workspace root first.
-    '';
+    let path = src + "/Cargo.build-spec.json"; in
+    if pathExists path then fromJSON (readFile path)
+    else throw "mkRustToolFlake: ${toString src}/Cargo.build-spec.json missing — run `gen build .`";
 
-  # Pick the workspace member name. Single-member workspaces use the
-  # root_crate's name; multi-member ones require packageName.
-  rootKey = spec.root_crate;
-  rootCrateName = spec.crates.${rootKey}.name;
-  pickedName =
-    if packageName != null then packageName
-    else if builtins.length spec.workspace_members == 1 then rootCrateName
+  multiMember = length spec.workspace_members > 1;
+  pickedMember =
+    if member != null then member
+    else if !multiMember then spec.crates.${spec.root_crate}.name
     else throw ''
-      mkRustToolFlake: workspace has multiple members; pass `packageName = "<one of these>"`.
+      mkRustToolFlake: workspace has ${toString (length spec.workspace_members)} members; pass `member = "<one>"`.
       Members: ${builtins.concatStringsSep ", " (map (k: spec.crates.${k}.name) spec.workspace_members)}
     '';
 
-  meta = spec.flake_metadata.${pickedName} or (throw ''
-    mkRustToolFlake: spec has no flake_metadata for `${pickedName}`. Did you
-    regenerate the spec with gen ≥ v0.1.1?
-  '');
+  meta = spec.flake_metadata.${pickedMember}
+    or (throw "mkRustToolFlake: spec has no flake_metadata for `${pickedMember}` — regenerate at gen v2+.");
 
-  resolvedToolName =
-    if toolName != null then toolName
-    else meta.default_bin or pickedName;
-
-  resolvedRepo =
-    if repo != null then repo
-    else meta.repo or (throw ''
-      mkRustToolFlake: spec has no repo for `${pickedName}`. Pass `repo = "owner/name"`
-      or add `repository = "https://github.com/owner/name"` to the member's Cargo.toml.
-    '');
+  resolvedToolName = if toolName != null then toolName else (meta.default_bin or pickedMember);
+  resolvedRepo = if repo != null then repo
+    else meta.repo or (throw "mkRustToolFlake: no repo for `${pickedMember}` — pass `repo` or set [package].repository.");
 
   toolFlake = import ./tool-release-flake.nix {
     inherit (inputs) nixpkgs crate2nix flake-utils;
@@ -84,23 +58,13 @@ let
     devenv = inputs.devenv or null;
     forge = inputs.forge or null;
   };
-
-  passthrough = builtins.removeAttrs args [
-    "inputs" "src" "packageName" "toolName" "repo" "systems" "module"
-    "crateOverrides" "buildInputs" "nativeBuildInputs" "buildMode"
-  ];
-
-  baseArgs = {
+in toolFlake (
+  {
     toolName = resolvedToolName;
     inherit src;
     repo = resolvedRepo;
-    inherit crateOverrides buildInputs nativeBuildInputs buildMode;
+    inherit crateOverrides buildInputs nativeBuildInputs;
   }
-  // (if builtins.length spec.workspace_members > 1
-      then { packageName = pickedName; }
-      else {})
-  // (if systems != null then { inherit systems; } else {})
+  // (if multiMember then { packageName = pickedMember; } else {})
   // (if module != null then { inherit module; } else {})
-  // passthrough;
-in
-  toolFlake baseArgs
+)

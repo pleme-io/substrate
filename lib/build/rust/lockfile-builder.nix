@@ -1,43 +1,30 @@
-# Lockfile-native Rust builder — pure-Nix orchestrator over the typed
-# Cargo.build-spec.json that `gen lock-build` produces.
+# Pure-dispatch Rust builder over gen's typed Cargo.build-spec.json.
 #
-# ARCHITECTURAL CONTRACT — deeply and consistently algorithmic:
+# Rust (gen-cargo) does the parsing + sha256 prefetch + URL
+# normalization + workspace inheritance. This file is the Nix
+# composition layer: tagged-enum source dispatch, lazy mapAttrs over
+# the dep graph, attrset assembly. No string munging, no regex, no
+# fromTOML, no override-as-data decoding.
 #
-#   Rust (gen-cargo) owns ALL semantics — parsing, cargo metadata,
-#   feature resolution, target/cfg evaluation (via cargo's
-#   --filter-platform), rename synthesis, source URL + sha256
-#   resolution, dep-split into runtime/build buckets. The Cargo.build-
-#   spec.json schema delivers EVERY field substrate's buildRustCrate
-#   call needs in its final shape — no Nix-side derivation.
-#
-#   Nix (this file) is PURE DISPATCH — one fromJSON read, per-crate
-#   buildRustCrate call, memoized dep-graph walk, attrset assembly.
-#   Zero parsing, zero filtering, zero shape transformation, zero
-#   semantic decisions. New format quirks land in the Rust side; this
-#   file is invariant.
-#
-# Returns the same project-attrset shape crate2nix produces
-# (`{ rootCrate, workspaceMembers, allWorkspaceMembers, crates }`).
-# Operators run `gen lock-build` (or `gen build`) whenever Cargo.lock
-# changes; the JSON sidecar is committed alongside Cargo.lock.
+# Override composition: callers compose `defaultCrateOverrides` upstream
+# (nixpkgs defaults + plemeCrateOverrides + user overrides) and pass the
+# merged attrset in. Single composition channel — same shape nixpkgs
+# uses everywhere.
 { pkgs, lib ? pkgs.lib }:
 
 let
-  inherit (builtins) readFile fromJSON pathExists map elemAt;
-
-  # ── Spec loading ────────────────────────────────────────────────
+  inherit (builtins) fromJSON readFile pathExists map;
 
   loadBuildSpec = src:
-    let path = src + "/Cargo.build-spec.json";
-    in if pathExists path
-       then fromJSON (readFile path)
-       else throw ''
-         lockfile-builder: ${toString src}/Cargo.build-spec.json not found.
-         Run `gen build .` in the workspace root to produce it.
-       '';
+    let path = src + "/Cargo.build-spec.json"; in
+    if pathExists path
+    then fromJSON (readFile path)
+    else throw ''
+      lockfile-builder: ${toString src}/Cargo.build-spec.json not found.
+      Run `gen build .` in the workspace root to produce it.
+    '';
 
-  # ── Source resolution (one-line dispatch per kind) ─────────────
-
+  # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen.
   srcOf = workspaceSrc: spec:
     if spec.source.kind == "registry" then
       pkgs.fetchurl {
@@ -46,128 +33,69 @@ let
         name = spec.source.name_with_ext;
       }
     else if spec.source.kind == "git" then
-      # URL already cleaned by gen-cargo (no `?branch=...` suffix).
       pkgs.fetchgit {
         url = spec.source.url;
         rev = spec.source.rev;
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
     else
-      # Pass the source through unfiltered. `.nix` files can be legitimate
-      # source assets (e.g. gen-nix bundles crate2nix-internal-helpers.nix
-      # via include_str!) — filtering them globally breaks the build. Top-
-      # level flake.nix is harmless to buildRustCrate since it only looks
-      # at src/ and the manifest.
       if spec.source.relative_path == "." || spec.source.relative_path == ""
       then workspaceSrc
       else workspaceSrc + "/${spec.source.relative_path}";
 
-  # ── Top-level entrypoint ───────────────────────────────────────
-
   mkProject = {
     src,
-    name ? null,
     defaultCrateOverrides ? pkgs.defaultCrateOverrides,
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
   }: let
-      spec = loadBuildSpec src;
-      buildRustCrate = buildRustCrateForPkgs pkgs;
+    spec = loadBuildSpec src;
+    buildRustCrate = buildRustCrateForPkgs pkgs;
 
-      # Workspace members get their declared bins; transitive deps
-      # get crateBin=[] to suppress auto-discovery of broken
-      # example/test bins under src/bin/ (e.g. alloc-no-stdlib's
-      # heap_alloc.rs which uses #![no_std] + no main).
-      memberKeys = builtins.listToAttrs
-        (map (k: { name = k; value = true; }) spec.workspace_members);
-      isWorkspaceMember = key: memberKeys ? ${key};
+    workspaceKeys = builtins.listToAttrs
+      (map (k: { name = k; value = true; }) spec.workspace_members);
+    isWorkspaceMember = key: workspaceKeys ? ${key};
 
-      # MEMOIZED per-crate-key build via attrset materialization.
-      #
-      # PRIOR BUG: `buildByKey = key: let ... in buildRustCrate ...;`
-      # is a function — each invocation re-evaluates. With high dep
-      # re-use (serde depended on by 50 crates → buildByKey "serde"
-      # computed 50 times → each of those triggers serde's own deps
-      # recursively → exponential).
-      #
-      # FIX: build an attrset once via mapAttrs over spec.crates. Each
-      # value is a thunk computed lazily ONCE; subsequent reads hit
-      # the cached value. O(N) eval cost across the entire graph.
-      # Per-crate overrides emitted by gen as DATA in spec.crate_overrides.
-      # Today: { rmcp = { pre_build = "export CARGO_CRATE_NAME=rmcp"; }; }.
-      # Pure-dispatch translation to buildRustCrate's override-attr shape.
-      specOverrides = spec.crate_overrides or {};
-      specOverrideFor = name:
-        let entry = specOverrides.${name} or null;
-        in if entry == null then (oldAttrs: oldAttrs)
-           else oldAttrs:
-             {}
-             // (if entry ? pre_build && entry.pre_build != null
-                 then { preBuild = (oldAttrs.preBuild or "") + entry.pre_build; }
-                 else {});
+    # Workspace members declare [[bin]]s explicitly; transitive deps
+    # leave buildRustCrate's auto-detection in place (passing
+    # `crateBin = []` would suppress library compilation for sys crates).
+    binsFor = key: crate:
+      let bins = map (b: { inherit (b) name path; }) (crate.binaries or []);
+      in if isWorkspaceMember key && bins != [] then { crateBin = bins; } else {};
 
-      built = lib.mapAttrs (key: crate: let
-          deps = map (d: built.${d.package_key}) crate.runtime_dependencies;
-          buildDeps = map (d: built.${d.package_key}) crate.build_dependencies;
-          binList =
-            if isWorkspaceMember key
-            then map (b: { name = b.name; path = b.path; }) (crate.binaries or [])
-            else [];
-          baseArgs = {
-            crateName = crate.name;
-            version = crate.version;
-            edition = crate.edition;
-            src = srcOf src crate;
-            features = crate.features;
-            crateRenames = crate.crate_renames;
-            dependencies = deps;
-            buildDependencies = buildDeps;
-            crateBin = binList;
-            release = true;
-          }
-          // (if crate.proc_macro then { procMacro = true; } else {})
-          // (if crate.build_script != null then { build = crate.build_script; } else {});
-          fleetOverrideFn = specOverrideFor crate.name;
-          consumerOverrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
-          # Apply fleet override first (data from spec), consumer override
-          # second (user-supplied via defaultCrateOverrides arg) so
-          # consumers always win on conflict.
-          composedArgs = let
-            withFleet = baseArgs // fleetOverrideFn baseArgs;
-          in withFleet // consumerOverrideFn withFleet;
-        in buildRustCrate composedArgs
-      ) spec.crates;
+    extraFor = crate:
+      (if crate.proc_macro then { procMacro = true; } else {})
+      // (if crate.build_script != null then { build = crate.build_script; } else {});
 
-      buildByKey = key: built.${key} or (throw ''
-        lockfile-builder: crate key `${key}` not in Cargo.build-spec.json
-      '');
+    overrideFor = name: defaultCrateOverrides.${name} or (oldAttrs: oldAttrs);
 
-      workspaceMembers = builtins.listToAttrs (map (key:
-        let c = spec.crates.${key}; in {
-          name = c.name;
-          value = {
-            packageId = c.name;
-            build = buildByKey key;
-            debug = buildByKey key;
-          };
-        }
-      ) spec.workspace_members);
+    # Lazy memoization: each thunk is computed once via mapAttrs.
+    built = lib.mapAttrs (key: crate: let
+      args = {
+        crateName = crate.name;
+        version = crate.version;
+        edition = crate.edition;
+        src = srcOf src crate;
+        features = crate.features;
+        crateRenames = crate.crate_renames;
+        dependencies = map (d: built.${d.package_key}) crate.runtime_dependencies;
+        buildDependencies = map (d: built.${d.package_key}) crate.build_dependencies;
+        release = true;
+      } // binsFor key crate // extraFor crate;
+    in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
 
-      rootKey = spec.root_crate or (elemAt spec.workspace_members 0);
-      rootName = (spec.crates.${rootKey}).name;
-      rootCrate = {
-        packageId = rootName;
-        build = buildByKey rootKey;
-        debug = buildByKey rootKey;
-      };
-    in {
-      inherit rootCrate workspaceMembers;
-      crates = spec.crates;
-      allWorkspaceMembers = pkgs.symlinkJoin {
-        name = "all-workspace-members";
-        paths = map (m: m.build) (builtins.attrValues workspaceMembers);
-      };
+    memberRecord = key: let c = spec.crates.${key}; in {
+      name = c.name;
+      value = { packageId = c.name; build = built.${key}; debug = built.${key}; };
     };
-
+  in {
+    rootCrate = { packageId = spec.crates.${spec.root_crate}.name; build = built.${spec.root_crate}; debug = built.${spec.root_crate}; };
+    workspaceMembers = builtins.listToAttrs (map memberRecord spec.workspace_members);
+    crates = spec.crates;
+    allWorkspaceMembers = pkgs.symlinkJoin {
+      name = "all-workspace-members";
+      paths = map (k: built.${k}) spec.workspace_members;
+    };
+  };
 in {
   inherit mkProject loadBuildSpec;
 }

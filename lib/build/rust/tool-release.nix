@@ -144,12 +144,10 @@ let
   # ============================================================================
   # BINARY BUILDER
   # ============================================================================
+  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
   mkBinary = _targetName: targetInfo: let
     targetPkgs = targetInfo.pkgs;
-    # rmcp's CARGO_CRATE_NAME quirk now flows through the spec via
-    # `spec.crate_overrides.rmcp.pre_build` (lockfile-builder applies it).
-    # This file only carries the consumer-facing user/target shape.
-    consumerOverrides = targetPkgs.defaultCrateOverrides // {
+    consumerOverrides = targetPkgs.defaultCrateOverrides // plemeCrateOverrides // {
       ${crateKey} = attrs: {
         buildInputs = (attrs.buildInputs or [])
           ++ buildInputs
