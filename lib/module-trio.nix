@@ -211,7 +211,15 @@ in
       shikumiEnvVar     = spec.shikumiEnvVar     or
                           (lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] name) + "_CONFIG");
 
-      extraHmOptions     = spec.extraHmOptions     or {};
+      # `extraHmOptions` accepts EITHER a plain attrset OR a function
+      # `lib: { ... }`. Function-form lets consumers use raw
+      # `lib.mkOption` / `lib.types.*` without having to declare
+      # nixpkgs as a flake input — substrate threads `lib` in
+      # transparently. Plain-attrset form stays supported for
+      # consumers that prefer pure data.
+      extraHmOptions     =
+        let raw = spec.extraHmOptions or {};
+        in if builtins.isFunction raw then raw lib else raw;
       extraSystemOptions = spec.extraSystemOptions or {};
       extraHmConfig      = spec.extraHmConfig      or (_: {});
       extraHmConfigFn    = spec.extraHmConfigFn    or (_: {});
@@ -249,6 +257,7 @@ in
             else if field.type == "nullOrInt"    then types.nullOr types.int
             else if field.type == "nullOrBool"   then types.nullOr types.bool
             else if field.type == "nullOrPath"   then types.nullOr types.path
+            else if field.type == "nullOrFloat"  then types.nullOr types.float
             else if field.type == "listOfStr"    then types.listOf types.str
             else if field.type == "listOfInt"    then types.listOf types.int
             else if field.type == "listOfBool"   then types.listOf types.bool
@@ -259,6 +268,9 @@ in
             else if field.type == "attrs"        then types.attrs
             else if field.type == "intRange"     then
               types.ints.between (field.min or 0) (field.max or 65535)
+            else if field.type == "enum"         then
+              # `field.values = [ "a" "b" ... ]` for enum-of-strings.
+              types.enum (field.values or (throw "module-trio: enum needs `values`."))
             else throw "module-trio: unknown shikumiTypedGroup field type '${field.type}' — see the type-alias dictionary in module-trio.nix's resolveFieldType, or pass field.type as a raw types.* expression."
           else field.type
         else types.unspecified;
