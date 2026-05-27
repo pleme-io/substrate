@@ -16,21 +16,25 @@
   # there reaches rustc.
   rmcp = _: { preBuild = "export CARGO_CRATE_NAME=rmcp"; };
 
-  # alloc-no-stdlib ships an example binary `src/bin/heap_alloc.rs`
-  # whose `use alloc_no_stdlib;` / `use core;` only resolve when the
-  # crate is built with `cargo build --example heap_alloc` (which
-  # supplies the `--extern alloc_no_stdlib=…` link), not via
-  # buildRustCrate's binary auto-discovery. Suppress the bin —
-  # consumers only ever pull the library.
-  alloc-no-stdlib = _: { crateBin = []; };
+  # alloc-no-stdlib / alloc-stdlib / brotli / brotli-decompressor
+  # all ship example/CLI binaries under `src/bin/*.rs`. Previously
+  # each was hand-listed here with `crateBin = []`. As of substrate
+  # rev 2843381 the lockfile-builder suppresses bin auto-detection
+  # for ALL transitive deps uniformly, making these entries
+  # redundant. Kept commented as documentation of the bug class.
+  # alloc-no-stdlib = _: { crateBin = []; };
+  # alloc-stdlib = _: { crateBin = []; };
+  # brotli = _: { crateBin = []; };
+  # brotli-decompressor = _: { crateBin = []; };
 
-  # alloc-stdlib has the same shape — `src/bin/integration.rs`
-  # depends on the lib being externally linked. Suppress the bin.
-  alloc-stdlib = _: { crateBin = []; };
-
-  # brotli + brotli-decompressor ship CLI binaries (`src/bin/brotli.rs`,
-  # `src/bin/decompress.rs`) under the same auto-discovery footgun.
-  # Consumers always pull the lib (datafusion / parquet / shinryu-mcp).
-  brotli = _: { crateBin = []; };
-  brotli-decompressor = _: { crateBin = []; };
+  # ring 0.17.x's build.rs asserts that `CARGO_MANIFEST_LINKS`
+  # matches the `[package] links = "ring_core_X_Y_Z_"` declared in
+  # its Cargo.toml. Cargo sets that env var from the manifest;
+  # buildRustCrate doesn't, so the build script panics with
+  # `assertion 'left == right' failed`. Surface the expected value
+  # explicitly here. The hardcoded value tracks ring's version —
+  # bump when ring bumps. Gen-side fix: emit `links` into the
+  # build-spec so lockfile-builder can set CARGO_MANIFEST_LINKS
+  # automatically.
+  ring = _: { CARGO_MANIFEST_LINKS = "ring_core_0_17_14_"; };
 }
