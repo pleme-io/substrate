@@ -47,7 +47,9 @@ let
       }
     else if spec.source.kind == "git" then
       pkgs.fetchgit {
-        url = spec.source.url;
+        # Strip cargo's `?branch=...` / `?tag=...` / `?rev=...` suffix
+        # — fetchgit treats URL literally; the `?` form isn't valid git.
+        url = lib.head (lib.splitString "?" spec.source.url);
         rev = spec.source.rev;
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
