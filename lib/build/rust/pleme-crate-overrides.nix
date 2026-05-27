@@ -94,4 +94,18 @@
       fi
     '';
   };
+
+  # mime_guess 2.0.x's build.rs does `extern crate unicase;` — unicase is a
+  # *build-dependency*. Same nested-build-dep drop as clang-sys above: when
+  # mime_guess is pulled as a transitive build-dep (e.g. via pleme-tend, fumi),
+  # buildRustCrate leaves its buildDeps empty, so the build script can't find
+  # the crates.io `unicase` and rustc loads the unstable copy from the toolchain
+  # sysroot instead → error[E0658] (rustc_private / loaded-from-sysroot). Fold
+  # the crate's normal deps (which include the built unicase) into
+  # buildDependencies so it lands in target/buildDeps for `-L` discovery. The
+  # build.rs already has `extern crate unicase;`, so no prePatch is needed.
+  mime_guess = attrs: {
+    buildDependencies = (attrs.buildDependencies or [])
+      ++ (attrs.dependencies or []);
+  };
 }
