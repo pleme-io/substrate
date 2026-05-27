@@ -68,4 +68,25 @@
   wgpu-types = _: {
     extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
   };
+
+  # clang-sys 1.8.x's build script (build/static.rs, build/common.rs) imports
+  # `glob` via 2021-edition `use glob::…` — no `extern crate`. glob is a
+  # *build-dependency*. nixpkgs' buildRustCrate compiles build scripts with
+  # only `-L dependency=target/buildDeps` (no `--extern`), and drops the
+  # nested build-dep entirely when clang-sys is itself pulled as a build-dep
+  # (via coreaudio-sys → bindgen), leaving buildDeps empty → error[E0432]
+  # unresolved import `glob`. (Surfaced fleet-wide by the nixpkgs bump; hits
+  # hibiki + any bindgen consumer.) Fix: fold the crate's normal deps (which
+  # include the already-built glob) into buildDependencies so glob lands in
+  # target/buildDeps, and inject `extern crate glob;` so `-L` discovery
+  # resolves the `use` under edition 2021.
+  clang-sys = attrs: {
+    buildDependencies = (attrs.buildDependencies or [])
+      ++ (attrs.dependencies or []);
+    prePatch = (attrs.prePatch or "") + ''
+      if [ -f build.rs ] && ! grep -q 'extern crate glob;' build.rs; then
+        sed -i '1i extern crate glob;' build.rs
+      fi
+    '';
+  };
 }
