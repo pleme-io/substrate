@@ -54,12 +54,14 @@ let
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
     else
-      lib.cleanSourceWith {
-        src = if spec.source.relative_path == "." || spec.source.relative_path == ""
-              then workspaceSrc
-              else workspaceSrc + "/${spec.source.relative_path}";
-        filter = path: type: !(lib.hasSuffix ".nix" path);
-      };
+      # Pass the source through unfiltered. `.nix` files can be legitimate
+      # source assets (e.g. gen-nix bundles crate2nix-internal-helpers.nix
+      # via include_str!) — filtering them globally breaks the build. Top-
+      # level flake.nix is harmless to buildRustCrate since it only looks
+      # at src/ and the manifest.
+      if spec.source.relative_path == "." || spec.source.relative_path == ""
+      then workspaceSrc
+      else workspaceSrc + "/${spec.source.relative_path}";
 
   # ── Top-level entrypoint ───────────────────────────────────────
 
