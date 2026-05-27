@@ -323,6 +323,10 @@ in rec {
   # pkgs.<name>. Compound over mkRustTool. Distinct from `mkRustOverlay`
   # below (fenix toolchain overlay).
   mkRustToolOverlay = import ./build/rust/mk-rust-overlay.nix;
+  # Zero-argument flake factory. Consumer flake collapses to:
+  #   outputs = i: i.substrate.lib.mkRustToolFlake { src = i.self; inputs = i; };
+  # Derives toolName + repo + (optionally) packageName from Cargo.toml.
+  mkRustToolFlake = import ./build/rust/mk-rust-tool-flake.nix;
   # Direct access to the lockfile-builder primitive for advanced uses.
   lockfileBuilder = import ./build/rust/lockfile-builder.nix { inherit pkgs; };
   # Nix-side invariant check — mirrors gen-cargo's invariants module.

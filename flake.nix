@@ -86,6 +86,12 @@
         rustLibraryFlakeBuilder = ./lib/build/rust/library-flake.nix;
         zigToolReleaseFlakeBuilder = ./lib/build/zig/tool-release-flake.nix;
 
+        # Zero-argument Rust-tool flake factory. Reads the consumer's
+        # Cargo.toml to derive toolName + repo + packageName. Consumer
+        # flake collapses to:
+        #   outputs = i: i.substrate.mkRustToolFlake { src = i.self; inputs = i; };
+        mkRustToolFlake = import ./lib/build/rust/mk-rust-tool-flake.nix;
+
         # Rust overlay module for direct import
         rustOverlay = ./lib/build/rust/overlay.nix;
 
