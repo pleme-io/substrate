@@ -146,14 +146,10 @@ let
   # ============================================================================
   mkBinary = _targetName: targetInfo: let
     targetPkgs = targetInfo.pkgs;
-    # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time
-    # (src/model.rs:860). Cargo sets this per-crate but nixpkgs'
-    # buildRustCrate only exports the CARGO_PKG_* / CARGO_CFG_* /
-    # CARGO_MANIFEST_* families — a top-level attr does not reach
-    # the rustc child, so inject via preBuild which runs in the
-    # same shell as buildCrate.
+    # rmcp's CARGO_CRATE_NAME quirk now flows through the spec via
+    # `spec.crate_overrides.rmcp.pre_build` (lockfile-builder applies it).
+    # This file only carries the consumer-facing user/target shape.
     consumerOverrides = targetPkgs.defaultCrateOverrides // {
-      rmcp = _: { preBuild = "export CARGO_CRATE_NAME=rmcp"; };
       ${crateKey} = attrs: {
         buildInputs = (attrs.buildInputs or [])
           ++ buildInputs

@@ -1,28 +1,29 @@
 # mkRustToolFlake — zero-argument consumer flake for a Rust binary.
 #
-# Derives `toolName`, `packageName`, and `repo` from the source's
-# Cargo.toml. The whole consumer flake collapses to:
+# Pure dispatch over `Cargo.build-spec.json` (gen-cargo's typed output).
+# Reads `spec.flake_metadata.<packageName>` for the tool name + repo
+# slug — no Cargo.toml parsing in Nix.
+#
+# Consumer flake collapses to:
 #
 #   {
 #     inputs.substrate.url = "github:pleme-io/substrate";
-#     inputs.nixpkgs.follows = "substrate/nixpkgs";
-#     inputs.flake-utils.follows = "substrate/flake-utils";
-#     inputs.crate2nix.follows = "substrate/crate2nix";
-#     outputs = i: i.substrate.lib.mkRustToolFlake { src = i.self; inputs = i; };
+#     outputs = i: i.substrate.mkRustToolFlake {
+#       inherit (i) self;
+#       inputs = i;
+#       packageName = "<workspace member>";   # only when workspace
+#     };
 #   }
 #
-# When the top-level Cargo.toml is a workspace, pass `packageName` to pick
-# the member; the bin name comes from that member's [[bin]] (or
-# [package].name fallback).
-#
-# Per-consumer overrides (crateOverrides, buildInputs, nativeBuildInputs)
-# pass through verbatim to rust-tool-release-flake.
+# Single-crate workspaces don't need `packageName` — the spec's
+# `root_crate` field identifies the only buildable. Per-consumer overrides
+# (crateOverrides, buildInputs, nativeBuildInputs) pass through verbatim.
 {
-  inputs,                # the consumer flake's inputs attrset (needs nixpkgs / crate2nix / flake-utils / substrate)
+  inputs,
   src,
-  packageName ? null,    # nullable; if the workspace has one bin we infer it
-  toolName ? null,       # override autodetected bin name
-  repo ? null,           # override autodetected repository
+  packageName ? null,    # required when the workspace has multiple members
+  toolName ? null,       # override autodetected default-bin
+  repo ? null,           # override autodetected owner/name
   systems ? null,
   module ? null,
   crateOverrides ? {},
@@ -32,84 +33,44 @@
   ...
 } @ args:
 let
-  inherit (builtins) fromTOML readFile pathExists head;
+  inherit (builtins) fromJSON readFile pathExists;
 
-  rootToml = fromTOML (readFile (src + "/Cargo.toml"));
+  specPath = src + "/Cargo.build-spec.json";
+  spec =
+    if pathExists specPath
+    then fromJSON (readFile specPath)
+    else throw ''
+      mkRustToolFlake: ${toString src}/Cargo.build-spec.json is missing.
+      Run `gen build .` in the workspace root first.
+    '';
 
-  # Resolve workspace + package toml. Workspace consumers expose `[workspace]`;
-  # single-crate consumers expose `[package]` directly.
-  isWorkspace = rootToml ? workspace;
+  # Pick the workspace member name. Single-member workspaces use the
+  # root_crate's name; multi-member ones require packageName.
+  rootKey = spec.root_crate;
+  rootCrateName = spec.crates.${rootKey}.name;
+  pickedName =
+    if packageName != null then packageName
+    else if builtins.length spec.workspace_members == 1 then rootCrateName
+    else throw ''
+      mkRustToolFlake: workspace has multiple members; pass `packageName = "<one of these>"`.
+      Members: ${builtins.concatStringsSep ", " (map (k: spec.crates.${k}.name) spec.workspace_members)}
+    '';
 
-  # Pick member toml when a workspace + a packageName were given.
-  memberToml =
-    if isWorkspace && packageName != null
-    then
-      let
-        candidatePaths = map (m: src + "/${m}/Cargo.toml") (rootToml.workspace.members or []);
-        match = builtins.filter (p:
-          pathExists p && (fromTOML (readFile p)).package.name == packageName
-        ) candidatePaths;
-      in if match == []
-         then throw "mkRustToolFlake: packageName `${packageName}` not in workspace members."
-         else fromTOML (readFile (head match))
-    else rootToml;
-
-  rawPackageBlock = memberToml.package or (throw ''
-    mkRustToolFlake: ${toString src}/Cargo.toml has no [package]. If this is
-    a workspace, pass `packageName = "<member>"`.
+  meta = spec.flake_metadata.${pickedName} or (throw ''
+    mkRustToolFlake: spec has no flake_metadata for `${pickedName}`. Did you
+    regenerate the spec with gen ≥ v0.1.1?
   '');
 
-  # Cargo workspace inheritance: a member field can be `{ workspace = true; }`,
-  # meaning "look up `[workspace.package].<field>` in the workspace root".
-  # Resolve those at parse time so consumers see flat strings.
-  workspacePackage = rootToml.workspace.package or {};
-  resolveInherited = field: value:
-    if builtins.isAttrs value && value ? workspace && value.workspace == true
-    then workspacePackage.${field} or (throw ''
-      mkRustToolFlake: ${packageBlock.name or "<member>"}.${field} inherits from
-      [workspace.package] but ${toString src}/Cargo.toml has no
-      [workspace.package].${field}.
-    '')
-    else value;
-  packageBlock = builtins.mapAttrs resolveInherited rawPackageBlock;
-
-  # bin name precedence: explicit toolName arg > first [[bin]].name > package.name
-  binTable = if memberToml ? bin && builtins.length memberToml.bin > 0
-             then head memberToml.bin
-             else null;
   resolvedToolName =
     if toolName != null then toolName
-    else if binTable != null && binTable ? name then binTable.name
-    else packageBlock.name;
+    else meta.default_bin or pickedName;
 
-  resolvedPackageName =
-    if packageName != null then packageName
-    else packageBlock.name;
-
-  # repo: explicit arg > [package].repository ('https://github.com/owner/name[.git]') > throw
-  parseRepoUrl = url:
-    let
-      stripped = lib.removeSuffix ".git" url;
-      parts = lib.splitString "/" stripped;
-      len = builtins.length parts;
-    in
-      if len < 2
-      then throw "mkRustToolFlake: cannot parse `${url}` into owner/repo."
-      else
-        let
-          owner = builtins.elemAt parts (len - 2);
-          name = builtins.elemAt parts (len - 1);
-        in "${owner}/${name}";
-
-  lib = inputs.substrate.inputs.nixpkgs.lib or inputs.nixpkgs.lib;
   resolvedRepo =
     if repo != null then repo
-    else if packageBlock ? repository
-    then parseRepoUrl packageBlock.repository
-    else throw ''
-      mkRustToolFlake: pass `repo = "owner/name"` or set
-      [package].repository in ${toString src}/Cargo.toml.
-    '';
+    else meta.repo or (throw ''
+      mkRustToolFlake: spec has no repo for `${pickedName}`. Pass `repo = "owner/name"`
+      or add `repository = "https://github.com/owner/name"` to the member's Cargo.toml.
+    '');
 
   toolFlake = import ./tool-release-flake.nix {
     inherit (inputs) nixpkgs crate2nix flake-utils;
@@ -129,8 +90,8 @@ let
     repo = resolvedRepo;
     inherit crateOverrides buildInputs nativeBuildInputs buildMode;
   }
-  // (if packageName != null || isWorkspace
-      then { packageName = resolvedPackageName; }
+  // (if builtins.length spec.workspace_members > 1
+      then { packageName = pickedName; }
       else {})
   // (if systems != null then { inherit systems; } else {})
   // (if module != null then { inherit module; } else {})

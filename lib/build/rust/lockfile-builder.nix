@@ -46,10 +46,9 @@ let
         name = spec.source.name_with_ext;
       }
     else if spec.source.kind == "git" then
+      # URL already cleaned by gen-cargo (no `?branch=...` suffix).
       pkgs.fetchgit {
-        # Strip cargo's `?branch=...` / `?tag=...` / `?rev=...` suffix
-        # — fetchgit treats URL literally; the `?` form isn't valid git.
-        url = lib.head (lib.splitString "?" spec.source.url);
+        url = spec.source.url;
         rev = spec.source.rev;
         sha256 = spec.source.sha256 or lib.fakeSha256;
       }
@@ -93,6 +92,19 @@ let
       # FIX: build an attrset once via mapAttrs over spec.crates. Each
       # value is a thunk computed lazily ONCE; subsequent reads hit
       # the cached value. O(N) eval cost across the entire graph.
+      # Per-crate overrides emitted by gen as DATA in spec.crate_overrides.
+      # Today: { rmcp = { pre_build = "export CARGO_CRATE_NAME=rmcp"; }; }.
+      # Pure-dispatch translation to buildRustCrate's override-attr shape.
+      specOverrides = spec.crate_overrides or {};
+      specOverrideFor = name:
+        let entry = specOverrides.${name} or null;
+        in if entry == null then (oldAttrs: oldAttrs)
+           else oldAttrs:
+             {}
+             // (if entry ? pre_build && entry.pre_build != null
+                 then { preBuild = (oldAttrs.preBuild or "") + entry.pre_build; }
+                 else {});
+
       built = lib.mapAttrs (key: crate: let
           deps = map (d: built.${d.package_key}) crate.runtime_dependencies;
           buildDeps = map (d: built.${d.package_key}) crate.build_dependencies;
@@ -114,8 +126,15 @@ let
           }
           // (if crate.proc_macro then { procMacro = true; } else {})
           // (if crate.build_script != null then { build = crate.build_script; } else {});
-          overrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
-        in buildRustCrate (baseArgs // overrideFn baseArgs)
+          fleetOverrideFn = specOverrideFor crate.name;
+          consumerOverrideFn = defaultCrateOverrides.${crate.name} or (oldAttrs: oldAttrs);
+          # Apply fleet override first (data from spec), consumer override
+          # second (user-supplied via defaultCrateOverrides arg) so
+          # consumers always win on conflict.
+          composedArgs = let
+            withFleet = baseArgs // fleetOverrideFn baseArgs;
+          in withFleet // consumerOverrideFn withFleet;
+        in buildRustCrate composedArgs
       ) spec.crates;
 
       buildByKey = key: built.${key} or (throw ''
