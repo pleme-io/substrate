@@ -59,4 +59,13 @@
   wgpu-hal = _: {
     extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
   };
+  wgpu-core = _: {
+    extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
+  };
+  wgpu = _: {
+    extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
+  };
+  wgpu-types = _: {
+    extraRustcOpts = [ "--cfg" "supports_64bit_atomics" ];
+  };
 }
