@@ -84,8 +84,13 @@
     buildDependencies = (attrs.buildDependencies or [])
       ++ (attrs.dependencies or []);
     prePatch = (attrs.prePatch or "") + ''
+      # Append (not prepend): build.rs opens with `//!` inner docs +
+      # `#![allow(...)]` inner attrs, which must precede all items, so a
+      # leading `extern crate` triggers E0753. `extern crate` is a crate-root
+      # item whose position is irrelevant to name resolution — appending is
+      # safe and brings glob into scope for the build/*.rs submodules.
       if [ -f build.rs ] && ! grep -q 'extern crate glob;' build.rs; then
-        sed -i '1i extern crate glob;' build.rs
+        printf '\nextern crate glob;\n' >> build.rs
       fi
     '';
   };
