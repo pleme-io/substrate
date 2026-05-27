@@ -64,7 +64,10 @@ let
 
     extraFor = crate:
       (if crate.proc_macro then { procMacro = true; } else {})
-      // (if crate.build_script != null then { build = crate.build_script; } else {});
+      // (if crate.build_script != null then { build = crate.build_script; } else {})
+      // (if crate.lib_target or null != null
+          then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
+          else {});
 
     overrideFor = name: defaultCrateOverrides.${name} or (oldAttrs: oldAttrs);
 
