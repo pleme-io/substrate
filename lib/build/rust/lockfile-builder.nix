@@ -43,6 +43,22 @@ let
     let m = builtins.match "([^?]+)\\?.*" url; in
     if m == null then url else builtins.head m;
 
+  # Registry URL canonicalization. Old gen versions (< 70774a2) emitted
+  # `https://crates.io/api/v1/crates/<name>/<ver>/download`, which is
+  # the redirect entrypoint. crates.io has started serving HTTP 403 on
+  # that URL for any request without a `User-Agent` header — and
+  # nixpkgs' fetchurl invokes curl without one by default. Rewrite to
+  # the canonical immutable CDN URL (`static.crates.io`) the redirect
+  # would have pointed at. Idempotent: URLs already in CDN form pass
+  # through unchanged.
+  canonicalRegistryUrl = name: version: url:
+    let
+      apiPrefix = "https://crates.io/api/v1/crates/";
+      isApiUrl = lib.hasPrefix apiPrefix url;
+    in if isApiUrl
+       then "https://static.crates.io/crates/${name}/${name}-${version}.crate"
+       else url;
+
   # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen
   # — `stripUrlQuery` is belt-and-suspenders for the documented gen
   # `?branch=main`-leak class.
@@ -59,7 +75,7 @@ let
   srcOf = workspaceSrc: spec:
     if spec.source.kind == "registry" then
       pkgs.fetchurl {
-        url = spec.source.url;
+        url = canonicalRegistryUrl spec.name spec.version spec.source.url;
         sha256 = spec.source.sha256;
         name = spec.source.name_with_ext;
       }
