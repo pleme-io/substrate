@@ -29,7 +29,9 @@
 # error, fall back to committed `Cargo.build-spec.json`. The
 # hermetic gen-cargo rewrite retires that fallback.
 {
-  pkgs,
+  # Host pkgs — explicit because pkgsStatic's `.buildPackages` is itself,
+  # not the darwin/linux host. The IFD always runs on the build machine.
+  hostPkgs,
   gen,
   src,
   # Optional: target triple for cross-spec emission (defaults to host).
@@ -42,16 +44,6 @@ let
   # filter further, but `src` is typically already the workspace
   # root — additional filtering buys little.
   targetArg = if target == null then "" else "--filter-platform=${target}";
-
-  # The IFD always runs on the HOST during eval, regardless of which
-  # target the consumer is being built for. When `pkgs` is a pkgsStatic
-  # (or other cross/target pkgs), `pkgs.runCommand` would re-stage gen +
-  # cargo + rustc against the TARGET stdenv — causing a recursive
-  # cascade of rebuilding gen for x86_64-unknown-linux-musl when the
-  # consumer is a linux-musl build. `pkgs.buildPackages` is the host's
-  # native pkgs (for native builds it's the same as pkgs; for cross it
-  # is the builder), so the IFD always lands on host-native tooling.
-  hostPkgs = pkgs.buildPackages;
 in
 hostPkgs.runCommand "cargo-build-spec" {
   # `gen build` invokes `cargo metadata` under the hood (v1 gen-cargo

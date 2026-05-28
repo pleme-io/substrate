@@ -131,6 +131,14 @@ let
     # `gen build .` by hand. Callers may pass an explicit `gen` to
     # override the auto-detection.
     gen ? (pkgs.gen or null),
+    # Host pkgs for the IFD auto-regen. When `pkgs` is pkgsStatic (cross
+    # builds), `pkgs.buildPackages` is pkgsStatic itself — not the
+    # build-machine's darwin/linux native pkgs. The IFD always runs at
+    # eval time on the build host, so it needs native cargo/rustc/cacert.
+    # Default falls back to `pkgs.buildPackages` for native builds where
+    # the two are equivalent; cross consumers (tool-release.nix) pass
+    # the explicit darwin/linux host pkgs.
+    hostPkgs ? pkgs.buildPackages,
   }: let
     specInvariants = import ./spec-invariants.nix;
     # I4 — per-platform spec emission. gen-cargo's --filter-platform
@@ -195,14 +203,14 @@ let
     targetSpecDrv =
       if needsRegenTarget && gen != null
       then import ./mk-build-spec.nix {
-        inherit pkgs gen src;
+        inherit hostPkgs gen src;
         target = targetTriple;
       }
       else null;
     hostSpecDrv =
       if needsRegenTarget && gen != null && isCross
       then import ./mk-build-spec.nix {
-        inherit pkgs gen src;
+        inherit hostPkgs gen src;
         target = hostTriple;
       }
       else targetSpecDrv;  # native: reuse.

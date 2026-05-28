@@ -171,17 +171,19 @@ let
       };
     } // crateOverrides;
 
-    # gen is the substrate-bound regeneration tool. Forward it so
-    # lockfile-builder.mkProject's auto-regen actually fires: without
-    # this, mkProject's `gen ? (pkgs.gen or null)` default lands on
-    # null (pkgs doesn't carry gen), so committed specs stay stale
-    # and per-target cfg-filtering (I4) never runs. Per the GEN
-    # TYPED-SPEC CONTRACT — regeneration is background to rebuild;
-    # this is the wire that makes it so.
+    # gen + hostPkgs are the IFD auto-regen pair. Without them
+    # mkProject's defaults land on `pkgs.gen or null` (== null) and
+    # `pkgs.buildPackages` — which for pkgsStatic targets resolves
+    # back to pkgsStatic itself (not the host). The IFD then either
+    # never fires or recursively rebuilds gen/cargo/rustc for the
+    # target stdenv. tool-release closes both gaps explicitly: gen
+    # comes from substrate's flake input pre-bind, hostPkgs is the
+    # native build-machine nixpkgs.
     project =
       if effectiveMode == "lockfile"
       then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject {
         inherit src gen;
+        hostPkgs = hostPkgs;
         defaultCrateOverrides = consumerOverrides;
       }
       else import cargoNix {
