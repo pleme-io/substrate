@@ -1,5 +1,46 @@
 [
   {
+    "label": "caixa.upgrade-instruction",
+    "variant_count": 5,
+    "variant_kinds": [
+      "load-module",
+      "state-change",
+      "soft-purge",
+      "purge",
+      "restart"
+    ],
+    "variant_fields": [
+      [
+        "load-module",
+        [
+          "module"
+        ]
+      ],
+      [
+        "state-change",
+        [
+          "script"
+        ]
+      ],
+      [
+        "soft-purge",
+        [
+          "module"
+        ]
+      ],
+      [
+        "purge",
+        [
+          "module"
+        ]
+      ],
+      [
+        "restart",
+        []
+      ]
+    ]
+  },
+  {
     "label": "gen.ansible.ansible-quirk",
     "variant_count": 4,
     "variant_kinds": [
