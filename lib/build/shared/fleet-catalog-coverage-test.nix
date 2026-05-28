@@ -80,6 +80,12 @@ let
     # distribution). placement-policy = where a workload may land
     # (zone-aware / rack-aware / latency-aware / spread / none).
     { label = "engenho.placement-policy"; count = 5; ecosystem = null; }
+    # Seventh consumer class: magma (Rust-native OpenTofu-compatible
+    # IaC executor). resource-kind = taxonomy of what a
+    # ResourceAddress points at; action = every legal action a
+    # magma plan walker can emit per resource.
+    { label = "magma.resource-kind"; count = 5; ecosystem = null; }
+    { label = "magma.action";        count = 9; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -123,9 +129,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 17 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho)"
+    "fleet catalog has ≥ 19 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma)"
     true
-    (builtins.length catalog >= 17);
+    (builtins.length catalog >= 19);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -164,9 +170,15 @@ let
     "catalog has ≥ 6 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 6);
+
+  # Seven-class invariant. Substrate adds magma (IaC executor).
+  sevenClassesTest = assertEq
+    "catalog has ≥ 7 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 7);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
-  fiveClassesTest sixClassesTest ]
+  fiveClassesTest sixClassesTest sevenClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

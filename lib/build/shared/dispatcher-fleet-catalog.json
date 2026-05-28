@@ -515,6 +515,92 @@
     ]
   },
   {
+    "label": "magma.action",
+    "variant_count": 9,
+    "variant_kinds": [
+      "no-op",
+      "create",
+      "read",
+      "update",
+      "replace",
+      "delete",
+      "forget",
+      "create-then-delete",
+      "delete-then-create"
+    ],
+    "variant_fields": [
+      [
+        "no-op",
+        []
+      ],
+      [
+        "create",
+        []
+      ],
+      [
+        "read",
+        []
+      ],
+      [
+        "update",
+        []
+      ],
+      [
+        "replace",
+        []
+      ],
+      [
+        "delete",
+        []
+      ],
+      [
+        "forget",
+        []
+      ],
+      [
+        "create-then-delete",
+        []
+      ],
+      [
+        "delete-then-create",
+        []
+      ]
+    ]
+  },
+  {
+    "label": "magma.resource-kind",
+    "variant_count": 5,
+    "variant_kinds": [
+      "managed",
+      "data",
+      "output",
+      "local",
+      "variable"
+    ],
+    "variant_fields": [
+      [
+        "managed",
+        []
+      ],
+      [
+        "data",
+        []
+      ],
+      [
+        "output",
+        []
+      ],
+      [
+        "local",
+        []
+      ],
+      [
+        "variable",
+        []
+      ]
+    ]
+  },
+  {
     "label": "shigoto.retry-outcome",
     "variant_count": 2,
     "variant_kinds": [
