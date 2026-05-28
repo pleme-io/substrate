@@ -101,6 +101,10 @@ let
     # Lisp + substrate + VM). hypervisor = available backends for
     # booting tatara-vm guests.
     { label = "tatara.hypervisor"; count = 4; ecosystem = null; }
+    # Eleventh consumer class: hanshi (typed print-shop management).
+    # job-event-kind = structured-log event universe in a print
+    # job's audit trail.
+    { label = "hanshi.job-event-kind"; count = 8; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -144,9 +148,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 25 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara)"
+    "fleet catalog has ≥ 26 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi)"
     true
-    (builtins.length catalog >= 25);
+    (builtins.length catalog >= 26);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -211,10 +215,17 @@ let
     "catalog has ≥ 10 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 10);
+
+  # Eleven-class invariant. Substrate adds hanshi (typed
+  # print-shop management).
+  elevenClassesTest = assertEq
+    "catalog has ≥ 11 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 11);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
   fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest
-  nineClassesTest tenClassesTest ]
+  nineClassesTest tenClassesTest elevenClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

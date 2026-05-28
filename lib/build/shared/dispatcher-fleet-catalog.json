@@ -515,6 +515,74 @@
     ]
   },
   {
+    "label": "hanshi.job-event-kind",
+    "variant_count": 8,
+    "variant_kinds": [
+      "state-transition",
+      "file-written",
+      "vw-consumed",
+      "vw-log-line",
+      "printer-observed",
+      "advisory-fired",
+      "operator-note",
+      "qc-recorded"
+    ],
+    "variant_fields": [
+      [
+        "state-transition",
+        [
+          "from",
+          "to",
+          "reason"
+        ]
+      ],
+      [
+        "file-written",
+        [
+          "path",
+          "bytes",
+          "sha256_hex"
+        ]
+      ],
+      [
+        "vw-consumed",
+        []
+      ],
+      [
+        "vw-log-line",
+        [
+          "text"
+        ]
+      ],
+      [
+        "printer-observed",
+        [
+          "state",
+          "summary"
+        ]
+      ],
+      [
+        "advisory-fired",
+        [
+          "advisory"
+        ]
+      ],
+      [
+        "operator-note",
+        [
+          "text"
+        ]
+      ],
+      [
+        "qc-recorded",
+        [
+          "passed",
+          "notes"
+        ]
+      ]
+    ]
+  },
+  {
     "label": "kura.backoff-strategy",
     "variant_count": 4,
     "variant_kinds": [
