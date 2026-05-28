@@ -41,14 +41,25 @@ let
     in args
       // (if url  != null then { url  = rewriteOne url; } else {})
       // (if urls != null then { urls = map rewriteOne urls; } else {});
-  wrapped = args: prev.fetchurl (rewriteArgs args);
 in
 {
-  # Preserve fetchurl's attribute surface (`.override`, etc.) by
-  # merging the original onto a freshly-functioned wrapper. nixpkgs
-  # downstream code does `fetchurl.override { ... }` and expects a
-  # set + functor; if we only return the bare lambda, it explodes
-  # with `expected a set but found a function: extendsWithExclusion`.
-  fetchurl = wrapped // (builtins.removeAttrs prev.fetchurl [ "__functor" ])
-    // { __functor = self: args: wrapped args; };
+  # nixpkgs >= 25.11 wraps `fetchurl` in makeOverridableExcludingArgs, so
+  # its override machinery sometimes calls the fetcher with a FUNCTION
+  # argument (the finalAttrs/fpargs form), not an attrset. Only the
+  # attrset form carries a crate URL to rewrite; every other form
+  # (function, etc.) must pass straight through to the original fetcher
+  # untouched — or eval fails with "expected a set but found a function".
+  #
+  # Earlier iterations tried to preserve fetchurl's attribute surface
+  # (`.override`, `__functor`) via `wrapped // prev.fetchurl // {…}`,
+  # but `wrapped` is a function and `function // set` is illegal in Nix
+  # ("expected a set but found a function: lambda wrapped"). Preserving
+  # .override is unnecessary in practice — full darwin-system + rust
+  # closure evals do not call `pkgs.fetchurl.override`. If a consumer
+  # ever needs it, switch to the conditional-functor form (apply only
+  # when `builtins.isAttrs prev.fetchurl`).
+  fetchurl = arg:
+    if builtins.isAttrs arg
+    then prev.fetchurl (rewriteArgs arg)
+    else prev.fetchurl arg;
 }
