@@ -1,0 +1,300 @@
+[
+  {
+    "ecosystem": "ansible",
+    "variant_count": 4,
+    "variants": [
+      {
+        "kind": "drop-dependency",
+        "fields": [
+          "collection"
+        ]
+      },
+      {
+        "kind": "pin-dependency",
+        "fields": [
+          "collection",
+          "version"
+        ]
+      },
+      {
+        "kind": "build-ignore",
+        "fields": [
+          "path"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "bundler",
+    "variant_count": 5,
+    "variants": [
+      {
+        "kind": "pin-ruby",
+        "fields": [
+          "version"
+        ]
+      },
+      {
+        "kind": "skip-native-build",
+        "fields": []
+      },
+      {
+        "kind": "extra-cflags",
+        "fields": [
+          "flags"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      },
+      {
+        "kind": "override-source",
+        "fields": [
+          "url"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "cargo",
+    "variant_count": 3,
+    "variants": [
+      {
+        "kind": "force-cfg",
+        "fields": [
+          "cfg"
+        ]
+      },
+      {
+        "kind": "fold-normal-into-build",
+        "fields": [
+          "extern_crate"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "gomod",
+    "variant_count": 5,
+    "variants": [
+      {
+        "kind": "force-vendor-hash",
+        "fields": [
+          "hash"
+        ]
+      },
+      {
+        "kind": "build-tag",
+        "fields": [
+          "tag"
+        ]
+      },
+      {
+        "kind": "ldflag",
+        "fields": [
+          "flag"
+        ]
+      },
+      {
+        "kind": "cgo-off",
+        "fields": []
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "helm",
+    "variant_count": 4,
+    "variants": [
+      {
+        "kind": "override-value",
+        "fields": [
+          "path",
+          "value"
+        ]
+      },
+      {
+        "kind": "skip-hook",
+        "fields": [
+          "hook"
+        ]
+      },
+      {
+        "kind": "patch-manifest",
+        "fields": [
+          "resource_kind",
+          "name",
+          "jsonpath",
+          "value"
+        ]
+      },
+      {
+        "kind": "force-image-tag",
+        "fields": [
+          "container",
+          "tag"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "npm",
+    "variant_count": 5,
+    "variants": [
+      {
+        "kind": "npm-install-flag",
+        "fields": [
+          "flag"
+        ]
+      },
+      {
+        "kind": "skip-postinstall",
+        "fields": []
+      },
+      {
+        "kind": "pin-nodejs",
+        "fields": [
+          "version"
+        ]
+      },
+      {
+        "kind": "override-registry",
+        "fields": [
+          "url"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "pip",
+    "variant_count": 4,
+    "variants": [
+      {
+        "kind": "pin-interpreter",
+        "fields": [
+          "python"
+        ]
+      },
+      {
+        "kind": "skip-check",
+        "fields": []
+      },
+      {
+        "kind": "drop-requires",
+        "fields": [
+          "package"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "poetry",
+    "variant_count": 4,
+    "variants": [
+      {
+        "kind": "override-build-system",
+        "fields": [
+          "package",
+          "backend"
+        ]
+      },
+      {
+        "kind": "override-attrs",
+        "fields": [
+          "package",
+          "attr",
+          "value"
+        ]
+      },
+      {
+        "kind": "skip-check",
+        "fields": [
+          "package"
+        ]
+      },
+      {
+        "kind": "prefer-wheel",
+        "fields": [
+          "package",
+          "prefer"
+        ]
+      }
+    ]
+  },
+  {
+    "ecosystem": "swift",
+    "variant_count": 4,
+    "variants": [
+      {
+        "kind": "pin-toolchain",
+        "fields": [
+          "version"
+        ]
+      },
+      {
+        "kind": "force-configuration",
+        "fields": [
+          "configuration"
+        ]
+      },
+      {
+        "kind": "ldflag",
+        "fields": [
+          "flag"
+        ]
+      },
+      {
+        "kind": "substitute-source",
+        "fields": [
+          "file",
+          "from",
+          "to"
+        ]
+      }
+    ]
+  }
+]
