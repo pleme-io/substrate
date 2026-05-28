@@ -632,7 +632,23 @@ let
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
           features = featuresFor;
-        } // binsFor key crate;
+        } // binsFor key crate
+        # Defensive: ALWAYS forward `links` from the top-level
+        # CrateSpec field (gen-cargo populates this from cargo
+        # metadata's pkg.links — set IF the upstream Cargo.toml has
+        # a `[package].links` declaration). Without this, ring
+        # 0.17.14's build.rs:286 `assert_eq!(env, "ring_core_0_17_14_")`
+        # fires (it inspects CARGO_MANIFEST_LINKS, which buildRustCrate
+        # exports verbatim from the args' `links` attr) and the build
+        # crashes. The build_rust_crate_args spread above ALSO carries
+        # `links` when present, but legacyArgs only sets links
+        # conditionally — and consumer call paths that go through
+        # crate2nix's overrideAttrs can shadow it. This belt-and-
+        # suspenders extraction guarantees substrate ↔ buildRustCrate
+        # never lose links for the *-sys class of crate.
+          // (if (crate.links or null) != null
+              then { links = crate.links; }
+              else {});
         # Apply lib_target synthesis BEFORE prefixForMember so the
         # synthesized libPath gets the same `<relative_path>/` glue as a
         # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
