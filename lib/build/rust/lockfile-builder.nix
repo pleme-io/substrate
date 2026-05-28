@@ -104,9 +104,12 @@ let
         then firstMatch
         else full
     else
-      if spec.source.relative_path == "." || spec.source.relative_path == ""
-      then workspaceSrc
-      else workspaceSrc + "/${spec.source.relative_path}";
+      # Path source = workspace member (or root). ALWAYS use the full
+      # workspace root so `include_str!("../../sibling.lisp")` from a
+      # member's src/lib.rs can reach files at the workspace root.
+      # libPath / build_script in build_rust_crate_args must be prefixed
+      # with relative_path to compensate — handled in `prefixForMember`.
+      workspaceSrc;
 
   plemeCrateOverrides = import ./pleme-crate-overrides.nix;
   mkProject = {
@@ -224,15 +227,31 @@ let
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
           else {});
 
+    # Path-source workspace members now use src = workspaceSrc (so
+    # include_str! to sibling files works). libPath / build / crateBin
+    # entries need a `<relative_path>/` prefix to compensate. Pure
+    # string transform on the args attrset.
+    prefixForMember = crate: args:
+      if crate.source.kind != "path" then args
+      else let rel = crate.source.relative_path or ""; in
+        if rel == "" || rel == "." then args
+        else let p = path: rel + "/" + path; in args
+          // (if args ? libPath then { libPath = p args.libPath; } else {})
+          // (if args ? build then { build = p args.build; } else {})
+          // (if args ? crateBin && args.crateBin != []
+              then { crateBin = map (b: b // { path = p b.path; }) args.crateBin; }
+              else {});
+
     # Lazy memoization: each thunk is computed once via mapAttrs.
     built = lib.mapAttrs (key: crate: let
-      args = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
+      baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
               then crate.build_rust_crate_args
               else legacyArgs crate) // {
         src = srcOf src crate;
         dependencies = map (d: built.${d.package_key}) crate.runtime_dependencies;
         buildDependencies = map (d: built.${d.package_key}) crate.build_dependencies;
       } // binsFor key crate;
+      args = prefixForMember crate baseArgs;
     in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
 
     memberRecord = key: let c = spec.crates.${key}; in {
