@@ -80,7 +80,24 @@
         })
       ];
     }).pkgsStatic;
-  mkDarwinPkgs = targetSystem: import nixpkgs { system = targetSystem; };
+  # Darwin target pkgs MUST use the same fenix toolchain as hostPkgs.
+  # On native darwin (target arch == host arch — the common case for
+  # operator workstations), the dual-tree dispatch in lockfile-builder
+  # compares the target tree's `built.${blake3}` against the host
+  # tree's `builtBuild.${blake3}`. Without fenix on the target side,
+  # the two buildRustCrate invocations diverge (different rustc
+  # version / different default flags), producing different output
+  # hashes — even though source + args appear identical. That breaks
+  # every native-darwin consumer that uses dual-tree dispatch (proc-
+  # macro deps mostly). Match the hostPkgs overlay stack here so
+  # native = identical-by-construction.
+  mkDarwinPkgs = targetSystem:
+    if fenix == null
+    then import nixpkgs { system = targetSystem; }
+    else import nixpkgs {
+      system = targetSystem;
+      overlays = [ (rustOverlay.mkRustOverlay { inherit fenix; system = targetSystem; }) ];
+    };
 
   targets = {
     "aarch64-apple-darwin" = {
