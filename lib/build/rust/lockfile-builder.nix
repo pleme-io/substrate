@@ -479,7 +479,17 @@ let
       if (args ? libName) && args.libName != null then args
       else
         let
-          binsOnly = (crate.lib_target or null) == null
+          # Only path-source workspace members trigger the orphan-rm. For
+          # registry/git crates, gen-cargo intentionally suppresses
+          # lib_target when name+path match the buildRustCrate defaults
+          # (see gen/crates/gen-cargo/src/build_spec.rs:756 — `is_default &&
+          # !is_member`), letting buildRustCrate's auto-discovery handle
+          # the lib build with `crate-type = ["proc-macro", "rlib"]` etc.
+          # The orphan-rm must NOT fire on those — clap-4.6.1 ships
+          # lib_target=None + binaries=[{stdio-fixture}] for this exact
+          # reason. Removing its src/lib.rs would yield an empty drv.
+          binsOnly = crate.source.kind == "path"
+            && (crate.lib_target or null) == null
             && ((crate.binaries or []) != []);
           rel = crate.source.relative_path or "";
           # Substrate uses `src = workspaceSrc` for path-source workspace
