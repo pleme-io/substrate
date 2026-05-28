@@ -133,7 +133,32 @@ let
     gen ? (pkgs.gen or null),
   }: let
     specInvariants = import ./spec-invariants.nix;
-    # 1) Try the committed spec first (cheap, no IFD).
+    # I4 — per-platform spec emission. gen-cargo's --filter-platform
+    # has cargo resolve cfg(target_os=…) / cfg(target_vendor=…) /
+    # cfg(any/all/not(…)) / custom-cfg expressions for the given
+    # triple; substrate consumes the resolved dep edges directly. No
+    # Nix-side cfg parsing, no risk of getting it wrong on the
+    # gnarly nested cfg expressions real-world crates emit
+    # (rustix_use_experimental_asm, getrandom_backend, …). For
+    # cross-builds the target tree and host tree get separate
+    # platform-filtered specs.
+    # rustc-style triple (aarch64-apple-darwin) vs Nix-style
+    # (arm64-apple-darwin); nixpkgs exposes the canonical rustc form
+    # under `.rust.rustcTarget` on every platform object. Use that
+    # consistently so `gen build --filter-platform=<triple>` matches
+    # what rustc expects.
+    targetTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
+    hostTriple = pkgs.buildPackages.stdenv.hostPlatform.rust.rustcTarget;
+    isCross = targetTriple != hostTriple;
+
+    # 1) Try the committed spec first (cheap, no IFD). Note: committed
+    #    specs are typically multi-platform (no --filter-platform was
+    #    passed when emitted), so they may contain cfg-conditional
+    #    deps that don't apply to the current target. For native
+    #    builds where the committed spec was generated on the same
+    #    platform, this is usually fine. For cross-builds or where
+    #    cfg-impossible deps exist, regen via IFD with the explicit
+    #    target triple is required.
     committedPath = src + "/Cargo.build-spec.json";
     committedSpec =
       if builtins.pathExists committedPath
@@ -142,23 +167,44 @@ let
     committedViolations =
       if committedSpec == null then [ "spec-missing" ]
       else specInvariants committedSpec;
-    needsRegen = committedViolations != [];
-    # 2) When committed is stale/missing AND gen is reachable, derive
-    #    a fresh spec via IFD (mkBuildSpec runs `gen build <src>` in a
-    #    derivation). Zero operator action required.
-    regenSpecSrc =
-      if needsRegen && gen != null
-      then import ./mk-build-spec.nix { inherit pkgs gen src; }
+    # Trigger regen if invariants violated OR cross-build (committed
+    # specs are not platform-filtered; under cross we need explicit
+    # --filter-platform per tree).
+    needsRegenTarget = committedViolations != [] || isCross;
+
+    # 2) Per-tree IFD: each tree gets its own platform-filtered spec
+    #    when gen is reachable. Native builds reuse the target spec
+    #    for the host tree (targetTriple == hostTriple so the filter
+    #    yields identical results). Cross-builds emit two specs.
+    targetSpecDrv =
+      if needsRegenTarget && gen != null
+      then import ./mk-build-spec.nix {
+        inherit pkgs gen src;
+        target = targetTriple;
+      }
       else null;
-    specSrc =
-      if regenSpecSrc != null then regenSpecSrc
-      else src;
-    # 3) Reload — uses the fresh spec when regen happened, else falls
-    #    back to the committed (the no-gen path still tolerates I1
-    #    violations via the lockfile-builder's synthLibTarget fallback
-    #    below; consumers without gen at least self-heal that single
-    #    invariant).
-    spec = loadBuildSpec specSrc;
+    hostSpecDrv =
+      if needsRegenTarget && gen != null && isCross
+      then import ./mk-build-spec.nix {
+        inherit pkgs gen src;
+        target = hostTriple;
+      }
+      else targetSpecDrv;  # native: reuse.
+
+    specTarget =
+      if targetSpecDrv != null
+      then loadBuildSpec targetSpecDrv
+      else loadBuildSpec src;
+    specHost =
+      if hostSpecDrv != null && hostSpecDrv != targetSpecDrv
+      then loadBuildSpec hostSpecDrv
+      else specTarget;
+
+    # `spec` retained for upstream callers that read it from the
+    # return value (workspaceMembers, root_crate). Use the target
+    # spec since that's the workload-facing view.
+    spec = specTarget;
+    needsRegen = needsRegenTarget;  # legacy alias for _regenAssert.
     # If regen wasn't possible (gen unavailable) but the committed spec
     # had violations, surface a traced warning so the operator knows
     # the build is running on synthesized fallbacks instead of a true
@@ -360,10 +406,12 @@ let
               then { crateBin = map (b: b // { path = p b.path; }) args.crateBin; }
               else {});
 
-    # Typed per-tree construction. `depFor` and `buildDepFor` close
-    # over the appropriate target/host trees per the I2 dispatch.
+    # Typed per-tree construction. Each tree iterates ITS OWN
+    # platform-filtered spec (per I4) — `specTarget` for the workload
+    # tree, `specHost` for the build-arch tree. `depFor`/`buildDepFor`
+    # close over the appropriate target/host trees per I2 dispatch.
     # `buildRustCrate` is the per-tree builder (target vs. host pkgs).
-    mkBuiltTree = { buildRustCrate, depFor, buildDepFor }:
+    mkBuiltTree = { treeSpec, buildRustCrate, depFor, buildDepFor }:
       lib.mapAttrs (key: crate: let
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
@@ -378,21 +426,24 @@ let
         # emission) without requiring every consumer repo to regenerate.
         argsSynth = applySynthLibTarget crate baseArgs;
         args = prefixForMember crate argsSynth;
-      in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
+      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
 
-    # Target tree: workload arch. Dispatch runtime deps by I2; build
-    # deps always to host.
+    # Target tree: workload arch + target-filtered dep edges (I4).
+    # Dispatch runtime deps by I2; build deps always → host tree.
     built = mkBuiltTree {
+      treeSpec = specTarget;
       buildRustCrate = buildRustCrateTarget;
       depFor = d:
-        if (spec.crates.${d.package_key}.proc_macro or false)
+        if (specTarget.crates.${d.package_key}.proc_macro or false)
         then builtBuild.${d.package_key}
         else built.${d.package_key};
       buildDepFor = d: builtBuild.${d.package_key};
     };
 
-    # Host tree: build/native arch. Transitively all-host.
+    # Host tree: build/native arch + host-filtered dep edges (I4).
+    # Transitively all-host.
     builtBuild = mkBuiltTree {
+      treeSpec = specHost;
       buildRustCrate = buildRustCrateHost;
       depFor = d: builtBuild.${d.package_key};
       buildDepFor = d: builtBuild.${d.package_key};
