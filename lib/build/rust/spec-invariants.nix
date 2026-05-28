@@ -66,6 +66,26 @@ spec: let
     in (check "runtime" rd) ++ (check "build" bd)
   ) crateKeys);
 
+  # ── I1: workspace-member-missing-lib-target ──────────────────────
+  # Mirrors gen-cargo's `WorkspaceMemberMissingLibTarget`
+  # (invariants.rs). Per the GEN TYPED-SPEC CONTRACT, a workspace
+  # member with neither binaries nor lib_target has zero build
+  # targets — provably unbuildable. The stale-gen-cargo signature
+  # (pre-09f6311 emission) and the surface bug that motivated the
+  # auto-regen path below.
+  workspaceMemberMissingLib = concatLists (map (k:
+    let c = cratesAttrs.${k} or null;
+    in if c == null
+       then []
+       else
+         let
+           noBins = (c.binaries or []) == [];
+           noLib  = (c.lib_target or null) == null;
+         in if noBins && noLib
+            then [ "workspace-member-missing-lib-target: ${k} (${c.name or k})" ]
+            else []
+  ) members);
+
   # ── rename-version-mismatch ──────────────────────────────────────
   renameMismatches = concatLists (map (fromKey:
     let c = cratesAttrs.${fromKey};
@@ -86,4 +106,4 @@ spec: let
 
 in
   unresolvedDeps ++ registryNoSha ++ unknownMembers ++ rootCrateViolations
-    ++ devInRuntime ++ renameMismatchesFiltered
+    ++ devInRuntime ++ renameMismatchesFiltered ++ workspaceMemberMissingLib

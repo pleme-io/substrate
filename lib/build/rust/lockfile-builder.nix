@@ -120,17 +120,76 @@ let
     # nixpkgs defaults → pleme overrides → caller overrides (later wins).
     defaultCrateOverrides ? (pkgs.defaultCrateOverrides // plemeCrateOverrides),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
-    # Optional: substrate-bound gen package. When supplied, the
-    # build-spec is derived on demand via IFD instead of read from
-    # the committed `Cargo.build-spec.json`. Consumers stop
-    # committing the JSON; bumping gen propagates fleet-wide.
-    gen ? null,
+    # Auto-detected: pulls from `pkgs.gen` when substrate's rust
+    # overlay (or any overlay that adds `gen`) is composed. Per the
+    # GEN TYPED-SPEC CONTRACT (`theory/GEN-TYPED-SPEC-CONTRACT.md`),
+    # regeneration is BACKGROUND TO REBUILD — never a manual step.
+    # When `gen` is reachable AND the committed spec is missing or
+    # invariant-violating (stale), the build-spec is regenerated via
+    # IFD before lockfile composition. Operators see "auto-regen"
+    # transparently as part of `nix build`; they never run
+    # `gen build .` by hand. Callers may pass an explicit `gen` to
+    # override the auto-detection.
+    gen ? (pkgs.gen or null),
   }: let
-    specSrc =
-      if gen != null
+    specInvariants = import ./spec-invariants.nix;
+    # 1) Try the committed spec first (cheap, no IFD).
+    committedPath = src + "/Cargo.build-spec.json";
+    committedSpec =
+      if builtins.pathExists committedPath
+      then fromJSON (readFile committedPath)
+      else null;
+    committedViolations =
+      if committedSpec == null then [ "spec-missing" ]
+      else specInvariants committedSpec;
+    needsRegen = committedViolations != [];
+    # 2) When committed is stale/missing AND gen is reachable, derive
+    #    a fresh spec via IFD (mkBuildSpec runs `gen build <src>` in a
+    #    derivation). Zero operator action required.
+    regenSpecSrc =
+      if needsRegen && gen != null
       then import ./mk-build-spec.nix { inherit pkgs gen src; }
+      else null;
+    specSrc =
+      if regenSpecSrc != null then regenSpecSrc
       else src;
+    # 3) Reload — uses the fresh spec when regen happened, else falls
+    #    back to the committed (the no-gen path still tolerates I1
+    #    violations via the lockfile-builder's synthLibTarget fallback
+    #    below; consumers without gen at least self-heal that single
+    #    invariant).
     spec = loadBuildSpec specSrc;
+    # If regen wasn't possible (gen unavailable) but the committed spec
+    # had violations, surface a traced warning so the operator knows
+    # the build is running on synthesized fallbacks instead of a true
+    # regen. Hard error only when the synthesis can't cover (e.g.
+    # missing-spec without gen).
+    _regenAssert =
+      if needsRegen && gen == null then
+        if committedSpec == null then
+          throw ''
+            substrate/lockfile-builder: ${toString src}/Cargo.build-spec.json
+            not found AND `gen` is not reachable (pkgs.gen is unset).
+            Either:
+              (a) compose substrate's rust overlay (provides pkgs.gen) →
+                  auto-regen will take over, OR
+              (b) pass `gen = substrate.packages.<system>.gen` to
+                  lockfileBuilder.mkProject explicitly, OR
+              (c) run `gen build .` once in the workspace root to
+                  produce the committed spec.
+            Per the GEN TYPED-SPEC CONTRACT, (a) is the directive-
+            aligned default — no per-repo regen toil.
+          ''
+        else builtins.trace ''
+          substrate/lockfile-builder: committed Cargo.build-spec.json has
+          invariant violations:
+          ${builtins.concatStringsSep "\n  " (map (v: "  - " + v) committedViolations)}
+          `gen` is unreachable (pkgs.gen unset) — falling back to
+          spec-side synthesis (lib_target etc.). Compose substrate's
+          rust overlay or pass `gen` to mkProject for true auto-regen.
+        '' null
+      else null;
+    _ = _regenAssert;
     # Invariant E: schema-version gate. Substrate's lockfile-builder
     # is contracted against `Cargo.build-spec.json` v3+ (pre-shaped
     # `build_rust_crate_args`). Older specs must be regenerated; we
@@ -216,6 +275,34 @@ let
       then crate.lib_target.name
       else builtins.replaceStrings [ "-" ] [ "_" ] crate.name;
 
+    # I1 — Workspace-member lib_target synthesis (stale-spec defense).
+    # Per the GEN TYPED-SPEC CONTRACT (theory/GEN-TYPED-SPEC-CONTRACT.md,
+    # invariant I1), gen-cargo ≥ 09f6311 always emits lib_target for
+    # workspace-member lib crates. Pre-09f6311 specs (still committed in
+    # some downstream repos like ishou pre-regeneration) suppressed it
+    # for default-named members → substrate would pass no libName/libPath
+    # to buildRustCrate → with src = workspaceSrc, rustc resolved
+    # `src/lib.rs` against the workspace root (no such file) → no rlib
+    # built → consumer's --extern hard-failed.
+    #
+    # Synthesis is the interpreter side of the contract: when a
+    # path-source member with a non-trivial relative_path arrives
+    # WITHOUT lib_target AND WITHOUT binaries, assume the conventional
+    # `src/lib.rs` + `rustcCrateName` and let `prefixForMember` glue the
+    # relative_path on. The fleet self-heals against stale specs without
+    # every consumer needing to push a regen.
+    synthLibTarget = crate:
+      let
+        srcKind = crate.source.kind or null;
+        rel = crate.source.relative_path or "";
+        hasMember = srcKind == "path" && rel != "" && rel != ".";
+        hasNoTargets = (crate.lib_target or null) == null
+          && ((crate.binaries or []) == []);
+      in
+        if hasMember && hasNoTargets
+        then { libName = rustcCrateName crate; libPath = "src/lib.rs"; }
+        else {};
+
     legacyArgs = crate:
       { crateName = crate.name; version = crate.version; edition = crate.edition;
         features = crate.features; crateRenames = crate.crate_renames; release = true;
@@ -226,6 +313,13 @@ let
       // (if (crate.lib_target or null) != null
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
           else {});
+
+    # Apply lib_target synthesis to ANY args-source missing libName/libPath
+    # (legacyArgs OR spread build_rust_crate_args). Idempotent: if the args
+    # already declare libName, the synthesis no-ops.
+    applySynthLibTarget = crate: args:
+      if args ? libName then args
+      else args // synthLibTarget crate;
 
     # Path-source workspace members now use src = workspaceSrc (so
     # include_str! to sibling files works). libPath / build / crateBin
@@ -251,7 +345,12 @@ let
         dependencies = map (d: built.${d.package_key}) crate.runtime_dependencies;
         buildDependencies = map (d: built.${d.package_key}) crate.build_dependencies;
       } // binsFor key crate;
-      args = prefixForMember crate baseArgs;
+      # Apply lib_target synthesis BEFORE prefixForMember so the
+      # synthesized libPath gets the same `<relative_path>/` glue as a
+      # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
+      # emission) without requiring every consumer repo to regenerate.
+      argsSynth = applySynthLibTarget crate baseArgs;
+      args = prefixForMember crate argsSynth;
     in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
 
     memberRecord = key: let c = spec.crates.${key}; in {
