@@ -64,6 +64,14 @@ let
     # provides resources to programs as typed dispatcher entries.
     { label = "wasm-platform.wasi-capability"; count = 8; ecosystem = null; }
     { label = "wasm-platform.wasm-target";     count = 3; ecosystem = null; }
+    # Caixa OTP supervisor surface — two more typed shadows over
+    # Erlang/OTP supervisor primitives.
+    { label = "caixa.restart-strategy"; count = 4; ecosystem = null; }
+    { label = "caixa.restart-policy";   count = 3; ecosystem = null; }
+    # Fourth consumer class: cofre secret materialization.
+    # Backend kind = where the materialized value lives (Sops on
+    # disk / Akeyless API / Mock in-memory).
+    { label = "cofre.backend-kind"; count = 3; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -107,9 +115,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 12 entries (9 gen + 1 caixa + 2 wasm-platform)"
+    "fleet catalog has ≥ 15 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre)"
     true
-    (builtins.length catalog >= 12);
+    (builtins.length catalog >= 15);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -122,13 +130,21 @@ let
     (builtins.length rootLabelRoots >= 2);
 
   # ★★★ progression check: at least three distinct consumer
-  # classes. gen + caixa + wasm-platform = 3 today.
+  # classes.
   threeClassesTest = assertEq
     "catalog has ≥ 3 distinct consumer classes (★★★ progression)"
     true
     (builtins.length rootLabelRoots >= 3);
+
+  # Substrate has four classes today (gen + caixa + wasm-platform
+  # + cofre). The four-class invariant guards against regression
+  # — collapsing to ≤ 3 classes fails the substrate test.
+  fourClassesTest = assertEq
+    "catalog has ≥ 4 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 4);
 in
-[ totalCountTest twoClassesTest threeClassesTest ]
+[ totalCountTest twoClassesTest threeClassesTest fourClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

@@ -1,5 +1,56 @@
 [
   {
+    "label": "caixa.restart-policy",
+    "variant_count": 3,
+    "variant_kinds": [
+      "permanent",
+      "temporary",
+      "transient"
+    ],
+    "variant_fields": [
+      [
+        "permanent",
+        []
+      ],
+      [
+        "temporary",
+        []
+      ],
+      [
+        "transient",
+        []
+      ]
+    ]
+  },
+  {
+    "label": "caixa.restart-strategy",
+    "variant_count": 4,
+    "variant_kinds": [
+      "one-for-one",
+      "one-for-all",
+      "rest-for-one",
+      "simple-one-for-one"
+    ],
+    "variant_fields": [
+      [
+        "one-for-one",
+        []
+      ],
+      [
+        "one-for-all",
+        []
+      ],
+      [
+        "rest-for-one",
+        []
+      ],
+      [
+        "simple-one-for-one",
+        []
+      ]
+    ]
+  },
+  {
     "label": "caixa.upgrade-instruction",
     "variant_count": 5,
     "variant_kinds": [
@@ -37,6 +88,36 @@
       [
         "restart",
         []
+      ]
+    ]
+  },
+  {
+    "label": "cofre.backend-kind",
+    "variant_count": 3,
+    "variant_kinds": [
+      "sops",
+      "akeyless",
+      "mock"
+    ],
+    "variant_fields": [
+      [
+        "sops",
+        [
+          "file",
+          "yaml_path"
+        ]
+      ],
+      [
+        "akeyless",
+        [
+          "path"
+        ]
+      ],
+      [
+        "mock",
+        [
+          "name"
+        ]
       ]
     ]
   },
