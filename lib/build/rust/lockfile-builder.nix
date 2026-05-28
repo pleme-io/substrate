@@ -527,13 +527,6 @@ let
         # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
         # emission) without requiring every consumer repo to regenerate.
         argsSynth = applySynthLibTarget crate baseArgs;
-<<<<<<< Updated upstream
-        args = prefixForMember crate argsSynth;
-      in buildRustCrate (args // overrideFor crate.name args)) targetCrates;
-||||||| Stash base
-        args = prefixForMember crate argsSynth;
-      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
-=======
         argsPrefixed = prefixForMember crate argsSynth;
         # Mechanical dispatch from typed CrateQuirk variants (emitted by
         # gen-cargo into `crate.quirks`) to their class-helper apply
@@ -544,8 +537,11 @@ let
         # collision.
         quirkAttrs = quirkApply.applyQuirks (crate.quirks or []) argsPrefixed;
         args = argsPrefixed // quirkAttrs;
-      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
->>>>>>> Stashed changes
+        # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
+        # (the multi-target universe). Restricts `built` to crates actually
+        # reachable for this target — keeps apple-only drvs out of linux
+        # trees and vice versa. See targetCrates definition above.
+      in buildRustCrate (args // overrideFor crate.name args)) targetCrates;
 
     # Target tree: workload arch + target-filtered dep edges (I4).
     # Dispatch runtime deps via the typed `dep.tree` field gen-cargo
