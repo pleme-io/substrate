@@ -189,7 +189,9 @@ let
           rust overlay or pass `gen` to mkProject for true auto-regen.
         '' null
       else null;
-    _ = _regenAssert;
+    # Single sentinel forces evaluation of both side-effect-only
+    # bindings (`builtins.seq` chains them deterministically).
+    _ = builtins.seq _specVersionAssert _regenAssert;
     # Invariant E: schema-version gate. Substrate's lockfile-builder
     # is contracted against `Cargo.build-spec.json` v3+ (pre-shaped
     # `build_rust_crate_args`). Older specs must be regenerated; we
@@ -210,7 +212,6 @@ let
         in the workspace root (gen >= c9a0067) to regenerate against
         SCHEMA_VERSION 3.
       '';
-    _ = _specVersionAssert;
     buildRustCrate = buildRustCrateForPkgs pkgs;
 
     workspaceKeys = builtins.listToAttrs

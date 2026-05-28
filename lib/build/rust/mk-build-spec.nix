@@ -44,7 +44,14 @@ let
   targetArg = if target == null then "" else "--filter-platform=${target}";
 in
 pkgs.runCommand "cargo-build-spec" {
-  nativeBuildInputs = [ gen ];
+  # `gen build` invokes `cargo metadata` under the hood (v1 gen-cargo
+  # path; replaced by Rust-native digestion in the upcoming hermetic
+  # rewrite). cargo + rustc must be on PATH inside the IFD sandbox;
+  # cacert provides the CA bundle cargo needs to fetch the crates.io
+  # index over TLS (the sandbox lacks /etc/ssl by default).
+  nativeBuildInputs = [ gen pkgs.cargo pkgs.rustc pkgs.cacert ];
+  SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  NIX_SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   # gen reads Cargo.toml + Cargo.lock + walks workspace members.
   # Substrate's gen v1 still calls cargo-metadata (non-hermetic);
   # __noChroot lets it reach the network for the cargo registry index
@@ -57,6 +64,10 @@ pkgs.runCommand "cargo-build-spec" {
   cp -r $src/* .
   chmod -R u+w .
   mkdir -p $out
+  # cargo needs a writable HOME for its registry cache; the sandbox's
+  # default /homeless-shelter is read-only.
+  export CARGO_HOME=$PWD/.cargo
+  export HOME=$PWD
   gen build . ${targetArg} > /dev/null
   if [ ! -f Cargo.build-spec.json ]; then
     echo "mkBuildSpec: gen build did not produce Cargo.build-spec.json" >&2
