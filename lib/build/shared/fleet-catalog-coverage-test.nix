@@ -110,6 +110,12 @@ let
     # every shikumi-backed app supports (bare / discovered /
     # default / custom).
     { label = "shikumi.config-tier-kind"; count = 4; ecosystem = null; }
+    # Thirteenth consumer class: estante (typed shell-package
+    # manager — cargo for shell). Two surfaces: placement
+    # (cache / nix / both two-store architecture) and source
+    # (github / git-https / git-ssh / gist / local).
+    { label = "estante.placement"; count = 3; ecosystem = null; }
+    { label = "estante.source";    count = 5; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -153,9 +159,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 27 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi + 1 shikumi)"
+    "fleet catalog has ≥ 29 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi + 1 shikumi + 2 estante)"
     true
-    (builtins.length catalog >= 27);
+    (builtins.length catalog >= 29);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -234,10 +240,18 @@ let
     "catalog has ≥ 12 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 12);
+
+  # Thirteen-class invariant. Substrate adds estante (typed
+  # shell-package manager — cargo for shell).
+  thirteenClassesTest = assertEq
+    "catalog has ≥ 13 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 13);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
   fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest
-  nineClassesTest tenClassesTest elevenClassesTest twelveClassesTest ]
+  nineClassesTest tenClassesTest elevenClassesTest twelveClassesTest
+  thirteenClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

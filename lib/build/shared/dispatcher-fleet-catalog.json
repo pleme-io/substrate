@@ -161,6 +161,77 @@
     ]
   },
   {
+    "label": "estante.placement",
+    "variant_count": 3,
+    "variant_kinds": [
+      "cache",
+      "nix",
+      "both"
+    ],
+    "variant_fields": [
+      [
+        "cache",
+        []
+      ],
+      [
+        "nix",
+        []
+      ],
+      [
+        "both",
+        []
+      ]
+    ]
+  },
+  {
+    "label": "estante.source",
+    "variant_count": 5,
+    "variant_kinds": [
+      "github",
+      "git-https",
+      "git-ssh",
+      "gist",
+      "local"
+    ],
+    "variant_fields": [
+      [
+        "github",
+        [
+          "owner",
+          "repo",
+          "reference"
+        ]
+      ],
+      [
+        "git-https",
+        [
+          "url",
+          "reference"
+        ]
+      ],
+      [
+        "git-ssh",
+        [
+          "url",
+          "reference"
+        ]
+      ],
+      [
+        "gist",
+        [
+          "id",
+          "reference"
+        ]
+      ],
+      [
+        "local",
+        [
+          "path"
+        ]
+      ]
+    ]
+  },
+  {
     "label": "gen.ansible.ansible-quirk",
     "variant_count": 4,
     "variant_kinds": [
