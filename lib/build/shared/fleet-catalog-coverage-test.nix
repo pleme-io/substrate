@@ -76,6 +76,10 @@ let
     # retry-outcome is the typed decision a RetryPolicy emits when
     # a job fails (retry-with-timestamp or deadletter).
     { label = "shigoto.retry-outcome"; count = 2; ecosystem = null; }
+    # Sixth consumer class: engenho fabric (cluster placement +
+    # distribution). placement-policy = where a workload may land
+    # (zone-aware / rack-aware / latency-aware / spread / none).
+    { label = "engenho.placement-policy"; count = 5; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -119,9 +123,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 16 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto)"
+    "fleet catalog has ≥ 17 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho)"
     true
-    (builtins.length catalog >= 16);
+    (builtins.length catalog >= 17);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -154,8 +158,15 @@ let
     "catalog has ≥ 5 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 5);
+
+  # Six-class invariant. Substrate adds engenho (cluster placement).
+  sixClassesTest = assertEq
+    "catalog has ≥ 6 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 6);
 in
-[ totalCountTest twoClassesTest threeClassesTest fourClassesTest fiveClassesTest ]
+[ totalCountTest twoClassesTest threeClassesTest fourClassesTest
+  fiveClassesTest sixClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

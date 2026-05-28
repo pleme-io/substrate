@@ -122,6 +122,45 @@
     ]
   },
   {
+    "label": "engenho.placement-policy",
+    "variant_count": 5,
+    "variant_kinds": [
+      "zone-aware",
+      "rack-aware",
+      "latency-aware",
+      "spread",
+      "none"
+    ],
+    "variant_fields": [
+      [
+        "zone-aware",
+        [
+          "min_zones"
+        ]
+      ],
+      [
+        "rack-aware",
+        [
+          "min_racks"
+        ]
+      ],
+      [
+        "latency-aware",
+        [
+          "max_p99_ms"
+        ]
+      ],
+      [
+        "spread",
+        []
+      ],
+      [
+        "none",
+        []
+      ]
+    ]
+  },
+  {
     "label": "gen.ansible.ansible-quirk",
     "variant_count": 4,
     "variant_kinds": [
