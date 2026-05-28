@@ -128,6 +128,27 @@ let
       then import ./mk-build-spec.nix { inherit pkgs gen src; }
       else src;
     spec = loadBuildSpec specSrc;
+    # Invariant E: schema-version gate. Substrate's lockfile-builder
+    # is contracted against `Cargo.build-spec.json` v3+ (pre-shaped
+    # `build_rust_crate_args`). Older specs must be regenerated; we
+    # accept v2 transitionally during M5 with a warning that points
+    # operators at `gen build .`. Sunset at M6.
+    _specVersionAssert =
+      let v = spec.version or 0; in
+      if v >= 3 then null
+      else if v == 2 then builtins.trace ''
+        substrate/lockfile-builder: ${toString src}/Cargo.build-spec.json is v2.
+        Regenerate with `gen build .` (gen >= c9a0067) — legacyArgs
+        backward-compat will sunset at M6. Spec v3 adds typed
+        `build_rust_crate_args` + universal `preBuild` + `links`.
+      '' null
+      else throw ''
+        substrate/lockfile-builder: ${toString src}/Cargo.build-spec.json
+        has unsupported schema version ${toString v}. Run `gen build .`
+        in the workspace root (gen >= c9a0067) to regenerate against
+        SCHEMA_VERSION 3.
+      '';
+    _ = _specVersionAssert;
     buildRustCrate = buildRustCrateForPkgs pkgs;
 
     workspaceKeys = builtins.listToAttrs
