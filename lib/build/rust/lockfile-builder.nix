@@ -444,14 +444,30 @@ let
     # tree, `specHost` for the build-arch tree. `depFor`/`buildDepFor`
     # close over the appropriate target/host trees per I2 dispatch.
     # `buildRustCrate` is the per-tree builder (target vs. host pkgs).
-    mkBuiltTree = { treeSpec, buildRustCrate, depFor, buildDepFor }:
+    #
+    # Multi-target spec support (schema v5+, #25): when the spec
+    # carries `target_resolves[triple]`, dep edges come from that
+    # target's section — eliminates the gen-bootstrap chicken-and-egg.
+    # Fall back to per-crate `runtime_dependencies` / `build_dependencies`
+    # for older specs (schema < 5).
+    depsFor = treeSpec: triple: key: crate:
+      let
+        sectionCrates = (treeSpec.target_resolves or {}).${triple} or null;
+        section = if sectionCrates != null then sectionCrates.crates.${key} or null else null;
+      in
+        if section != null
+        then { runtime = section.runtime_dependencies; build = section.build_dependencies; }
+        else { runtime = crate.runtime_dependencies; build = crate.build_dependencies; };
+
+    mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
       lib.mapAttrs (key: crate: let
+        deps = depsFor treeSpec triple key crate;
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
                 else legacyArgs crate) // {
           src = srcOf src crate;
-          dependencies = map depFor crate.runtime_dependencies;
-          buildDependencies = map buildDepFor crate.build_dependencies;
+          dependencies = map depFor deps.runtime;
+          buildDependencies = map buildDepFor deps.build;
         } // binsFor key crate;
         # Apply lib_target synthesis BEFORE prefixForMember so the
         # synthesized libPath gets the same `<relative_path>/` glue as a
@@ -470,6 +486,7 @@ let
     # at spec-emission time, not in Nix at evaluation time.
     built = mkBuiltTree {
       treeSpec = specTarget;
+      triple = targetTriple;
       buildRustCrate = buildRustCrateTarget;
       depFor = d:
         let
@@ -485,6 +502,7 @@ let
     # Transitively all-host.
     builtBuild = mkBuiltTree {
       treeSpec = specHost;
+      triple = hostTriple;
       buildRustCrate = buildRustCrateHost;
       depFor = d: builtBuild.${d.package_key};
       buildDepFor = d: builtBuild.${d.package_key};
