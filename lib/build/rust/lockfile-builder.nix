@@ -368,7 +368,16 @@ let
       let bins = map (b: { inherit (b) name path; }) (crate.binaries or []);
       in
         if isWorkspaceMember key
-        then (if bins != [] then { crateBin = bins; } else {})
+        # ANY workspace member: if the spec says no bins, declare
+        # `crateBin = []` explicitly to suppress buildRustCrate's
+        # default `src/main.rs` auto-detection. Workspace-relative
+        # src means that detection lands on the workspace ROOT's
+        # src/main.rs (an orphan file in repos like tatara that
+        # split into a multi-crate layout), compiling it as a bin
+        # named after the wrong package and failing on dozens of
+        # unresolved imports the orphan source uses. The empty list
+        # matches cargo metadata's authoritative "no bin targets".
+        then (if bins != [] then { crateBin = bins; } else { crateBin = []; })
         else { crateBin = []; };
 
     # Always layer plemeCrateOverrides in — even when the caller passed
