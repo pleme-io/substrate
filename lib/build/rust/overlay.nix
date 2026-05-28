@@ -90,7 +90,18 @@
       makeWrapper ${rustToolchain}/bin/cargo $out/bin/cargo \
         --suffix PATH : "${rustToolchain}/bin"
     '';
-  in {
+  in (import ./crates-io-cdn-overlay.nix final prev) // {
+    # crates.io 403 fix (2026-05-27 policy change): compose the
+    # crates-io-cdn overlay here so EVERY consumer of this rust overlay
+    # — substrate's own library/service/tool builders AND every
+    # downstream flake doing `import nixpkgs { overlays = [ mkRustOverlay
+    # … ]; }` then `buildRustPackage`/`fetchCargoVendor` (e.g.
+    # mathscape) — gets the api/v1 → static.crates.io rewrite
+    # automatically, with zero per-repo config. The gen lockfile-builder
+    # path canonicalizes independently; this covers the
+    # buildRustPackage/crate2nix paths. fetchurl is a content-addressed
+    # FOD, so the rewrite is zero-cascade (no crate output hashes change).
+
     # DO NOT override system rustc/cargo — this breaks nixpkgs packages
     # (mercurial, librsvg, cryptography, etc.) that aren't compatible with
     # the newer fenix toolchain's stricter lints and behavior changes.
