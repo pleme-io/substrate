@@ -260,6 +260,68 @@ let
     # spec since that's the workload-facing view.
     spec = specTarget;
     needsRegen = needsRegenTarget;  # legacy alias for _regenAssert.
+
+    # Workspace-root orphan filter — kills the auto-detect class of bug.
+    #
+    # Repos that split a former monolithic crate into N workspace
+    # members (tatara is the canonical example: workspace-root `./src/`
+    # contains api/, cli/, drivers/, etc. from the pre-split monolith
+    # that cargo no longer compiles) leave the orphan tree at workspace
+    # root. nixpkgs' buildRustCrate `build-crate.nix`:
+    #
+    #   if   [[ -e "$LIB_PATH" ]] then build_lib "$LIB_PATH"
+    #   elif [[ -e src/lib.rs  ]] then build_lib src/lib.rs
+    #
+    # ...has an `elif` that fires on that workspace-root orphan for
+    # every bin-only path-source member built via `src = workspaceSrc`,
+    # compiling a lib named after the wrong crate with the wrong deps
+    # → cascade of E0432/E0433 errors that look like missing externs.
+    #
+    # Symmetric trap exists for `src/main.rs` — a lib-only member with
+    # `crateBin = []` is safe, but an unexpected orphan `src/main.rs`
+    # at workspace root would also be picked up.
+    #
+    # **Workspace-root orphan = an `src/` directory at the workspace
+    # root that no member crate claims as its own.** A member claims
+    # the root when its `source.relative_path` is `""` or `"."` —
+    # that's cargo's convention for a root crate co-located with the
+    # workspace. If no member claims the root, then workspace-root
+    # `src/` is provably unowned and safe to filter out.
+    #
+    # The filter is applied ONCE here at the workspaceSrc level — pure
+    # Nix `lib.cleanSourceWith` — so every path-source member sees a
+    # tree where the orphan isn't present at all. No bash, no per-crate
+    # preBuild, no fragile string predicates. Decided once at the
+    # source-derivation level; every consumer of `mkSrcOf` for a path
+    # member transparently sees the filtered tree.
+    hasRootCrate =
+      let
+        checkOne = key:
+          let c = spec.crates.${key} or null; in
+            c != null
+            && c.source.kind == "path"
+            && (c.source.relative_path == ""
+                || c.source.relative_path == ".");
+      in
+        lib.any checkOne (spec.workspace_members or []);
+
+    filteredWorkspaceSrc =
+      if hasRootCrate then src
+      else
+        let
+          srcStr = toString src;
+        in
+          lib.cleanSourceWith {
+            inherit src;
+            name = "workspace-src-no-root-orphan";
+            filter = path: type:
+              let
+                rel = lib.removePrefix (srcStr + "/") (toString path);
+                isWorkspaceRootSrcDir = type == "directory" && rel == "src";
+                isUnderWorkspaceRootSrc = lib.hasPrefix "src/" rel;
+              in
+                !(isWorkspaceRootSrcDir || isUnderWorkspaceRootSrc);
+          };
     # If regen wasn't possible (gen unavailable) but the committed spec
     # had violations, surface a traced warning so the operator knows
     # the build is running on synthesized fallbacks instead of a true
@@ -474,58 +536,19 @@ let
       # NOTE: `args ? libName` is `true` even when the attr's value is
       # `null` (Rust's `lib_name: Option<String> = None` serializes to
       # JSON null which Nix reads as the value null, with the attr
-      # PRESENT). Filter explicitly on null so the bin-only branch
-      # fires when build_rust_crate_args carries libName=null.
+      # PRESENT). Filter explicitly on null so the synth branch fires
+      # when build_rust_crate_args carries libName=null.
+      #
+      # Workspace-root orphan `src/lib.rs` / `src/main.rs` (present in
+      # repos like tatara that split a former monolithic crate into N
+      # workspace members) used to be removed here via a preBuild bash
+      # `rm`. That moved upstream — `mkSrcOf` now filters the
+      # workspace src derivation with `lib.cleanSourceWith` so bin-only
+      # workspace members see a tree where the orphan isn't present
+      # at all. Pure Nix, no bash glue, decided once at the source
+      # level instead of per-crate at preBuild time.
       if (args ? libName) && args.libName != null then args
-      else
-        let
-          # Only path-source workspace members trigger the orphan-rm. For
-          # registry/git crates, gen-cargo intentionally suppresses
-          # lib_target when name+path match the buildRustCrate defaults
-          # (see gen/crates/gen-cargo/src/build_spec.rs:756 — `is_default &&
-          # !is_member`), letting buildRustCrate's auto-discovery handle
-          # the lib build with `crate-type = ["proc-macro", "rlib"]` etc.
-          # The orphan-rm must NOT fire on those — clap-4.6.1 ships
-          # lib_target=None + binaries=[{stdio-fixture}] for this exact
-          # reason. Removing its src/lib.rs would yield an empty drv.
-          binsOnly = crate.source.kind == "path"
-            && (crate.lib_target or null) == null
-            && ((crate.binaries or []) != []);
-          rel = crate.source.relative_path or "";
-          # Substrate uses `src = workspaceSrc` for path-source workspace
-          # members so `include_str!("../sibling.lisp")` works. Side
-          # effect: the unpacked source tree HAS the workspace root,
-          # not the member subdir. nixpkgs' buildRustCrate's
-          # build-crate.nix lib-build logic:
-          #
-          #   if   [[ -e "$LIB_PATH"  ]] then build_lib "$LIB_PATH"
-          #   elif [[ -e src/lib.rs   ]] then build_lib src/lib.rs
-          #
-          # ...has an `elif` that fires on the workspace-root orphan
-          # `src/lib.rs` (present in repos like tatara that split a
-          # former monolithic crate into a workspace, leaving the old
-          # ./src/lib.rs at root) even when LIB_PATH is a non-existent
-          # `<rel>/src/lib.rs`. Setting LIB_PATH alone is insufficient;
-          # the orphan must be physically removed from the unpacked
-          # source before buildPhase. Inject the removal into preBuild.
-          binsOnlyPreBuild = ''
-            # Suppress workspace-root orphan src/lib.rs detection.
-            # Spec says this member is bin-only (no lib_target); the
-            # workspace root's leftover src/lib.rs is not OUR lib.
-            if [[ -e src/lib.rs && ! -e "${rel}/src/lib.rs" ]]; then
-              rm src/lib.rs
-              echo "substrate: removed workspace-root orphan src/lib.rs (no lib_target for ${crate.name})"
-            fi
-            if [[ -e src/main.rs && ! -e "${rel}/src/main.rs" ]]; then
-              rm src/main.rs
-              echo "substrate: removed workspace-root orphan src/main.rs (no orphan-bin allowed for ${crate.name})"
-            fi
-          '';
-          existingPreBuild = args.preBuild or "";
-        in
-          if binsOnly
-          then args // { preBuild = existingPreBuild + "\n" + binsOnlyPreBuild; }
-          else args // synthLibTarget crate;
+      else args // synthLibTarget crate;
 
     # Path-source workspace members now use src = workspaceSrc (so
     # include_str! to sibling files works). libPath / build / crateBin
@@ -605,7 +628,7 @@ let
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
                 else legacyArgs crate) // {
-          src = (mkSrcOf hostPkgs) src crate;
+          src = (mkSrcOf hostPkgs) filteredWorkspaceSrc crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
           features = featuresFor;
