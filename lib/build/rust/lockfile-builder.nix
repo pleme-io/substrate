@@ -121,6 +121,12 @@ let
       workspaceSrc;
 
   plemeCrateOverrides = import ./pleme-crate-overrides.nix;
+  # Mechanical dispatch layer for typed `CrateQuirk` variants emitted
+  # by gen-cargo. Class-helper functions (forceCfg /
+  # foldNormalIntoBuild / substituteSource); per-crate knowledge of
+  # WHICH crates need WHICH quirks lives in
+  # `gen-cargo/src/quirks.rs::REGISTRY` (Rust source of truth).
+  quirkApply = import ./quirk-apply.nix { inherit lib; };
   mkProject = {
     src,
     # Substrate guarantee: every fleet-wide buildRustCrate quirk in
@@ -506,8 +512,25 @@ let
         # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
         # emission) without requiring every consumer repo to regenerate.
         argsSynth = applySynthLibTarget crate baseArgs;
+<<<<<<< Updated upstream
         args = prefixForMember crate argsSynth;
       in buildRustCrate (args // overrideFor crate.name args)) targetCrates;
+||||||| Stash base
+        args = prefixForMember crate argsSynth;
+      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
+=======
+        argsPrefixed = prefixForMember crate argsSynth;
+        # Mechanical dispatch from typed CrateQuirk variants (emitted by
+        # gen-cargo into `crate.quirks`) to their class-helper apply
+        # functions. Zero per-crate Nix-attrset knowledge — the registry
+        # is in Rust at `gen-cargo/src/quirks.rs::REGISTRY`. Quirks
+        # contribute additional override fields that merge on top of the
+        # base args; the consumer's own override (overrideFor) wins on
+        # collision.
+        quirkAttrs = quirkApply.applyQuirks (crate.quirks or []) argsPrefixed;
+        args = argsPrefixed // quirkAttrs;
+      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
+>>>>>>> Stashed changes
 
     # Target tree: workload arch + target-filtered dep edges (I4).
     # Dispatch runtime deps via the typed `dep.tree` field gen-cargo
