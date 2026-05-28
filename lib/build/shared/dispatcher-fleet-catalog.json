@@ -1,0 +1,356 @@
+[
+  {
+    "label": "gen.ansible.ansible-quirk",
+    "variant_count": 4,
+    "variant_kinds": [
+      "drop-dependency",
+      "pin-dependency",
+      "build-ignore",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "drop-dependency",
+        [
+          "collection"
+        ]
+      ],
+      [
+        "pin-dependency",
+        [
+          "collection",
+          "version"
+        ]
+      ],
+      [
+        "build-ignore",
+        [
+          "path"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.bundler.bundler-quirk",
+    "variant_count": 5,
+    "variant_kinds": [
+      "pin-ruby",
+      "skip-native-build",
+      "extra-cflags",
+      "substitute-source",
+      "override-source"
+    ],
+    "variant_fields": [
+      [
+        "pin-ruby",
+        [
+          "version"
+        ]
+      ],
+      [
+        "skip-native-build",
+        []
+      ],
+      [
+        "extra-cflags",
+        [
+          "flags"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ],
+      [
+        "override-source",
+        [
+          "url"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.cargo.crate-quirk",
+    "variant_count": 3,
+    "variant_kinds": [
+      "force-cfg",
+      "fold-normal-into-build",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "force-cfg",
+        [
+          "cfg"
+        ]
+      ],
+      [
+        "fold-normal-into-build",
+        [
+          "extern_crate"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.gomod.gomod-quirk",
+    "variant_count": 5,
+    "variant_kinds": [
+      "force-vendor-hash",
+      "build-tag",
+      "ldflag",
+      "cgo-off",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "force-vendor-hash",
+        [
+          "hash"
+        ]
+      ],
+      [
+        "build-tag",
+        [
+          "tag"
+        ]
+      ],
+      [
+        "ldflag",
+        [
+          "flag"
+        ]
+      ],
+      [
+        "cgo-off",
+        []
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.helm.helm-quirk",
+    "variant_count": 4,
+    "variant_kinds": [
+      "override-value",
+      "skip-hook",
+      "patch-manifest",
+      "force-image-tag"
+    ],
+    "variant_fields": [
+      [
+        "override-value",
+        [
+          "path",
+          "value"
+        ]
+      ],
+      [
+        "skip-hook",
+        [
+          "hook"
+        ]
+      ],
+      [
+        "patch-manifest",
+        [
+          "resource_kind",
+          "name",
+          "jsonpath",
+          "value"
+        ]
+      ],
+      [
+        "force-image-tag",
+        [
+          "container",
+          "tag"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.npm.npm-quirk",
+    "variant_count": 5,
+    "variant_kinds": [
+      "npm-install-flag",
+      "skip-postinstall",
+      "pin-nodejs",
+      "override-registry",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "npm-install-flag",
+        [
+          "flag"
+        ]
+      ],
+      [
+        "skip-postinstall",
+        []
+      ],
+      [
+        "pin-nodejs",
+        [
+          "version"
+        ]
+      ],
+      [
+        "override-registry",
+        [
+          "url"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.pip.pip-quirk",
+    "variant_count": 4,
+    "variant_kinds": [
+      "pin-interpreter",
+      "skip-check",
+      "drop-requires",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "pin-interpreter",
+        [
+          "python"
+        ]
+      ],
+      [
+        "skip-check",
+        []
+      ],
+      [
+        "drop-requires",
+        [
+          "package"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.poetry.poetry-quirk",
+    "variant_count": 4,
+    "variant_kinds": [
+      "override-build-system",
+      "override-attrs",
+      "skip-check",
+      "prefer-wheel"
+    ],
+    "variant_fields": [
+      [
+        "override-build-system",
+        [
+          "package",
+          "backend"
+        ]
+      ],
+      [
+        "override-attrs",
+        [
+          "package",
+          "attr",
+          "value"
+        ]
+      ],
+      [
+        "skip-check",
+        [
+          "package"
+        ]
+      ],
+      [
+        "prefer-wheel",
+        [
+          "package",
+          "prefer"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "gen.swift.swift-quirk",
+    "variant_count": 4,
+    "variant_kinds": [
+      "pin-toolchain",
+      "force-configuration",
+      "ldflag",
+      "substitute-source"
+    ],
+    "variant_fields": [
+      [
+        "pin-toolchain",
+        [
+          "version"
+        ]
+      ],
+      [
+        "force-configuration",
+        [
+          "configuration"
+        ]
+      ],
+      [
+        "ldflag",
+        [
+          "flag"
+        ]
+      ],
+      [
+        "substitute-source",
+        [
+          "file",
+          "from",
+          "to"
+        ]
+      ]
+    ]
+  }
+]
