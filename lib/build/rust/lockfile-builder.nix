@@ -460,10 +460,36 @@ let
 
     # Apply lib_target synthesis to ANY args-source missing libName/libPath
     # (legacyArgs OR spread build_rust_crate_args). Idempotent: if the args
-    # already declare libName, the synthesis no-ops.
+    # already declare libName, the synthesis no-ops. When the spec
+    # carries `binaries` but no `lib_target` (a bin-only workspace
+    # member), explicitly point `libPath` at the member's own
+    # `<relative_path>/src/lib.rs` — which doesn't exist — so
+    # buildRustCrate's existence check skips the lib build instead
+    # of auto-detecting the workspace ROOT's orphan src/lib.rs
+    # (present in repos like tatara that split a former monolithic
+    # crate into N workspace members; the orphan lib.rs at root
+    # gets compiled as a lib named after EVERY bin-only member and
+    # fails on dozens of unresolved imports the orphan source uses).
     applySynthLibTarget = crate: args:
       if args ? libName then args
-      else args // synthLibTarget crate;
+      else
+        let
+          binsOnly = (crate.lib_target or null) == null
+            && ((crate.binaries or []) != []);
+          rel = crate.source.relative_path or "";
+          # `<rel>/src/lib.rs` for path members, plain `src/lib.rs`
+          # for non-path members. The path may not exist; that's
+          # the point — buildRustCrate skips when libPath doesn't
+          # resolve to a real file. Cargo metadata is authoritative;
+          # if it lists no lib target, the substrate enforces.
+          suppressedLibPath =
+            if crate.source.kind == "path" && rel != "" && rel != "."
+            then rel + "/src/lib.rs"
+            else "src/lib.rs";
+        in
+          if binsOnly
+          then args // { libName = rustcCrateName crate; libPath = suppressedLibPath; }
+          else args // synthLibTarget crate;
 
     # Path-source workspace members now use src = workspaceSrc (so
     # include_str! to sibling files works). libPath / build / crateBin
