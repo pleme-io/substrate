@@ -113,12 +113,56 @@ let
         then firstMatch
         else full
     else
-      # Path source = workspace member (or root). ALWAYS use the full
-      # workspace root so `include_str!("../../sibling.lisp")` from a
-      # member's src/lib.rs can reach files at the workspace root.
-      # libPath / build_script in build_rust_crate_args must be prefixed
-      # with relative_path to compensate — handled in `prefixForMember`.
-      workspaceSrc;
+      # Path source — two cases:
+      #
+      # 1. Workspace member (relative_path is INSIDE workspaceSrc):
+      #    ALWAYS use the full workspace root so
+      #    `include_str!("../../sibling.lisp")` from a member's
+      #    src/lib.rs can reach files at the workspace root.
+      #    libPath / build_script in build_rust_crate_args must be
+      #    prefixed with relative_path to compensate — handled in
+      #    `prefixForMember`.
+      #
+      # 2. External path-dep (relative_path starts with "../" —
+      #    escapes the workspace via a cargo path = "../sibling-repo"
+      #    declaration): NOT SUPPORTED. The sibling repo's source
+      #    lives OUTSIDE workspaceSrc; using workspaceSrc here makes
+      #    libPath dangle at "../sibling/src/lib.rs" which doesn't
+      #    exist in the build sandbox, producing a silent empty drv
+      #    (the buildPhase runs but rustc never finds the lib, no
+      #    rlib emitted). Downstream consumers fail with the cryptic
+      #    "extern location for <crate> does not exist".
+      #
+      #    Fail loud with a typed error directing the operator to
+      #    convert the path-dep to a git or registry dep in the
+      #    consuming workspace's Cargo.toml — that's the only correct
+      #    fix today. Future substrate work could fetch the external
+      #    path-dep's source from a flake-input mapping emitted by
+      #    gen-cargo, but that doesn't exist yet.
+      if lib.hasPrefix ".." (spec.source.relative_path or "")
+      then throw ''
+        substrate/lockfile-builder: external path-dep not supported.
+
+        Crate `${spec.name}` (version ${spec.version}) declared with
+        a cargo `path = "${spec.source.relative_path}"` that escapes
+        the workspace root. The sibling repo's source is not present
+        in the Nix build sandbox (src = workspaceSrc) — buildRustCrate
+        would silently produce an empty drv and the consuming crate
+        fails with "extern location does not exist".
+
+        Fix: change the dep in the consuming workspace's Cargo.toml
+        to use git (or registry) instead of path. Example:
+
+          # before (broken in Nix builds)
+          ${spec.name} = { path = "${spec.source.relative_path}" }
+
+          # after (works in Nix builds)
+          ${spec.name} = { git = "https://github.com/pleme-io/${spec.name}.git" }
+
+        Re-run `gen lock-build` after editing, then commit + push the
+        regenerated Cargo.build-spec.json.
+      ''
+      else workspaceSrc;
 
   # Triple-aware: imported as a function `triple -> overrides`. Each
   # tree-builder specializes the overrides for its target triple, so
