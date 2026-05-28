@@ -201,6 +201,18 @@
         # Rust overlay module for direct import
         rustOverlay = ./lib/build/rust/overlay.nix;
 
+        # Fleet-wide nixpkgs overlay that rewrites
+        # crates.io/api/v1/.../download URLs into the canonical
+        # static.crates.io CDN form. Catches every fetcher in the
+        # closure — substrate's own lockfile-builder, nixpkgs'
+        # built-in cargoSetupHook / fetchCargoVendor /
+        # prefetch-npm-deps, and any third-party flake that
+        # vendors Cargo deps via pkgs.fetchurl.
+        # Consumer flakes compose into their nixpkgs.overlays list.
+        overlays = {
+          crates-io-cdn = import ./lib/build/rust/crates-io-cdn-overlay.nix;
+        };
+
         # Flake-parts module factory for monorepo consumers
         monorepoPartsModule = ./lib/util/monorepo-parts.nix;
 
