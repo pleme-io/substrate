@@ -156,7 +156,12 @@ let
     # consistently so `gen build --filter-platform=<triple>` matches
     # what rustc expects.
     targetTriple = pkgs.stdenv.hostPlatform.rust.rustcTarget;
-    hostTriple = pkgs.buildPackages.stdenv.hostPlatform.rust.rustcTarget;
+    # Must use the explicit hostPkgs — NOT pkgs.buildPackages. For
+    # pkgsStatic, `pkgs.buildPackages` is pkgsStatic itself (same
+    # store path), so its rustcTarget == targetTriple and isCross
+    # falsely reports false. Without this fix, cross-musl builds
+    # never engage the dual-tree dispatch.
+    hostTriple = hostPkgs.stdenv.hostPlatform.rust.rustcTarget;
     isCross = targetTriple != hostTriple;
 
     # 1) Try the committed spec first (cheap, no IFD). Note: committed
@@ -301,11 +306,15 @@ let
     #   arch); EVERY dep routes to builtBuild — the proc-macro graph is
     #   transitively host.
     #
-    # For native builds (pkgs.buildPackages == pkgs), the two trees
-    # yield identical derivations — the dispatch is a no-op. Real
-    # divergence only happens for cross-builds (musl-from-gnu, etc.).
+    # For native builds (hostPkgs == pkgs), the two trees yield
+    # identical derivations — the dispatch is a no-op. Real divergence
+    # only happens for cross-builds (musl-from-gnu, darwin-from-linux,
+    # etc.). hostPkgs is required here (NOT pkgs.buildPackages) because
+    # pkgsStatic.buildPackages == pkgsStatic, which collapses the
+    # host/target distinction and routes proc-macro builds to the
+    # workload's static musl stdenv → autocfg/E0461 target mismatch.
     buildRustCrateTarget = buildRustCrateForPkgs pkgs;
-    buildRustCrateHost = buildRustCrateForPkgs pkgs.buildPackages;
+    buildRustCrateHost = buildRustCrateForPkgs hostPkgs;
 
     workspaceKeys = builtins.listToAttrs
       (map (k: { name = k; value = true; }) spec.workspace_members);
