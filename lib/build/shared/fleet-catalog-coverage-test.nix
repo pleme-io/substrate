@@ -93,6 +93,10 @@ let
     { label = "kura.backoff-strategy";  count = 4; ecosystem = null; }
     { label = "kura.verification-kind"; count = 5; ecosystem = null; }
     { label = "kura.event";             count = 4; ecosystem = null; }
+    # Ninth consumer class: pangea-operator (K8s controller for
+    # architecture compliance bindings). target-kind = which CRD
+    # kinds a compliance binding may target.
+    { label = "pangea.target-kind"; count = 4; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -136,9 +140,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 23 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura)"
+    "fleet catalog has ≥ 24 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea)"
     true
-    (builtins.length catalog >= 23);
+    (builtins.length catalog >= 24);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -189,9 +193,17 @@ let
     "catalog has ≥ 8 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 8);
+
+  # Nine-class invariant. Substrate adds pangea-operator
+  # (K8s controller for architecture compliance bindings).
+  nineClassesTest = assertEq
+    "catalog has ≥ 9 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 9);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
-  fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest ]
+  fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest
+  nineClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

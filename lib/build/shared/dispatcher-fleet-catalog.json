@@ -751,6 +751,34 @@
     ]
   },
   {
+    "label": "pangea.target-kind",
+    "variant_count": 4,
+    "variant_kinds": [
+      "infrastructure-template",
+      "infrastructure-flow",
+      "image-pipeline",
+      "packer-build"
+    ],
+    "variant_fields": [
+      [
+        "infrastructure-template",
+        []
+      ],
+      [
+        "infrastructure-flow",
+        []
+      ],
+      [
+        "image-pipeline",
+        []
+      ],
+      [
+        "packer-build",
+        []
+      ]
+    ]
+  },
+  {
     "label": "shigoto.retry-outcome",
     "variant_count": 2,
     "variant_kinds": [
