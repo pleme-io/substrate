@@ -799,6 +799,34 @@
     ]
   },
   {
+    "label": "tatara.hypervisor",
+    "variant_count": 4,
+    "variant_kinds": [
+      "vfkit",
+      "vfkit-darwin",
+      "qemu",
+      "kasou"
+    ],
+    "variant_fields": [
+      [
+        "vfkit",
+        []
+      ],
+      [
+        "vfkit-darwin",
+        []
+      ],
+      [
+        "qemu",
+        []
+      ],
+      [
+        "kasou",
+        []
+      ]
+    ]
+  },
+  {
     "label": "wasm-platform.wasi-capability",
     "variant_count": 8,
     "variant_kinds": [

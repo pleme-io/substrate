@@ -97,6 +97,10 @@ let
     # architecture compliance bindings). target-kind = which CRD
     # kinds a compliance binding may target.
     { label = "pangea.target-kind"; count = 4; ecosystem = null; }
+    # Tenth consumer class: tatara (foundational pleme-io crate —
+    # Lisp + substrate + VM). hypervisor = available backends for
+    # booting tatara-vm guests.
+    { label = "tatara.hypervisor"; count = 4; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -140,9 +144,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 24 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea)"
+    "fleet catalog has ≥ 25 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara)"
     true
-    (builtins.length catalog >= 24);
+    (builtins.length catalog >= 25);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -200,10 +204,17 @@ let
     "catalog has ≥ 9 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 9);
+
+  # Ten-class invariant. Substrate adds tatara (Lisp + VM
+  # foundational layer).
+  tenClassesTest = assertEq
+    "catalog has ≥ 10 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 10);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
   fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest
-  nineClassesTest ]
+  nineClassesTest tenClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)
