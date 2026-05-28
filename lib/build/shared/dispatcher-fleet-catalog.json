@@ -515,6 +515,156 @@
     ]
   },
   {
+    "label": "kura.backoff-strategy",
+    "variant_count": 4,
+    "variant_kinds": [
+      "fixed",
+      "linear",
+      "exponential",
+      "jitter"
+    ],
+    "variant_fields": [
+      [
+        "fixed",
+        []
+      ],
+      [
+        "linear",
+        []
+      ],
+      [
+        "exponential",
+        []
+      ],
+      [
+        "jitter",
+        []
+      ]
+    ]
+  },
+  {
+    "label": "kura.event",
+    "variant_count": 4,
+    "variant_kinds": [
+      "success",
+      "failure",
+      "timeout",
+      "custom"
+    ],
+    "variant_fields": [
+      [
+        "success",
+        []
+      ],
+      [
+        "failure",
+        []
+      ],
+      [
+        "timeout",
+        []
+      ],
+      [
+        "custom",
+        [
+          "name"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "kura.node-kind",
+    "variant_count": 7,
+    "variant_kinds": [
+      "prompt",
+      "prompt-with-model",
+      "shell",
+      "file-read",
+      "conditional",
+      "fan-out",
+      "fan-in"
+    ],
+    "variant_fields": [
+      [
+        "prompt",
+        []
+      ],
+      [
+        "prompt-with-model",
+        [
+          "model"
+        ]
+      ],
+      [
+        "shell",
+        [
+          "command"
+        ]
+      ],
+      [
+        "file-read",
+        [
+          "path"
+        ]
+      ],
+      [
+        "conditional",
+        [
+          "condition"
+        ]
+      ],
+      [
+        "fan-out",
+        [
+          "count"
+        ]
+      ],
+      [
+        "fan-in",
+        []
+      ]
+    ]
+  },
+  {
+    "label": "kura.verification-kind",
+    "variant_count": 5,
+    "variant_kinds": [
+      "match",
+      "json-valid",
+      "non-empty",
+      "command",
+      "llm"
+    ],
+    "variant_fields": [
+      [
+        "match",
+        [
+          "pattern"
+        ]
+      ],
+      [
+        "json-valid",
+        []
+      ],
+      [
+        "non-empty",
+        []
+      ],
+      [
+        "command",
+        [
+          "command"
+        ]
+      ],
+      [
+        "llm",
+        [
+          "prompt"
+        ]
+      ]
+    ]
+  },
+  {
     "label": "magma.action",
     "variant_count": 9,
     "variant_kinds": [

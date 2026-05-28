@@ -86,6 +86,13 @@ let
     # magma plan walker can emit per resource.
     { label = "magma.resource-kind"; count = 5; ecosystem = null; }
     { label = "magma.action";        count = 9; ecosystem = null; }
+    # Eighth consumer class: kura (typed agent runner). Four DAG-
+    # model typed shadows — node taxonomy, retry backoff, output
+    # verification, state-machine transition events.
+    { label = "kura.node-kind";         count = 7; ecosystem = null; }
+    { label = "kura.backoff-strategy";  count = 4; ecosystem = null; }
+    { label = "kura.verification-kind"; count = 5; ecosystem = null; }
+    { label = "kura.event";             count = 4; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -129,9 +136,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 19 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma)"
+    "fleet catalog has ≥ 23 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura)"
     true
-    (builtins.length catalog >= 19);
+    (builtins.length catalog >= 23);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -176,9 +183,15 @@ let
     "catalog has ≥ 7 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 7);
+
+  # Eight-class invariant. Substrate adds kura (agent DAG runner).
+  eightClassesTest = assertEq
+    "catalog has ≥ 8 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 8);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
-  fiveClassesTest sixClassesTest sevenClassesTest ]
+  fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)
