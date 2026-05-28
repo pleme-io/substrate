@@ -218,6 +218,29 @@ let
   nativeBinary = binaries.${nativeTarget};
 
   # ============================================================================
+  # HOST-TOOL BINARY — always-native, never pkgsStatic
+  # ============================================================================
+  # The `host-tool` output is the binary built against the host's native
+  # nixpkgs (regular glibc on linux, regular darwin on macOS). It is the
+  # variant consumers should use when the binary is consumed AS A BUILD TOOL
+  # — most importantly for substrate's gen-IFD wire (mk-build-spec.nix).
+  #
+  # The default per-target build (and the `default` output) uses pkgsStatic
+  # for linux targets — fine for deploy artifacts, but the static-musl
+  # cross-build cascade hits real-world crate compat walls (notify v8.2.0
+  # mio cfg-conditional, etc.) and is semantically wrong for SDLC tools
+  # that never deploy via static-musl in the first place.
+  #
+  # `host-tool` is system-scoped: on aarch64-darwin it's an aarch64-darwin
+  # binary; on x86_64-linux it's a glibc x86_64-linux binary. Consumers
+  # reading `gen.packages.${system}.host-tool` always get something
+  # natively runnable on `${system}`.
+  hostToolBinary = mkBinary "host-tool" {
+    pkgs = hostPkgs;
+    isDarwin = system == "aarch64-darwin" || system == "x86_64-darwin";
+  };
+
+  # ============================================================================
   # APPS (via release-helpers.nix)
   # ============================================================================
   # Resolve forge command — avoid hostPkgs.forge which collides with a removed
@@ -295,6 +318,10 @@ in {
   ) // {
     default = nativeBinary;
     ${toolName} = nativeBinary;
+    # SDLC-tool variant: built against host's regular nixpkgs (no
+    # pkgsStatic). Consumed by substrate's gen-IFD wire and by any
+    # other "I just need this binary to run on this system" use case.
+    host-tool = hostToolBinary;
   };
 
   devShells.default = (import ../shared/devshell.nix { pkgs = hostPkgs; }).mkRustDevShell {

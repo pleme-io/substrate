@@ -58,6 +58,8 @@ let
     fenix = inputs.fenix or null;
     devenv = inputs.devenv or null;
     forge = inputs.forge or null;
+    # gen flows as a flake input here; the inner tool-release-flake.nix
+    # resolves it to the host-tool variant (or default) for IFD use.
     gen = inputs.gen or null;
   };
 in toolFlake (
