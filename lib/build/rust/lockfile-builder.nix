@@ -469,6 +469,29 @@ let
         else { runtime = crate.runtime_dependencies; build = crate.build_dependencies; };
 
     mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
+      let
+        # Multi-target spec (#25): iterate only crates ACTUALLY REACHABLE
+        # for the current target — restricts `built` to the per-target
+        # subset. Without this, apple-only crates (wgpu-core-deps-apple,
+        # core-graphics-types, objc-sys) exist as keys in `built` for
+        # linux trees because they live in the spec's universe
+        # (`spec.crates`). Some dep paths transitively reach those keys
+        # through the per-crate `runtime_dependencies` fallback for
+        # crates missing from target_resolves — which builds apple-only
+        # sources on linux and fails with E0455 "link kind framework
+        # is only supported on Apple targets".
+        #
+        # Restricting iteration to target_resolves[triple].crates keys
+        # closes the leak. Old specs (no target_resolves) fall back to
+        # spec.crates — the legacy single-target behavior.
+        targetCrates =
+          let
+            section = (treeSpec.target_resolves or {}).${triple} or null;
+          in
+            if section != null
+            then builtins.intersectAttrs section.crates treeSpec.crates
+            else treeSpec.crates;
+      in
       lib.mapAttrs (key: crate: let
         deps = depsFor treeSpec triple key crate;
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
@@ -484,7 +507,7 @@ let
         # emission) without requiring every consumer repo to regenerate.
         argsSynth = applySynthLibTarget crate baseArgs;
         args = prefixForMember crate argsSynth;
-      in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
+      in buildRustCrate (args // overrideFor crate.name args)) targetCrates;
 
     # Target tree: workload arch + target-filtered dep edges (I4).
     # Dispatch runtime deps via the typed `dep.tree` field gen-cargo
