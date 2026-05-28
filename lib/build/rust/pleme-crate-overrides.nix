@@ -13,8 +13,6 @@
 # discoverable by tooling. Use this file only when the bug is in
 # nixpkgs' attribute.
 let
-  lib = (import <nixpkgs> {}).lib;
-
   # Strip apple-only features from a feature list so linux builds of
   # the crate compile cleanly. Cargo's feature unification is crate-
   # global: any consumer enabling `notify[macos_fsevent]` or its
@@ -30,8 +28,12 @@ let
   # of consumer pin staleness — apple-only features only activate on
   # apple targets via target-conditional features (in target-resolves)
   # OR they're explicitly safe on linux.
+  #
+  # Uses `builtins.filter` (not `lib.filter`) to avoid requiring an
+  # impure `<nixpkgs>` lookup — pleme-crate-overrides.nix is imported
+  # in pure-eval flake context where `<nixpkgs>` is unavailable.
   stripAppleOnlyFeatures = features:
-    lib.filter (f:
+    builtins.filter (f:
       f != "macos_fsevent"
       && f != "fsevent-sys"
     ) features;
