@@ -72,6 +72,10 @@ let
     # Backend kind = where the materialized value lives (Sops on
     # disk / Akeyless API / Mock in-memory).
     { label = "cofre.backend-kind"; count = 3; ecosystem = null; }
+    # Fifth consumer class: shigoto typed job-scheduler.
+    # retry-outcome is the typed decision a RetryPolicy emits when
+    # a job fails (retry-with-timestamp or deadletter).
+    { label = "shigoto.retry-outcome"; count = 2; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -115,9 +119,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 15 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre)"
+    "fleet catalog has ≥ 16 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto)"
     true
-    (builtins.length catalog >= 15);
+    (builtins.length catalog >= 16);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -143,8 +147,15 @@ let
     "catalog has ≥ 4 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 4);
+
+  # Five-class invariant. Substrate now spans gen + caixa +
+  # wasm-platform + cofre + shigoto. Any future collapse fails CI.
+  fiveClassesTest = assertEq
+    "catalog has ≥ 5 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 5);
 in
-[ totalCountTest twoClassesTest threeClassesTest fourClassesTest ]
+[ totalCountTest twoClassesTest threeClassesTest fourClassesTest fiveClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)

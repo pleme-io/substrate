@@ -476,6 +476,26 @@
     ]
   },
   {
+    "label": "shigoto.retry-outcome",
+    "variant_count": 2,
+    "variant_kinds": [
+      "retry",
+      "deadletter"
+    ],
+    "variant_fields": [
+      [
+        "retry",
+        [
+          "until_ms"
+        ]
+      ],
+      [
+        "deadletter",
+        []
+      ]
+    ]
+  },
+  {
     "label": "wasm-platform.wasi-capability",
     "variant_count": 8,
     "variant_kinds": [
