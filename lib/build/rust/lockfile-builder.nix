@@ -500,12 +500,27 @@ let
       in
       lib.mapAttrs (key: crate: let
         deps = depsFor treeSpec triple key crate;
+        # Per-target features (schema v5+): cargo's resolver computes
+        # different features per target due to cfg-conditional feature
+        # activations (e.g. macos_fsevent on apple-only). Without this,
+        # substrate passed crate.features (the universe) to rustc on
+        # every target, leaking apple features into linux builds.
+        # Fall back to crate.features for old specs.
+        featuresFor =
+          let
+            section = (treeSpec.target_resolves or {}).${triple} or null;
+            sectionCrate = if section != null then section.crates.${key} or null else null;
+          in
+            if sectionCrate != null && sectionCrate ? features
+            then sectionCrate.features
+            else crate.features;
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
                 else legacyArgs crate) // {
           src = (mkSrcOf hostPkgs) src crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
+          features = featuresFor;
         } // binsFor key crate;
         # Apply lib_target synthesis BEFORE prefixForMember so the
         # synthesized libPath gets the same `<relative_path>/` glue as a
