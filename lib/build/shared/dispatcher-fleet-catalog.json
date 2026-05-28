@@ -867,6 +867,34 @@
     ]
   },
   {
+    "label": "shikumi.config-tier-kind",
+    "variant_count": 4,
+    "variant_kinds": [
+      "bare",
+      "discovered",
+      "default",
+      "custom"
+    ],
+    "variant_fields": [
+      [
+        "bare",
+        []
+      ],
+      [
+        "discovered",
+        []
+      ],
+      [
+        "default",
+        []
+      ],
+      [
+        "custom",
+        []
+      ]
+    ]
+  },
+  {
     "label": "tatara.hypervisor",
     "variant_count": 4,
     "variant_kinds": [

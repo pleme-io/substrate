@@ -105,6 +105,11 @@ let
     # job-event-kind = structured-log event universe in a print
     # job's audit trail.
     { label = "hanshi.job-event-kind"; count = 8; ecosystem = null; }
+    # Twelfth consumer class: shikumi (foundational typed-config
+    # primitive). config-tier-kind = the four typed config tiers
+    # every shikumi-backed app supports (bare / discovered /
+    # default / custom).
+    { label = "shikumi.config-tier-kind"; count = 4; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -148,9 +153,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 26 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi)"
+    "fleet catalog has ≥ 27 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi + 1 shikumi)"
     true
-    (builtins.length catalog >= 26);
+    (builtins.length catalog >= 27);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -222,10 +227,17 @@ let
     "catalog has ≥ 11 distinct consumer classes"
     true
     (builtins.length rootLabelRoots >= 11);
+
+  # Twelve-class invariant. Substrate adds shikumi (foundational
+  # typed-config primitive).
+  twelveClassesTest = assertEq
+    "catalog has ≥ 12 distinct consumer classes"
+    true
+    (builtins.length rootLabelRoots >= 12);
 in
 [ totalCountTest twoClassesTest threeClassesTest fourClassesTest
   fiveClassesTest sixClassesTest sevenClassesTest eightClassesTest
-  nineClassesTest tenClassesTest elevenClassesTest ]
+  nineClassesTest tenClassesTest elevenClassesTest twelveClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)
