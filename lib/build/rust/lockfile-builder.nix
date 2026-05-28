@@ -212,7 +212,30 @@ let
         in the workspace root (gen >= c9a0067) to regenerate against
         SCHEMA_VERSION 3.
       '';
-    buildRustCrate = buildRustCrateForPkgs pkgs;
+    # I2 — proc-macro host placement (GEN TYPED-SPEC CONTRACT invariant).
+    #
+    # Proc-macro crates run INSIDE rustc at compile time on the BUILD
+    # (host) architecture — never the workload's target arch. cargo
+    # follows this rule by default. substrate's earlier single-pkgs
+    # design collapsed this distinction and cross-compiled proc-macros
+    # to the workload's target (e.g. musl), producing a `-lgcc_s` link
+    # failure (musl static linking lacks libgcc_s).
+    #
+    # Two parallel built trees mirror crate2nix-internal-helpers.nix:
+    # - `built` uses `pkgs.buildRustCrate` (workload/target arch).
+    #   runtime_dependencies dispatch by spec.crates.${id}.proc_macro:
+    #   true → builtBuild (host); false → built (target).
+    #   build_dependencies ALWAYS route to builtBuild (build.rs runs on
+    #   host).
+    # - `builtBuild` uses `pkgs.buildPackages.buildRustCrate` (host
+    #   arch); EVERY dep routes to builtBuild — the proc-macro graph is
+    #   transitively host.
+    #
+    # For native builds (pkgs.buildPackages == pkgs), the two trees
+    # yield identical derivations — the dispatch is a no-op. Real
+    # divergence only happens for cross-builds (musl-from-gnu, etc.).
+    buildRustCrateTarget = buildRustCrateForPkgs pkgs;
+    buildRustCrateHost = buildRustCrateForPkgs pkgs.buildPackages;
 
     workspaceKeys = builtins.listToAttrs
       (map (k: { name = k; value = true; }) spec.workspace_members);
@@ -337,22 +360,43 @@ let
               then { crateBin = map (b: b // { path = p b.path; }) args.crateBin; }
               else {});
 
-    # Lazy memoization: each thunk is computed once via mapAttrs.
-    built = lib.mapAttrs (key: crate: let
-      baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
-              then crate.build_rust_crate_args
-              else legacyArgs crate) // {
-        src = srcOf src crate;
-        dependencies = map (d: built.${d.package_key}) crate.runtime_dependencies;
-        buildDependencies = map (d: built.${d.package_key}) crate.build_dependencies;
-      } // binsFor key crate;
-      # Apply lib_target synthesis BEFORE prefixForMember so the
-      # synthesized libPath gets the same `<relative_path>/` glue as a
-      # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
-      # emission) without requiring every consumer repo to regenerate.
-      argsSynth = applySynthLibTarget crate baseArgs;
-      args = prefixForMember crate argsSynth;
-    in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
+    # Typed per-tree construction. `depFor` and `buildDepFor` close
+    # over the appropriate target/host trees per the I2 dispatch.
+    # `buildRustCrate` is the per-tree builder (target vs. host pkgs).
+    mkBuiltTree = { buildRustCrate, depFor, buildDepFor }:
+      lib.mapAttrs (key: crate: let
+        baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
+                then crate.build_rust_crate_args
+                else legacyArgs crate) // {
+          src = srcOf src crate;
+          dependencies = map depFor crate.runtime_dependencies;
+          buildDependencies = map buildDepFor crate.build_dependencies;
+        } // binsFor key crate;
+        # Apply lib_target synthesis BEFORE prefixForMember so the
+        # synthesized libPath gets the same `<relative_path>/` glue as a
+        # declared one. Self-heals stale specs (pre-09f6311 gen-cargo
+        # emission) without requiring every consumer repo to regenerate.
+        argsSynth = applySynthLibTarget crate baseArgs;
+        args = prefixForMember crate argsSynth;
+      in buildRustCrate (args // overrideFor crate.name args)) spec.crates;
+
+    # Target tree: workload arch. Dispatch runtime deps by I2; build
+    # deps always to host.
+    built = mkBuiltTree {
+      buildRustCrate = buildRustCrateTarget;
+      depFor = d:
+        if (spec.crates.${d.package_key}.proc_macro or false)
+        then builtBuild.${d.package_key}
+        else built.${d.package_key};
+      buildDepFor = d: builtBuild.${d.package_key};
+    };
+
+    # Host tree: build/native arch. Transitively all-host.
+    builtBuild = mkBuiltTree {
+      buildRustCrate = buildRustCrateHost;
+      depFor = d: builtBuild.${d.package_key};
+      buildDepFor = d: builtBuild.${d.package_key};
+    };
 
     memberRecord = key: let c = spec.crates.${key}; in {
       name = c.name;
