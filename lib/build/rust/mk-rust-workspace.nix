@@ -19,7 +19,11 @@
 }: { pkgs, lib ? pkgs.lib }:
 let
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
-  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
+  # Triple-aware: pleme-crate-overrides exports `triple -> overrides`.
+  # mkRustWorkspace builds for the workspace's native target (no cross-
+  # compilation here), so specialize for `pkgs.stdenv.hostPlatform`.
+  plemeCrateOverrides =
+    (import ./pleme-crate-overrides.nix) pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
   _ = assert (builtins.pathExists (src + "/Cargo.build-spec.json")) ||
         throw ''

@@ -120,7 +120,11 @@ let
       # with relative_path to compensate — handled in `prefixForMember`.
       workspaceSrc;
 
-  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
+  # Triple-aware: imported as a function `triple -> overrides`. Each
+  # tree-builder specializes the overrides for its target triple, so
+  # substrate-level safety nets (e.g. apple-only feature strip on
+  # notify) fire only on the targets they're protecting.
+  plemeCrateOverridesFor = import ./pleme-crate-overrides.nix;
   # Mechanical dispatch layer for typed `CrateQuirk` variants emitted
   # by gen-cargo. Class-helper functions (forceCfg /
   # foldNormalIntoBuild / substituteSource); per-crate knowledge of
@@ -133,7 +137,14 @@ let
     # plemeCrateOverrides applies by default. Callers can still pass an
     # explicit `defaultCrateOverrides` to extend — the merge order is
     # nixpkgs defaults → pleme overrides → caller overrides (later wins).
-    defaultCrateOverrides ? (pkgs.defaultCrateOverrides // plemeCrateOverrides),
+    # Default merges plemeCrateOverrides specialized to the *target*
+    # triple — host-tree builds further specialize via overrideFor's
+    # triple-aware path inside mkBuiltTree. Callers that pass their
+    # own defaultCrateOverrides override the default entirely. The
+    # triple is computed from `pkgs` directly (rather than referencing
+    # the `targetTriple` let-binding defined later in mkProject) to
+    # keep the parameter default self-contained.
+    defaultCrateOverrides ? (pkgs.defaultCrateOverrides // (plemeCrateOverridesFor pkgs.stdenv.hostPlatform.rust.rustcTarget)),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
     # Auto-detected: pulls from `pkgs.gen` when substrate's rust
     # overlay (or any overlay that adds `gen`) is composed. Per the
@@ -367,9 +378,15 @@ let
     # ship (wgpu-hal cfg, openraft BTreeSet patch, document-features
     # lib_target, etc.). Compose per-crate: pleme rules apply first,
     # caller wins on key collision.
-    overrideFor = name:
+    #
+    # Triple-aware: each tree-builder (target or host) computes its
+    # own plemeCrateOverrides map specialized to the triple it's
+    # building for. Substrate-level safety nets (apple-only feature
+    # strip on notify, etc.) fire only on the triples they protect.
+    overrideFor = triple: name:
       let
-        pleme  = plemeCrateOverrides.${name}  or null;
+        plemeForTriple = plemeCrateOverridesFor triple;
+        pleme  = plemeForTriple.${name}    or null;
         caller = defaultCrateOverrides.${name} or null;
       in
         if pleme == null && caller == null then (oldAttrs: oldAttrs)
@@ -541,7 +558,7 @@ let
         # (the multi-target universe). Restricts `built` to crates actually
         # reachable for this target — keeps apple-only drvs out of linux
         # trees and vice versa. See targetCrates definition above.
-      in buildRustCrate (args // overrideFor crate.name args)) targetCrates;
+      in buildRustCrate (args // overrideFor triple crate.name args)) targetCrates;
 
     # Target tree: workload arch + target-filtered dep edges (I4).
     # Dispatch runtime deps via the typed `dep.tree` field gen-cargo

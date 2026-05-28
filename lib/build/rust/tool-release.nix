@@ -175,9 +175,14 @@ let
   # ============================================================================
   # BINARY BUILDER
   # ============================================================================
-  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
+  # Triple-aware: pleme-crate-overrides exports a function
+  # `triple -> overrides` so substrate-level safety nets (e.g. apple-
+  # only feature strip on notify) fire only on the triples they
+  # protect. mkBinary specializes per `_targetName` (the triple).
+  plemeCrateOverridesFor = import ./pleme-crate-overrides.nix;
   mkBinary = _targetName: targetInfo: let
     targetPkgs = targetInfo.pkgs;
+    plemeCrateOverrides = plemeCrateOverridesFor _targetName;
     consumerOverrides = targetPkgs.defaultCrateOverrides // plemeCrateOverrides // {
       ${crateKey} = attrs: {
         buildInputs = (attrs.buildInputs or [])
