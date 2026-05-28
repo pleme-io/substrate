@@ -72,16 +72,25 @@ let
   # Cargo.toml` exists — that's the conventional layout. Falls
   # through to the unnarrowed root when the repo is a single-crate
   # source.
-  srcOf = workspaceSrc: spec:
+  # Factory: produce `srcOf` closed over `fetchPkgs` (host pkgs, not
+  # the cross-target pkgs). When `pkgs` is pkgsStatic (cross-musl),
+  # `pkgs.fetchgit` inherits the pkgsStatic cross-build stdenv
+  # (NIX_CFLAGS_LINK=-static, --host=x86_64-unknown-linux-musl, etc.).
+  # FODs running under that stdenv lose host network — fetchgit's
+  # git-clone fails with "Could not resolve host: github.com" on hosts
+  # whose DNS is dnsmasq-mediated (rio). Use hostPkgs.fetchgit so the
+  # FOD runs in the host-native stdenv with normal network access.
+  # Source fetches are platform-independent — they just download bytes.
+  mkSrcOf = fetchPkgs: workspaceSrc: spec:
     if spec.source.kind == "registry" then
-      pkgs.fetchurl {
+      fetchPkgs.fetchurl {
         url = canonicalRegistryUrl spec.name spec.version spec.source.url;
         sha256 = spec.source.sha256;
         name = spec.source.name_with_ext;
       }
     else if spec.source.kind == "git" then
       let
-        full = pkgs.fetchgit {
+        full = fetchPkgs.fetchgit {
           url = stripUrlQuery spec.source.url;
           rev = spec.source.rev;
           sha256 = spec.source.sha256 or lib.fakeSha256;
@@ -465,7 +474,7 @@ let
         baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
                 else legacyArgs crate) // {
-          src = srcOf src crate;
+          src = (mkSrcOf hostPkgs) src crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
         } // binsFor key crate;
