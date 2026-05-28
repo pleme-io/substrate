@@ -42,16 +42,26 @@ let
   # filter further, but `src` is typically already the workspace
   # root — additional filtering buys little.
   targetArg = if target == null then "" else "--filter-platform=${target}";
+
+  # The IFD always runs on the HOST during eval, regardless of which
+  # target the consumer is being built for. When `pkgs` is a pkgsStatic
+  # (or other cross/target pkgs), `pkgs.runCommand` would re-stage gen +
+  # cargo + rustc against the TARGET stdenv — causing a recursive
+  # cascade of rebuilding gen for x86_64-unknown-linux-musl when the
+  # consumer is a linux-musl build. `pkgs.buildPackages` is the host's
+  # native pkgs (for native builds it's the same as pkgs; for cross it
+  # is the builder), so the IFD always lands on host-native tooling.
+  hostPkgs = pkgs.buildPackages;
 in
-pkgs.runCommand "cargo-build-spec" {
+hostPkgs.runCommand "cargo-build-spec" {
   # `gen build` invokes `cargo metadata` under the hood (v1 gen-cargo
   # path; replaced by Rust-native digestion in the upcoming hermetic
   # rewrite). cargo + rustc must be on PATH inside the IFD sandbox;
   # cacert provides the CA bundle cargo needs to fetch the crates.io
   # index over TLS (the sandbox lacks /etc/ssl by default).
-  nativeBuildInputs = [ gen pkgs.cargo pkgs.rustc pkgs.cacert ];
-  SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-  NIX_SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  nativeBuildInputs = [ gen hostPkgs.cargo hostPkgs.rustc hostPkgs.cacert ];
+  SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   # gen reads Cargo.toml + Cargo.lock + walks workspace members.
   # Substrate's gen v1 still calls cargo-metadata (non-hermetic);
   # __noChroot lets it reach the network for the cargo registry index
