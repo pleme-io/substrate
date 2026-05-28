@@ -393,5 +393,80 @@
         ]
       ]
     ]
+  },
+  {
+    "label": "wasm-platform.wasi-capability",
+    "variant_count": 8,
+    "variant_kinds": [
+      "network",
+      "env",
+      "filesystem",
+      "clocks",
+      "random",
+      "exit",
+      "stdio",
+      "tcp-listen"
+    ],
+    "variant_fields": [
+      [
+        "network",
+        []
+      ],
+      [
+        "env",
+        []
+      ],
+      [
+        "filesystem",
+        [
+          "paths"
+        ]
+      ],
+      [
+        "clocks",
+        []
+      ],
+      [
+        "random",
+        []
+      ],
+      [
+        "exit",
+        []
+      ],
+      [
+        "stdio",
+        []
+      ],
+      [
+        "tcp-listen",
+        [
+          "addr"
+        ]
+      ]
+    ]
+  },
+  {
+    "label": "wasm-platform.wasm-target",
+    "variant_count": 3,
+    "variant_kinds": [
+      "wasm32-wasi",
+      "wasm32-wasi-preview2",
+      "wasm32-unknown"
+    ],
+    "variant_fields": [
+      [
+        "wasm32-wasi",
+        []
+      ],
+      [
+        "wasm32-wasi-preview2",
+        []
+      ],
+      [
+        "wasm32-unknown",
+        []
+      ]
+    ]
   }
 ]

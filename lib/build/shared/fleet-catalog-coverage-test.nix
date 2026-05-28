@@ -57,6 +57,13 @@ let
     # soft_purge / purge / restart — directly mirroring Erlang's
     # appup.
     { label = "caixa.upgrade-instruction"; count = 5; ecosystem = null; }
+    # ★★★ progression — third consumer class: wasm-platform's
+    # runtime layer typed-cataloged. WASI capability surface +
+    # WASM target triples. The "model side" of the unified
+    # computing model (theory/TYPED-ABSORPTION.md): the model
+    # provides resources to programs as typed dispatcher entries.
+    { label = "wasm-platform.wasi-capability"; count = 8; ecosystem = null; }
+    { label = "wasm-platform.wasm-target";     count = 3; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -100,9 +107,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 10 entries (9 gen adapters + ≥ 1 non-adapter)"
+    "fleet catalog has ≥ 12 entries (9 gen + 1 caixa + 2 wasm-platform)"
     true
-    (builtins.length catalog >= 10);
+    (builtins.length catalog >= 12);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
@@ -113,8 +120,15 @@ let
     "catalog has ≥ 2 distinct consumer classes (★★ promotion)"
     true
     (builtins.length rootLabelRoots >= 2);
+
+  # ★★★ progression check: at least three distinct consumer
+  # classes. gen + caixa + wasm-platform = 3 today.
+  threeClassesTest = assertEq
+    "catalog has ≥ 3 distinct consumer classes (★★★ progression)"
+    true
+    (builtins.length rootLabelRoots >= 3);
 in
-[ totalCountTest twoClassesTest ]
+[ totalCountTest twoClassesTest threeClassesTest ]
   ++ (map presenceTest production)
   ++ (map countTest production)
   ++ (map ecosystemDirTest production)
