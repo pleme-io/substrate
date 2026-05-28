@@ -471,24 +471,50 @@ let
     # gets compiled as a lib named after EVERY bin-only member and
     # fails on dozens of unresolved imports the orphan source uses).
     applySynthLibTarget = crate: args:
-      if args ? libName then args
+      # NOTE: `args ? libName` is `true` even when the attr's value is
+      # `null` (Rust's `lib_name: Option<String> = None` serializes to
+      # JSON null which Nix reads as the value null, with the attr
+      # PRESENT). Filter explicitly on null so the bin-only branch
+      # fires when build_rust_crate_args carries libName=null.
+      if (args ? libName) && args.libName != null then args
       else
         let
           binsOnly = (crate.lib_target or null) == null
             && ((crate.binaries or []) != []);
           rel = crate.source.relative_path or "";
-          # `<rel>/src/lib.rs` for path members, plain `src/lib.rs`
-          # for non-path members. The path may not exist; that's
-          # the point — buildRustCrate skips when libPath doesn't
-          # resolve to a real file. Cargo metadata is authoritative;
-          # if it lists no lib target, the substrate enforces.
-          suppressedLibPath =
-            if crate.source.kind == "path" && rel != "" && rel != "."
-            then rel + "/src/lib.rs"
-            else "src/lib.rs";
+          # Substrate uses `src = workspaceSrc` for path-source workspace
+          # members so `include_str!("../sibling.lisp")` works. Side
+          # effect: the unpacked source tree HAS the workspace root,
+          # not the member subdir. nixpkgs' buildRustCrate's
+          # build-crate.nix lib-build logic:
+          #
+          #   if   [[ -e "$LIB_PATH"  ]] then build_lib "$LIB_PATH"
+          #   elif [[ -e src/lib.rs   ]] then build_lib src/lib.rs
+          #
+          # ...has an `elif` that fires on the workspace-root orphan
+          # `src/lib.rs` (present in repos like tatara that split a
+          # former monolithic crate into a workspace, leaving the old
+          # ./src/lib.rs at root) even when LIB_PATH is a non-existent
+          # `<rel>/src/lib.rs`. Setting LIB_PATH alone is insufficient;
+          # the orphan must be physically removed from the unpacked
+          # source before buildPhase. Inject the removal into preBuild.
+          binsOnlyPreBuild = ''
+            # Suppress workspace-root orphan src/lib.rs detection.
+            # Spec says this member is bin-only (no lib_target); the
+            # workspace root's leftover src/lib.rs is not OUR lib.
+            if [[ -e src/lib.rs && ! -e "${rel}/src/lib.rs" ]]; then
+              rm src/lib.rs
+              echo "substrate: removed workspace-root orphan src/lib.rs (no lib_target for ${crate.name})"
+            fi
+            if [[ -e src/main.rs && ! -e "${rel}/src/main.rs" ]]; then
+              rm src/main.rs
+              echo "substrate: removed workspace-root orphan src/main.rs (no orphan-bin allowed for ${crate.name})"
+            fi
+          '';
+          existingPreBuild = args.preBuild or "";
         in
           if binsOnly
-          then args // { libName = rustcCrateName crate; libPath = suppressedLibPath; }
+          then args // { preBuild = existingPreBuild + "\n" + binsOnlyPreBuild; }
           else args // synthLibTarget crate;
 
     # Path-source workspace members now use src = workspaceSrc (so
