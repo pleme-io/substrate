@@ -462,14 +462,22 @@ let
       in buildRustCrate (args // overrideFor crate.name args)) treeSpec.crates;
 
     # Target tree: workload arch + target-filtered dep edges (I4).
-    # Dispatch runtime deps by I2; build deps always → host tree.
+    # Dispatch runtime deps via the typed `dep.tree` field gen-cargo
+    # populates per the BuildTree enum (#12). Old specs (schema < 4)
+    # don't carry `tree` — fall back to the proc_macro lookup for
+    # backward compat. New specs (schema >= 4) bypass that and read
+    # the typed field directly — the dispatch decision lives in Rust
+    # at spec-emission time, not in Nix at evaluation time.
     built = mkBuiltTree {
       treeSpec = specTarget;
       buildRustCrate = buildRustCrateTarget;
       depFor = d:
-        if (specTarget.crates.${d.package_key}.proc_macro or false)
-        then builtBuild.${d.package_key}
-        else built.${d.package_key};
+        let
+          legacy = specTarget.crates.${d.package_key}.proc_macro or false;
+          tree = d.tree or (if legacy then "host" else "target");
+        in if tree == "host"
+           then builtBuild.${d.package_key}
+           else built.${d.package_key};
       buildDepFor = d: builtBuild.${d.package_key};
     };
 
