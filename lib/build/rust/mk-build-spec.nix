@@ -52,17 +52,24 @@ hostPkgs.runCommand "cargo-build-spec" {
   # cacert provides the CA bundle cargo needs to fetch the crates.io
   # index over TLS (the sandbox lacks /etc/ssl by default).
   #
-  # No shell tools — gen-cargo's prefetch step is pure-Rust as of
-  # 2026-05-29: `gix` for git fetch, `nix-nar` streaming into
-  # `Sha256` for the FOD digest, base64 SRI encoding. See
+  # Minimal shell-tool footprint — `git` is the ONE load-bearing
+  # binary gen-cargo's prefetcher subprocesses for the actual clone
+  # (one binary, no nix-prefetch-git shell-script chain, no nix-hash
+  # subprocess). The NAR-sha256 digest is computed in pure Rust via
+  # the nix-nar crate streamed into Sha256. See
   # `theory/RUST-NATIVE-PREFETCH.md` and `gen-cargo/src/git_prefetcher.rs`.
-  # The brittle nix-prefetch-git → git → nix-hash shell-script
-  # transitive-tool dependency tree is gone by construction.
+  #
+  # Destination: drop `git` once the prefetcher migrates back to
+  # `gix` (zero subprocess). Deferred behind a substrate-side fix
+  # for *-sys propagation through `buildRustCrate` — gix's
+  # transport features pull `curl-sys` or `libgit2-sys` whose
+  # propagatedBuildInputs don't bubble to consumer link steps.
   nativeBuildInputs = [
     gen
     hostPkgs.cargo
     hostPkgs.rustc
     hostPkgs.cacert
+    hostPkgs.git
   ];
   SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
