@@ -258,26 +258,41 @@ let
     committedViolations =
       if committedSpec == null then [ "spec-missing" ]
       else specInvariants committedSpec;
-    # Per the primary theory ('regeneration is BACKGROUND to rebuild,
-    # never an operator step'), trigger auto-regen on EVERY eval where
-    # `gen` is reachable — the committed spec is a cache hint, not the
-    # source of truth. Without this, native-platform builds with a
-    # clean-but-unfiltered committed spec would silently use cfg-
-    # impossible dep edges (the rio darwin-only-on-linux trap). cargo's
-    # resolver via gen --filter-platform is the only correct source
-    # of platform-resolved dep edges.
+
+    # Typed freshness gate — the 10-100× perf win for `nix run .#rebuild`
+    # on a clean fleet. Schema v7 specs embed `cargo_lock_sha256`
+    # (gen-cargo populates it via sha2; gen and nix compute the SAME
+    # digest by construction). When the committed spec's hash matches
+    # the current `Cargo.lock`'s SHA-256, the spec is byte-equal to
+    # what gen would re-emit — IFD is skipped entirely.
     #
-    # Cost: each build triggers an IFD running `gen build` (~30s-2min
-    # on first run; cached afterwards). The hermetic gen-cargo rewrite
-    # (no cargo metadata shell-out, no network) collapses this to a
-    # pure derivation. Until then, the cost is the price of correctness.
-    #
-    # When gen is unavailable, fall back to the committed spec +
-    # invariant violations as the regen trigger (lower correctness,
-    # higher availability).
+    # SHA-256 specifically because `builtins.hashFile "sha256"` is
+    # native nix (no IFD, no subprocess), so the gate is pure-eval.
+    # Schema < 7 specs (no `cargo_lock_sha256` field) get `null` here
+    # and fall back to the legacy "always regen when gen is reachable"
+    # path — backward compatibility is automatic.
+    lockPath = src + "/Cargo.lock";
+    currentLockSha256 =
+      if builtins.pathExists lockPath
+      then builtins.hashFile "sha256" lockPath
+      else null;
+    committedLockSha256 =
+      if committedSpec == null then null
+      else committedSpec.cargo_lock_sha256 or null;
+    specHashIsFresh =
+      committedLockSha256 != null
+      && currentLockSha256 != null
+      && committedLockSha256 == currentLockSha256;
+
+    # Regenerate via IFD when:
+    #   - gen is unreachable → can't regen; consume committed spec.
+    #   - committed spec is missing or invariant-violating.
+    #   - committed spec's lock-hash differs from current Cargo.lock.
+    # Skip regen when the committed spec's `cargo_lock_sha256` matches
+    # — same algorithm cargo-metadata would produce, materially.
     needsRegenTarget =
-      if gen != null then true
-      else committedViolations != [];
+      if gen == null then false
+      else committedViolations != [] || !specHashIsFresh;
 
     # 2) Per-tree IFD: each tree gets its own platform-filtered spec
     #    when gen is reachable. Native builds reuse the target spec
