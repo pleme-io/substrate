@@ -73,54 +73,24 @@ let
     };
   in rustTool toolArgs;
 
-  # Ultra-simple consumer flake support. gen emits a complete typed
-  # `module_trio` attrset inside `flake_metadata[<toolName>]` when the
-  # consumer authored `[package.metadata.pleme]` in Cargo.toml — all
-  # defaults applied IN RUST (gen-cargo `ModuleTrioSpec`). Nix is dumb:
-  # read the struct, pass to mkModuleTrio. No TOML scraping, no
-  # per-field defaulting, no priority logic.
-  #
-  # Three sources, in priority order:
-  #   1. Explicit `module = { ... }` arg — operator override, wins.
-  #   2. spec.flake_metadata.<toolName>.module_trio — gen-emitted typed struct.
-  #   3. No module trio. Substrate emits nothing under
-  #      homeManagerModules / nixosModules / darwinModules. The tool
-  #      is just a CLI; consumers that want it on PATH use overlay.
-  #
-  # Central-control-plane move: behavior change → gen-cargo
-  # ModuleTrioSpec defaults → every consumer's next regen.
-  src = args.src or null;
-  specPath = if src == null then null else src + "/Cargo.build-spec.json";
-  spec =
-    if specPath != null && builtins.pathExists specPath
-    then builtins.fromJSON (builtins.readFile specPath)
-    else null;
-  specModuleTrio =
-    if spec == null then null
-    else ((spec.flake_metadata or {}).${toolName} or {}).module_trio or null;
-  # Translate the gen-emitted struct (snake_case keys, defaults
-  # already applied) into the mkModuleTrio call shape (camelCase
-  # `hmNamespace` / `packageAttr` / `binaryName`). This is a pure
-  # rename — no defaulting, no logic.
-  trioFromSpec =
-    if specModuleTrio == null then null
-    else {
-      name        = specModuleTrio.name;
-      description = specModuleTrio.description;
-      packageAttr = specModuleTrio.package_attr;
-      binaryName  = specModuleTrio.binary_name;
-      hmNamespace = specModuleTrio.hm_namespace;
-      withMcp           = specModuleTrio.with_mcp           or false;
-      withHttp          = specModuleTrio.with_http          or false;
-      withSystemDaemon  = specModuleTrio.with_system_daemon or false;
-    };
-  # Final trio spec: explicit module arg wins; else spec; else nothing.
-  trioSpec =
-    if module != null then module
-    else trioFromSpec;
+  # Module trio is built by mk-rust-tool-flake.nix (one layer up)
+  # which has the spec's pickedMember context and can look up
+  # `spec.flake_metadata.${pickedMember}.module_trio` correctly even
+  # when the package name and the tool/binary name differ (e.g.
+  # hibikine package shipping the `hibiki` binary). When that layer
+  # finds a spec-driven trio, it passes it as `module` to this file.
+  # Direct callers of tool-release-flake.nix supply `module = { ... }`
+  # explicitly. Either way, the `module` arg is the only source of
+  # trio config this file needs to consult.
   trio =
-    if trioSpec == null then null
-    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio trioSpec;
+    if module == null then null
+    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio (
+      {
+        name = module.name or toolName;
+        description = module.description or "${toolName} CLI tool";
+        packageAttr = module.packageAttr or toolName;
+      } // (builtins.removeAttrs module [ "name" "description" "packageAttr" ])
+    );
 
   moduleOutputs = if trio == null then {} else {
     homeManagerModules.default = trio.homeManagerModule;

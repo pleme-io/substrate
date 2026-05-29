@@ -53,6 +53,16 @@ let
   resolvedRepo = if repo != null then repo
     else meta.repo or (throw "mkRustToolFlake: no repo for `${pickedMember}` — pass `repo` or set [package].repository.");
 
+  # The typed `module_trio` struct that gen emits when the consumer
+  # authors `[package.metadata.pleme]` in Cargo.toml. Already in
+  # mkModuleTrio's camelCase shape (gen-cargo `ModuleTrioSpec` uses
+  # `#[serde(rename_all = "camelCase")]`), so substrate consumes it
+  # verbatim — zero translation, zero per-field logic, zero defaults.
+  # Every behavior change lives in gen-cargo.
+  effectiveModule =
+    if module != null then module
+    else meta.module_trio or null;
+
   toolFlake = import ./tool-release-flake.nix {
     inherit (inputs) nixpkgs crate2nix flake-utils;
     fenix = inputs.fenix or null;
@@ -70,5 +80,5 @@ in toolFlake (
     inherit crateOverrides buildInputs nativeBuildInputs;
   }
   // (if multiMember then { packageName = pickedMember; } else {})
-  // (if module != null then { inherit module; } else {})
+  // (if effectiveModule != null then { module = effectiveModule; } else {})
 )
