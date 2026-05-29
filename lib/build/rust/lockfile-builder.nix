@@ -177,6 +177,14 @@ let
   quirkApply = import ./quirk-apply.nix { inherit lib; };
   mkProject = {
     src,
+    # Optional human-readable workspace identifier used in error
+    # messages (e.g. "mkRustWorkspace: ${name} — Cargo.build-spec.json
+    # missing"). Callers like mk-rust-workspace.nix pass this through;
+    # the lockfile-builder itself only forwards it for diagnostic
+    # surface. Present so the API doesn't reject "name = ..." with
+    # `unexpected argument` when callers attach context for richer
+    # error reporting.
+    name ? "<unnamed-workspace>",
     # Substrate guarantee: every fleet-wide buildRustCrate quirk in
     # plemeCrateOverrides applies by default. Callers can still pass an
     # explicit `defaultCrateOverrides` to extend — the merge order is
