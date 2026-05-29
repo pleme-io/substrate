@@ -218,15 +218,16 @@ let
     # the explicit darwin/linux host pkgs.
     hostPkgs ? pkgs.buildPackages,
     # Transient-lock contract — see comment block around
-    # `committedLockSha256` below. When `true`, substrate refuses
-    # builds where the committed spec's hash disagrees with the
-    # current `Cargo.lock`'s sha256 (gen-cargo's `Drifted` state).
+    # `committedLockSha256` below. When `true` (default), substrate
+    # refuses builds where the committed spec's hash disagrees with
+    # the current `Cargo.lock`'s sha256 (gen-cargo's `Drifted` state).
     # The build throws a typed error pointing the operator at
-    # `gen lock --update`. When `false` (default for backward compat),
-    # substrate auto-regenerates via IFD on drift — the existing
-    # silent-self-heal behaviour. New consumers default-on this; the
-    # fleet transitions repo-by-repo.
-    strictTransientLock ? false,
+    # `gen lock --update`. Silent IFD-regen of an operator's
+    # deliberate snapshot is a surprise; the strict default makes
+    # the deterministic-lock contract a fleet invariant. Per-consumer
+    # opt-out via `strictTransientLock = false` is supported for
+    # legacy repos mid-migration but should not be permanent.
+    strictTransientLock ? true,
   }: let
     specInvariants = import ./spec-invariants.nix;
     # I4 — per-platform spec emission. gen-cargo's --filter-platform

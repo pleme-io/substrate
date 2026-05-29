@@ -32,10 +32,135 @@
 let
   inherit (builtins) fromJSON readFile pathExists length;
 
-  spec =
-    let path = src + "/Cargo.build-spec.json"; in
-    if pathExists path then fromJSON (readFile path)
-    else throw "mkRustToolFlake: ${toString src}/Cargo.build-spec.json missing — run `gen build .`";
+  # ── Spec resolution: committed spec OR Cargo.toml fallback ─────────
+  #
+  # Transient-lock support. Repositories in the canonical
+  # transient-lock shape `.gitignore` `Cargo.build-spec.json` so the
+  # nix-side `mkRustToolFlake` cannot rely on a committed file. When
+  # the committed spec is absent, synthesize the MINIMAL fields this
+  # file needs (toolName / repo / module_trio) directly from
+  # `Cargo.toml`'s typed metadata. Pure-eval nix via
+  # `builtins.fromTOML`, no IFD, no system dependency.
+  #
+  # The committed-spec path remains the fast-path (no TOML parse, full
+  # dep graph available downstream); the TOML path is a graceful
+  # fallback that makes `gen lock --reset` repos work seamlessly with
+  # the canonical `substrate.rust.tool { src = ./.; }` flake.
+  cargoTomlPath = src + "/Cargo.toml";
+  cargoToml =
+    if pathExists cargoTomlPath
+    then builtins.fromTOML (readFile cargoTomlPath)
+    else throw "mkRustToolFlake: ${toString src}/Cargo.toml missing — not a cargo workspace?";
+
+  hasCommittedSpec = pathExists (src + "/Cargo.build-spec.json");
+  committedSpec =
+    if hasCommittedSpec
+    then fromJSON (readFile (src + "/Cargo.build-spec.json"))
+    else null;
+
+  # Parse `owner/repo` from a GitHub-style URL string. Mirrors
+  # gen-cargo::parse_owner_repo — handles SSH, HTTPS, .git suffix.
+  parseOwnerRepo = url:
+    let
+      strip = s: prefix:
+        let
+          plen = builtins.stringLength prefix;
+          slen = builtins.stringLength s;
+        in
+          if slen < plen then null
+          else if builtins.substring 0 plen s == prefix
+            then builtins.substring plen (slen - plen) s
+            else null;
+      stripSuffix = s: suffix:
+        let
+          plen = builtins.stringLength suffix;
+          slen = builtins.stringLength s;
+        in
+          if slen < plen then s
+          else if builtins.substring (slen - plen) plen s == suffix
+            then builtins.substring 0 (slen - plen) s
+            else s;
+      after =
+        strip url "https://github.com/"
+        ;
+      afterSshShort =
+        strip url "git@github.com:"
+        ;
+      afterAny =
+        if after != null then after
+        else if afterSshShort != null then afterSshShort
+        else null;
+    in
+      if afterAny == null then null
+      else stripSuffix afterAny ".git";
+
+  # CamelCase keys to match gen-cargo's ModuleTrioSpec wire shape
+  # (#[serde(rename_all = "camelCase")]). When the consumer authors
+  # `[package.metadata.pleme]` in Cargo.toml, build the
+  # `module_trio` map here so substrate consumes it verbatim.
+  plemeMetaFor = pkg:
+    let
+      pkgPleme = (pkg.metadata.pleme or {});
+      packageName = pkg.name;
+      defaultBin = pkgPleme."hm-leaf" or packageName;
+      defaultBinaryName = pkgPleme."binary-name" or defaultBin;
+      defaultPackageAttr = pkgPleme."package-attr" or defaultBin;
+      hasPleme = pkgPleme != {};
+    in
+      {
+        default_bin = defaultBin;
+        repo =
+          if pkg ? repository
+          then parseOwnerRepo pkg.repository
+          else null;
+      } // (
+        if !hasPleme then {}
+        else {
+          module_trio = {
+            name = defaultBin;
+            description =
+              pkgPleme.description
+                or (pkg.description or "${packageName} CLI tool");
+            packageAttr = defaultPackageAttr;
+            binaryName = defaultBinaryName;
+            hmNamespace = pkgPleme."hm-namespace" or "programs";
+            withMcp = pkgPleme."with-mcp" or false;
+            withHttp = pkgPleme."with-http" or false;
+            withSystemDaemon = pkgPleme."with-system-daemon" or false;
+          };
+        }
+      );
+
+  # Synthesize the MINIMAL spec shape this file consults. The full
+  # spec (with crates, target_resolves, etc.) is built by
+  # `lockfile-builder.nix` via IFD; this fallback only needs the
+  # fields driving toolName / repo / module_trio resolution.
+  synthesizedSpec =
+    let
+      members =
+        if cargoToml ? workspace && cargoToml.workspace ? members
+        then cargoToml.workspace.members
+        else [ "." ];
+      # For the trivial single-package case, the manifest's [package]
+      # IS the member.
+      singlePackage = cargoToml ? package;
+      pkg = cargoToml.package or null;
+      packageName = if pkg != null then pkg.name else "unknown-package";
+    in
+      if singlePackage then {
+        workspace_members = [ { name = packageName; relative_path = "."; } ];
+        root_crate = "${packageName}-${pkg.version or "0.0.0"}";
+        crates."${packageName}-${pkg.version or "0.0.0"}" = { name = packageName; };
+        flake_metadata."${packageName}" = plemeMetaFor pkg;
+      } else throw ''
+        mkRustToolFlake: ${toString src}/Cargo.build-spec.json missing AND
+        ${toString src}/Cargo.toml has no [package] block — pure-TOML
+        fallback only supports single-package crates today. Either:
+          1. Run `gen lock --snapshot` to commit a spec, OR
+          2. Pass an explicit `toolName` + `repo` to substrate.rust.tool.
+      '';
+
+  spec = if committedSpec != null then committedSpec else synthesizedSpec;
 
   multiMember = length spec.workspace_members > 1;
   pickedMember =
