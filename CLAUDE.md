@@ -741,6 +741,46 @@ These are imported directly from substrate, not via `lib.${system}`:
 
 ---
 
+## ★★ No rev-pinned `url = "github:pleme-io/X/REV"` URLs in fleet flakes
+
+**The core substrate principle that makes fleet-wide fixes propagate.**
+
+Hard-coding a rev in a flake input URL — e.g.
+`url = "github:pleme-io/blackmatter-kubernetes/26f6014"` — freezes that
+input at that exact rev. `nix flake update <input>` then has NO effect
+(the URL itself contains the pin, so the lock can't move). Substrate-grade
+fixes — `nix-prefetch-git` added to mk-build-spec.nix, workspace-member
+dedup, sha256 freshness gate — that ship to substrate's main are
+INVISIBLE to consumers behind rev-pinned URLs. The fleet ends up with
+27+ distinct substrate revs in nix's lock graph and 300+ stale chains
+no `nix flake update` can heal.
+
+**The doctrine:**
+
+1. **Do NOT use `github:org/repo/REV` URLs for INTERNAL pleme-io inputs.**
+   Use `github:pleme-io/<repo>` (track main) and rely on `nix flake update`
+   to bump. Pinning is the job of flake.lock, not the URL.
+
+2. **DO use `inputs.<x>.follows = "<x>"` at the aggregator level** so
+   every consumer transitively flows through the same `<x>`. This
+   collapses N parallel `<x>` nodes in the graph to one — a single
+   bump propagates fleet-wide.
+
+3. **Exception**: external (non-pleme-io) inputs may rev-pin when
+   needed for reproducibility. The principle is internal-only.
+
+**Detection**: `gen flake-lint --check-substrate-chain` walks
+`nix/flake.lock` and reports every consumer whose substrate (or other
+typed input) is at a non-target rev, plus the leaf flake.nix files
+that need editing.
+
+**Auto-fix**: per-flake script that drops the `/REV` suffix from
+matching URLs, then runs `nix flake update`. Applied today across
+helmworks, lilitu, pangea-operator, openclaw-web, kindling-profiles
+to land the substrate IFD-tools fix fleet-wide.
+
+---
+
 ## ★★ IFD Sandbox Contract — `lib/build/rust/mk-build-spec.nix`
 
 Substrate's gen-IFD path runs `gen build` inside a nix sandbox to
