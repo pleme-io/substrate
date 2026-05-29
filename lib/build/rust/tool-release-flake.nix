@@ -73,14 +73,54 @@ let
     };
   in rustTool toolArgs;
 
+  # Ultra-simple consumer flake support: read module-trio config from
+  # `Cargo.build-spec.json`'s `flake_metadata[<toolName>]` map, populated
+  # by gen from `Cargo.toml [package.metadata.pleme]`. Consumers don't
+  # need to pass `module = { ... }` at all when the typed metadata is
+  # in the source. Priority order per field:
+  #
+  #   1. Explicit `module.<field>` arg (highest — operator override)
+  #   2. flake_metadata.<toolName>.<json-key> (gen-emitted)
+  #   3. Substrate default
+  #
+  # This is THE central-control-plane move: change behavior in substrate
+  # OR in gen, every consumer gets it on next eval without flake.nix
+  # edits. New consumers ship a 3-line flake; existing consumers can
+  # migrate by adding `[package.metadata.pleme]` to Cargo.toml and
+  # deleting their `module = { ... }` block.
+  src = args.src or null;
+  specPath = if src == null then null else src + "/Cargo.build-spec.json";
+  spec =
+    if specPath != null && builtins.pathExists specPath
+    then builtins.fromJSON (builtins.readFile specPath)
+    else null;
+  flakeMetaForTool =
+    if spec == null then null
+    else (spec.flake_metadata or {}).${toolName} or null;
+  # Priority resolver: explicit module field > flake_metadata field > default.
+  pick = field: jsonKey: default:
+    if module != null && module ? ${field} then module.${field}
+    else if flakeMetaForTool != null && flakeMetaForTool ? ${jsonKey}
+         && flakeMetaForTool.${jsonKey} != null
+      then flakeMetaForTool.${jsonKey}
+    else default;
+  hasAnyModuleSource = module != null || flakeMetaForTool != null;
   trio =
-    if module == null then null
+    if !hasAnyModuleSource then null
     else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio (
       {
-        name = module.name or toolName;
-        description = module.description or "${toolName} CLI tool";
-        packageAttr = module.packageAttr or toolName;
-      } // (builtins.removeAttrs module [ "name" "description" "packageAttr" ])
+        name = pick "name" "hm_leaf" toolName;
+        description = pick "description" "description" "${toolName} CLI tool";
+        packageAttr = pick "packageAttr" "package_attr" toolName;
+        hmNamespace = pick "hmNamespace" "hm_namespace" "programs";
+        binaryName = pick "binaryName" "binary_name" toolName;
+      }
+      // (
+        if module == null then {}
+        else builtins.removeAttrs module [
+          "name" "description" "packageAttr" "hmNamespace" "binaryName"
+        ]
+      )
     );
 
   moduleOutputs = if trio == null then {} else {
