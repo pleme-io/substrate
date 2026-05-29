@@ -73,55 +73,54 @@ let
     };
   in rustTool toolArgs;
 
-  # Ultra-simple consumer flake support: read module-trio config from
-  # `Cargo.build-spec.json`'s `flake_metadata[<toolName>]` map, populated
-  # by gen from `Cargo.toml [package.metadata.pleme]`. Consumers don't
-  # need to pass `module = { ... }` at all when the typed metadata is
-  # in the source. Priority order per field:
+  # Ultra-simple consumer flake support. gen emits a complete typed
+  # `module_trio` attrset inside `flake_metadata[<toolName>]` when the
+  # consumer authored `[package.metadata.pleme]` in Cargo.toml — all
+  # defaults applied IN RUST (gen-cargo `ModuleTrioSpec`). Nix is dumb:
+  # read the struct, pass to mkModuleTrio. No TOML scraping, no
+  # per-field defaulting, no priority logic.
   #
-  #   1. Explicit `module.<field>` arg (highest — operator override)
-  #   2. flake_metadata.<toolName>.<json-key> (gen-emitted)
-  #   3. Substrate default
+  # Three sources, in priority order:
+  #   1. Explicit `module = { ... }` arg — operator override, wins.
+  #   2. spec.flake_metadata.<toolName>.module_trio — gen-emitted typed struct.
+  #   3. No module trio. Substrate emits nothing under
+  #      homeManagerModules / nixosModules / darwinModules. The tool
+  #      is just a CLI; consumers that want it on PATH use overlay.
   #
-  # This is THE central-control-plane move: change behavior in substrate
-  # OR in gen, every consumer gets it on next eval without flake.nix
-  # edits. New consumers ship a 3-line flake; existing consumers can
-  # migrate by adding `[package.metadata.pleme]` to Cargo.toml and
-  # deleting their `module = { ... }` block.
+  # Central-control-plane move: behavior change → gen-cargo
+  # ModuleTrioSpec defaults → every consumer's next regen.
   src = args.src or null;
   specPath = if src == null then null else src + "/Cargo.build-spec.json";
   spec =
     if specPath != null && builtins.pathExists specPath
     then builtins.fromJSON (builtins.readFile specPath)
     else null;
-  flakeMetaForTool =
+  specModuleTrio =
     if spec == null then null
-    else (spec.flake_metadata or {}).${toolName} or null;
-  # Priority resolver: explicit module field > flake_metadata field > default.
-  pick = field: jsonKey: default:
-    if module != null && module ? ${field} then module.${field}
-    else if flakeMetaForTool != null && flakeMetaForTool ? ${jsonKey}
-         && flakeMetaForTool.${jsonKey} != null
-      then flakeMetaForTool.${jsonKey}
-    else default;
-  hasAnyModuleSource = module != null || flakeMetaForTool != null;
+    else ((spec.flake_metadata or {}).${toolName} or {}).module_trio or null;
+  # Translate the gen-emitted struct (snake_case keys, defaults
+  # already applied) into the mkModuleTrio call shape (camelCase
+  # `hmNamespace` / `packageAttr` / `binaryName`). This is a pure
+  # rename — no defaulting, no logic.
+  trioFromSpec =
+    if specModuleTrio == null then null
+    else {
+      name        = specModuleTrio.name;
+      description = specModuleTrio.description;
+      packageAttr = specModuleTrio.package_attr;
+      binaryName  = specModuleTrio.binary_name;
+      hmNamespace = specModuleTrio.hm_namespace;
+      withMcp           = specModuleTrio.with_mcp           or false;
+      withHttp          = specModuleTrio.with_http          or false;
+      withSystemDaemon  = specModuleTrio.with_system_daemon or false;
+    };
+  # Final trio spec: explicit module arg wins; else spec; else nothing.
+  trioSpec =
+    if module != null then module
+    else trioFromSpec;
   trio =
-    if !hasAnyModuleSource then null
-    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio (
-      {
-        name = pick "name" "hm_leaf" toolName;
-        description = pick "description" "description" "${toolName} CLI tool";
-        packageAttr = pick "packageAttr" "package_attr" toolName;
-        hmNamespace = pick "hmNamespace" "hm_namespace" "programs";
-        binaryName = pick "binaryName" "binary_name" toolName;
-      }
-      // (
-        if module == null then {}
-        else builtins.removeAttrs module [
-          "name" "description" "packageAttr" "hmNamespace" "binaryName"
-        ]
-      )
-    );
+    if trioSpec == null then null
+    else (import ../../module-trio.nix { lib = pkgsLib; }).mkModuleTrio trioSpec;
 
   moduleOutputs = if trio == null then {} else {
     homeManagerModules.default = trio.homeManagerModule;
