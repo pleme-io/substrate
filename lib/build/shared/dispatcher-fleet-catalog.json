@@ -345,6 +345,49 @@
     ]
   },
   {
+    "label": "gen.cargo.freshness",
+    "variant_count": 5,
+    "variant_kinds": [
+      "fresh",
+      "drifted",
+      "unhashed-spec",
+      "missing-spec",
+      "missing-lock"
+    ],
+    "variant_fields": [
+      [
+        "fresh",
+        [
+          "spec_hash",
+          "lock_hash"
+        ]
+      ],
+      [
+        "drifted",
+        [
+          "spec_hash",
+          "lock_hash"
+        ]
+      ],
+      [
+        "unhashed-spec",
+        [
+          "lock_hash"
+        ]
+      ],
+      [
+        "missing-spec",
+        [
+          "lock_hash"
+        ]
+      ],
+      [
+        "missing-lock",
+        []
+      ]
+    ]
+  },
+  {
     "label": "gen.gomod.gomod-quirk",
     "variant_count": 5,
     "variant_kinds": [

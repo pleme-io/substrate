@@ -116,6 +116,15 @@ let
     # (github / git-https / git-ssh / gist / local).
     { label = "estante.placement"; count = 3; ecosystem = null; }
     { label = "estante.source";    count = 5; ecosystem = null; }
+    # Fourteenth consumer class: gen-cargo's typed spec-freshness
+    # surface. The 5-variant `Freshness` enum
+    # (Fresh / Drifted / UnhashedSpec / MissingSpec / MissingLock)
+    # drives the `gen build --if-stale` + `gen check-spec` +
+    # `gen fleet-check` fast-path that turned the pre-rebuild
+    # sweep from ~30s into ~1s for the whole pleme-io fleet.
+    # Same algebraic shape — closed enum, total `summary()` fold,
+    # typed-dispatcher catalog member.
+    { label = "gen.cargo.freshness"; count = 5; ecosystem = null; }
   ];
 
   catalogByLabel = label:
@@ -159,9 +168,9 @@ let
           (builtins.pathExists ecosystemDir);
 
   totalCountTest = assertEq
-    "fleet catalog has ≥ 29 entries (9 gen + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi + 1 shikumi + 2 estante)"
+    "fleet catalog has ≥ 30 entries (9 gen-quirk + 3 caixa + 2 wasm-platform + 1 cofre + 1 shigoto + 1 engenho + 2 magma + 4 kura + 1 pangea + 1 tatara + 1 hanshi + 1 shikumi + 2 estante + 1 gen.cargo.freshness)"
     true
-    (builtins.length catalog >= 29);
+    (builtins.length catalog >= 30);
 
   # ★★ promotion criterion #1 check: at least two distinct
   # consumer-class roots in the label tree.
