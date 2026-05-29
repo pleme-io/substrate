@@ -312,15 +312,50 @@ let
     # invalidated by a Cargo.lock change. Refuse the build with a
     # typed error rather than silently regenerating — silent regen
     # would discard the operator's intentional pin.
+    #
+    # EXCEPT — when `src` is a nix-store path (immutable flake
+    # input), strict refusal is useless: the operator can't
+    # `gen lock --update` against a read-only store path. Substrate
+    # falls back to auto-IFD-regen in that case (the existing
+    # `needsRegenTarget = true` path). Strict mode is only useful
+    # when src is a mutable working directory (the user's local
+    # clone of the repo they're editing).
+    srcStr = toString src;
+    srcIsMutable =
+      builtins.stringLength srcStr < 11
+      || builtins.substring 0 11 srcStr != "/nix/store/";
+    # Try to surface the repo identity in the error message — much
+    # more actionable than the store-path path. Reads from
+    # `committedSpec.flake_metadata.<first-member>.repo` if present.
+    inferredRepo =
+      if committedSpec == null then null
+      else
+        let
+          firstMember =
+            if committedSpec ? workspace_members
+               && builtins.length committedSpec.workspace_members > 0
+            then
+              let m0 = builtins.elemAt committedSpec.workspace_members 0; in
+              if builtins.isAttrs m0 then m0.name else m0
+            else null;
+          fm =
+            if firstMember == null then null
+            else (committedSpec.flake_metadata or {}).${firstMember} or null;
+        in
+          if fm == null then null else fm.repo or null;
+    repoHint =
+      if inferredRepo == null then ""
+      else "\n        Repo: github.com/${inferredRepo}\n";
     _driftAssert =
       if strictTransientLock
+         && srcIsMutable
          && committedSpec != null
          && committedLockSha256 != null
          && currentLockSha256 != null
          && committedLockSha256 != currentLockSha256
       then throw ''
         substrate/lockfile-builder: COMMITTED LOCK HAS DRIFTED.
-
+${repoHint}
         ${toString src}/Cargo.build-spec.json declares
         cargo_lock_sha256 = ${committedLockSha256}
         but the current Cargo.lock hashes to
