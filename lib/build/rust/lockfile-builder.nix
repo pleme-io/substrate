@@ -217,6 +217,16 @@ let
     # the two are equivalent; cross consumers (tool-release.nix) pass
     # the explicit darwin/linux host pkgs.
     hostPkgs ? pkgs.buildPackages,
+    # Transient-lock contract — see comment block around
+    # `committedLockSha256` below. When `true`, substrate refuses
+    # builds where the committed spec's hash disagrees with the
+    # current `Cargo.lock`'s sha256 (gen-cargo's `Drifted` state).
+    # The build throws a typed error pointing the operator at
+    # `gen lock --update`. When `false` (default for backward compat),
+    # substrate auto-regenerates via IFD on drift — the existing
+    # silent-self-heal behaviour. New consumers default-on this; the
+    # fleet transitions repo-by-repo.
+    strictTransientLock ? false,
   }: let
     specInvariants = import ./spec-invariants.nix;
     # I4 — per-platform spec emission. gen-cargo's --filter-platform
@@ -259,6 +269,17 @@ let
       if committedSpec == null then [ "spec-missing" ]
       else specInvariants committedSpec;
 
+    # Transient-lock contract (gen-cargo `LockLifecycleState`):
+    #   - Unlocked   = no committedSpec, IFD-regen fine
+    #   - Locked     = committedSpec + fresh hash, reuse
+    #   - Drifted    = committedSpec but stale → REFUSE if strict
+    #   - MissingLock = no Cargo.lock, can't build
+    # When `strictTransientLock` is true (off by default for backward
+    # compat), substrate refuses Drifted builds with a typed error
+    # pointing the operator at `gen lock --update`. Auto-regen
+    # silently rewriting an operator's deliberate snapshot is a
+    # surprise; the strict path forces an explicit acknowledgement.
+
     # Typed freshness gate — the 10-100× perf win for `nix run .#rebuild`
     # on a clean fleet. Schema v7 specs embed `cargo_lock_sha256`
     # (gen-cargo populates it via sha2; gen and nix compute the SAME
@@ -284,15 +305,58 @@ let
       && currentLockSha256 != null
       && committedLockSha256 == currentLockSha256;
 
+    # Strict-transient-lock refusal: when a committed spec exists
+    # but its hash disagrees with current Cargo.lock, the operator
+    # has a deliberate snapshot (Locked) that has since been
+    # invalidated by a Cargo.lock change. Refuse the build with a
+    # typed error rather than silently regenerating — silent regen
+    # would discard the operator's intentional pin.
+    _driftAssert =
+      if strictTransientLock
+         && committedSpec != null
+         && committedLockSha256 != null
+         && currentLockSha256 != null
+         && committedLockSha256 != currentLockSha256
+      then throw ''
+        substrate/lockfile-builder: COMMITTED LOCK HAS DRIFTED.
+
+        ${toString src}/Cargo.build-spec.json declares
+        cargo_lock_sha256 = ${committedLockSha256}
+        but the current Cargo.lock hashes to
+        cargo_lock_sha256 = ${currentLockSha256}.
+
+        The committed spec is an EXPLICIT operator snapshot
+        (gen-cargo `LockLifecycleState::Locked`); silently
+        regenerating it would discard your intentional pin.
+
+        Resolve by running ONE of:
+          1. `gen lock --update`  in ${toString src}
+             → regenerate from current Cargo.lock + emit typed
+                LockDiff for review.
+          2. `gen lock --reset`   in ${toString src}
+             → drop the committed spec; substrate IFD will regen
+                per build (transient `Unlocked` state).
+          3. Revert the Cargo.lock change so it matches the
+             snapshot.
+
+        (To disable this gate per-consumer, pass
+        `strictTransientLock = false` to `mkProject`; the substrate
+        default is opt-in for backward compat.)
+      ''
+      else null;
+
     # Regenerate via IFD when:
     #   - gen is unreachable → can't regen; consume committed spec.
     #   - committed spec is missing or invariant-violating.
-    #   - committed spec's lock-hash differs from current Cargo.lock.
+    #   - committed spec's lock-hash differs from current Cargo.lock
+    #     AND strict mode is off (strict mode refuses above).
     # Skip regen when the committed spec's `cargo_lock_sha256` matches
     # — same algorithm cargo-metadata would produce, materially.
     needsRegenTarget =
-      if gen == null then false
-      else committedViolations != [] || !specHashIsFresh;
+      builtins.seq _driftAssert (
+        if gen == null then false
+        else committedViolations != [] || !specHashIsFresh
+      );
 
     # 2) Per-tree IFD: each tree gets its own platform-filtered spec
     #    when gen is reachable. Native builds reuse the target spec
