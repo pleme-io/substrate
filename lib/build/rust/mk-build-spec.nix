@@ -51,7 +51,23 @@ hostPkgs.runCommand "cargo-build-spec" {
   # rewrite). cargo + rustc must be on PATH inside the IFD sandbox;
   # cacert provides the CA bundle cargo needs to fetch the crates.io
   # index over TLS (the sandbox lacks /etc/ssl by default).
-  nativeBuildInputs = [ gen hostPkgs.cargo hostPkgs.rustc hostPkgs.cacert ];
+  #
+  # `nix-prefetch-git` + `git` are required because gen-cargo's
+  # prefetch step shells out to `nix-prefetch-git` to compute the
+  # sha256 of every git source in the resolve graph. The build spec
+  # MUST carry a fixed sha256 for every git source (FOD path) so the
+  # substrate consumer's fetchgit derivation runs in pure-eval mode
+  # without network access. Recent gen-cargo (3f6e4fa) hard-errors
+  # if prefetch fails, so the tool MUST be on PATH inside this
+  # sandbox or every consumer with a git dep fails the spec build.
+  nativeBuildInputs = [
+    gen
+    hostPkgs.cargo
+    hostPkgs.rustc
+    hostPkgs.cacert
+    hostPkgs.nix-prefetch-git
+    hostPkgs.git
+  ];
   SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   # gen reads Cargo.toml + Cargo.lock + walks workspace members.
