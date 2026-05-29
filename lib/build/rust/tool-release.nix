@@ -130,6 +130,16 @@ in {
   # exists, else crate2nix Cargo.nix. `lockfile` = force lockfile-builder
   # (errors if spec missing). `cargo-nix` = force the legacy crate2nix path.
   buildMode ? "auto",
+  # When `true` AND the outer flake helper supplied `gen`, wrap the
+  # native binary so its runtime PATH begins with the pinned gen's
+  # bin dir. Closes the substrate bootstrap loop where a fleet-style
+  # binary that calls `gen` on PATH ends up calling whatever
+  # /etc/profiles holds — usually the OLD gen the binary is supposed
+  # to replace via activation. With the wrap, PATH gen IS the gen
+  # this binary's flake.lock pinned at build time. Consumers:
+  # fleet (calls gen for the pre-rebuild spec sweep); any future
+  # tool that shells out to gen at runtime.
+  runtimeNeedsGen ? false,
   ...
 }:
 let
@@ -239,6 +249,35 @@ let
 
   nativeBinary = binaries.${nativeTarget};
 
+  # Runtime-pinned-PATH wrapping. Only fires when:
+  #   - consumer sets `runtimeNeedsGen = true`, AND
+  #   - the outer flake helper supplied a non-null `gen`
+  # Otherwise the binary is returned as-is.
+  #
+  # Implementation: symlinkJoin + wrapProgram. The bin/<x> symlink is
+  # replaced with a shell wrapper that runs the original with
+  # `PATH=${gen}/bin:$PATH`. Operator `gen` invocations from inside
+  # the wrapped binary find the lock-pinned gen first, before
+  # /etc/profiles' activation-time gen — eliminating the bootstrap
+  # loop where the binary's job IS to activate the new gen.
+  wrapWithRuntimeGen = bin:
+    if runtimeNeedsGen && gen != null
+    then hostPkgs.symlinkJoin {
+      name = "${toolName}-with-pinned-gen";
+      paths = [ bin ];
+      buildInputs = [ hostPkgs.makeWrapper ];
+      postBuild = ''
+        for f in "$out/bin/"*; do
+          if [ -L "$f" ] || [ -x "$f" ]; then
+            wrapProgram "$f" --prefix PATH : "${gen}/bin"
+          fi
+        done
+      '';
+    }
+    else bin;
+
+  wrappedNativeBinary = wrapWithRuntimeGen nativeBinary;
+
   # ============================================================================
   # HOST-TOOL BINARY — always-native, never pkgsStatic
   # ============================================================================
@@ -338,12 +377,17 @@ in {
       value = binaries.${targetName};
     }) (builtins.attrNames targets)
   ) // {
-    default = nativeBinary;
-    ${toolName} = nativeBinary;
+    default = wrappedNativeBinary;
+    ${toolName} = wrappedNativeBinary;
     # SDLC-tool variant: built against host's regular nixpkgs (no
     # pkgsStatic). Consumed by substrate's gen-IFD wire and by any
     # other "I just need this binary to run on this system" use case.
     host-tool = hostToolBinary;
+    # Unwrapped variant for substrate-internal consumers that need
+    # the raw rust-crate output (e.g. nix-bundle, source attribution,
+    # debugging). Reaches the same store path the binary would have
+    # had without the runtime-PATH wrap.
+    unwrapped = nativeBinary;
   };
 
   devShells.default = (import ../shared/devshell.nix { pkgs = hostPkgs; }).mkRustDevShell {
@@ -358,7 +402,7 @@ in {
   apps = {
     default = {
       type = "app";
-      program = "${nativeBinary}/bin/${toolName}";
+      program = "${wrappedNativeBinary}/bin/${toolName}";
     };
     release = releaseApp;
     bump = bumpApp;
