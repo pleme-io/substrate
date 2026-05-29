@@ -67,6 +67,13 @@ hostPkgs.runCommand "cargo-build-spec" {
     hostPkgs.cacert
     hostPkgs.nix-prefetch-git
     hostPkgs.git
+    # nix-prefetch-git is a shell script that shells out to `nix hash
+    # file` (and `nix-hash` for compatibility) to compute the FOD
+    # digest. Without the `nix` binary on PATH inside the sandbox,
+    # the script fails with "No such file or directory" on its first
+    # `nix` subprocess spawn — which gen-cargo surfaces as a hard
+    # prefetch error.
+    hostPkgs.nix
   ];
   SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
