@@ -52,28 +52,17 @@ hostPkgs.runCommand "cargo-build-spec" {
   # cacert provides the CA bundle cargo needs to fetch the crates.io
   # index over TLS (the sandbox lacks /etc/ssl by default).
   #
-  # `nix-prefetch-git` + `git` are required because gen-cargo's
-  # prefetch step shells out to `nix-prefetch-git` to compute the
-  # sha256 of every git source in the resolve graph. The build spec
-  # MUST carry a fixed sha256 for every git source (FOD path) so the
-  # substrate consumer's fetchgit derivation runs in pure-eval mode
-  # without network access. Recent gen-cargo (3f6e4fa) hard-errors
-  # if prefetch fails, so the tool MUST be on PATH inside this
-  # sandbox or every consumer with a git dep fails the spec build.
+  # No shell tools — gen-cargo's prefetch step is pure-Rust as of
+  # 2026-05-29: `gix` for git fetch, `nix-nar` streaming into
+  # `Sha256` for the FOD digest, base64 SRI encoding. See
+  # `theory/RUST-NATIVE-PREFETCH.md` and `gen-cargo/src/git_prefetcher.rs`.
+  # The brittle nix-prefetch-git → git → nix-hash shell-script
+  # transitive-tool dependency tree is gone by construction.
   nativeBuildInputs = [
     gen
     hostPkgs.cargo
     hostPkgs.rustc
     hostPkgs.cacert
-    hostPkgs.nix-prefetch-git
-    hostPkgs.git
-    # nix-prefetch-git is a shell script that shells out to `nix hash
-    # file` (and `nix-hash` for compatibility) to compute the FOD
-    # digest. Without the `nix` binary on PATH inside the sandbox,
-    # the script fails with "No such file or directory" on its first
-    # `nix` subprocess spawn — which gen-cargo surfaces as a hard
-    # prefetch error.
-    hostPkgs.nix
   ];
   SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
   NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
