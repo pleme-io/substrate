@@ -738,3 +738,40 @@ These are imported directly from substrate, not via `lib.${system}`:
 - Overlays: `overlay.nix` within each language directory
 - Helpers: `*-helpers.nix` (e.g., `service-helpers.nix`, `docker-helpers.nix`)
 - Standalone import paths: exposed as `*Builder` attrs (e.g., `rustLibraryBuilder`)
+
+---
+
+## ★★ IFD Sandbox Contract — `lib/build/rust/mk-build-spec.nix`
+
+Substrate's gen-IFD path runs `gen build` inside a nix sandbox to
+regenerate `Cargo.build-spec.json` on demand. The sandbox provides a
+**closed list of tools on PATH** + `__noChroot = true` for network
+access. Every tool gen-cargo shells out to MUST be added to this
+sandbox's `nativeBuildInputs` or every consumer with a corresponding
+dep class fails the spec build.
+
+Today's tool list (`mk-build-spec.nix` L54+):
+
+| Tool | Why gen-cargo needs it |
+|---|---|
+| `gen` (the binary itself) | The `gen build` command |
+| `cargo` | `cargo metadata` subprocess for resolve graph |
+| `rustc` | cargo metadata's `rustc-cfg=` queries |
+| `cacert` | TLS cert bundle for cargo's registry index fetch |
+| `nix-prefetch-git` | gen-cargo's `prefetch_git_sha256` step for each git source |
+| `git` | nix-prefetch-git's transitive dep |
+
+**The contract:** when gen-cargo lands a new code path that requires
+a subprocess (signature verification, custom hashers, alternate
+prefetchers, additional resolvers), the matching tool MUST be added
+to `mk-build-spec.nix`'s `nativeBuildInputs` in the same PR. The
+gen-side hard-error message should always name the missing tool so
+future operators see the exact symbol to add here.
+
+Failure mode this contract prevents: "gen: error: failed to prefetch
+sha256 for git source ... No such file or directory (os error 2)" —
+emitted when the tool gen calls isn't on PATH inside the sandbox.
+
+Reference: gen-cargo 3f6e4fa hard-fails on prefetch_git_sha256
+failure; substrate 267430e added `nix-prefetch-git` + `git` after the
+fleet rebuild surfaced the missing-tool class.
