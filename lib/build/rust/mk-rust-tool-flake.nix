@@ -203,7 +203,18 @@ let
   meta = spec.flake_metadata.${pickedMember}
     or (throw "mkRustToolFlake: spec has no flake_metadata for `${pickedMember}` — regenerate at gen v2+.");
 
-  resolvedToolName = if toolName != null then toolName else (meta.default_bin or pickedMember);
+  # toolName drives the overlay attribute + packages.${system}.${toolName}.
+  # MUST be the cargo crate / binary name (for `pkgs.${packageAttr}` HM
+  # default lookups), NOT the HM module's leaf name (`hm-leaf`, which
+  # may differ — `blackmatter-cli` package + `cli` leaf →
+  # `blackmatter.components.cli` HM module reads `pkgs.blackmatter-cli`).
+  # Fall back chain: explicit toolName → module_trio.binaryName →
+  # module_trio.packageAttr → meta.default_bin → pickedMember.
+  resolvedToolName =
+    if toolName != null then toolName
+    else if meta ? module_trio && meta.module_trio ? binaryName then meta.module_trio.binaryName
+    else if meta ? module_trio && meta.module_trio ? packageAttr then meta.module_trio.packageAttr
+    else meta.default_bin or pickedMember;
   resolvedRepo = if repo != null then repo
     else meta.repo or (throw "mkRustToolFlake: no repo for `${pickedMember}` — pass `repo` or set [package].repository.");
 
