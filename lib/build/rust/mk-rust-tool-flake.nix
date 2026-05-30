@@ -152,15 +152,31 @@ let
         root_crate = "${packageName}-${pkg.version or "0.0.0"}";
         crates."${packageName}-${pkg.version or "0.0.0"}" = { name = packageName; };
         flake_metadata."${packageName}" = plemeMetaFor pkg;
-      } else throw ''
-        mkRustToolFlake: ${toString src}/Cargo.build-spec.json missing AND
-        ${toString src}/Cargo.toml has no [package] block — pure-TOML
-        fallback only supports single-package crates today. Either:
-          1. Run `gen lock --snapshot` to commit a spec, OR
-          2. Pass an explicit `toolName` + `repo` to substrate.rust.tool.
-      '';
+      } else null;  # workspace case → IFD path below
 
-  spec = if committedSpec != null then committedSpec else synthesizedSpec;
+  # Workspace IFD fallback: when no committed spec AND consumer is a
+  # workspace, regenerate via mk-build-spec.nix (gen running inside
+  # the nix sandbox). Uses substrate's own flake.lock to discover the
+  # gen rev — self-consistent with substrate's own pin, no consumer
+  # wiring required. The IFD pays a one-time cost per (gen rev × src
+  # state); subsequent evals hit nix's drv cache.
+  substrateFlakeLock = fromJSON (readFile (./. + "/../../../flake.lock"));
+  genRev = substrateFlakeLock.nodes.gen.locked.rev;
+  ifdSystem = "x86_64-linux";  # Fixed: IFD-host-arbitrary; the spec is system-agnostic JSON.
+  ifdHostPkgs = (import inputs.nixpkgs { system = ifdSystem; });
+  ifdGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
+  ifdGen = ifdGenFlake.packages.${ifdSystem}.host-tool or ifdGenFlake.packages.${ifdSystem}.default;
+  ifdSpecDrv = (import ./mk-build-spec.nix) {
+    inherit src;
+    hostPkgs = ifdHostPkgs;
+    gen = ifdGen;
+  };
+  ifdSpec = fromJSON (readFile "${ifdSpecDrv}/Cargo.build-spec.json");
+
+  spec =
+    if committedSpec != null then committedSpec
+    else if synthesizedSpec != null then synthesizedSpec
+    else ifdSpec;  # workspace fallback via IFD
 
   multiMember = length spec.workspace_members > 1;
   pickedMember =
