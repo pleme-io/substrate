@@ -19,6 +19,13 @@
   fenix ? null,
   devenv ? null,
   forge ? null,
+  # gen powers substrate's IFD spec-regen path. Consumers can pass
+  # their own gen flake (preferred — pins to a known rev). When
+  # null, substrate auto-fetches gen via `builtins.getFlake` so the
+  # IFD path still works — closes the "consumer didn't wire gen,
+  # substrate falls through to throw" regression class surfaced
+  # 2026-05-30 across workspace-style consumers (ishou, etc.).
+  gen ? null,
 }:
 {
   toolName,
@@ -40,12 +47,23 @@ let
     if args ? src && args.src ? inputs then hygiene.enforceAll args.src.inputs
     else true;
 
+  # Auto-fetch gen as a flake when the consumer didn't pass one.
+  # `builtins.getFlake "github:pleme-io/gen"` follows latest main and
+  # caches via nix's flake-cache (default tarball-ttl ~1h) — caching
+  # IS the right move. The IFD path self-heals when gen's schema
+  # bumps without forcing every consumer to pin gen explicitly.
+  # Consumers that want a specific rev pass `gen` themselves.
+  effectiveGen =
+    if gen != null then gen
+    else builtins.getFlake "github:pleme-io/gen";
+
   mkPerSystem = system: let
     rustWorkspace = import ./workspace-release.nix {
       inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
       fenix = if fenix != null then fenix else null;
       forge = if forge != null then forge.packages.${system}.default else null;
+      gen = effectiveGen.packages.${system}.host-tool or effectiveGen.packages.${system}.default;
     };
   in rustWorkspace workspaceArgs;
 

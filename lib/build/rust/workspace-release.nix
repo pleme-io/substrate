@@ -20,9 +20,14 @@
   fenix ? null,
   devenv ? null,
   forge ? null,
+  # gen powers substrate's IFD spec-regen path. workspace-release-flake
+  # auto-fetches via `builtins.getFlake "github:pleme-io/gen"` when
+  # the consumer didn't pass one; this forwarding makes the gen
+  # binding visible to tool-release → lockfile-builder.
+  gen ? null,
 }: let
   rustTool = import ./tool-release.nix {
-    inherit nixpkgs system crate2nix fenix devenv forge;
+    inherit nixpkgs system crate2nix fenix devenv forge gen;
   };
 in {
   toolName,
