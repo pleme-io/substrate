@@ -55,21 +55,30 @@ let
     if args ? src && args.src ? inputs then hygiene.enforceAll args.src.inputs
     else true;
 
+  # Auto-fetch gen from substrate's own flake.lock pin when consumer
+  # didn't pass one — closes the substrate-doesn't-know-about-gen
+  # class for tool-shape flakes. Same pattern as workspace-release-
+  # flake.nix; rev resolves from substrate's flake.lock so the
+  # auto-fetched gen always tracks substrate's own gen pin.
+  substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
+  genRev = substrateFlakeLock.nodes.gen.locked.rev;
+  effectiveGen =
+    if gen != null then gen
+    else builtins.getFlake "github:pleme-io/gen/${genRev}";
+
   mkPerSystem = system: let
     rustTool = import ./tool-release.nix {
       inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
       fenix = if fenix != null then fenix else null;
       forge = if forge != null then forge.packages.${system}.default else null;
-      # gen is wired in AS A BUILD TOOL for the IFD auto-regen
-      # path. Prefer the `host-tool` output (native dynamic, no
-      # pkgsStatic) over `default` (which may be a static-musl
-      # cross-build for linux systems and fail under crate-compat
-      # walls like notify/mio). Fall back to `default` for gen
-      # versions that haven't published host-tool yet.
-      gen =
-        if gen == null then null
-        else gen.packages.${system}.host-tool or gen.packages.${system}.default;
+      # gen is wired in AS A BUILD TOOL for the IFD auto-regen path.
+      # Prefer the `host-tool` output (native dynamic, no pkgsStatic)
+      # over `default` (which may be a static-musl cross-build for
+      # linux systems and fail under crate-compat walls like
+      # notify/mio). Fall back to `default` for gen versions that
+      # haven't published host-tool yet.
+      gen = effectiveGen.packages.${system}.host-tool or effectiveGen.packages.${system}.default;
     };
   in rustTool toolArgs;
 

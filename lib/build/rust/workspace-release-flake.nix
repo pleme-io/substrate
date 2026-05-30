@@ -48,14 +48,19 @@ let
     else true;
 
   # Auto-fetch gen as a flake when the consumer didn't pass one.
-  # `builtins.getFlake "github:pleme-io/gen"` follows latest main and
-  # caches via nix's flake-cache (default tarball-ttl ~1h) — caching
-  # IS the right move. The IFD path self-heals when gen's schema
-  # bumps without forcing every consumer to pin gen explicitly.
-  # Consumers that want a specific rev pass `gen` themselves.
+  # `builtins.getFlake` requires a LOCKED reference in pure-eval
+  # mode — so we read substrate's OWN flake.lock to discover the
+  # gen rev substrate is pinned at. This keeps substrate self-
+  # consistent: substrate's flake.lock IS the single source of
+  # truth for the auto-fetched gen rev. When substrate's CI bumps
+  # its gen input, every downstream workspace consumer's auto-
+  # fetched gen tracks that bump automatically. Caching is handled
+  # by nix's flake-cache against the locked rev.
+  substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
+  genRev = substrateFlakeLock.nodes.gen.locked.rev;
   effectiveGen =
     if gen != null then gen
-    else builtins.getFlake "github:pleme-io/gen";
+    else builtins.getFlake "github:pleme-io/gen/${genRev}";
 
   mkPerSystem = system: let
     rustWorkspace = import ./workspace-release.nix {
