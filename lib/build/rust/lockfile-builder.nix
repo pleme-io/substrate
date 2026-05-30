@@ -753,11 +753,49 @@ let
         # collision.
         quirkAttrs = quirkApply.applyQuirks (crate.quirks or []) argsPrefixed;
         args = argsPrefixed // quirkAttrs;
+        # ── propagatedBuildInputs gap-fill ──────────────────────────
+        # nixpkgs' buildRustCrate (pkgs/build-support/rust/build-rust-crate/default.nix)
+        # reads `crate.buildInputs` + `crate.nativeBuildInputs` but
+        # *not* `crate.propagatedBuildInputs`. Overrides like
+        # `defaultCrateOverrides.curl-sys` that set
+        # `propagatedBuildInputs = [pkgs.curl]` get silently dropped
+        # — final binaries linking against curl-sys see "library not
+        # found for -lcurl" because curl never reaches stdenv's
+        # NIX_LDFLAGS path.
+        #
+        # We close the gap substrate-side without touching nixpkgs:
+        #   1. Extract `propagatedBuildInputs` from the override's
+        #      output BEFORE merging into the buildRustCrate args.
+        #   2. Fold the crate's own propagated set + every dep's
+        #      transitive propagated set into `buildInputs` of THIS
+        #      crate's mkDerivation. Mechanical equivalent of what
+        #      stdenv would do if buildRustCrate forwarded the attr.
+        #   3. Stash the union on the resulting derivation as
+        #      `propagatedFromOverride` so direct dependents pick it
+        #      up via the same fold (transitive closure by induction).
+        overrideExtras = overrideFor triple crate.name args;
+        ownPropagated = overrideExtras.propagatedBuildInputs or [];
+        depDrvs = (map depFor deps.runtime) ++ (map buildDepFor deps.build);
+        depPropagated = lib.unique
+          (lib.concatMap (d: d.propagatedFromOverride or []) depDrvs);
+        mergedExtras = overrideExtras // {
+          buildInputs = (overrideExtras.buildInputs or [])
+            ++ ownPropagated
+            ++ depPropagated;
+          # buildRustCrate would drop this anyway — strip it
+          # explicitly so the merged `crate` attrset stays clean and
+          # nothing downstream re-reads it as if it were live.
+          propagatedBuildInputs = null;
+        };
         # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
         # (the multi-target universe). Restricts `built` to crates actually
         # reachable for this target — keeps apple-only drvs out of linux
         # trees and vice versa. See targetCrates definition above.
-      in buildRustCrate (args // overrideFor triple crate.name args)) targetCrates;
+        rawDrv = buildRustCrate (args // mergedExtras);
+      in rawDrv // {
+        propagatedFromOverride =
+          lib.unique (ownPropagated ++ depPropagated);
+      }) targetCrates;
 
     # Target tree: workload arch + target-filtered dep edges (I4).
     # Dispatch runtime deps via the typed `dep.tree` field gen-cargo
