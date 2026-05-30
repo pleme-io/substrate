@@ -778,14 +778,17 @@ let
         depDrvs = (map depFor deps.runtime) ++ (map buildDepFor deps.build);
         depPropagated = lib.unique
           (lib.concatMap (d: d.propagatedFromOverride or []) depDrvs);
-        mergedExtras = overrideExtras // {
+        # Drop `propagatedBuildInputs` via removeAttrs — setting it to
+        # `null` here flows through buildRustCrate to stdenv's
+        # make-derivation, which calls `length propagatedBuildInputs`
+        # and throws "expected a list but found null". The override's
+        # propagated set has already been folded into `buildInputs`
+        # above, so the attr is redundant; just take it out of the
+        # attrset entirely.
+        mergedExtras = (removeAttrs overrideExtras [ "propagatedBuildInputs" ]) // {
           buildInputs = (overrideExtras.buildInputs or [])
             ++ ownPropagated
             ++ depPropagated;
-          # buildRustCrate would drop this anyway — strip it
-          # explicitly so the merged `crate` attrset stays clean and
-          # nothing downstream re-reads it as if it were live.
-          propagatedBuildInputs = null;
         };
         # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
         # (the multi-target universe). Restricts `built` to crates actually
