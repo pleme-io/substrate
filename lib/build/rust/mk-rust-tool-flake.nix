@@ -104,14 +104,16 @@ let
       packageName = pkg.name;
       # First-[[bin]]-name defaults: many fleet crates name the binary
       # differently from the package (hibikine package → hibiki bin,
-      # namimado-cli → namimado, etc.). Default `hm-leaf` to the first
-      # `[[bin]]` name when present so HM modules land at the BINARY
-      # name (operators set `programs.hibiki.enable`, not
+      # namimado-cli → namimado, etc.). [[bin]] lives at TOP LEVEL of
+      # Cargo.toml (not under [package]), so we consult cargoToml.bin
+      # via closure capture. Default `hm-leaf` to the first [[bin]]
+      # name when present so HM modules land at the BINARY name
+      # (operators set `programs.hibiki.enable`, not
       # `programs.hibikine.enable`). Author override:
       # `[package.metadata.pleme] hm-leaf = "<name>"`.
       firstBinName =
-        if pkg ? bin && builtins.length pkg.bin > 0
-        then (builtins.head pkg.bin).name or packageName
+        if cargoToml ? bin && builtins.length cargoToml.bin > 0
+        then (builtins.head cargoToml.bin).name or packageName
         else packageName;
       defaultBin = pkgPleme."hm-leaf" or firstBinName;
       defaultBinaryName = pkgPleme."binary-name" or defaultBin;
