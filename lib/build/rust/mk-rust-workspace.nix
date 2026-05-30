@@ -9,8 +9,14 @@
 #   let ws = (mkRustWorkspace { name = "myworkspace"; src = ./.; }) { inherit pkgs; };
 #   in ws.workspaceMembers.cli-tool
 #
-# Same prerequisites as mkRustTool — Cargo.build-spec.json must be
-# committed (gen build .).
+# Under the operator-surface doctrine (theory/COMMITTED-SPEC-FRESHNESS-GATE.md
+# + #76), Cargo.build-spec.json is no longer required at the consumer's
+# source root. lockfile-builder's mkProject does the typed dispatch:
+# committed spec when present (fast path, no IFD), gen-driven IFD when
+# absent. The previous `assert pathExists ... // Cargo.build-spec.json`
+# guard predated that doctrine and is dropped — it blocked every
+# consumer that retired their committed spec (seki, …) from reaching
+# the IFD fallback.
 {
   name,
   src,
@@ -24,13 +30,6 @@ let
   # compilation here), so specialize for `pkgs.stdenv.hostPlatform`.
   plemeCrateOverrides =
     (import ./pleme-crate-overrides.nix) pkgs.stdenv.hostPlatform.rust.rustcTarget;
-
-  _ = assert (builtins.pathExists (src + "/Cargo.build-spec.json")) ||
-        throw ''
-          mkRustWorkspace: ${name} — Cargo.build-spec.json missing at ${toString src}.
-          Run `gen build .` in the workspace root to produce it.
-        '';
-       null;
 
   project = lockfileBuilder.mkProject {
     inherit src;

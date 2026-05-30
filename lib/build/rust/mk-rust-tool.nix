@@ -27,15 +27,14 @@
 let
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
 
+  # Cargo.toml + Cargo.lock are the operator-authored surface per the
+  # doctrine — assert their presence. Cargo.build-spec.json is no
+  # longer required at the consumer root; lockfile-builder's mkProject
+  # IFD-fallbacks to gen when it isn't committed.
   _ = assert (builtins.pathExists (src + "/Cargo.toml")) ||
         throw "mkRustTool: ${name} — Cargo.toml not found at ${toString src}";
        assert (builtins.pathExists (src + "/Cargo.lock")) ||
         throw "mkRustTool: ${name} — Cargo.lock not found at ${toString src}";
-       assert (builtins.pathExists (src + "/Cargo.build-spec.json")) ||
-        throw ''
-          mkRustTool: ${name} — Cargo.build-spec.json missing at ${toString src}.
-          Run `gen build .` in the tool's source directory to produce it.
-        '';
        null;
 
   project = lockfileBuilder.mkProject {
