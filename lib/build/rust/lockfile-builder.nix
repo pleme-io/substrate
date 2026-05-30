@@ -199,16 +199,26 @@ let
     defaultCrateOverrides ? (pkgs.defaultCrateOverrides // (plemeCrateOverridesFor pkgs.stdenv.hostPlatform.rust.rustcTarget)),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
     # Auto-detected: pulls from `pkgs.gen` when substrate's rust
-    # overlay (or any overlay that adds `gen`) is composed. Per the
-    # GEN TYPED-SPEC CONTRACT (`theory/GEN-TYPED-SPEC-CONTRACT.md`),
-    # regeneration is BACKGROUND TO REBUILD — never a manual step.
-    # When `gen` is reachable AND the committed spec is missing or
-    # invariant-violating (stale), the build-spec is regenerated via
-    # IFD before lockfile composition. Operators see "auto-regen"
-    # transparently as part of `nix build`; they never run
-    # `gen build .` by hand. Callers may pass an explicit `gen` to
-    # override the auto-detection.
-    gen ? (pkgs.gen or null),
+    # overlay (or any overlay that adds `gen`) is composed. When
+    # neither overlay-`gen` nor caller-passed `gen` is available,
+    # auto-fetch from substrate's own flake.lock pin via
+    # `builtins.getFlake`. This closes the bootstrap-loop class
+    # where consumers using `lockfileBuilder.mkProject` directly
+    # (repo-forge, etc.) hit a missing-spec throw because they
+    # never wired gen — substrate self-heals via its own pinned
+    # gen rev. Per the GEN TYPED-SPEC CONTRACT
+    # (`theory/GEN-TYPED-SPEC-CONTRACT.md`), regeneration is
+    # BACKGROUND TO REBUILD — never a manual step.
+    gen ?
+      let
+        overlayGen = pkgs.gen or null;
+        substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
+        genRev = substrateFlakeLock.nodes.gen.locked.rev;
+        autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
+        autoGen = autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.host-tool
+          or autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      in
+        if overlayGen != null then overlayGen else autoGen,
     # Host pkgs for the IFD auto-regen. When `pkgs` is pkgsStatic (cross
     # builds), `pkgs.buildPackages` is pkgsStatic itself — not the
     # build-machine's darwin/linux native pkgs. The IFD always runs at
