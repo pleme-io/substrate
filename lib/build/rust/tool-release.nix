@@ -161,24 +161,29 @@ let
   # only for unmigrated repos that don't yet have a spec.
   hasBuildSpec = builtins.pathExists (src + "/Cargo.build-spec.json");
   hasCargoNix = builtins.pathExists cargoNix;
-  # Auto-mode dispatch (reverted to original ordering 2026-05-27):
-  #   1. If a Cargo.build-spec.json sidecar exists, use lockfile-builder.
-  #      Build-spec is gen-cargo's fresh output and correctly handles
-  #      workspace-relative path deps that crate2nix's Cargo.nix would
-  #      otherwise bake in as broken `../sibling-repo` references.
-  #   2. Otherwise, fall back to crate2nix Cargo.nix.
-  # Operators can force either path explicitly via `buildMode =
-  # "lockfile"` or `buildMode = "cargo-nix"`.
+  # Auto-mode dispatch (2026-05-30: operator-surface doctrine):
+  # `lockfile` is always the right default. lockfile-builder handles
+  # the missing-committed-spec case INTERNALLY via mk-build-spec.nix
+  # (IFD), so substrate never needs the committed sidecar to dispatch.
+  # `cargo-nix` stays as an explicit opt-in for repos that still
+  # commit `Cargo.nix` (legacy crate2nix path) — operators flip
+  # `buildMode = "cargo-nix"` to opt in.
+  #
+  # This closes the operator-surface doctrine on the substrate side:
+  # only `Cargo.toml` is required as an operator-authored input;
+  # every derived artifact (Cargo.lock, Cargo.build-spec.json,
+  # Cargo.nix) is substrate-internal and IFD-regenerated as needed.
   effectiveMode =
     if buildMode == "auto"
-    then (if hasBuildSpec then "lockfile" else "cargo-nix")
+    then "lockfile"
     else buildMode;
   _modeAssert =
-    if effectiveMode == "lockfile" && !hasBuildSpec
+    if effectiveMode == "cargo-nix" && !hasCargoNix
     then throw ''
-      substrate/rust-release: buildMode = "lockfile" but
-      ${toString src}/Cargo.build-spec.json is missing. Run
-      `gen build .` in the workspace root first.
+      substrate/rust-release: buildMode = "cargo-nix" but
+      ${toString cargoNix} is missing. Either commit Cargo.nix or
+      switch to buildMode = "lockfile" (the default — uses
+      lockfile-builder + gen IFD with no committed sidecar required).
     ''
     else null;
 
