@@ -70,69 +70,39 @@
 let
   targetArg = if target == null then "" else "--filter-platform=${target}";
 
-  # ── Freshness gate ───────────────────────────────────────────────
+  # ── Spec source dispatch (operator-surface doctrine, aligned) ────
   #
-  # Read committed spec + embedded cargo_lock_sha256; compare against
-  # current Cargo.lock's SHA-256. All file-existence + read + hash
-  # operations are pure Nix — no IFD, no derivation builds yet.
+  # Substrate trusts the committed spec unconditionally when present.
+  # Spec freshness is gen's responsibility — gen's auto-commit CI in
+  # bootstrap-exception repos keeps committed specs synced with
+  # Cargo.lock changes. Substrate's only job is to consume the
+  # artifact gen produced.
+  #
+  # Two cases only:
+  #   1. Committed spec exists → use it. Fast path, no IFD, near-
+  #      instant evaluation, cache-friendly across hosts.
+  #   2. No committed spec → IFD via `gen build .` inside the
+  #      sandbox. The operator-surface doctrine default: every
+  #      consumer self-derives from Cargo.toml + Cargo.lock.
+  #
+  # The previous `cargo_lock_sha256` freshness comparison was the
+  # wrong primitive — it compared two derived artifacts (Cargo.lock
+  # + the spec) against each other, then asked operators to manually
+  # re-run gen and commit. The CI auto-commit pattern eliminates
+  # that toil at the source.
 
   committedSpecPath = src + "/Cargo.build-spec.json";
-  cargoLockPath = src + "/Cargo.lock";
-
   hasCommittedSpec = builtins.pathExists committedSpecPath;
-  hasCargoLock = builtins.pathExists cargoLockPath;
 
-  # Embedded cargo_lock_sha256 from the committed spec (null if no
-  # committed spec or the field is absent — older specs that pre-date
-  # the freshness field).
-  committedLockHash =
-    if hasCommittedSpec
-    then
-      let
-        parsed = builtins.fromJSON (builtins.readFile committedSpecPath);
-      in
-        parsed.cargo_lock_sha256 or null
-    else null;
-
-  # Current Cargo.lock's SHA-256 (null if no lockfile — pure-library
-  # repos without a lockfile fall through to IFD).
-  currentLockHash =
-    if hasCargoLock
-    then builtins.hashFile "sha256" cargoLockPath
-    else null;
-
-  # Typed verdict — closed three-variant set mirroring gen-cargo's
-  # `Freshness` enum.
-  verdict =
-    if !hasCommittedSpec then "missing"
-    else if committedLockHash == null then "unhashed"
-    else if currentLockHash == null then "missing-lockfile"
-    else if committedLockHash == currentLockHash then "fresh"
-    else "drifted";
-
-  # ── Fast path: Fresh ─────────────────────────────────────────────
-  #
-  # Committed spec is provably consistent with current Cargo.lock —
-  # copy it through with no IFD. Evaluation is near-instant; the
-  # resulting derivation is content-addressable and shareable across
-  # hosts via any substituter.
+  # ── Fast path: committed spec exists ────────────────────────────
   committedDerivation = hostPkgs.runCommand "cargo-build-spec-committed" {
-    passthru = {
-      source = "committed";
-      cargoLockSha256 = currentLockHash;
-      freshness = verdict;
-    };
+    passthru.source = "committed";
   } ''
     mkdir -p $out
     cp ${committedSpecPath} $out/Cargo.build-spec.json
   '';
 
   # ── Fallback: IFD ────────────────────────────────────────────────
-  #
-  # No committed spec OR drift detected — regenerate via `gen build .`
-  # inside the nix sandbox. `git` is the one load-bearing binary
-  # (gen-cargo's prefetcher subprocesses it); destination is
-  # zero-subprocess once substrate fixes *-sys link-dep propagation.
   ifdDerivation = hostPkgs.runCommand "cargo-build-spec-ifd" {
     nativeBuildInputs = [
       gen
@@ -145,10 +115,7 @@ let
     NIX_SSL_CERT_FILE = "${hostPkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     __noChroot = true;
     src = src;
-    passthru = {
-      source = "ifd";
-      freshness = verdict;
-    };
+    passthru.source = "ifd";
   } ''
     cp -r $src/* .
     chmod -R u+w .
@@ -163,18 +130,5 @@ let
     cp Cargo.build-spec.json $out/
   '';
 
-  # Drift warning — operator-visible message via builtins.trace so
-  # next rebuild surfaces the staleness without failing the build.
-  # Promotion to a hard error is the destination; tracking via
-  # substrate flake input until all fleet consumers ship a CI
-  # auto-commit workflow.
-  driftWarning =
-    "mkBuildSpec: committed Cargo.build-spec.json in ${toString src} has DRIFTED "
-    + "from Cargo.lock (committed cargo_lock_sha256=${toString committedLockHash} "
-    + "vs current=${toString currentLockHash}). Falling back to IFD. "
-    + "Run `gen build .` and commit the regenerated spec to restore the fast path.";
-
 in
-  if verdict == "fresh" then committedDerivation
-  else if verdict == "drifted" then builtins.trace driftWarning ifdDerivation
-  else ifdDerivation
+  if hasCommittedSpec then committedDerivation else ifdDerivation

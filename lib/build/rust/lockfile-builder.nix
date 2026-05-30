@@ -291,118 +291,30 @@ let
     # silently rewriting an operator's deliberate snapshot is a
     # surprise; the strict path forces an explicit acknowledgement.
 
-    # Typed freshness gate — the 10-100× perf win for `nix run .#rebuild`
-    # on a clean fleet. Schema v7 specs embed `cargo_lock_sha256`
-    # (gen-cargo populates it via sha2; gen and nix compute the SAME
-    # digest by construction). When the committed spec's hash matches
-    # the current `Cargo.lock`'s SHA-256, the spec is byte-equal to
-    # what gen would re-emit — IFD is skipped entirely.
+    # ── Spec-source policy (aligned with operator-surface doctrine) ──
     #
-    # SHA-256 specifically because `builtins.hashFile "sha256"` is
-    # native nix (no IFD, no subprocess), so the gate is pure-eval.
-    # Schema < 7 specs (no `cargo_lock_sha256` field) get `null` here
-    # and fall back to the legacy "always regen when gen is reachable"
-    # path — backward compatibility is automatic.
-    lockPath = src + "/Cargo.lock";
-    currentLockSha256 =
-      if builtins.pathExists lockPath
-      then builtins.hashFile "sha256" lockPath
-      else null;
-    committedLockSha256 =
-      if committedSpec == null then null
-      else committedSpec.cargo_lock_sha256 or null;
-    specHashIsFresh =
-      committedLockSha256 != null
-      && currentLockSha256 != null
-      && committedLockSha256 == currentLockSha256;
-
-    # Strict-transient-lock refusal: when a committed spec exists
-    # but its hash disagrees with current Cargo.lock, the operator
-    # has a deliberate snapshot (Locked) that has since been
-    # invalidated by a Cargo.lock change. Refuse the build with a
-    # typed error rather than silently regenerating — silent regen
-    # would discard the operator's intentional pin.
+    # Substrate trusts the committed spec unconditionally when it
+    # exists and passes structural invariants. Spec freshness is
+    # gen's responsibility — gen's auto-commit CI in bootstrap-
+    # exception repos keeps committed specs synced with Cargo.lock
+    # changes. Substrate's only job is to consume what gen produced.
     #
-    # EXCEPT — when `src` is a nix-store path (immutable flake
-    # input), strict refusal is useless: the operator can't
-    # `gen lock --update` against a read-only store path. Substrate
-    # falls back to auto-IFD-regen in that case (the existing
-    # `needsRegenTarget = true` path). Strict mode is only useful
-    # when src is a mutable working directory (the user's local
-    # clone of the repo they're editing).
-    srcStr = toString src;
-    srcIsMutable =
-      builtins.stringLength srcStr < 11
-      || builtins.substring 0 11 srcStr != "/nix/store/";
-    # Try to surface the repo identity in the error message — much
-    # more actionable than the store-path path. Reads from
-    # `committedSpec.flake_metadata.<first-member>.repo` if present.
-    inferredRepo =
-      if committedSpec == null then null
-      else
-        let
-          firstMember =
-            if committedSpec ? workspace_members
-               && builtins.length committedSpec.workspace_members > 0
-            then
-              let m0 = builtins.elemAt committedSpec.workspace_members 0; in
-              if builtins.isAttrs m0 then m0.name else m0
-            else null;
-          fm =
-            if firstMember == null then null
-            else (committedSpec.flake_metadata or {}).${firstMember} or null;
-        in
-          if fm == null then null else fm.repo or null;
-    repoHint =
-      if inferredRepo == null then ""
-      else "\n        Repo: github.com/${inferredRepo}\n";
-    _driftAssert =
-      if strictTransientLock
-         && srcIsMutable
-         && committedSpec != null
-         && committedLockSha256 != null
-         && currentLockSha256 != null
-         && committedLockSha256 != currentLockSha256
-      then throw ''
-        substrate/lockfile-builder: COMMITTED LOCK HAS DRIFTED.
-${repoHint}
-        ${toString src}/Cargo.build-spec.json declares
-        cargo_lock_sha256 = ${committedLockSha256}
-        but the current Cargo.lock hashes to
-        cargo_lock_sha256 = ${currentLockSha256}.
-
-        The committed spec is an EXPLICIT operator snapshot
-        (gen-cargo `LockLifecycleState::Locked`); silently
-        regenerating it would discard your intentional pin.
-
-        Resolve by running ONE of:
-          1. `gen lock --update`  in ${toString src}
-             → regenerate from current Cargo.lock + emit typed
-                LockDiff for review.
-          2. `gen lock --reset`   in ${toString src}
-             → drop the committed spec; substrate IFD will regen
-                per build (transient `Unlocked` state).
-          3. Revert the Cargo.lock change so it matches the
-             snapshot.
-
-        (To disable this gate per-consumer, pass
-        `strictTransientLock = false` to `mkProject`; the substrate
-        default is opt-in for backward compat.)
-      ''
-      else null;
+    # The previous `cargo_lock_sha256` freshness comparison was the
+    # wrong primitive — it compared two derived artifacts against
+    # each other, then asked operators to manually re-run gen and
+    # commit. CI auto-commit eliminates that toil at the source.
+    # `strictTransientLock` is retained as a no-op argument for
+    # backward compatibility with consumer flake call sites.
+    _strictTransientLockArgRetainedForBackcompat = strictTransientLock;
+    _driftAssert = null;
 
     # Regenerate via IFD when:
     #   - gen is unreachable → can't regen; consume committed spec.
     #   - committed spec is missing or invariant-violating.
-    #   - committed spec's lock-hash differs from current Cargo.lock
-    #     AND strict mode is off (strict mode refuses above).
-    # Skip regen when the committed spec's `cargo_lock_sha256` matches
-    # — same algorithm cargo-metadata would produce, materially.
+    # Trust committed spec when present + structurally valid.
     needsRegenTarget =
-      builtins.seq _driftAssert (
-        if gen == null then false
-        else committedViolations != [] || !specHashIsFresh
-      );
+      if gen == null then false
+      else committedSpec == null || committedViolations != [];
 
     # 2) Per-tree IFD: each tree gets its own platform-filtered spec
     #    when gen is reachable. Native builds reuse the target spec
