@@ -665,13 +665,29 @@ let
     # target's section — eliminates the gen-bootstrap chicken-and-egg.
     # Fall back to per-crate `runtime_dependencies` / `build_dependencies`
     # for older specs (schema < 5).
+    # Reconstruct a target's { crates = <key→edges> } section, handling
+    # BOTH shapes purely by structure (no version gate):
+    #   • compact v10: target_resolves = { base; targets; }; a target's
+    #     crates = base // targets.<triple>.overrides. `base` holds crates
+    #     whose resolved edges are byte-identical across ALL fleet targets
+    #     (stored once); `overrides` holds the per-target remainder.
+    #   • legacy v5–v9: target_resolves.<triple> = { crates; }.
+    # gen-cargo owns the base/override split (rust-for-logic); this is the
+    # trivial attrset-merge expansion — pure dispatch, no computation.
+    sectionFor = treeSpec: triple:
+      let tr = treeSpec.target_resolves or null; in
+      if tr == null then null
+      else if tr ? base
+        then { crates = tr.base // ((tr.targets.${triple} or {}).overrides or {}); }
+        else tr.${triple} or null;
+
     depsFor = treeSpec: triple: key: crate:
       let
-        sectionCrates = (treeSpec.target_resolves or {}).${triple} or null;
-        section = if sectionCrates != null then sectionCrates.crates.${key} or null else null;
+        section = sectionFor treeSpec triple;
+        edges = if section != null then section.crates.${key} or null else null;
       in
-        if section != null
-        then { runtime = section.runtime_dependencies; build = section.build_dependencies; }
+        if edges != null
+        then { runtime = edges.runtime_dependencies; build = edges.build_dependencies; }
         else { runtime = crate.runtime_dependencies; build = crate.build_dependencies; };
 
     mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
@@ -691,8 +707,7 @@ let
         # closes the leak. Old specs (no target_resolves) fall back to
         # spec.crates — the legacy single-target behavior.
         targetCrates =
-          let
-            section = (treeSpec.target_resolves or {}).${triple} or null;
+          let section = sectionFor treeSpec triple;
           in
             if section != null
             then builtins.intersectAttrs section.crates treeSpec.crates
@@ -708,7 +723,7 @@ let
         # Fall back to crate.features for old specs.
         featuresFor =
           let
-            section = (treeSpec.target_resolves or {}).${triple} or null;
+            section = sectionFor treeSpec triple;
             sectionCrate = if section != null then section.crates.${key} or null else null;
           in
             if sectionCrate != null && sectionCrate ? features
