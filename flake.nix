@@ -20,16 +20,26 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # gen ships alongside substrate as part of the unified
-    # dep-SDLC + build-SDLC surface. Consumers never declare
-    # `inputs.gen` — substrate's `rust.{shape}` factories close
-    # over substrate's gen pin and expose every `Adapter` verb
-    # (lock / build / plan / confirm / diff / sbom) as flake apps
-    # in the consumer's outputs.
-    gen = {
-      url = "github:pleme-io/gen";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # gen is INTENTIONALLY NOT a flake input.
+    #
+    # gen's own flake builds itself via `substrate.mkRustToolFlake`, so
+    # `inputs.gen` created a substrate↔gen FLAKE-INPUT CYCLE
+    # (gen → substrate → gen → …) that Nix unrolls, growing this
+    # flake.lock by ~64 nodes on every lock bump (history: monotonic
+    # +128 lines per lock update; the lock had bloated past 2600 nodes).
+    #
+    # Instead, gen is built FROM A PINNED SOURCE
+    # (`lib/build/rust/gen-pin.json` — rev + sha256) using substrate's
+    # OWN tool-builder (`self.mkRustToolFlake`). No `inputs.gen` ⇒ no
+    # cycle ⇒ the lock collapses to a small, stable size. Bumping gen is
+    # a 2-line edit to `gen-pin.json` (rev + sha256) — NO lock growth.
+    #
+    # The same `gen-pin.json` rev is read by the four IFD auto-fetch
+    # sites in `lib/build/rust/` (tool-release-flake / workspace-release-
+    # flake / mk-rust-tool-flake / lockfile-builder) so downstream
+    # consumers that hit the IFD fallback still resolve substrate's
+    # pinned gen rev. Those `getFlake`-at-rev fetches happen at
+    # IFD/eval time and do NOT grow any lock.
     # Fleet source-of-truth for devenv. Consumers of
     # rust-{tool,service,library}-flake.nix should set
     # `inputs.devenv.follows = "substrate/devenv"` rather than carry
@@ -52,6 +62,46 @@
   }: let
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
     eachSystem = f: nixpkgs.lib.genAttrs systems f;
+
+    # ── gen, built from a PINNED SOURCE (no flake input → no cycle) ──
+    #
+    # `inputs.gen` was removed to break the substrate↔gen flake-input
+    # cycle that grew this lock unboundedly (see the inputs comment).
+    # gen is rebuilt here from a pinned tarball via substrate's OWN
+    # tool-builder, producing a derivation byte-identical to the old
+    # `inputs.gen.packages.${system}.default` for the same gen rev.
+    #
+    # `gen-pin.json` (rev + sha256) is the single source of truth for
+    # the gen pin — bump = edit those two fields, NO lock growth.
+    genPin = builtins.fromJSON (builtins.readFile ./lib/build/rust/gen-pin.json);
+    # FOD fetch — system-independent (content-addressed by sha256), so a
+    # single fetch serves every system.
+    genSrc = (import nixpkgs { system = builtins.head systems; }).fetchFromGitHub {
+      owner = "pleme-io";
+      repo = "gen";
+      rev = genPin.rev;
+      sha256 = genPin.sha256;
+    };
+    # Build gen the SAME way gen's own flake builds itself
+    # (`substrate.mkRustToolFlake { src = ./.; member = "gen-cli"; }`),
+    # but with substrate's machinery referenced via `self` — no
+    # `inputs.gen`. gen ships a committed `Cargo.build-spec.json`, so
+    # this takes mkRustToolFlake's committed-spec fast path (crate2nix
+    # under lockfile-builder); no chicken-and-egg, gen builds WITHOUT a
+    # working gen. `gen` left unset ⇒ the inner builder auto-fetches the
+    # gen-pin rev only as an IFD build-tool, which never fires here
+    # because the committed spec is present.
+    genFlake = self.mkRustToolFlake {
+      inputs = {
+        inherit nixpkgs crate2nix fenix;
+        flake-utils = inputs.flake-utils;
+        devenv = inputs.devenv or null;
+        forge = inputs.forge or null;
+      };
+      src = genSrc;
+      member = "gen-cli";
+    };
+    genFor = system: genFlake.packages.${system}.default;
   in
     flake-parts.lib.mkFlake { inherit inputs; } {
       inherit systems;
@@ -133,7 +183,12 @@
           substrateInputs = {
             inherit nixpkgs crate2nix fenix;
             flake-utils = inputs.flake-utils;
-            gen = inputs.gen;
+            # gen is no longer a flake input — pass null so the inner
+            # tool/workspace builders auto-fetch the `gen-pin.json` rev
+            # at IFD time (no lock growth). The substrate↔gen cycle is
+            # broken; consumers that need gen-as-build-tool resolve it
+            # from the pin, not from a flake input.
+            gen = null;
             devenv = inputs.devenv or null;
             forge = inputs.forge or null;
           };
@@ -152,10 +207,11 @@
 
         # gen, exposed as a substrate-bound package. Consumers never
         # declare `inputs.gen` — the bump propagates fleet-wide via a
-        # single substrate bump. Available as a top-level binary and
-        # for IFD invocation inside `mkBuildSpec`.
+        # single `gen-pin.json` edit. Available as a top-level binary and
+        # for IFD invocation inside `mkBuildSpec`. Built from the pinned
+        # source via substrate's own tool-builder (no flake-input cycle).
         packages = eachSystem (system: {
-          gen = inputs.gen.packages.${system}.default;
+          gen = genFor system;
         });
 
         # Sibling ecosystem surfaces. Same shape as `rust` — every

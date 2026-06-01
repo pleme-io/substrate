@@ -212,8 +212,13 @@ let
     gen ?
       let
         overlayGen = pkgs.gen or null;
-        substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
-        genRev = substrateFlakeLock.nodes.gen.locked.rev;
+        # gen rev from substrate's `gen-pin.json` (NOT flake.lock — gen
+        # is no longer a flake input, which broke the substrate↔gen lock
+        # cycle). `gen-pin.json` lives next to this file and is the single
+        # source of truth for the gen pin. This IFD-time `getFlake`
+        # against the locked rev does NOT grow any lock.
+        genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+        genRev = genPin.rev;
         autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
         autoGen = autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.host-tool
           or autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;

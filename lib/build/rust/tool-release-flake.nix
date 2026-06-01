@@ -55,13 +55,15 @@ let
     if args ? src && args.src ? inputs then hygiene.enforceAll args.src.inputs
     else true;
 
-  # Auto-fetch gen from substrate's own flake.lock pin when consumer
-  # didn't pass one — closes the substrate-doesn't-know-about-gen
-  # class for tool-shape flakes. Same pattern as workspace-release-
-  # flake.nix; rev resolves from substrate's flake.lock so the
-  # auto-fetched gen always tracks substrate's own gen pin.
-  substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
-  genRev = substrateFlakeLock.nodes.gen.locked.rev;
+  # Auto-fetch gen from substrate's source-pin when consumer didn't
+  # pass one — closes the substrate-doesn't-know-about-gen class for
+  # tool-shape flakes. Same pattern as workspace-release-flake.nix.
+  # The rev resolves from `gen-pin.json` (NOT from flake.lock — gen is
+  # no longer a flake input, which broke the substrate↔gen lock cycle).
+  # `gen-pin.json` is the single source of truth for the gen pin; the
+  # IFD-time `getFlake` against the locked rev does NOT grow any lock.
+  genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+  genRev = genPin.rev;
   effectiveGen =
     if gen != null then gen
     else builtins.getFlake "github:pleme-io/gen/${genRev}";

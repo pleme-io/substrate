@@ -169,12 +169,14 @@ let
 
   # Workspace IFD fallback: when no committed spec AND consumer is a
   # workspace, regenerate via mk-build-spec.nix (gen running inside
-  # the nix sandbox). Uses substrate's own flake.lock to discover the
+  # the nix sandbox). Uses substrate's `gen-pin.json` to discover the
   # gen rev — self-consistent with substrate's own pin, no consumer
-  # wiring required. The IFD pays a one-time cost per (gen rev × src
-  # state); subsequent evals hit nix's drv cache.
-  substrateFlakeLock = fromJSON (readFile (./. + "/../../../flake.lock"));
-  genRev = substrateFlakeLock.nodes.gen.locked.rev;
+  # wiring required (gen is no longer a flake input — the substrate↔gen
+  # lock cycle is broken; `gen-pin.json` is the single source of truth).
+  # The IFD pays a one-time cost per (gen rev × src state); subsequent
+  # evals hit nix's drv cache.
+  genPin = fromJSON (readFile ./gen-pin.json);
+  genRev = genPin.rev;
   ifdSystem = "x86_64-linux";  # Fixed: IFD-host-arbitrary; the spec is system-agnostic JSON.
   ifdHostPkgs = (import inputs.nixpkgs { system = ifdSystem; });
   ifdGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";

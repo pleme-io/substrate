@@ -49,15 +49,16 @@ let
 
   # Auto-fetch gen as a flake when the consumer didn't pass one.
   # `builtins.getFlake` requires a LOCKED reference in pure-eval
-  # mode — so we read substrate's OWN flake.lock to discover the
-  # gen rev substrate is pinned at. This keeps substrate self-
-  # consistent: substrate's flake.lock IS the single source of
-  # truth for the auto-fetched gen rev. When substrate's CI bumps
-  # its gen input, every downstream workspace consumer's auto-
-  # fetched gen tracks that bump automatically. Caching is handled
-  # by nix's flake-cache against the locked rev.
-  substrateFlakeLock = builtins.fromJSON (builtins.readFile (./. + "/../../../flake.lock"));
-  genRev = substrateFlakeLock.nodes.gen.locked.rev;
+  # mode — so we read substrate's `gen-pin.json` to discover the gen
+  # rev substrate is pinned at. `gen-pin.json` (NOT flake.lock — gen
+  # is no longer a flake input, which broke the substrate↔gen lock
+  # cycle) IS the single source of truth for the gen rev. When
+  # substrate bumps that pin, every downstream workspace consumer's
+  # auto-fetched gen tracks the bump automatically. Caching is handled
+  # by nix's flake-cache against the locked rev. This IFD-time
+  # `getFlake` does NOT grow any lock.
+  genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+  genRev = genPin.rev;
   effectiveGen =
     if gen != null then gen
     else builtins.getFlake "github:pleme-io/gen/${genRev}";
