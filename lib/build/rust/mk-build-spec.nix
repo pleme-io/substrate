@@ -130,5 +130,18 @@ let
     cp Cargo.build-spec.json $out/
   '';
 
+  # ── Deterministic-performance visibility ─────────────────────────
+  # The committed spec is the fast, network-free, cache-shared path; the
+  # IFD fallback runs `gen build .` (cargo metadata over the network,
+  # __noChroot) DURING EVAL — variable latency, not shared across hosts:
+  # the literal "evaluating derivation is taking a while" cost. Falling to
+  # IFD was SILENT, so the eval-time tax was invisible. Emit a loud trace
+  # naming the source so every IFD repo is visible + actionable — commit
+  # its `gen build .` output (Cargo.build-spec.json) to take the
+  # deterministic, no-IFD fast path.
+  ifdDerivationTraced = builtins.trace
+    "mkBuildSpec[IFD]: no committed Cargo.build-spec.json for ${toString src} → eval-time `gen build` (network). Commit one for a deterministic no-IFD build."
+    ifdDerivation;
+
 in
-  if hasCommittedSpec then committedDerivation else ifdDerivation
+  if hasCommittedSpec then committedDerivation else ifdDerivationTraced
