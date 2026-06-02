@@ -175,6 +175,7 @@ let
   # WHICH crates need WHICH quirks lives in
   # `gen-cargo/src/quirks.rs::REGISTRY` (Rust source of truth).
   quirkApply = import ./quirk-apply.nix { inherit lib; };
+  overrideCompose = import ./crate-override-compose.nix { inherit lib; };
   mkProject = {
     src,
     # Optional human-readable workspace identifier used in error
@@ -541,40 +542,23 @@ let
     # lockfile-builder directly (escriba's flake.nix is the canonical
     # example) would otherwise silently drop every fleet-wide quirk we
     # ship (wgpu-hal cfg, openraft BTreeSet patch, document-features
-    # lib_target, etc.). Compose per-crate: caller rules apply first,
-    # **pleme (the fleet safety-net) wins on key collision**.
+    # lib_target, etc.). Per-crate composition is delegated to
+    # `composeOverrideMaps` (./crate-override-compose.nix): the caller's
+    # `defaultCrateOverrides` is the `base`, plemeCrateOverrides is the
+    # `winner`. The fleet safety-net wins on field collision so a caller's
+    # raw nixpkgs default cannot re-introduce the very bug pleme fixes
+    # (e.g. proc-macro-crate 3.5.0's broken `--replace-fail` postPatch).
+    # Full rationale + regression test live alongside that function
+    # (crate-override-compose-test.nix).
     #
-    # Why pleme wins (not the caller): every pleme override here exists
-    # to FIX a nixpkgs/upstream bug (e.g. proc-macro-crate 3.5.0, whose
-    # nixpkgs `defaultCrateOverrides` postPatch `--replace-fail`s a
-    # literal — `env::var("CARGO")` — that the crate removed, hard-
-    # erroring the build). Callers almost never pass an *intentional*
-    # override of a pleme-managed crate; what they pass is the raw
-    # `pkgs.defaultCrateOverrides` (carrying the very nixpkgs bug pleme
-    # is fixing) `//` their own per-crate extras. If the caller won on
-    # collision, that buggy nixpkgs default would clobber pleme's fix —
-    # exactly the "silently drop fleet-wide quirks" failure this block
-    # set out to prevent. pleme manages only the handful of crates with
-    # known nixpkgs/upstream breakage (proc-macro-crate, notify); a
-    # caller's extras key off their own crate name and never collide, so
-    # making pleme win is surgical (it changes behavior only for those
-    # safety-net crates). A consumer that genuinely must override one of
-    # them edits pleme-crate-overrides.nix, not their flake.
-    #
-    # Triple-aware: each tree-builder (target or host) computes its
-    # own plemeCrateOverrides map specialized to the triple it's
-    # building for. Substrate-level safety nets (apple-only feature
-    # strip on notify, etc.) fire only on the triples they protect.
-    overrideFor = triple: name:
-      let
-        plemeForTriple = plemeCrateOverridesFor triple;
-        pleme  = plemeForTriple.${name}    or null;
-        caller = defaultCrateOverrides.${name} or null;
-      in
-        if pleme == null && caller == null then (oldAttrs: oldAttrs)
-        else if pleme == null then caller
-        else if caller == null then pleme
-        else (attrs: (caller attrs) // (pleme attrs));
+    # Triple-aware: each tree-builder (target or host) builds the winner
+    # map specialized to the triple it's building for, so substrate
+    # safety nets (apple-only feature strip on notify, etc.) fire only on
+    # the triples they protect.
+    overrideFor = triple: overrideCompose.composeOverrideMaps {
+      base = defaultCrateOverrides;
+      winner = plemeCrateOverridesFor triple;
+    };
 
     # gen ≥ 3e9fbc6 emits `build_rust_crate_args` pre-shaped for
     # buildRustCrate (procMacro, build, links, libName, libPath, …).
