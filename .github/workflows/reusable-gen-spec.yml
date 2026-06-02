@@ -1,0 +1,88 @@
+# reusable-gen-spec — fleet-wide gen build-spec + Cargo.gen.lock maintenance.
+#
+# The spread engine for the Cargo.gen.lock slim-delta migration. Any Rust
+# repo adopts it with a thin caller:
+#
+#   # .github/workflows/gen-spec.yml
+#   name: gen-spec
+#   on:
+#     push: { branches: [main], paths: ["**/Cargo.toml", "**/Cargo.lock"] }
+#     pull_request: { paths: ["**/Cargo.toml", "**/Cargo.lock"] }
+#   jobs:
+#     gen-spec:
+#       uses: pleme-io/substrate/.github/workflows/reusable-gen-spec.yml@main
+#       secrets: inherit
+#
+# Mechanism (conditional logic in Rust, not shell):
+#   `gen build . --commit` regenerates BOTH the committed full
+#   `Cargo.build-spec.json` AND the slim `Cargo.gen.lock` delta (the
+#   producer emits both since gen-cargo P1), atomically committing if
+#   drifted (gen-spec-bot identity), no-op when fresh.
+#
+#   - push to main : regen + commit + push back via the typed action.
+#   - pull request : regen without commit; fail the PR if either artifact
+#                    drifted (author must include the regen commit).
+#
+# Uses PUBLISHED gen (`nix run github:pleme-io/gen`) — NOT a from-source
+# build — so it works in any consumer repo, not just gen itself.
+# substrate's lockfile-builder consumes the committed Cargo.gen.lock as the
+# highest-priority spec source (delta > build-spec > IFD), so adopting this
+# workflow is what eliminates eval-time IFD for the repo.
+name: reusable-gen-spec
+
+on:
+  workflow_call:
+    inputs:
+      gen-ref:
+        description: "gen flake ref to run (pin for reproducibility)."
+        type: string
+        default: "github:pleme-io/gen"
+
+concurrency:
+  group: gen-spec-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  gen-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Regen build-spec.json + Cargo.gen.lock. On main: --commit (atomic,
+      # gen-spec-bot, no-op when fresh). On PR: regen only.
+      - name: Regen spec + delta (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: nix run ${{ inputs.gen-ref }} -- build . --commit
+
+      - name: Regen spec + delta (PR — no commit)
+        if: github.event_name == 'pull_request'
+        run: nix run ${{ inputs.gen-ref }} -- build .
+
+      # Drift = the PR didn't include a fresh regen of either artifact.
+      - name: Fail PR if regen was not included
+        if: github.event_name == 'pull_request'
+        run: |
+          drift=""
+          git diff --quiet -- Cargo.build-spec.json || drift="$drift Cargo.build-spec.json"
+          git diff --quiet -- Cargo.gen.lock        || drift="$drift Cargo.gen.lock"
+          if [ -n "$drift" ]; then
+            echo "::error::stale artifacts:$drift — run \`gen build . --commit\` locally and include the regen commit."
+            git --no-pager diff -- Cargo.gen.lock Cargo.build-spec.json | head -200
+            exit 1
+          fi
+
+      - uses: pleme-io/actions/git-push-with-token@v1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "false"
