@@ -92,6 +92,12 @@ in rec {
         default = [];
         description = "Restrict to these profile scopes. Empty list = all scopes.";
       };
+
+      hosts = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = "Restrict to these hosts (networking.hostName). Empty list = all hosts.";
+      };
     };
   };
 
@@ -209,6 +215,17 @@ in rec {
     filterAttrs (sname: _:
       let srv = serverDefs.${sname}; in
       srv.scopes == [] || elem scopeName srv.scopes
+    ) resolvedServers;
+
+  # ─── Per-Host Filtering ───────────────────────────────────────────
+  # Filters resolved servers for a specific host (networking.hostName).
+  # Servers with empty hosts list are included on all hosts. An empty
+  # hostName ("") disables host filtering (all servers pass) — the safe
+  # default for standalone HM that doesn't wire a host name.
+  mkFilterForHost = serverDefs: resolvedServers: hostName:
+    filterAttrs (sname: _:
+      let h = serverDefs.${sname}.hosts or []; in
+      h == [] || hostName == "" || elem hostName h
     ) resolvedServers;
 
   # ─── Combined Agent + Scope Filtering ────────────────────────────
@@ -453,6 +470,7 @@ in rec {
         server = nameValuePair serverName (partial // {
           enable = e.enable or false;
           scopes = e.scopes or [ scope ];
+          hosts = e.hosts or [];
           envFiles = (partial.envFiles or {}) // foldl' (a: c: a // c.envFile) {} creds;
         });
         homeFiles = foldl' (a: c: a // c.homeFile) {} creds;
