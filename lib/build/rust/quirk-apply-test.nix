@@ -5,20 +5,23 @@
 # and the result is asserted against the buildRustCrate-arg shape the
 # substrate consumer expects.
 #
-# Consumed as a substrate flake check (`substrate.checks.quirk-apply`).
+# Wired into CI via .github/workflows/nix-tests.yml (rust-overrides job).
 # Failure means the Rust enum's serde shape drifted from the Nix
 # dispatch arms — exactly the bug class typed-spec contracts exist
 # to prevent.
 #
-# Usage:
-#   nix-instantiate --eval substrate/lib/build/rust/quirk-apply-test.nix
-{ lib ? (import <nixpkgs> {}).lib }:
+# Direct-expression shape (not a `{ lib ? … }:` lambda) so that
+#   nix-instantiate --eval --strict substrate/lib/build/rust/quirk-apply-test.nix
+# actually RUNS the assertions and fails closed on `throw`; a lambda file
+# would print `<LAMBDA>` and exit 0 without running anything. Evaluates to
+# `{ total = N; passed = N; }` on success.
 let
+  lib = (import <nixpkgs> {}).lib;
   q = import ./quirk-apply.nix { inherit lib; };
 
   # Helpers
   assertEq = name: expected: actual:
-    if expected == actual then "✓ ${name}"
+    if expected == actual then true
     else throw "✗ ${name}: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
 
   # ── Test 1: ForceCfg ─────────────────────────────────────────────
@@ -96,5 +99,8 @@ let
     unknownTry.success;
 
   results = [ test1 test2 test3 test3b test4 test5 test5b test6 test7 ];
+  n = builtins.length results;
 in
-results
+  # Forces every check (each is `true` or throws) → fails closed.
+  assert builtins.all (x: x) results;
+  { total = n; passed = n; }
