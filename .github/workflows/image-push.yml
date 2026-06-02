@@ -122,6 +122,13 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
+          # The ubuntu runner ships a v1 /etc/containers/registries.conf,
+          # which nixpkgs skopeo rejects ("registries.conf must be in v2
+          # format but is in v1"). Point skopeo at a minimal v2 config —
+          # we only ever push fully-qualified docker:// refs, so no
+          # unqualified search registries are needed.
+          export CONTAINERS_REGISTRIES_CONF="${RUNNER_TEMP:-/tmp}/registries.conf"
+          printf 'unqualified-search-registries = []\n' > "$CONTAINERS_REGISTRIES_CONF"
           # Push primary tag, then each additionalTag, all as copies
           # of the same content-addressed image (skopeo copy is cheap
           # — server-side mount when blobs already exist).
