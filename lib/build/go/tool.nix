@@ -102,37 +102,40 @@
       inherit pname completions src;
     };
 
-    # Substrate is the single source of truth for the Go toolchain version
-    # (pkgs.go is overridden to our from-source goToolchain via the go overlay).
-    # Enforce, at build time, that a consuming go.mod never declares a `go`
-    # directive AHEAD of that toolchain — otherwise the build fails deep inside
-    # `go mod download` with the cryptic "requires go >= X (running Y;
-    # GOTOOLCHAIN=local)". This turns it into one clear, actionable error.
-    # Fleet rule: authored go.mod declares the MINOR only (e.g. `go 1.25`),
-    # never a patch ahead of the builder.
-    goVersionGuard = ''
-      _gomod="${if modRoot != null then modRoot else "."}/go.mod"
-      if [ -f "$_gomod" ]; then
-        _req=$(grep -m1 '^go ' "$_gomod" | awk '{print $2}')
-        _tool="${pkgs.go.version}"
-        if [ -n "$_req" ] \
-          && [ "$(printf '%s\n%s\n' "$_tool" "$_req" | sort -V | tail -1)" = "$_req" ] \
-          && [ "$_req" != "$_tool" ]; then
-          echo "substrate.mkGoTool: ${pname} go.mod requires 'go $_req' but the substrate goToolchain is $_tool." >&2
-          echo "  Pin go.mod to the minor only ('go ${pkgs.lib.versions.majorMinor pkgs.go.version}'), never a patch ahead of the builder." >&2
-          exit 1
-        fi
-      fi
-    '';
+    # Substrate's from-source goToolchain (pkgs.go) is the single source of truth
+    # for the fleet Go version. Assert — at EVAL time, typed via the canonical
+    # builtins.compareVersions (NOT fragile shell parsing) — that the consuming
+    # go.mod's `go` directive is not AHEAD of the toolchain. Otherwise the build
+    # would fail deep in `go mod download` with the cryptic "requires go >= X
+    # (running Y; GOTOOLCHAIN=local)". Fleet rule: authored go.mod declares the
+    # MINOR only (e.g. `go 1.25`), never a patch ahead of the builder.
+    # Reading go.mod is tryEval-guarded, so a non-path / unreadable src silently
+    # skips the check rather than breaking the build.
+    goVersionAssert =
+      let
+        gomodPath = "${src}/${lib.optionalString (modRoot != null) (modRoot + "/")}go.mod";
+        read = builtins.tryEval (builtins.readFile gomodPath);
+        goLine =
+          if read.success
+          then lib.findFirst (l: lib.hasPrefix "go " l) null (lib.splitString "\n" read.value)
+          else null;
+        req =
+          if goLine == null then null
+          else lib.head (lib.splitString " " (lib.removePrefix "go " goLine));
+        tool = pkgs.go.version;
+      in
+        if req != null && builtins.compareVersions req tool > 0
+        then throw ("substrate.mkGoTool: ${pname} go.mod requires 'go ${req}' but the substrate "
+          + "goToolchain is ${tool}. Pin go.mod to the minor only ('go ${lib.versions.majorMinor tool}'), "
+          + "never a patch ahead of the builder.")
+        else null;
 
-  in pkgs.buildGoModule ({
+  in builtins.seq goVersionAssert (pkgs.buildGoModule ({
     inherit pname version src vendorHash proxyVendor doCheck tags;
 
     nativeBuildInputs = completionAttrs.nativeBuildInputs ++ extraBuildInputs;
 
     ldflags = effectiveLdflags;
-
-    preBuild = goVersionGuard + (extraAttrs.preBuild or "");
 
     postInstall = completionAttrs.postInstallScript + extraPostInstall;
 
@@ -143,8 +146,7 @@
   }
   // lib.optionalAttrs (subPackages != null) { inherit subPackages; }
   // lib.optionalAttrs (modRoot != null) { inherit modRoot; }
-  # preBuild already merged above (guard + caller's); don't let the spread clobber it.
-  // (builtins.removeAttrs extraAttrs ["preBuild"]));
+  // extraAttrs));
 
   # Create a Nix overlay that provides multiple Go tools.
   #
