@@ -1,0 +1,94 @@
+# Reusable workflow: publish ALL charts in a Helm MONOREPO to an OCI registry
+# on push to main — the AUTO-RELEASE (default-on, ship-on-merge) shape for repos
+# that hold many charts under `charts/*` with NO single root Chart.yaml.
+#
+# Why this exists (vs the single-chart helm-auto-release.yml):
+#   The canonical single-chart shim reads ONE Chart.yaml at the repo root and
+#   auto-bumps its patch version. A chart monorepo (helmworks, helmworks-akeyless)
+#   has no root Chart.yaml — detect-repo-type returns `unknown` and helm-bump has
+#   nothing to bump. This workflow instead wraps the already-proven aggregate
+#   engine `nix run .#release` (= forge helm release-all: discover → lint →
+#   package → push), which 404-probes each (name, version) and SKIPS anything
+#   already published. So it is naturally idempotent.
+#
+# Version model — IMPORTANT: there is NO auto-bump here. The monorepo has no
+# single version to bump; each chart's version is hand-bumped in its own
+# Chart.yaml in the commit that changes it. This workflow is *publish-on-merge of
+# already-bumped Chart.yaml versions*: every push to main re-runs release-all,
+# which publishes only the charts whose on-disk version is not yet on the
+# registry and skips the rest. Bumping a chart = the act that makes it ship.
+#
+# Package visibility: this workflow does NOT change ghcr package visibility — it
+# only pushes. New packages inherit the org/repo default; per-package
+# public/private is set out-of-band (a private chart's package must be made
+# private once at creation). It never flips an existing public chart private
+# (rio FluxCD pulls the public ones), nor vice-versa.
+#
+# Usage (consumer repo, the whole footprint):
+#   # .github/workflows/auto-release.yml
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/helm-monorepo-auto-release.yml@main
+#       secrets: inherit
+
+name: helm-monorepo-auto-release
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: "OCI registry URL (oci:// scheme) the charts publish to."
+        type: string
+        default: "oci://ghcr.io/pleme-io/charts"
+      release-app:
+        description: "The flake app that runs forge helm release-all (nix run .#<app>)."
+        type: string
+        default: "release"
+      runner:
+        description: "Runner label."
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN. Use a BOT_PAT only if cross-namespace OCI push needs broader scope than GITHUB_TOKEN grants."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish all bumped charts
+    runs-on: ${{ inputs.runner }}
+    # Never re-trigger on the bot's own pushes (defensive; this workflow does not
+    # itself push commits, but a consumer might add a bump step later).
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Registry login
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          host="${REGISTRY#oci://}"
+          host="${host%%/*}"
+          echo "$TOKEN" | nix shell nixpkgs#kubernetes-helm --command \
+            helm registry login "$host" --username "${{ github.actor }}" --password-stdin
+
+      - name: Publish all bumped charts (idempotent — skips already-published)
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          RELEASE_APP: ${{ inputs.release-app }}
+        run: |
+          set -euo pipefail
+          nix run ".#${RELEASE_APP}" -- "$REGISTRY"
