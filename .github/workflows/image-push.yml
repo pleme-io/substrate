@@ -72,6 +72,17 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          # pleme-io's default build pattern is IFD-self-derive: gen-based
+          # crates (tatara-lisp and friends) generate their Cargo build spec
+          # via an Import-From-Derivation marked `__noChroot`. The strict
+          # default (`sandbox = true`) rejects `__noChroot` outright
+          # ("has '__noChroot' set, but that's not allowed when 'sandbox' is
+          # 'true'"), breaking every action-image build that bundles a tlisp
+          # interpreter. `relaxed` keeps the sandbox for ordinary derivations
+          # and only un-sandboxes those that explicitly opt in via __noChroot.
+          extra-conf: |
+            sandbox = relaxed
 
       # `nix build` writes ./result as a symlink into /nix/store/...
       # The oci-image-push Docker action doesn't have /nix/store mounted,
