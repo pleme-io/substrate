@@ -1,0 +1,33 @@
+# relver — typed release-version primitive. Replaces the hand-rolled bash
+# semver/tag logic in pleme-io's auto-bump workflows (substrate + actions +
+# gem + ansible). Three shapes: source-changed-since-tag, semver-compute-next,
+# idempotent tag create+push. git is accessed via std::process::Command (NOT
+# git2) — zero C deps, byte-exact git semantics (version-sort, pathspec globs),
+# and `git` is already on PATH on every runner + devshell.
+[package]
+name = "relver"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Typed release-version primitive: semver compute, changed-since-tag, idempotent tag — replaces inline bash in pleme-io auto-bump workflows"
+
+[[bin]]
+name = "relver"
+path = "src/main.rs"
+
+[lib]
+name = "relver"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

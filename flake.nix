@@ -212,6 +212,16 @@
         # source via substrate's own tool-builder (no flake-input cycle).
         packages = eachSystem (system: {
           gen = genFor system;
+          # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
+          # replaces inline skopeo bash in the image-push pipeline.
+          oci-push = import ./lib/build/oci-push.nix {
+            pkgs = import nixpkgs { inherit system; };
+          };
+          # relver: typed release-version primitive. `nix run …#relver -- next …`
+          # replaces inline semver/tag bash in the auto-bump workflows.
+          relver = import ./lib/build/relver.nix {
+            pkgs = import nixpkgs { inherit system; };
+          };
         });
 
         # Sibling ecosystem surfaces. Same shape as `rust` — every
