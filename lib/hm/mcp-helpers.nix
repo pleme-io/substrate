@@ -324,4 +324,144 @@ in rec {
         };
       }
     ) agents);
+
+  # ─── MCP Kind Registry ─────────────────────────────────────────────
+  # kind → { serverPrefix?; mkServer = args: <partial server opts>; credEnvs?; }
+  #   mkServer returns the kind's command/args/package/env/description. The
+  #   fleet wires enable/scopes/envFiles. credEnvs lists the env vars that
+  #   are file-backed credentials (dummy-managed by default; a fleet entry's
+  #   `creds` overrides). Org modules extend via `(mcpKinds pkgs) // {...}`.
+  # Generic kinds only — org-specific kinds (e.g. akeyless-jit) live in the
+  # org module per the "generic in substrate, org kinds extend" decision.
+  mcpKinds = pkgs: let
+    grafanaReadOnly = [
+      "-disable-write" "-enabled-tools"
+      "search,datasource,prometheus,loki,incident,alerting,oncall,sift,asserts,pyroscope,dashboard,annotations,navigation"
+    ];
+  in {
+    grafana = {
+      mkServer = { url }: {
+        package = pkgs.mcp-grafana; command = "mcp-grafana";
+        args = grafanaReadOnly; env.GRAFANA_URL = url;
+        description = "Grafana (read-only) — ${url}";
+      };
+      credEnvs = [ "GRAFANA_SERVICE_ACCOUNT_TOKEN" ];
+    };
+    datadog = {
+      mkServer = { site ? "datadoghq.com" }: {
+        command = "npx"; args = [ "-y" "@winor30/mcp-server-datadog" ];
+        env.DATADOG_SITE = site; description = "Datadog — metrics/APM/logs (${site})";
+      };
+      credEnvs = [ "DATADOG_API_KEY" "DATADOG_APP_KEY" ];
+    };
+    splunk = {
+      # UNVERIFIED package — disabled by default at call sites.
+      mkServer = { url }: {
+        command = "npx"; args = [ "-y" "@splunk/mcp-server" ];
+        env.SPLUNK_URL = url; description = "Splunk logs — ${url}";
+      };
+      credEnvs = [ "SPLUNK_TOKEN" ];
+    };
+    kubernetes = {
+      serverPrefix = "k8s";
+      mkServer = { }: {
+        package = pkgs.mcp-k8s-go; command = "mcp-k8s-go";
+        description = "Kubernetes (read-only viewer kubeconfig)";
+      };
+      credEnvs = [ "KUBECONFIG" ];
+    };
+    argocd = {
+      mkServer = { server }: {                       # UNVERIFIED package
+        command = "npx"; args = [ "-y" "argocd-mcp" ];
+        env.ARGOCD_SERVER = server; description = "ArgoCD — ${server}";
+      };
+      credEnvs = [ "ARGOCD_AUTH_TOKEN" ];
+    };
+    gcp = {
+      mkServer = { }: { command = "npx"; args = [ "-y" "gcp-mcp" ]; description = "GCP (read-only SA)"; };
+      credEnvs = [ "GOOGLE_APPLICATION_CREDENTIALS" ];
+    };
+    azure = {
+      mkServer = { }: { command = "npx"; args = [ "-y" "@azure/mcp" ]; description = "Azure (read-only)"; };
+      credEnvs = [ "AZURE_TOKEN" ];
+    };
+    sentry = {
+      mkServer = { }: { command = "npx"; args = [ "-y" "@sentry/mcp-server" ]; description = "Sentry error tracking"; };
+      credEnvs = [ "SENTRY_AUTH_TOKEN" ];
+    };
+  };
+
+  # ─── Credential Strategy ───────────────────────────────────────────
+  # mkCred { scope; homeDir; } { env; secret; strategy ? "dummy"; externalPath ? null; label ? ""; }
+  #   → { envFile = {ENV=path;}; homeFile = {...}; sopsSecret = {...}; }
+  # strategy:
+  #   external — value lives at externalPath, managed elsewhere (no side-effect)
+  #   dummy    — write a non-secret placeholder via home.file ("ready to turn on")
+  #   sops     — declare sops.secrets (KEY MUST pre-exist in secrets.yaml)
+  # Canonical fleet path: ~/.config/mcp-fleet/<scope>/<secret>.
+  mkCred = { scope, homeDir }: { env, secret, strategy ? "dummy", externalPath ? null, label ? "" }:
+    let
+      rel = ".config/mcp-fleet/${scope}/${secret}";
+      path = if strategy == "external" then externalPath else "${homeDir}/${rel}";
+    in {
+      envFile = { ${env} = path; };
+      homeFile = optionalAttrs (strategy == "dummy") {
+        ${rel}.text = "REPLACE-ME — dummy ${secret}${optionalString (label != "") " for ${label}"}; supply via SOPS and set strategy=\"sops\"\n";
+      };
+      sopsSecret = optionalAttrs (strategy == "sops") {
+        "mcp-fleet/${scope}/${secret}" = { inherit path; mode = "0600"; };
+      };
+    };
+
+  # ─── MCP Fleet ─────────────────────────────────────────────────────
+  # Expand a catalog of same/mixed-kind endpoints into anvil servers plus
+  # their credential side-effects, deduplicating the per-org generators.
+  #
+  # mkMcpFleet pkgs { scope; homeDir; entries; kinds ? mcpKinds pkgs; }
+  #   entries :: [ { kind; name; args ? {}; enable ? false; scopes ? [scope];
+  #                  creds ? null; } ]
+  #     creds == null            → auto dummy creds from the kind's credEnvs
+  #     creds == [ {env; strategy?; secret?; externalPath?;} ] → explicit
+  #   → { servers = {...}; homeFiles = {...}; sopsSecrets = {...}; }
+  #   namePrefix : optional infix to keep server names unique across fleets
+  #     sharing the flat registry (e.g. "pleme" → grafana-pleme-lilitu).
+  mkMcpFleet = pkgs: { scope, homeDir, entries, kinds ? mcpKinds pkgs, namePrefix ? null }:
+    let
+      mkc = mkCred { inherit scope homeDir; };
+      credSlug = e: lib.toLower (concatStringsSep "-" (drop 1 (splitString "_" e)));
+      resolveEntry = e: let
+        kindDef = kinds.${e.kind};
+        prefix = kindDef.serverPrefix or e.kind;
+        serverName =
+          if namePrefix == null then "${prefix}-${e.name}"
+          else "${prefix}-${namePrefix}-${e.name}";
+        envs = kindDef.credEnvs or [];
+        autoCreds =
+          if length envs <= 1
+          then map (env: { inherit env; secret = "${e.kind}-${e.name}.token"; strategy = "dummy"; }) envs
+          else map (env: { inherit env; secret = "${e.kind}-${e.name}.${credSlug env}"; strategy = "dummy"; }) envs;
+        credSpecs = if (e.creds or null) != null then e.creds else autoCreds;
+        creds = map (c: mkc {
+          inherit (c) env;
+          secret = c.secret or "${e.kind}-${e.name}.token";
+          strategy = c.strategy or "dummy";
+          externalPath = c.externalPath or null;
+          label = serverName;
+        }) credSpecs;
+        partial = kindDef.mkServer (e.args or {});
+      in {
+        server = nameValuePair serverName (partial // {
+          enable = e.enable or false;
+          scopes = e.scopes or [ scope ];
+          envFiles = (partial.envFiles or {}) // foldl' (a: c: a // c.envFile) {} creds;
+        });
+        homeFiles = foldl' (a: c: a // c.homeFile) {} creds;
+        sopsSecrets = foldl' (a: c: a // c.sopsSecret) {} creds;
+      };
+      resolved = map resolveEntry entries;
+    in {
+      servers = listToAttrs (map (r: r.server) resolved);
+      homeFiles = foldl' (a: r: a // r.homeFiles) {} resolved;
+      sopsSecrets = foldl' (a: r: a // r.sopsSecrets) {} resolved;
+    };
 }
