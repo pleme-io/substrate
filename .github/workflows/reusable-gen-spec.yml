@@ -57,26 +57,27 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      # Regen build-spec.json + Cargo.gen.lock. On main: --commit (atomic,
-      # gen-spec-bot, no-op when fresh). On PR: regen only.
-      - name: Regen spec + delta (push to main)
+      # DELTA-ONLY: the committed artifact is the slim Cargo.gen.lock.
+      # gen build regenerates it (and a gitignored Cargo.build-spec.json
+      # intermediate). On main: --commit retires build-spec + commits the
+      # delta as gen-spec-bot (no-op when fresh). On PR: regen only.
+      - name: Regen delta (push to main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: nix run ${{ inputs.gen-ref }} -- build . --commit
 
-      - name: Regen spec + delta (PR — no commit)
+      - name: Regen delta (PR — no commit)
         if: github.event_name == 'pull_request'
         run: nix run ${{ inputs.gen-ref }} -- build .
 
-      # Drift = the PR didn't include a fresh regen of either artifact.
-      - name: Fail PR if regen was not included
+      # Drift = the PR didn't include a fresh regen of the committed delta.
+      # (Cargo.build-spec.json is gitignored under delta-only, so it never
+      # registers as a tracked diff.)
+      - name: Fail PR if delta regen was not included
         if: github.event_name == 'pull_request'
         run: |
-          drift=""
-          git diff --quiet -- Cargo.build-spec.json || drift="$drift Cargo.build-spec.json"
-          git diff --quiet -- Cargo.gen.lock        || drift="$drift Cargo.gen.lock"
-          if [ -n "$drift" ]; then
-            echo "::error::stale artifacts:$drift — run \`gen build . --commit\` locally and include the regen commit."
-            git --no-pager diff -- Cargo.gen.lock Cargo.build-spec.json | head -200
+          if ! git diff --quiet -- Cargo.gen.lock; then
+            echo "::error::stale Cargo.gen.lock — run \`gen build . --commit\` locally and include the regen commit."
+            git --no-pager diff -- Cargo.gen.lock | head -200
             exit 1
           fi
 
