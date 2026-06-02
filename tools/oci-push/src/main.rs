@@ -57,6 +57,7 @@ use serde::{Deserialize, Serialize};
 /// no Docker/OCI mixing trips the registry.
 const MT_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
 const MT_LAYER_GZIP: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
+const MT_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
 
 /// HTTP for local registries (localhost / loopback, with or without a port),
 /// HTTPS otherwise. A local test rig or in-cluster zot speaks plain HTTP;
@@ -87,6 +88,7 @@ enum PushError {
     ReadTarball { path: String, source: std::io::Error },
     Archive(std::io::Error),
     NoManifestJson,
+    UnsupportedCompressor(&'static str),
     ManifestParse(serde_json::Error),
     EmptyManifest,
     MissingEntry(String),
@@ -131,6 +133,12 @@ impl fmt::Display for PushError {
             PushError::NoManifestJson => {
                 write!(f, "oci-push: docker-archive has no manifest.json")
             }
+            PushError::UnsupportedCompressor(c) => write!(
+                f,
+                "oci-push: docker-archive outer compressor '{c}' is unsupported — \
+                 rebuild the image with the default gz compressor (dockerTools \
+                 `compressor = \"gz\"`)"
+            ),
             PushError::ManifestParse(e) => write!(f, "oci-push: manifest.json parse error: {e}"),
             PushError::EmptyManifest => write!(f, "oci-push: manifest.json array is empty"),
             PushError::MissingEntry(p) => {
@@ -245,6 +253,22 @@ impl NativeBackend {
     fn read_archive_bytes(bytes: Vec<u8>) -> Result<HashMap<String, Vec<u8>>, PushError> {
         let gzipped = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
 
+        // Reject non-gzip outer compressors with a legible error — a raw-tar
+        // parse of a zstd/xz/bzip2 frame would otherwise fail cryptically.
+        // Nix dockerTools defaults to gz; only a non-default `compressor`
+        // setting produces these.
+        if !gzipped && bytes.len() >= 4 {
+            if bytes[..4] == [0x28, 0xb5, 0x2f, 0xfd] {
+                return Err(PushError::UnsupportedCompressor("zstd"));
+            }
+            if bytes[0] == 0xfd && bytes[1] == 0x37 && bytes[2] == 0x7a {
+                return Err(PushError::UnsupportedCompressor("xz"));
+            }
+            if bytes[0] == 0x42 && bytes[1] == 0x5a && bytes[2] == 0x68 {
+                return Err(PushError::UnsupportedCompressor("bzip2"));
+            }
+        }
+
         let reader: Box<dyn Read> = if gzipped {
             Box::new(GzDecoder::new(std::io::Cursor::new(bytes)))
         } else {
@@ -326,7 +350,10 @@ impl PushBackend for NativeBackend {
                     }
                 })?;
                 eprintln!("oci-push[native]: pushing {reference_str}");
-                let manifest = OciImageManifest::build(&layers, &config, None);
+                let mut manifest = OciImageManifest::build(&layers, &config, None);
+                // Set the top-level mediaType explicitly (build leaves it None);
+                // self-describing manifest for stricter downstream registries.
+                manifest.media_type = Some(MT_MANIFEST.to_string());
                 client
                     .push(&reference, &layers, config.clone(), &auth, Some(manifest))
                     .await
@@ -1023,6 +1050,20 @@ mod tests {
         assert!(matches!(protocol_for("ghcr.io/pleme-io/x"), ClientProtocol::Https));
         assert!(matches!(protocol_for("localhost:5000"), ClientProtocol::Http));
         assert!(matches!(protocol_for("127.0.0.1:5000"), ClientProtocol::Http));
+    }
+
+    #[test]
+    fn rejects_non_gzip_compressor() {
+        let zstd = vec![0x28, 0xb5, 0x2f, 0xfd, 0, 0, 0, 0];
+        assert!(matches!(
+            NativeBackend::read_archive_bytes(zstd).unwrap_err(),
+            PushError::UnsupportedCompressor("zstd")
+        ));
+        let xz = vec![0xfd, 0x37, 0x7a, 0x58, 0x5a, 0];
+        assert!(matches!(
+            NativeBackend::read_archive_bytes(xz).unwrap_err(),
+            PushError::UnsupportedCompressor("xz")
+        ));
     }
 
     #[test]
