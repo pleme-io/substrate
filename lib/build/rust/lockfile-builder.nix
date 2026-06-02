@@ -277,9 +277,21 @@ let
     #    platform, this is usually fine. For cross-builds or where
     #    cfg-impossible deps exist, regen via IFD with the explicit
     #    target triple is required.
+    # 0) Highest-priority spec source: the slim `Cargo.gen.lock` delta,
+    #    reconstructed in PURE NIX (fromTOML Cargo.lock + the committed
+    #    delta) — IFD-free, cache-shared, 3.4× smaller committed artifact.
+    #    `null` when no Cargo.gen.lock is present → falls through to the
+    #    full committed build-spec, then IFD. Proven build-equivalent to
+    #    the build-spec path on gen (crate set, per-crate source/scalars,
+    #    target_resolves, root_crate all identical). See lockfile-delta.nix
+    #    + gen/docs/CARGO-LOCK-DELTA-CONTRACT.md (D1–D4). This is the
+    #    deliberate `fromTOML` path the file header's "no fromTOML" note
+    #    predates — the delta trades reconstruction for a smaller artifact.
+    deltaSpec = (import ./lockfile-delta.nix { inherit lib; }).reconstruct src;
     committedPath = src + "/Cargo.build-spec.json";
     committedSpec =
-      if builtins.pathExists committedPath
+      if deltaSpec != null then deltaSpec
+      else if builtins.pathExists committedPath
       then fromJSON (readFile committedPath)
       else null;
     committedViolations =
@@ -341,12 +353,18 @@ let
       }
       else targetSpecDrv;  # native: reuse.
 
+    # The delta carries every fleet target's resolve (base // overrides[t]),
+    # so one reconstructed spec serves both trees — the per-triple selection
+    # happens downstream in target_resolves[triple], exactly as for the full
+    # build-spec. So when deltaSpec is present it is BOTH trees' spec.
     specTarget =
-      if targetSpecDrv != null
+      if deltaSpec != null then deltaSpec
+      else if targetSpecDrv != null
       then loadBuildSpec targetSpecDrv
       else loadBuildSpec src;
     specHost =
-      if hostSpecDrv != null && hostSpecDrv != targetSpecDrv
+      if deltaSpec != null then deltaSpec
+      else if hostSpecDrv != null && hostSpecDrv != targetSpecDrv
       then loadBuildSpec hostSpecDrv
       else specTarget;
 

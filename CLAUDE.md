@@ -815,3 +815,27 @@ emitted when the tool gen calls isn't on PATH inside the sandbox.
 Reference: gen-cargo 3f6e4fa hard-fails on prefetch_git_sha256
 failure; substrate 267430e added `nix-prefetch-git` + `git` after the
 fleet rebuild surfaced the missing-tool class.
+
+## ★★ Self-consistent SVH — the favored Rust-closure pattern
+
+A Rust crate's **SVH** (Strict Version Hash) is baked into its `.rustc`
+metadata and checked by every *consumer* crate. A build's rlibs must all come
+from ONE SVH-coherent source or the consumer hits `error[E0463]: can't find
+crate for X` (even with `--extern …rlib` passed). Favored, both first-class:
+
+1. **rio fills, darwin consumes** — rio (Linux, sandboxed) builds reproducibly
+   (byte-stable SVH) and is the sole filler of the shared cache.
+2. **darwin builds fully local** — one `darwin-rebuild` invocation → one rustc
+   run → mutually consistent SVHs.
+
+**SUNSET / directly inferior — never reintroduce: darwin pushing
+`aarch64-darwin` Rust crates to a shared substituter.** darwin has no full
+nix sandbox, so rustc's SVH absorbs per-build entropy and diverges build-to-
+build of the *same* `.drv` → a push poisons every consumer. Disabled fleet-
+wide (`tend.prebuild` off on darwin + closure-deep `repro="verify"` gate).
+Re-enable only behind a proven byte-reproducible darwin build.
+
+Recovery when poisoned (E0463 in a darwin rebuild): purge the poisoned `-lib`
+store paths (`sudo nix-store --delete --ignore-liveness`) + rebuild with
+`--option substitute false` (local self-consistent build). Full runbook +
+verified root cause: `pleme-io/nix/docs/darwin-rust-cache-reproducibility.md`.
