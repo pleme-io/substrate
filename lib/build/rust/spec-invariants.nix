@@ -81,7 +81,14 @@ spec: let
          let
            noBins = (c.binaries or []) == [];
            noLib  = (c.lib_target or null) == null;
-         in if noBins && noLib
+           # Only a PATH-sourced member is genuinely unbuildable without a
+           # lib_target (substrate resolves it to workspaceSrc — the root).
+           # A GIT-sourced "member" (transitive git self-reference) is
+           # fetched + narrowed to its subdir by mkSrcOf, where default
+           # src/lib.rs auto-detects → buildable; don't flag it. Mirrors
+           # gen-cargo invariants.rs check_workspace_member_lib_targets.
+           isPath = (c.source.kind or "path") == "path";
+         in if noBins && noLib && isPath
             then [ "workspace-member-missing-lib-target: ${k} (${c.name or k})" ]
             else []
   ) members);
