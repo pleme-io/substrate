@@ -1,0 +1,38 @@
+# oci-push — typed OCI image-push primitive for substrate's image-push pipeline.
+#
+# Absorbs `skopeo copy docker-archive: -> docker://` into a pleme-io primitive:
+# the NATIVE backend (default) is a pure-Rust OCI-distribution push built on the
+# fleet's existing `oci-client` (the same crate wasm-platform uses), so no
+# external `skopeo` binary is required. The skopeo backend remains as a
+# `--backend skopeo` fallback/escape hatch.
+[package]
+name = "oci-push"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Push a Nix-produced OCI image tarball (docker-archive) to a registry — native (pure-Rust oci-client) or skopeo backend"
+
+[[bin]]
+name = "oci-push"
+path = "src/main.rs"
+
+[dependencies]
+# OCI distribution client — fleet-standard (wasm-platform uses 0.13). rustls
+# (no OpenSSL/native-tls) so the build stays C-dependency-light under nix.
+oci-client = { version = "0.13", default-features = false, features = ["rustls-tls"] }
+# Async runtime for oci-client; the CLI block_on's a small multi-thread rt.
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "io-util"] }
+# Read the docker-archive tar (and gunzip the outer wrapper) + gzip each layer.
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Parse the docker-save manifest.json (a JSON array).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Typed DocaConfig (YAML authoring + config-show).
+serde_yaml = "0.9"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

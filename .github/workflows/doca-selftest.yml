@@ -1,0 +1,95 @@
+# doca-selftest — end-to-end proof of doca's NATIVE OCI push backend.
+#
+# Builds a tiny `dockerTools.buildImage` docker-archive with Nix, pushes it to
+# real ghcr.io via `oci-push --backend native` (pure-Rust oci-client, no skopeo,
+# no docker daemon), then `oci-push inspect` pulls the manifest back to prove
+# the bytes landed. Manual-only (workflow_dispatch) — this exercises a live
+# registry and burns a per-run `oci-push` build, so it is not on push/PR.
+#
+# Native-backend invariant proven here: `dockerTools.buildImage` emits a
+# docker-archive (`manifest.json[0]` + config json + UNCOMPRESSED `layer.tar`s);
+# doca's NativeBackend reads exactly that shape, gzips each layer, and pushes
+# via oci-client. A green run is the canonical proof of that contract.
+
+name: doca-selftest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  selftest:
+    name: doca native push -> ghcr.io -> inspect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Mirrors substrate/.github/workflows/image-push.yml: upstream Nix (not
+      # Determinate) so `extra-conf` is honored. `sandbox = relaxed` keeps the
+      # sandbox for ordinary derivations and only un-sandboxes `__noChroot`
+      # opt-ins (gen / tatara-lisp IFD self-derive).
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          determinate: false
+          extra-conf: |
+            sandbox = relaxed
+
+      # Tiny, fast-building OCI image. `writeTextDir` is the whole rootfs (one
+      # file under /etc) so there is no `runAsRoot` step — no KVM/VM needed,
+      # builds in seconds. `nix build --expr` writes ./result as a symlink into
+      # /nix/store; `cp -L` materializes the real `.tar.gz` docker-archive into
+      # the workspace so doca reads a concrete file path.
+      - name: Build tiny OCI image with Nix dockerTools
+        run: |
+          nix build --impure --print-out-paths --expr '
+            let
+              pkgs = import (builtins.getFlake "nixpkgs") {
+                system = "x86_64-linux";
+              };
+            in
+            pkgs.dockerTools.buildImage {
+              name = "doca-selftest";
+              tag = "selftest";
+              copyToRoot = pkgs.writeTextDir
+                "etc/doca-selftest"
+                "doca native oci push self-test\n";
+              config = {
+                Cmd = [ "/bin/true" ];
+                Labels = {
+                  "org.opencontainers.image.source" =
+                    "https://github.com/pleme-io/substrate";
+                  "io.pleme.doca.selftest" = "${{ github.sha }}";
+                };
+              };
+            }
+          '
+          cp -L result image.tar.gz
+          ls -l image.tar.gz
+
+      # Push with the NATIVE backend (default; --backend native is explicit for
+      # the proof). Pure-Rust oci-client basic-auths to ghcr with the workflow
+      # token. dest-user must be the actor; GITHUB_TOKEN carries packages:write.
+      - name: Push to ghcr.io (doca native backend)
+        run: |
+          nix run github:pleme-io/substrate#oci-push -- push \
+            --backend native \
+            --registry ghcr.io \
+            --image pleme-io/doca-selftest \
+            --tag "${{ github.sha }}" \
+            --tarball ./image.tar.gz \
+            --dest-user "${{ github.actor }}" \
+            --dest-pass "${{ secrets.GITHUB_TOKEN }}"
+
+      # Verify the manifest is fetchable from the live registry. `inspect`
+      # pretty-prints the OCI manifest JSON to stdout and the digest to stderr;
+      # a non-zero exit means the push did not land.
+      - name: Inspect pushed manifest (proof of landing)
+        run: |
+          nix run github:pleme-io/substrate#oci-push -- inspect \
+            --ref "ghcr.io/pleme-io/doca-selftest:${{ github.sha }}" \
+            --user "${{ github.actor }}" \
+            --pass "${{ secrets.GITHUB_TOKEN }}"
