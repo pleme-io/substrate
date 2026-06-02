@@ -79,8 +79,15 @@ jobs:
           # default (`sandbox = true`) rejects `__noChroot` outright
           # ("has '__noChroot' set, but that's not allowed when 'sandbox' is
           # 'true'"), breaking every action-image build that bundles a tlisp
-          # interpreter. `relaxed` keeps the sandbox for ordinary derivations
-          # and only un-sandboxes those that explicitly opt in via __noChroot.
+          # interpreter.
+          #
+          # Determinate Nix manages its own daemon config and ignores an
+          # `extra-conf` sandbox override (and its FlakeHub cache 401s for
+          # this org anyway, so it buys nothing here). Install upstream Nix
+          # instead, where `extra-conf` is honored: `sandbox = relaxed`
+          # keeps the sandbox for ordinary derivations and only un-sandboxes
+          # those that explicitly opt in via `__noChroot`.
+          determinate: false
           extra-conf: |
             sandbox = relaxed
 
