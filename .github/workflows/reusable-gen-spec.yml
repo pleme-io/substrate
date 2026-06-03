@@ -55,7 +55,12 @@ jobs:
           fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@main
+      # use-flakehub: false — no FlakeHub account; the default attempts
+      # FlakeHub auth and emits a red-herring ##[error] in every run.
+      # The native GitHub Actions cache half is what we want.
       - uses: DeterminateSystems/magic-nix-cache-action@main
+        with:
+          use-flakehub: false
 
       # DELTA-ONLY: the committed artifact is the slim Cargo.gen.lock.
       # gen build regenerates it (and a gitignored Cargo.build-spec.json
