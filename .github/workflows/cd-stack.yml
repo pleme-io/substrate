@@ -101,6 +101,8 @@ jobs:
       - uses: pleme-io/actions/slack-notify@main
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          title: ${{ format('CD: {0} → {1}', inputs.release, needs.deploy.outputs.deployed == 'true' && 'deployed' || 'FAILED') }}
+          # Quoted: `: ` inside the format() literal breaks unquoted YAML
+          # scalars (0-job parse-failure class).
+          title: "${{ format('CD: {0} → {1}', inputs.release, needs.deploy.outputs.deployed == 'true' && 'deployed' || 'FAILED') }}"
           body: ${{ format('chart={0} ns={1} revision={2}', inputs.chart, inputs.namespace, needs.deploy.outputs.revision) }}
           color: ${{ needs.deploy.outputs.deployed == 'true' && 'good' || 'danger' }}

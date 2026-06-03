@@ -36,11 +36,18 @@ jobs:
 
   notify:
     needs: deploy
-    if: always() && secrets.SLACK_WEBHOOK_URL != ''
+    # `secrets` is unavailable in job-level `if:` (github/inputs/needs/
+    # vars only) — gate the STEP on a job-env copy instead.
+    if: always()
     runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
-      - uses: pleme-io/actions/slack-notify@main
+      - if: env.SLACK_WEBHOOK_URL != ''
+        uses: pleme-io/actions/slack-notify@main
         with:
           webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          title: ${{ format('web3 deploy: {0}', needs.deploy.result) }}
+          # Quoted: `: ` inside the format() literal breaks unquoted YAML
+          # scalars (same 0-job parse-failure class as observability-deploy).
+          title: "${{ format('web3 deploy: {0}', needs.deploy.result) }}"
           color: ${{ needs.deploy.result == 'success' && 'good' || 'danger' }}

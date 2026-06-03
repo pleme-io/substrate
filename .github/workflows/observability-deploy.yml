@@ -30,41 +30,57 @@ permissions:
 jobs:
   fan-out:
     runs-on: ubuntu-latest
+    # The `secrets` context is NOT available in step-level `if:`
+    # (only env/github/inputs/job/matrix/needs/runner/steps/strategy/
+    # vars) — gating directly on `secrets.X` fails workflow validation
+    # and GitHub records a 0-job failed run on every push. Hoist each
+    # gate secret into job env and test `env.X` instead.
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
+      NR_API_KEY: ${{ secrets.NR_API_KEY }}
+      POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+      OTLP_ENDPOINT: ${{ secrets.OTLP_ENDPOINT }}
     steps:
-      - if: secrets.SENTRY_AUTH_TOKEN != ''
+      - if: env.SENTRY_AUTH_TOKEN != ''
         uses: pleme-io/actions/sentry-release@main
         with:
           auth-token: ${{ secrets.SENTRY_AUTH_TOKEN }}
           org: ${{ secrets.SENTRY_ORG }}
           project: ${{ secrets.SENTRY_PROJECT }}
           version: ${{ inputs.version }}
-      - if: secrets.DD_API_KEY != ''
+      - if: env.DD_API_KEY != ''
         uses: pleme-io/actions/datadog-event@main
         with:
           api-key: ${{ secrets.DD_API_KEY }}
-          title: ${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}
+          # Quoted: the literal `: ` inside format()'s first argument makes
+          # an unquoted plain scalar parse as a nested YAML mapping — the
+          # whole workflow file then fails validation and GitHub records a
+          # 0-job failed run on EVERY push to the repo.
+          title: "${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}"
           text: ${{ format('Deployed {0} version {1}', inputs.service-name, inputs.version) }}
-      - if: secrets.GRAFANA_URL != ''
+      - if: env.GRAFANA_URL != ''
         uses: pleme-io/actions/grafana-annotation@main
         with:
           url: ${{ secrets.GRAFANA_URL }}
           api-token: ${{ secrets.GRAFANA_TOKEN }}
-          text: ${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}
+          text: "${{ format('deploy: {0} {1}', inputs.service-name, inputs.version) }}"
           tags: ${{ format('deploy,{0}', inputs.service-name) }}
-      - if: secrets.NR_API_KEY != ''
+      - if: env.NR_API_KEY != ''
         uses: pleme-io/actions/newrelic-deploy-marker@main
         with:
           api-key: ${{ secrets.NR_API_KEY }}
           app-id: ${{ secrets.NR_APP_ID }}
           revision: ${{ inputs.version }}
-      - if: secrets.POSTHOG_API_KEY != ''
+      - if: env.POSTHOG_API_KEY != ''
         uses: pleme-io/actions/posthog-event@main
         with:
           api-key: ${{ secrets.POSTHOG_API_KEY }}
           project-id: ${{ secrets.POSTHOG_PROJECT_ID }}
           event: 'deploy'
           distinct-id: ${{ inputs.service-name }}
-      - if: secrets.OTLP_ENDPOINT != ''
+      - if: env.OTLP_ENDPOINT != ''
         uses: pleme-io/actions/opentelemetry-trace-emit@main
         with:
           endpoint: ${{ secrets.OTLP_ENDPOINT }}
