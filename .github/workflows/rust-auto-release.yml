@@ -53,7 +53,7 @@ on:
         required: false
         default: "true"
       publish-mode:
-        description: "full = bump+ship on push (rides crates.io new-crate rate limit in-job, capped 30m); drip = publish-only cron tick that rides remaining capacity and exits green. A consumer wires `${{ github.event_name == 'schedule' && 'drip' || 'full' }}`."
+        description: "full = bump+ship on push (rides crates.io new-crate rate limit in-job, capped 30m); drip = publish-only cron tick that rides remaining capacity and exits green. A consumer sets this to drip on schedule events and full otherwise."
         type: string
         required: false
         default: "full"
