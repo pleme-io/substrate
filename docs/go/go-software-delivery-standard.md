@@ -172,7 +172,33 @@ constructs it. Enforced present by
 | HTTP client / auth / retry / timeout | `todoku-go` | `todoku.New` | `main`/factory (struct field) | [NET-01](#dimension-networking-net)..[NET-13](#dimension-networking-net) |
 | Jobs / DAG / scheduler / gates | `shigoto-go` | `shigoto.NewScheduler` / `shigoto.Advance` / `shigoto.Gate` | service `main`; the delivery FSMs | [JOB-01](#dimension-concurrency-and-jobs-job)..[JOB-14](#dimension-concurrency-and-jobs-job) |
 | GitHub-Action I/O + bootstrap | `pleme-actions-shared-go` | `actions.ParseInputs` / `actions.SetOutput` / `bootstrap.Config[T]` | action `main` | [NAME-12](#dimension-naming-name), [CFG-14](#dimension-configuration-cfg) |
-| Terminal look-and-feel / theming / rendering | `borealis` | `borealis.Theme` / `borealis.Render` / `borealis.FromConfig` (+ `comp` / `fangx` / `huhx` / `bubblesx` / `tui`) | `main`/`bootstrap.Config` (theme resolved once) | [UI-01](#dimension-uiux-look-and-feel-ui)..[UI-12](#dimension-uiux-look-and-feel-ui) |
+| Terminal look-and-feel / theming / rendering | `borealis` | `borealis.Theme` / `borealis.Render` / `borealis.FromConfig` (+ `comp` / `fangx` / `huhx` / `bubblesx` / `tui` / `svg`) | `main`/`bootstrap.Config` (theme resolved once) | [UI-01](#dimension-uiux-look-and-feel-ui)..[UI-13](#dimension-uiux-look-and-feel-ui) |
+| Kubernetes controller / operator reconcile | `controller-go` | `controller.New` / `.FromConfig` / `.Run` (typed `controller.Reconciler`) | operator `main` (mgr under a lifecycle App) | [PRIM-controller](#dimension-primitive-ownership-prim), [LIFE-16](#dimension-lifecycle-and-health-life) |
+| Inbound gRPC serving + auth interceptor + admission webhook | `server-go/grpc`, `server-go/grpcauth`, `server-go/admission` | `grpc.New` / `grpcauth.UnaryServer` / `admission.Handler` | service `main` | [PRIM-server-grpc](#dimension-primitive-ownership-prim), [NET-14](#dimension-networking-net)..[NET-16](#dimension-networking-net) |
+| Authentication (cloud-identity / rotation / inbound-validation / profile) | `auth-go` (SDK in `auth-go/akeyless` leaf) | `auth.CloudIdentityProvider` / `Session.RotateEvery` / `auth.ProducerCredentialValidator` / `auth.FromProfile` | `main`/factory | [PRIM-auth](#dimension-primitive-ownership-prim), [AUTH-10](#dimension-authentication-and-credentials-auth)..[AUTH-13](#dimension-authentication-and-credentials-auth) |
+| On-disk auth-token cache | `token-cache-go` | `tokencache.Cache` (`New` / `FromConfig`) | tool composes with `auth-go` Session | [PRIM-token-cache](#dimension-primitive-ownership-prim), [CACHE-01](#dimension-authentication-and-credentials-auth) |
+| Service-reachability probe + request dedup/result-cache | `todoku-go` | `todoku.Probe` / `WithSingleFlight` / `WithResultCache` | `main`/factory | [PRIM-todoku-probe](#dimension-primitive-ownership-prim), [HTTP-04](#dimension-networking-net) |
+| Environment/readiness preflight (doctor) | `kenshou-go/doctor` | `doctor.New` / `.FromConfig` / `ConformanceReport` | `main`/preflight subcommand | [PRIM-kenshou-doctor](#dimension-primitive-ownership-prim), [DOCTOR-01](#dimension-code-emission-and-introspection-codegen) |
+| Cross-field config invariants + endpoint-matrix | `shikumi-go/validate` / `shikumi.EndpointMatrix` | `validate.Rules[T]` / embedded `EndpointMatrix` | config struct + `Load` | [PRIM-shikumi-crossfield](#dimension-primitive-ownership-prim), [CFG-15](#dimension-configuration-cfg)..[CFG-17](#dimension-configuration-cfg) |
+| Keep-X-fresh refresh loop (rotation/recycle/re-mint) | `refresh-loop-go` | `refreshloop.Loop` (over `shigoto-go`) | reconciler/daemon | [PRIM-refresh-loop](#dimension-primitive-ownership-prim), [JOB-15](#dimension-concurrency-and-jobs-job) |
+| Secret redaction + secret-into-template materialization | `redactor-go` / `secrettmpl-go` | redaction pass / redaction-aware template render | log/error/render surfaces | [PRIM-redactor](#dimension-primitive-ownership-prim), [SEC-13](#dimension-security-and-supply-chain-sec)..[SEC-14](#dimension-security-and-supply-chain-sec) |
+| Kubernetes API access + K8s-auth tuple | `kubeclient-go` / `k8sauthconfig-go` | `kubeclient.New` / `.FromClients` / `k8sauthconfig.Config` | `main`/factory | [PRIM-kubeclient](#dimension-primitive-ownership-prim), [NET-15](#dimension-networking-net), [CFG-17](#dimension-configuration-cfg) |
+| CI sink read/write (variable-set emitters) | `ci-sink-go` / `cisink-write-go` | `cisink.Reader` / `cisink.Writer` | action/CI `main` | [PRIM-ci-sink](#dimension-primitive-ownership-prim), [CI-01](#dimension-ci-and-migration-ci)..[CI-02](#dimension-ci-and-migration-ci) |
+| Migrate/install/validate plan-diff-apply cycle | `migration-harness-go` | `Planner[S]`/`Differ[S]`/`Applier[S]` + `Harness.Run` | migrator/installer/validator | [PRIM-migration-harness](#dimension-primitive-ownership-prim), [MIG-01](#dimension-ci-and-migration-ci) |
+| Typed-AST emission (Go provider / Python / Dapr / Helm+Kustomize / Grafana / CI-action) + TF-plan introspection | `go-synthesizer`, `python-synthesizer-go`, `dapr-component-generator`, `manifest-renderer-go`, `grafana-dashboard-go`, `pleme-actions-shared-go`, `tfplan-go` | `emit_resource` / `Render<Dialect>` / `Diagram.SVG` / `tfplan.Evaluate` | codegen tools / gates | [CODEGEN-01](#dimension-code-emission-and-introspection-codegen)..[CODEGEN-03](#dimension-code-emission-and-introspection-codegen), [RENDER-01](#dimension-code-emission-and-introspection-codegen), [TFPLAN-01](#dimension-code-emission-and-introspection-codegen) |
+| Tundra leaf libs (Homebrew formula / browser-replay / event schema / secret-mapping) | `tundra-brew`, `tundra-browser-replay`, `tundra-events`, `tundra-secret-mapping` | `New(...)` + `Render`/`Apply`/`Run`/`Decode` | tool/factory | [LEAF-SHAPE](#dimension-primitive-ownership-prim), [PRIM-tundra-brew](#dimension-primitive-ownership-prim)..[PRIM-tundra-secret-mapping](#dimension-primitive-ownership-prim) |
+| Build/packaging — private Go module + Node OCI service image | `substrate` | `mkGoPrivateModule` / `mkNodeDockerImage` | `flake.nix` | [BUILD-PRIV-01](#dimension-build-and-packaging-build), [BUILD-OCI-NODE-01](#dimension-build-and-packaging-build) |
+
+> **Primitive ownership (PRIM).** Every borealis-style Go primitive above (and
+> the Nix builders that package them) carries a load-bearing **rule of record**
+> in the [Primitive Ownership (PRIM)](#dimension-primitive-ownership-prim)
+> dimension of `rules-registry.yaml`: *"concern X is owned by primitive Y —
+> ad-hoc re-implementation is a kenshou-go / caixa-validate violation."* The
+> per-dimension rules (NET/CFG/OBS/LIFE/JOB/UI/SEC/AUTH/CI/MIG/CODEGEN) are the
+> enforcement restatements; the PRIM row is the single answer to *"who owns
+> this concern, and may I re-write it?"* (answer: you may not). This is the
+> mechanism behind the *never-produce-it-again* guarantee for the §4 fleet-gap
+> primitives.
 
 ### Inter-library composition graph
 
@@ -5107,6 +5133,241 @@ code.
 
 ---
 
+## Dimension: Authentication and Credentials (AUTH)
+
+The fleet's auth concerns are owned by **`auth-go`** (with the vendor SDK kept
+in the import-gated `auth-go/akeyless` leaf) plus the on-disk-cache primitive
+**`token-cache-go`**. Four additive seams + the cache compose the whole
+authentication surface; a tool never hand-rolls any of them.
+
+**AUTH-10** — Cloud-platform identity (AWS/Azure/GCP) flows through one shape:
+`auth.CloudIdentityProvider` (`Identity(ctx) (string, error)` returning an opaque
+base64 blob; `Cloud() auth.Cloud`). The cloud SDKs (and `akeyless-go-cloud-id`)
+are import-gated to a leaf wired behind an `auth.CloudIdentityFunc` carrier; the
+`auth-go` core names no cloud vendor (WORLDS-SEPARATE). *Owned by*
+[PRIM-auth](#dimension-primitive-ownership-prim).
+
+**AUTH-11** — A rotating credential (universal-identity / any rotate-on-use
+token) is advanced via the `Session` rotation scheduler (`auth.WithRotation` +
+`Session.RotateEvery` under lifecycle supervision), never an ad-hoc per-tool
+rotation goroutine; the rotating value lives only inside the `Session`
+([CFG-09](#dimension-configuration-cfg)).
+
+**AUTH-12** — Server-side inbound credential checks use the
+`auth.ProducerCredentialValidator` inverse seam
+(`Validate(ctx, ValidationRequest) (*ValidationResult, error)`; a wrong
+credential is `Valid=false` with a `nil` error, an outage is
+`auth.ErrValidationUnavailable` so receivers **fail closed**); the HTTP/SDK-backed
+impl is import-gated.
+
+**AUTH-13** — The multi-region/profile selector is a credential-free
+shikumi-loaded `auth.Profile` (`kind` + `AccessType`
+{`universal_identity`/`k8s_via_gateway`/`gcp_audience`/`ca_cert`} +
+gateway-config-URL token shape); a tool bridges it via `auth.FromProfile`
+(zero-dep) / `akeyless.ResolverFromProfile` (SDK, gated) — `FromConfig`-shape,
+never calls `shikumi.Load`.
+
+**CACHE-01** — An on-disk auth-token cache is `token-cache-go`
+(`tokencache.Cache`): XDG-cache-rooted, `0600` files / `0700` dir, SHA-256-keyed
+by access-id (the key never lands on disk verbatim), atomic temp+rename, `Entry`
+redacts under `fmt` + `slog`; `New(opts…)` + `FromConfig(Config)`; `Get` treats
+expired as a miss and evicts, `Evict` is idempotent. Vendor-neutral
+(WORLDS-SEPARATE): the `Session` holds the live token, the cache persists it
+across processes keyed by access-id; the akeyless coupling lives in the tool, not
+the cache. *Owned by* [PRIM-token-cache](#dimension-primitive-ownership-prim).
+
+---
+
+## Dimension: Code Emission and Introspection (CODEGEN)
+
+The typed-AST emitter family + the readiness/plan-introspection primitives. The
+unifying law: **malformed output is unrepresentable** — a generator holds a typed
+AST and renders it through one carrier, never `fmt`-interpolates strings.
+
+**DOCTOR-01** — A tool's readiness preflight is a `kenshou-go/doctor` check-set,
+never an ad-hoc connectivity/credential probe. `doctor.New(checks, opts…)` /
+`doctor.FromConfig(cfg, checks…)` runs to a typed `doctor.ConformanceReport` whose
+`.Err()` yields a `*doctor.PreflightError` (`ExitCode() = EX_TEMPFAIL(75)` /
+`Severity()` for the `errs.Exit` funnel). A `Check` is a behaviour-carrier
+(`Name()`; `Run(ctx) doctor.Result` → pass/warn/fail/error + `Remediation`; `warn`
+keeps the report green-but-surfaced). Shipped kinds: `NewEndpointCheck` (generic
+HTTP(S) status+latency readiness) and `NewProducerAuthCheck` over the generic
+`doctor.ProducerAuthPolicy` seam. The report renders ONLY via `render.DoctorReport`
+(borealis.Render-swap-ready). PUBLIC doctor primitives MUST NOT import or name a
+vendor (WORLDS-SEPARATE). *Owned by*
+[PRIM-kenshou-doctor](#dimension-primitive-ownership-prim). Readiness (this gate)
+and correctness (the `kenshou run` code gate) are two gates in one primitive.
+
+**CODEGEN-01** — A Go-native source/artifact emitter (a `Biblioteca` whose
+purpose is to render a typed AST to text) MUST: (a) model the artifact as typed
+value nodes, never interpolated strings; (b) expose exactly ONE carrier interface
+(e.g. `Renderable` with a single `Render` method) and ONE free render verb that
+dispatches over it (no per-node `Emit`/`ToX`/`Marshal` variants — borealis
+Law 5); (c) construct via `New(required…, opts…)` + a config-driven
+`FromConfig(cfg)` peer (cfg is a shikumi-shaped struct with yaml tags); (d) render
+any structured-text target (YAML/JSON/TOML) through the fleet's typed emitter
+(`go.yaml.in/yaml/v3` for YAML) rather than `fmt`/string concatenation; (e) ship a
+parse/compile round-trip test proving the emitted output is well-formed in the
+target language. *Applies to* `python-synthesizer-go`,
+`dapr-component-generator`, and every Go-native emitter.
+
+**CODEGEN-02 / CODEGEN-03** — A terraform-plugin-framework provider resource MUST
+be emitted from a typed `go_synthesizer::tfspec::TfResourceSpec` via
+`go_synthesizer::emit_resource(&spec)` (validated before lowering), never
+hand-written or `format!()`-strung; the emitted file carries the tfsdk-tagged
+model struct, the resource struct, `New{Name}Resource()`, the
+`var _ resource.Resource = …` assertion, and the full
+Metadata/Schema/CRUD set. A version-matrix healer queries
+`go_synthesizer::hashkinds::required_hashes(BuilderKind)` for which `HashKinds` to
+prefetch (the typed map is the single source of truth), never per-builder
+conditionals.
+
+**TFPLAN-01** — A gate introspects a Terraform plan via `tfplan-go`'s typed
+`Plan` + `Predicate` algebra (`Exists`/`NotExists`/`Will*`/`CountOfType`/`NoDestroy`
+→ `Outcome{Name, OK, Detail}`) consumed by `tfplan.Evaluate`/`AllOK`, never
+re-parsing `terraform show -json` as `map[string]any` per consumer; `NoDestroy()`
+is the standard destroy-safety gate.
+
+**RENDER-01** — Any primitive that renders a typed source to one or more
+emitted-artifact dialects MUST expose `(*Source) Render<Dialect>() ([]byte | Files,
+error)` as a **pure** function of the typed value (no map-order iteration, no
+timestamps, no ambient state) — identical input yields byte-identical output across
+repeated calls — AND when a source projects to ≥2 dialects the dialects MUST agree
+object-for-object except for documented per-dialect deltas. `kenshou-go` enforces
+via a per-render-verb determinism harness (render N times, assert `bytes.Equal`).
+Byte-stability is the property that makes rendered artifacts safe to commit + diff
+in CI and is the entire drift-kill mechanism of the 4b renderer family
+(`manifest-renderer-go`, `grafana-dashboard-go`,
+`pleme-actions-shared-go`/`ciaction`). Constructor stays
+`New(required, opts…) (*T, error)` returning a typed code-carrying `errors-go`
+error (`manifest_invalid`/`dashboard_invalid`).
+
+---
+
+## Dimension: CI and Migration (CI)
+
+**CI-01** — A tool reads CI provider/sink context through `ci-sink-go`'s
+`Reader`/`Context` (detection markers
+`GITHUB_ACTIONS`/`GITLAB_CI`/`BITBUCKET_BUILD_NUMBER`/`BUILDKITE`; precedence
+github > gitlab > bitbucket > buildkite), never an ad-hoc `os.Getenv` ladder.
+`Reader` is pure env-inspection (no file mutation). *Owned by*
+[PRIM-ci-sink](#dimension-primitive-ownership-prim).
+
+**CI-02** — A tool emits CI variable/output exports through `cisink-write-go`'s
+`Writer` keyed off a `cisink.Sink` (`SetVariable`/`SetOutput` in
+github/gitlab/bitbucket/buildkite dialects, with GitHub multiline-heredoc
+collision-avoidance and shell-quote escaping); never `>> $GITHUB_OUTPUT`, a
+heredoc, dotenv, shell-export, or meta-data lines. The `Writer` writes dialect
+bytes to a caller-owned `io.Writer` (no shell-out, hermetically testable).
+*Owned by* [PRIM-cisink-write](#dimension-primitive-ownership-prim).
+
+**MIG-01** — A migrate/install/validate operation expresses its cycle as
+`migration-harness-go` `Planner[S]`/`Differ[S]`/`Applier[S]` + `Harness.Run`,
+never a bespoke loop. The harness owns control flow
+(ordering/dry-run/abort-vs-continue/hooks/typed `Report`); the caller owns step
+semantics. The reusable backbone for migrators, installers, and validators —
+PUBLIC/generic; any vendor-specific use lands as a private solution-set composing
+these. *Owned by* [PRIM-migration-harness](#dimension-primitive-ownership-prim).
+
+---
+
+## Dimension: Primitive Ownership (PRIM)
+
+This dimension is the **never-produce-it-again guarantee** made explicit. Each row
+in `rules-registry.yaml`'s `primitive-ownership` family states *"concern X is
+owned by fleet primitive Y — ad-hoc re-implementation is a kenshou-go /
+caixa-validate violation."* The other dimensions (NET/CFG/OBS/LIFE/JOB/UI/SEC/
+AUTH/CI/MIG/CODEGEN) carry the **enforcement restatements**; the PRIM row is the
+single canonical answer to *"who owns this concern, and may I re-write it?"* —
+the answer is always **no, consume the primitive**.
+
+The §4 fleet-gap primitives that were just built + committed (each now flipped to
+☑ in `borealis-pattern-registry.md` §4) and their owning rules:
+
+| Primitive | Concern | Rule | Restated by |
+|---|---|---|---|
+| `controller-go` (NEW) | K8s controller/operator reconcile loop | `PRIM-controller` | LIFE-16 |
+| `server-go/grpc` (EXT) | inbound gRPC serving | `PRIM-server-grpc` | NET-14 |
+| `server-go/grpcauth` (EXT) | gRPC auth interceptor | `PRIM-server-grpcauth` | NET-14 |
+| `server-go/admission` (EXT) | K8s admission webhook + TLS | `PRIM-server-admission` | NET-16 |
+| `auth-go` (EXT) | cloud-identity / rotation / inbound-validation / profile | `PRIM-auth` | AUTH-10..13 |
+| `token-cache-go` (NEW) | on-disk auth-token cache | `PRIM-token-cache` | CACHE-01 |
+| `todoku-go` (EXT) | reachability probe + dedup/result-cache | `PRIM-todoku-probe` | HTTP-04 |
+| `kenshou-go/doctor` (EXT) | environment/readiness preflight | `PRIM-kenshou-doctor` | DOCTOR-01 |
+| `shikumi-go/validate` (EXT) | cross-field config invariants | `PRIM-shikumi-crossfield` | CFG-15 |
+| `shikumi.EndpointMatrix` (EXT) | endpoint-matrix schema | `PRIM-shikumi-endpointmatrix` | CFG-16 |
+| `metrics-go` (EXT) | in-process percentile summary (CLI) | `PRIM-metrics-summary` | OBS-15 |
+| `lifecycle-go` (EXT) | remote-session drain | `PRIM-lifecycle-drain` | LIFE-15 |
+| `refresh-loop-go` (NEW) | keep-X-fresh loop | `PRIM-refresh-loop` | JOB-15 |
+| `borealis` (EXT) | TUI + document (SVG/mermaid) render targets | `PRIM-borealis-targets` | UI-13 |
+| `redactor-go` (NEW) | secret/sensitive-text redaction | `PRIM-redactor` | SEC-13 |
+| `secrettmpl-go` (NEW) | secret-into-template materialization | `PRIM-secrettmpl` | SEC-14 |
+| `kubeclient-go` (NEW) | K8s API access (one client-go leaf) | `PRIM-kubeclient` | NET-15 |
+| `k8sauthconfig-go` (NEW) | K8s-auth tuple domain type | `PRIM-k8sauthconfig` | CFG-17 |
+| `ci-sink-go` (NEW) | CI sink read side | `PRIM-ci-sink` | CI-01 |
+| `cisink-write-go` (NEW) | CI export write side | `PRIM-cisink-write` | CI-02 |
+| `migration-harness-go` (NEW) | plan/diff/apply cycle | `PRIM-migration-harness` | MIG-01 |
+| `tfplan-go` (NEW) | TF-plan introspection | `PRIM-tfplan` | TFPLAN-01 |
+| `go-synthesizer` (EXT) | TF provider emission | `PRIM-go-synthesizer-tf` | CODEGEN-02 |
+| `go-synthesizer` (EXT) | hashkinds prefetch map | `PRIM-go-synthesizer-hashkinds` | CODEGEN-03 |
+| `python-synthesizer-go` (NEW) | Go-native Python-AST emission | `PRIM-python-synthesizer-go` | CODEGEN-01 |
+| `dapr-component-generator` (NEW) | Dapr SecretStore → metadata.yaml | `PRIM-dapr-component-generator` | CODEGEN-01 |
+| `manifest-renderer-go` (NEW) | typed source → Helm+Kustomize(+OpenShift) | `PRIM-manifest-renderer` | RENDER-01 |
+| `grafana-dashboard-go` (NEW) | typed dashboard → JSON (themed) | `PRIM-grafana-dashboard` | RENDER-01 |
+| `pleme-actions-shared-go`/`ciaction` (EXT) | typed action → 4 CI dialects | `PRIM-ciaction` | RENDER-01 |
+| `tundra-brew` (NEW) | Homebrew Formula → `.rb` | `PRIM-tundra-brew` | LEAF-SHAPE |
+| `tundra-browser-replay` (NEW) | headless-browser Recording AST | `PRIM-tundra-browser-replay` | LEAF-SHAPE |
+| `tundra-events` (NEW) | typed event schema | `PRIM-tundra-events` | LEAF-SHAPE |
+| `tundra-secret-mapping` (NEW) | JSON-secret field-mapping | `PRIM-tundra-secret-mapping` | LEAF-SHAPE |
+
+**LEAF-SHAPE** (shape rule) — A public `tundra-*` / `*-go` leaf library MUST
+expose the §3.5 surface: `New(required…, opts ...Option) *T` (no second
+back-compat constructor), options as `func(*T)`, `Validate() error` returning a
+typed `errors-go` code-carrying error (never bare `fmt.Errorf`), and the primary
+verb (`Render`/`Apply`/`Run`/`Decode`) returning `(result, error)` with errors-go
+codes. **WEIGHT-GATE:** a heavy real-world dependency (chromedp, a browser, an
+AMQP client) MUST live behind a build tag or in a leaf sub-package so the default
+`go build ./...` stays zero-dep and offline (Law 6/Law 8).
+
+> **`py-synthesizer-go` naming note (out of scope, pending).** The Go peer built
+> here is named `python-synthesizer-go` (mirroring the existing Rust
+> `python-synthesizer` crate at its committed path; the two are WORLDS-SEPARATE
+> artifacts). The §4c registry tracks a still-*pending* Go-native peer under the
+> name `py-synthesizer-go`; that build is **not** undertaken here and remains a
+> backlog item to avoid clobbering the committed Rust crate.
+
+---
+
+## Dimension: Build and Packaging (BUILD)
+
+Substrate Nix builders that package the Go (and Node) primitives. The macro law:
+one cross-language-identical surface so a consumer never re-learns the knobs.
+
+**BUILD-PRIV-01** — A pleme-io Go repo that imports a PRIVATE org module MUST
+build via `substrate.mkGoPrivateModule` (`lib/build/go/private-module.nix`), never
+an ad-hoc `buildGoModule` + `--impure`/`builtins.getEnv` token. The combined
+public+private closure is pinned by one `vendorHash`; the private fetch routes
+through exactly one typed shape — `privateFetch.kind = "deploy-token"` (FOD
+vendor-fetch; token materialized from a `/nix/store` `credentialFile` via git
+`insteadOf`, never the ambient env) or `"athens-goproxy"` (all fetches through a
+self-hosted Athens GOPROXY base URL). `GOPRIVATE`/`GONOSUMCHECK`/`GONOSUMDB` list
+the `privatePrefixes` (fail-closed if empty). The deploy token influences only
+*how* bytes are fetched, never *which* bytes land (pinned by `vendorHash`;
+cartorio-attestable). Preserves the LAYOUT-12/SEC-10 hermeticity contract.
+
+**BUILD-OCI-NODE-01** — A long-running Node.js **service** packaged as an OCI
+image MUST use `substrate.mkNodeDockerImage` (`lib/build/docker/node-image.nix`),
+whose parameter surface is the byte-for-byte peer of `mkGoDockerImage` and which
+emits the same FedRAMP-High posture (non-root 65534, cacert bundle, distroless
+drops busybox, `tini` PID-1 — load-bearing since Node does not reap zombies, OCI
+v1.1 reserved annotations via `mkStandardLabels`, reproducible `created` epoch).
+DISTINCT from the **web** `mkNodeDockerImage` (`lib/build/web/docker.nix`), which
+serves a static SPA via the Rust/Axum hanabi BFF and is NOT a runtime-service
+image; the two coexist by design. Eval the OCI builders against a Linux
+`hostPlatform` (`tini` is Linux-only).
+
+---
+
 ## Delivery FSM Type System
 
 Delivery itself is modeled as a typed, pure, table-driven **finite state machine**
@@ -7067,17 +7328,22 @@ each dimension to one prefix. The mapping (source → canonical) is:
 | `RLM-01..12` | `LAYOUT-01..12` |
 | `NAM-01..13` | `NAME-01..13` |
 | `cli-ux-01..12-*` (slug form) | `CLI-01..13` |
-| `CFG-001..014` | `CFG-01..15` |
-| `OBS-01..14` | `OBS-01..14` (unchanged) |
+| `CFG-001..014` | `CFG-01..17` |
+| `OBS-01..14` | `OBS-01..15` |
 | `ERR-01..12` | `ERR-01..12` (unchanged) |
 | `LH-01..14` | `LIFE-01..16` |
-| `NET-01..13` | `NET-01..14` |
-| `CJ-01..14` | `JOB-01..14` |
+| `NET-01..13` | `NET-01..16` (+ `HTTP-04`) |
+| `CJ-01..14` | `JOB-01..15` |
 | `DOC-01..10` | `DOC-01..20` |
 | `VER-01..12` | `VER-01..17` |
 | `TQ-01..12` | `TEST-01..12` |
 | `SEC-01..12` | `SEC-01..19` |
-| (new dimension — no source prefix) | `UI-01..12` |
+| (new dimension — no source prefix) | `UI-01..13` |
+| (new dimension — fleet-primitive auth seams) | `AUTH-10..13`, `CACHE-01` |
+| (new dimension — typed-AST emitters + introspection) | `DOCTOR-01`, `CODEGEN-01..03`, `TFPLAN-01`, `RENDER-01` |
+| (new dimension — CI sink + migration harness) | `CI-01..02`, `MIG-01` |
+| (new dimension — primitive ownership rule-of-record) | `PRIM-*`, `LEAF-SHAPE` |
+| (new dimension — substrate Nix builders) | `BUILD-PRIV-01`, `BUILD-OCI-NODE-01` |
 | FSM cases `module-delivery` / `release-delivery` / `image-delivery` / `action-delivery` | `FSM-MODULE` / `FSM-RELEASE` / `FSM-IMAGE` / `FSM-ACTION` |
 | FSM shared invariants | `FSM-AUDIT` / `FSM-TRISTATE` / `FSM-FAIL` / `FSM-RESET` / `FSM-IDEMPOTENT` / `FSM-CAS` / `FSM-OBS` |
 

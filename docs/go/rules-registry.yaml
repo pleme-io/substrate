@@ -13,7 +13,15 @@
 #   JOB-*     concurrency-and-jobs        DOC-*   documentation-and-discoverability
 #   VER-*     versioning-and-compatibility
 #   TEST-*    testing-and-quality         SEC-*   security-and-supply-chain
-#   UI-*      uiux-look-and-feel
+#   UI-*      uiux-look-and-feel          PRIM-*  primitive-ownership
+#   BUILD-*   build-and-packaging (substrate Nix builders)
+#
+# PRIM-* is the load-bearing "concern X is owned by fleet primitive Y —
+# ad-hoc re-implementation is a kenshou-go/caixa-validate violation" family.
+# Every borealis-style Go primitive (and the Nix builders that package them)
+# gets exactly one PRIM/BUILD rule-of-record so the concern can never be
+# re-produced ad hoc. Dimension restatements (NET/CFG/OBS/LIFE/JOB/UI/SEC)
+# cross-reference the owning PRIM rule.
 #
 # FSM rules (the delivery type system) are NOT listed here; they live in
 # go-software-delivery-standard.md under "Delivery FSM Type System".
@@ -179,6 +187,15 @@ rules:
   - id: CFG-14
     dimension: configuration
     enforcement: "pleme-actions-shared-go bootstrap.Config[T] performs steps 1-5 in order; analyzer flags a main calling LoadStore without the helper or logging.New before Validate; lifecycle-go hook registry type-checks Close(); startup test fails fast on invalid config."
+  - id: CFG-15
+    dimension: configuration
+    enforcement: "(owner: PRIM-shikumi-crossfield) analyzer flags cross-field invariants (required-if / required-unless / mutually-exclusive aliases / exactly-one-of) declared in a consumer Run body or a bespoke per-tool validation pass; they MUST route through shikumi-go/validate's typed Rules[T] builder (RequiredIf/RequiredUnless/MutuallyExclusive/ExactlyOne/Custom + Register), which composes into the same Validate pass Load runs and every reload swap; the go-playground/validator dep stays import-gated in the validate sub-package (Law 6)."
+  - id: CFG-16
+    dimension: configuration
+    enforcement: "(owner: PRIM-shikumi-endpointmatrix) kenshou-go lints a struct re-declaring a 'list of endpoints to reach' shape (ad-hoc []string / map[string]X) outside shikumi.EndpointMatrix; the set MUST be an embedded EndpointMatrix (Endpoint{Name,HostTemplate,Path,Criticality,ExpectedCodes}) with validate:\"endpoint_matrix,dive\", consumed via Expand/Accepts/Critical/WithCriticality/SortedByCriticality, never re-deriving host-template expansion or criticality filtering."
+  - id: CFG-17
+    dimension: configuration
+    enforcement: "(owner: PRIM-k8sauthconfig) analyzer flags a consumer re-declaring the K8s-auth tuple (host/issuer/caCert/insecureSkipTlsVerify/tokenReviewerJwt); it MUST embed k8sauthconfig-go's Config domain type; the token-reviewer JWT MUST be a redacting Secret newtype; cross-field invariants (host is an absolute http(s) URL; caCert XOR insecureSkipTlsVerify) are enforced via FromConfig, not per-consumer. WORLDS-SEPARATE: k8sauthconfig is a generic K8s-auth tuple, not a vendor adapter."
 
   # --- observability -------------------------------------------------------
   - id: OBS-01
@@ -223,6 +240,9 @@ rules:
   - id: OBS-14
     dimension: observability
     enforcement: "Where the OTel SDK is imported, vet pass requires tracer init at the logging.New site, a lifecycle.Shutdown 'tracing' hook calling Shutdown, and span-scoped trace_id on records; logging+otel bridge helper satisfies the check."
+  - id: OBS-15
+    dimension: observability
+    enforcement: "(owner: PRIM-metrics-summary) kenshou-go flags a metrics.Registry construction / exposed /metrics in a short-lived one-shot Run path with no lifecycle.App; a CLI needing in-process percentiles MUST use metrics-go's metrics.NewSummary (Observe/Quantile/Stats), the pure-stdlib non-server distribution — the long-lived scrape Registry and the short-lived report Summary are picked by lifetime, never expose /metrics from a CLI."
 
   # --- errors --------------------------------------------------------------
   - id: ERR-01
@@ -305,6 +325,12 @@ rules:
   - id: LIFE-14
     dimension: lifecycle-and-health
     enforcement: "forbidigo bans (*http.Server).Close in daemon/service packages outside tests; caixa-validate asserts the http/grpc hook uses the hook's context, not a fresh Background(); a shared graceful-with-fallback gRPC helper standardises the shape."
+  - id: LIFE-15
+    dimension: lifecycle-and-health
+    enforcement: "(owner: PRIM-lifecycle-drain) kenshou-go flags remote-session close logic inside an OnShutdown hook; a remote session held on a peer (SRA/tunnel/subscription) MUST be released via lifecycle.App.OnDrain(name, Drainable) during the drain window (NOT OnShutdown, which is local-resource LIFO teardown), and a Drainable MUST honour its ctx (the DrainInterval budget)."
+  - id: LIFE-16
+    dimension: lifecycle-and-health
+    enforcement: "(owner: PRIM-controller) caixa-validate flags a controller/operator main running a controller-runtime manager via direct signal.NotifyContext + mgr.Start; an operator MUST construct controller.New(cfg,reconciler,opts...)/FromConfig and run mgr under a lifecycle-go App via controller.Run(ctx); per-object reconcile state is the shigoto-go FSM (shigoto.Advance), not per-CR retry/backoff bookkeeping; sigs.k8s.io/controller-runtime is depguard-gated to a single adapter file (Law 6) and the public reconcile surface is the typed controller.Reconciler (naming no controller-runtime type, so reconcile logic is offline-testable — Law 2 / WORLDS-SEPARATE)."
 
   # --- networking ----------------------------------------------------------
   - id: NET-01
@@ -346,6 +372,18 @@ rules:
   - id: NET-13
     dimension: networking
     enforcement: "gsds-net-mw-order: analyzer asserts middleware.Chain is the only assembler and its layers appear in the mandated order (matched by known middleware names); routes bypassing Chain are flagged; recovery middleware logs via logging-go at SeverityError."
+  - id: NET-14
+    dimension: networking
+    enforcement: "(owner: PRIM-server-grpc) gsds-net-grpc bans a bare grpc.NewServer / hand-rolled GracefulStop outside server-go/grpc; every inbound gRPC server is server-go/grpc's grpc.New with the baked logging->RED-metrics->recover(innermost)->caller chain, registered as a lifecycle.App actor with GracefulStop-then-hard-Stop bounded by Config.DrainTimeout (gRPC restatement of NET-09/LIFE-14); a unix-socket listener unlinks a stale path before bind and on teardown."
+  - id: NET-15
+    dimension: networking
+    enforcement: "(owner: PRIM-kubeclient) gsds-net-kubeclient flags hand-rolled clientcmd + remotecommand + tar plumbing or a bespoke ExternalSecret informer; kubeconfig load, exec-credential plugin wiring (GKE/EKS), pod exec/log/copy, and ExternalSecret-by-remote-key indexing route through kubeclient-go (New/FromConfig/FromClients); k8s.io/client-go appears in exactly this one import-gated leaf (Law 6)."
+  - id: NET-16
+    dimension: networking
+    enforcement: "(owner: PRIM-server-admission) gsds-net-admission requires AdmissionReview decode/encode via server-go/admission (UID echo enforced by the encoders) and TLS at the NET-11 1.2 floor from a server-go/admission self-managed ServingCert; CABundle wire-back is the PatchCABundle RFC-6902 document (the webhook never hand-builds the patch)."
+  - id: HTTP-04
+    dimension: networking
+    enforcement: "(owner: PRIM-todoku-probe) gsds-net-reachability flags a hand-rolled scheme x API-path probe loop ('try https then http / try /api/v2 then /v2') and a second golang.org/x/sync/singleflight import in a todoku-consuming module; reachability is todoku.Probe/ProbeWithConfig (typed Reachability, accept status<500, BaseURL feeds WithBaseURL), request-dedup is todoku.WithSingleFlight, time-bounded memoisation is todoku.WithResultCache(ttl) — both Middleware = func(http.RoundTripper) http.RoundTripper decorators on the shared withTransportMiddleware seam (Law 2), backend-agnostic (WORLDS-SEPARATE)."
 
   # --- concurrency-and-jobs ------------------------------------------------
   - id: JOB-01
@@ -390,6 +428,9 @@ rules:
   - id: JOB-14
     dimension: concurrency-and-jobs
     enforcement: "noignoredreceipt flags a Tick whose TickReceipt is discarded; TestUnhealedSurfaced asserts deterministic Unhealed order, a WarnContext line with correlation_id, and an incremented alert metric."
+  - id: JOB-15
+    dimension: concurrency-and-jobs
+    enforcement: "(owner: PRIM-refresh-loop) kenshou-go flags a hand-rolled time.Ticker + ad-hoc retry 'keep-X-fresh' loop (rotation/recycle/re-mint); it MUST be a refresh-loop-go refreshloop.Loop over shigoto-go (Spec + Refresher + StepKind, e.g. KindSecretRotation/KindPodRecycle), driven by Loop.Tick (reconciler) or Loop.Run (daemon); recurrence is 're-arm-due-then-tick' over shigoto's single-shot FSM so freshness is a pure in-memory decision (clock injectable, offline-testable); §3.5 shapes apply (New(tool,opts)/FromConfig(cfg); typed Status via borealis.Render). Vendor-coupled Refreshers stay PRIVATE (WORLDS-SEPARATE)."
 
   # --- documentation-and-discoverability -----------------------------------
   - id: DOC-01
@@ -536,6 +577,12 @@ rules:
   - id: SEC-12
     dimension: security-and-supply-chain
     enforcement: "provenance-attest action emits the SLSA-style attestation alongside the cosign signature; tameshi computes the BLAKE3 Merkle tree; sekiban (K8s admission) + inshou (Nix rebuild) fail-close on a broken chain; the shigoto-go DAG sequences sign -> attest -> provenance -> publish; --skip-verification is logged via logging-go and surfaced in the action summary."
+  - id: SEC-13
+    dimension: security-and-supply-chain
+    enforcement: "(owner: PRIM-redactor) kenshou-go flags a hand-rolled secret-masking pass / per-tool redaction helper; secret-bearing text MUST be scrubbed through redactor-go (the one pattern/value redaction primitive), composing with the CFG-08 slog.LogValuer redaction so plaintext never reaches a log/error/stdout surface. PUBLIC + WORLDS-SEPARATE: redactor-go names no vendor."
+  - id: SEC-14
+    dimension: security-and-supply-chain
+    enforcement: "(owner: PRIM-secrettmpl) kenshou-go flags ad-hoc secret-injection templating (raw os.Expand / text-template over secret values without redaction discipline); secret-into-template materialization MUST use secrettmpl-go, which keeps the rendered value redaction-aware and the secret out of logs/errors (composes with redactor-go + CFG-07/CFG-08). PUBLIC + WORLDS-SEPARATE."
 
   # --- uiux-look-and-feel --------------------------------------------------
   - id: UI-01
@@ -574,3 +621,171 @@ rules:
   - id: UI-12
     dimension: uiux-look-and-feel
     enforcement: "gsds-ui-lint asserts borealis.Config is loaded via the shikumi cfg.Load/bootstrap.Config path and FromConfig is the only resolver (flags a borealis.Theme literal in tool code and a shikumi.Load inside a theme path); a no-shikumi.Load-in-FromConfig check mirrors CFG-01; a Theme captured in a package var is flagged (mirrors CFG-11); zero Config.Theme selects the Nord brand default."
+  - id: UI-13
+    dimension: uiux-look-and-feel
+    enforcement: "(owner: PRIM-borealis-targets) gsds-ui-lint flags a borealis/* leaf importing image/color or emitting a hex literal outside theme/, and a bespoke diagram/TUI formatter; a render target (terminal / TUI / document) draws all colour from the injected borealis.Theme via Theme.RoleColor (never inline hex), a TUI target's tea.Model.View is byte-identical to the static borealis.Render of the same typed value (Law 4), and a document target (SVG/mermaid) lives in a pure-stdlib gated leaf (no charm-stack dep, Law 6/Law 8) exposing deterministic golden-testable Diagram.SVG(t)/Diagram.Mermaid(t) with semantic borealis.Role on nodes/edges."
+
+  # --- authentication-and-credentials --------------------------------------
+  # (owner: PRIM-auth / PRIM-token-cache; AUTH/CACHE restate the §4d auth shapes)
+  - id: AUTH-10
+    dimension: authentication-and-credentials
+    enforcement: "(owner: PRIM-auth) analyzer flags a hand-rolled per-cloud identity fetch; every cloud-backed auth method consumes an auth.CloudIdentityProvider (Identity(ctx)(string,error) returning an opaque base64 blob; Cloud() auth.Cloud); the cloud SDKs (and akeyless-go-cloud-id) are import-gated to a leaf wired behind an auth.CloudIdentityFunc carrier, and the auth-go core names no cloud vendor (WORLDS-SEPARATE)."
+  - id: AUTH-11
+    dimension: authentication-and-credentials
+    enforcement: "(owner: PRIM-auth) analyzer flags an ad-hoc per-tool rotation goroutine for a rotating credential (universal-identity / rotate-on-use token); it MUST be advanced via the Session rotation scheduler (auth.WithRotation + Session.RotateEvery under lifecycle supervision); the rotating value lives only inside the Session (CFG-09)."
+  - id: AUTH-12
+    dimension: authentication-and-credentials
+    enforcement: "(owner: PRIM-auth) server-side inbound credential checks use the auth.ProducerCredentialValidator inverse seam (Validate(ctx,ValidationRequest)(*ValidationResult,error); a wrong credential is Valid=false with nil error, an outage is auth.ErrValidationUnavailable so receivers fail closed); the HTTP/SDK-backed impl is import-gated."
+  - id: AUTH-13
+    dimension: authentication-and-credentials
+    enforcement: "(owner: PRIM-auth) the multi-region/profile selector is a credential-free shikumi-loaded auth.Profile (kind + AccessType {universal_identity/k8s_via_gateway/gcp_audience/ca_cert} + gateway-config-URL token shape); a tool bridges it via auth.FromProfile (zero-dep) / akeyless.ResolverFromProfile (SDK, gated) — FromConfig-shape, never calls shikumi.Load."
+  - id: CACHE-01
+    dimension: authentication-and-credentials
+    enforcement: "(owner: PRIM-token-cache) kenshou-go flags a tool hand-rolling on-disk token persistence; an on-disk auth-token cache is token-cache-go (tokencache.Cache): XDG-cache-rooted, 0600 files / 0700 dir, SHA-256-keyed by access-id (key never on disk verbatim), atomic temp+rename, Entry redacts under fmt + slog; New(opts...)+FromConfig(Config); Get treats expired as a miss and evicts, Evict is idempotent. Vendor-neutral (WORLDS-SEPARATE) — the akeyless coupling lives in the tool, not the cache."
+
+  # --- code-emission-and-introspection -------------------------------------
+  # (owner: PRIM-* codegen/render primitives; the typed-AST emitter family)
+  - id: DOCTOR-01
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-kenshou-doctor) kenshou-go flags any *-go tool defining its own pass/warn/fail readiness enum, an ad-hoc http.Get health probe, or os.Exit on an unreachable-dependency path outside the doctor.PreflightError funnel; a readiness preflight is a kenshou-go/doctor check-set — doctor.New(checks,opts...)/doctor.FromConfig(cfg,checks...) returning a typed doctor.ConformanceReport whose .Err() yields *doctor.PreflightError (ExitCode()=EX_TEMPFAIL(75)/Severity()); a Check is a behaviour-carrier (Name()/Run(ctx) doctor.Result -> pass/warn/fail/error + Remediation; warn keeps the report green-but-surfaced); the report renders ONLY via render.DoctorReport (borealis.Render-swap-ready). PUBLIC doctor primitives (EndpointCheck, ProducerAuthPolicy/ProducerAuthCheck) MUST NOT import or name a vendor (WORLDS-SEPARATE)."
+  - id: CODEGEN-01
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-emitter-shape) a Go-native source/artifact emitter (a Biblioteca that renders a typed AST to text) MUST model the artifact as typed value nodes (never interpolated strings), expose exactly ONE carrier interface (e.g. Renderable with a single Render method) and ONE free render verb dispatching over it (no per-node Emit/ToX/Marshal variants — borealis Law 5), construct via New(required...,opts...)+FromConfig(cfg shikumi-shaped, yaml tags), render any structured-text target (YAML/JSON/TOML) through the fleet's typed emitter (go.yaml.in/yaml/v3 for YAML) rather than fmt/string concat, and ship a parse/compile round-trip test proving the output is well-formed in the target language."
+  - id: CODEGEN-02
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-go-synthesizer-tf) kenshou flags hand-written terraform-plugin-framework provider Go or format!()-strung framework method sets; a TF provider resource MUST be emitted from a typed go_synthesizer::tfspec::TfResourceSpec via go_synthesizer::emit_resource(&spec)->Result<GoFile,EmitError> (validated before lowering) — the emitted file carries the tfsdk-tagged model struct, the resource struct, New{Name}Resource(), the var _ resource.Resource = … assertion, and the full Metadata/Schema/Create/Read/Update/Delete set."
+  - id: CODEGEN-03
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-go-synthesizer-hashkinds) a version-matrix healer MUST query go_synthesizer::hashkinds::required_hashes(BuilderKind) for which HashKinds to prefetch (GoModule->vendorHash, GoTool->source+vendor, RustPackage->cargoHash, NodePackage->npmDepsHash, Fetch->source) rather than hard-coding per-builder conditionals — the typed map is the single source of truth."
+  - id: TFPLAN-01
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-tfplan) a gate MUST introspect a Terraform plan via tfplan-go's typed Plan + Predicate algebra (Exists/NotExists/Will*/CountOfType/NoDestroy yielding Outcome{Name,OK,Detail}) consumed by tfplan.Evaluate/AllOK, never re-parse `terraform show -json` as map[string]any per consumer; NoDestroy() is the standard destroy-safety gate."
+  - id: RENDER-01
+    dimension: code-emission-and-introspection
+    enforcement: "(owner: PRIM-manifest-renderer / PRIM-grafana-dashboard / PRIM-ciaction) any primitive rendering a typed source to one or more emitted-artifact dialects MUST expose `(*Source) Render<Dialect>() ([]byte|Files, error)` as a PURE function of the typed value (no map-order iteration, no timestamps, no ambient state) — identical input yields byte-identical output across repeated calls, and a source projecting to >=2 dialects MUST agree object-for-object except for documented per-dialect deltas; kenshou-go enforces via a per-render-verb determinism harness (render N times, assert bytes.Equal). Constructor stays New(required,opts...)(*T,error) returning a typed code-carrying errors-go error (manifest_invalid/dashboard_invalid)."
+
+  # --- primitive-ownership (PRIM) ------------------------------------------
+  # The load-bearing rule-of-record per fleet primitive: "concern X is owned
+  # by primitive Y — ad-hoc re-implementation is a violation." Each row pins a
+  # primitive to its concern; dimension rules above cross-reference these.
+  - id: PRIM-controller
+    dimension: primitive-ownership
+    enforcement: "Concern 'Kubernetes controller/operator reconcile loop' is owned by controller-go. A controller MUST NOT hand-roll a controller-runtime manager.Start glue loop, signal/drain handling, or per-CR requeue/backoff bookkeeping — build on controller.New/FromConfig + Run(ctx) (mgr under a lifecycle-go App), typed controller.Reconciler surface, shigoto per-object FSM, and the Webhook/Enqueuer adapter for out-of-band triggers. Restated by LIFE-16. Built + committed."
+  - id: PRIM-server-grpc
+    dimension: primitive-ownership
+    enforcement: "Concern 'inbound gRPC serving' is owned by server-go/grpc. No service constructs a bare grpc.NewServer or hand-rolls graceful-stop. Restated by NET-14. Built + committed."
+  - id: PRIM-server-grpcauth
+    dimension: primitive-ownership
+    enforcement: "Concern 'gRPC auth interceptor' is owned by server-go/grpcauth (UnaryServer/StreamServer(TokenVerifier) server gate; PerRPC/PerRPCInsecure(TokenSource) client creds). The live token flows through grpcauth.TokenSource (the *auth.Session adapter via grpcauth.FromSessionToken), never config/global; auth-go is bridged in the tool, never imported into the public leaf. Built + committed."
+  - id: PRIM-server-admission
+    dimension: primitive-ownership
+    enforcement: "Concern 'Kubernetes admission webhook decode/encode + serving TLS' is owned by server-go/admission. Restated by NET-16. Built + committed."
+  - id: PRIM-auth
+    dimension: primitive-ownership
+    enforcement: "Concern 'authentication: cloud-identity, credential rotation, inbound-credential validation, region/profile selection' is owned by auth-go (the akeyless SDK kept in the gated auth-go/akeyless leaf). Restated by AUTH-10..AUTH-13. Built + committed."
+  - id: PRIM-token-cache
+    dimension: primitive-ownership
+    enforcement: "Concern 'on-disk auth-token cache' is owned by token-cache-go. No tool hand-rolls token persistence. Restated by CACHE-01. Built + committed."
+  - id: PRIM-todoku-probe
+    dimension: primitive-ownership
+    enforcement: "Concern 'service-reachability preflight + concurrent-request dedup/result-cache' is owned by todoku-go (Probe/ProbeWithConfig + WithSingleFlight + WithResultCache — the public home of the akeyless-funnel dedup pattern). Restated by HTTP-04. Built + committed (extension)."
+  - id: PRIM-kenshou-doctor
+    dimension: primitive-ownership
+    enforcement: "Concern 'environment/readiness preflight (doctor check-set, endpoint-readiness, producer-auth policy, ConformanceReport)' is owned by kenshou-go/doctor — distinct from the kenshou code gate. Restated by DOCTOR-01. Built + committed (extension)."
+  - id: PRIM-shikumi-crossfield
+    dimension: primitive-ownership
+    enforcement: "Concern 'cross-field config invariants (required-if / mutually-exclusive / exactly-one-of)' is owned by shikumi-go/validate's Rules[T] builder. Restated by CFG-15. Built + committed (extension)."
+  - id: PRIM-shikumi-endpointmatrix
+    dimension: primitive-ownership
+    enforcement: "Concern 'a tool's set of remote endpoints to reach' is owned by shikumi.EndpointMatrix. Restated by CFG-16. Built + committed (extension)."
+  - id: PRIM-metrics-summary
+    dimension: primitive-ownership
+    enforcement: "Concern 'in-process histogram/percentile for a short-lived CLI (no scrape lifecycle)' is owned by metrics-go's metrics.NewSummary. Restated by OBS-15. Built + committed (extension)."
+  - id: PRIM-lifecycle-drain
+    dimension: primitive-ownership
+    enforcement: "Concern 'remote-session release during the drain window' is owned by lifecycle-go's App.OnDrain (distinct from OnShutdown local teardown). Restated by LIFE-15. Built + committed (extension)."
+  - id: PRIM-refresh-loop
+    dimension: primitive-ownership
+    enforcement: "Concern 'keep-X-fresh loop (rotation/recycle/re-mint)' is owned by refresh-loop-go (refreshloop.Loop over shigoto-go; vendor-coupled Refreshers stay PRIVATE). Restated by JOB-15. Built + committed."
+  - id: PRIM-borealis-targets
+    dimension: primitive-ownership
+    enforcement: "Concern 'render targets — live TUI program + document (SVG/mermaid) — from one borealis.Theme' is owned by borealis (tui.RenderModel[T] + the pure-stdlib svg leaf). Restated by UI-13. Built + committed (extension)."
+  - id: PRIM-redactor
+    dimension: primitive-ownership
+    enforcement: "Concern 'secret/sensitive-text redaction' is owned by redactor-go. Restated by SEC-13. Built + committed."
+  - id: PRIM-secrettmpl
+    dimension: primitive-ownership
+    enforcement: "Concern 'secret-into-template materialization (redaction-aware)' is owned by secrettmpl-go. Restated by SEC-14. Built + committed."
+  - id: PRIM-kubeclient
+    dimension: primitive-ownership
+    enforcement: "Concern 'Kubernetes API access — kubeconfig/exec-credential, pod exec/log/copy, ExternalSecret-by-remote-key index' is owned by kubeclient-go (the one import-gated client-go leaf; depends on the sibling leaf k8sauthconfig-go, not the reverse — Law 8). Restated by NET-15. Built + committed."
+  - id: PRIM-k8sauthconfig
+    dimension: primitive-ownership
+    enforcement: "Concern 'the K8s-auth tuple (host/issuer/ca/token-reviewer-jwt) domain type' is owned by k8sauthconfig-go. Restated by CFG-17. Built + committed."
+  - id: PRIM-ci-sink
+    dimension: primitive-ownership
+    enforcement: "Concern 'CI provider/sink detection + variable-namespace capture (read side)' is owned by ci-sink-go (Reader/Context; detection markers GITHUB_ACTIONS/GITLAB_CI/BITBUCKET_BUILD_NUMBER/BUILDKITE, precedence github>gitlab>bitbucket>buildkite) — no ad-hoc os.Getenv ladder. Restated by CI-01. Built + committed."
+  - id: PRIM-cisink-write
+    dimension: primitive-ownership
+    enforcement: "Concern 'CI variable/output export emission (write side)' is owned by cisink-write-go (Writer keyed off a cisink.Sink; github/gitlab/bitbucket/buildkite dialects) — no `>> $GITHUB_OUTPUT` / heredoc / dotenv / shell-export hand-emit. Restated by CI-02. Built + committed."
+  - id: PRIM-migration-harness
+    dimension: primitive-ownership
+    enforcement: "Concern 'migrate/install/validate plan-diff-apply cycle' is owned by migration-harness-go (Planner[S]/Differ[S]/Applier[S] + Harness.Run owns ordering/dry-run/abort-vs-continue/hooks/typed Report; caller owns step semantics) — no bespoke per-tool loop. Restated by MIG-01. Built + committed."
+  - id: PRIM-tfplan
+    dimension: primitive-ownership
+    enforcement: "Concern 'Terraform plan-JSON introspection + resource-existence predicates for kenshou-go' is owned by tfplan-go. Restated by TFPLAN-01. Built + committed."
+  - id: PRIM-go-synthesizer-tf
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed terraform-plugin-framework provider-resource emission' is owned by go-synthesizer (tfspec::TfResourceSpec + emit_resource). Restated by CODEGEN-02. Built + committed (extension)."
+  - id: PRIM-go-synthesizer-hashkinds
+    dimension: primitive-ownership
+    enforcement: "Concern 'which HashKinds a BuilderKind must prefetch (matrix-healer prefetch map)' is owned by go-synthesizer (hashkinds::required_hashes). Restated by CODEGEN-03. Built + committed (extension)."
+  - id: PRIM-python-synthesizer-go
+    dimension: primitive-ownership
+    enforcement: "Concern 'Go-native typed Python-AST emission (the Go peer of the Rust python-synthesizer crate; WORLDS-SEPARATE -go sibling path)' is owned by python-synthesizer-go. Subject to CODEGEN-01. Built + committed. NOTE: this is the Go peer; the Rust python-synthesizer crate is unchanged and the py-synthesizer-go naming concern is reconciled in the registry."
+  - id: PRIM-dapr-component-generator
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed Dapr SecretStore component model -> metadata.yaml via a YAML emitter (never raw string formatting)' is owned by dapr-component-generator. Subject to CODEGEN-01. Built + committed."
+  - id: PRIM-manifest-renderer
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed source -> Helm + Kustomize (+ OpenShift) manifests (drift-killer)' is owned by manifest-renderer-go (one Source -> RenderHelm()/RenderKustomize()/RenderOpenShift() Files projections that cannot drift). Restated by RENDER-01. Built + committed."
+  - id: PRIM-grafana-dashboard
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed Grafana-dashboard model -> dashboard JSON, borealis-themed' is owned by grafana-dashboard-go (thresholds reference semantic Roles, never hex; Tundra()/Nord() bind the palette like borealis/ishou). Restated by RENDER-01. Built + committed."
+  - id: PRIM-ciaction
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed composite-action / 4-CI-dialect (action.yml/task.json/pipe.yml/plugin.yml) renderer' is owned by pleme-actions-shared-go (NewAction(...).RenderActionYAML() + NewCIAction(...).Render{GitHubAction,AzureTask,BitbucketPipe,BuildkitePlugin}() — the Go analog of the (defciaction …) TataraDomain). Restated by RENDER-01. Built + committed (extension)."
+  - id: PRIM-tundra-brew
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed Homebrew Formula -> .rb' is owned by tundra-brew. Subject to LEAF-SHAPE / CODEGEN-01. Built + committed."
+  - id: PRIM-tundra-browser-replay
+    dimension: primitive-ownership
+    enforcement: "Concern 'headless-browser driver over a typed Recording AST' is owned by tundra-browser-replay (chromedp behind a build tag / leaf sub-package so the default build stays zero-dep — Law 6). Subject to LEAF-SHAPE. Built + committed."
+  - id: PRIM-tundra-events
+    dimension: primitive-ownership
+    enforcement: "Concern 'typed event schema (Envelope + Payload)' is owned by tundra-events. Subject to LEAF-SHAPE. Built + committed."
+  - id: PRIM-tundra-secret-mapping
+    dimension: primitive-ownership
+    enforcement: "Concern 'JSON-secret field-mapping with per-secret overrides' is owned by tundra-secret-mapping. Subject to LEAF-SHAPE. WORLDS-SEPARATE: the generic Mapping shape only; any vendor binding is a separate private adapter. Built + committed."
+  - id: LEAF-SHAPE
+    dimension: primitive-ownership
+    enforcement: "(shape rule) A public tundra-* / *-go leaf library MUST expose the §3.5 surface — New(required...,opts ...Option)*T (no second back-compat constructor), options as func(*T), Validate() error returning a typed errors-go code-carrying error (never bare fmt.Errorf), and the primary verb (Render/Apply/Run/Decode) returning (result, error) with errors-go codes. kenshou-go enforces: depguard bans stdlib errors/fmt-for-errors in non-Script libs, and every exported symbol carries a godoc comment. WEIGHT-GATE: a heavy real-world dependency (chromedp, a browser, an AMQP client) MUST live behind a build tag or in a leaf sub-package so the default `go build ./...` stays zero-dep and offline (Law 6/Law 8) — verified by building the default tag set and asserting the heavy module is absent from the default go.mod require block."
+
+  # --- ci-and-migration (CI / MIG) -----------------------------------------
+  - id: CI-01
+    dimension: ci-and-migration
+    enforcement: "(owner: PRIM-ci-sink) kenshou-go flags an ad-hoc os.Getenv ladder reading CI provider/sink context; it MUST read through ci-sink-go's Reader/Context (Reader is pure env-inspection, no file mutation). §3.5 New(required,opts...)/FromConfig(cfg) + code-carrying errors-go errors."
+  - id: CI-02
+    dimension: ci-and-migration
+    enforcement: "(owner: PRIM-cisink-write) kenshou-go flags a hand-emitted CI variable/output export (no `>> $GITHUB_OUTPUT`, heredoc, dotenv, shell-export, or meta-data lines); emission MUST go through cisink-write-go's Writer keyed off a cisink.Sink (SetVariable/SetOutput; GitHub multiline-heredoc collision-avoidance + shell-quote escaping; writes dialect bytes to a caller-owned io.Writer, no shell-out)."
+  - id: MIG-01
+    dimension: ci-and-migration
+    enforcement: "(owner: PRIM-migration-harness) kenshou-go flags a bespoke migrate/install/validate loop; the cycle MUST be migration-harness-go Planner[S]/Differ[S]/Applier[S] + Harness.Run, where dry-run and abort-vs-continue-on-error are harness policy (not re-implemented per tool). §3.5 New/FromConfig + code-carrying errors-go errors. PUBLIC/generic — any vendor-specific use lands as a private solution-set composing these."
+
+  # --- build-and-packaging (BUILD; substrate Nix builders) -----------------
+  - id: BUILD-PRIV-01
+    dimension: build-and-packaging
+    enforcement: "(owner: BUILD substrate.mkGoPrivateModule) caixa-validate rejects a buildGoModule callsite carrying a raw token arg / __noChroot / impure env reads when a private import is present, and substrate eval throws on empty privatePrefixes or an out-of-enum privateFetch.kind. A pleme-io Go repo importing a PRIVATE org module MUST build via substrate.mkGoPrivateModule (lib/build/go/private-module.nix) — never ad-hoc buildGoModule + --impure/builtins.getEnv token. The combined public+private closure is pinned by one vendorHash; the private fetch is exactly one of privateFetch.kind = \"deploy-token\" (FOD vendor-fetch; token materialized from a /nix/store credentialFile via git insteadOf) or \"athens-goproxy\" (all fetches through a self-hosted Athens GOPROXY base URL); GOPRIVATE/GONOSUMCHECK/GONOSUMDB list privatePrefixes (fail-closed if empty). The deploy token influences only HOW bytes are fetched, never WHICH bytes land (cartorio-attestable)."
+  - id: BUILD-OCI-NODE-01
+    dimension: build-and-packaging
+    enforcement: "(owner: BUILD substrate.mkNodeDockerImage) a long-running Node.js SERVICE packaged as an OCI image MUST use substrate.mkNodeDockerImage (lib/build/docker/node-image.nix), whose parameter surface is the byte-for-byte peer of mkGoDockerImage (name/builtApp/entry/tag/architecture/ports/env/user/workDir/entrypoint/extraContents/distroless/tini/labels/description/fleetSourceUrl/created) and which emits the same FedRAMP-High posture (non-root 65534, cacert bundle, distroless drops busybox, tini PID-1 — load-bearing since Node does not reap zombies, OCI v1.1 reserved annotations via mkStandardLabels, reproducible created epoch). DISTINCT from the web mkNodeDockerImage (lib/build/web/docker.nix), which serves a static SPA via the Rust/Axum hanabi BFF and is NOT a runtime-service image; eval the OCI builders against a Linux hostPlatform (tini is Linux-only)."
