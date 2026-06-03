@@ -136,6 +136,20 @@ in
           --registry "''${1:-${registry}}"
       '';
 
+      # Mirror upstream third-party subcharts into the pleme-io OCI registry so
+      # `release` never fetches from a third-party repo. Everything is derived
+      # from the wrapper charts' own Chart.yaml deps — no catalog. Idempotent:
+      # only a NEW upstream version touches the upstream; a clean no-op for a repo
+      # with no third-party subchart deps.
+      mirrorScript = pkgs.writeShellScript "helm-mirror" ''
+        set -euo pipefail
+        export PATH="${helm}/bin:$PATH"
+        REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+        exec ${forgeCmd} helm mirror \
+          --charts-dir "$REPO_ROOT/${chartsDir}" \
+          --registry "''${1:-${registry}}"
+      '';
+
       # Template app (interactive, uses helm directly)
       templateApp = pkgs.writeShellApplication {
         name = "helm-template";
@@ -171,6 +185,7 @@ in
     in perChartApps // {
       lint = { type = "app"; program = toString lintAllScript; };
       release = { type = "app"; program = toString releaseAllScript; };
+      mirror = { type = "app"; program = toString mirrorScript; };
       template = { type = "app"; program = "${templateApp}/bin/helm-template"; };
       bump = bumpApp;
     };

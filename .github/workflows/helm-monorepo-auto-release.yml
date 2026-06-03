@@ -85,6 +85,22 @@ jobs:
           echo "$TOKEN" | nix shell nixpkgs#kubernetes-helm --command \
             helm registry login "$host" --username "${{ github.actor }}" --password-stdin
 
+      # Hermetic supply chain (the law): mirror every third-party subchart this
+      # monorepo depends on into the pleme-io OCI registry FIRST, so the release
+      # fetches every subchart dep from ghcr (which we control), never from a
+      # third-party *.github.io repo. `forge helm mirror` derives everything from
+      # the wrapper charts' own Chart.yaml deps — no catalog. Idempotent: a
+      # (name,version) already in ghcr is skipped (a normal run is just N
+      # existence checks); only a freshly-bumped upstream version touches the
+      # upstream. A clean no-op for a repo with no third-party subchart deps.
+      # (The released `pleme-io/actions/helm-mirror` action is the same `forge
+      # helm mirror` for standalone use; here we invoke the consumer's pinned
+      # forge directly via its `.#mirror` flake app.)
+      - name: Mirror upstream subcharts
+        env:
+          REGISTRY: ${{ inputs.registry }}
+        run: nix run ".#mirror" -- "$REGISTRY"
+
       - name: Publish all bumped charts (idempotent — skips already-published)
         env:
           REGISTRY: ${{ inputs.registry }}
