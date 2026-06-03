@@ -714,6 +714,40 @@ let
         then { runtime = edges.runtime_dependencies; build = edges.build_dependencies; }
         else { runtime = crate.runtime_dependencies; build = crate.build_dependencies; };
 
+    # Edge-derived crate renames — renamed deps à la
+    # `serde = { package = "serde_core" }` (semver 1.0.28+).
+    #
+    # v9+ specs serialize the per-crate `crate_renames` field empty
+    # (skip_serializing) and the delta reconstruction defaults it to {},
+    # so the ONLY surviving source of rename truth is the resolve edge
+    # itself: `name` is cargo metadata's NodeDep.name (the extern name
+    # as written in consumer source — the rename when renamed, else the
+    # dep's lib target name) while `package_key` is the actual package.
+    # When the edge name differs from the dep's rustc crate name, emit a
+    # buildRustCrate `crateRenames` entry (keyed by dep crateName, in
+    # the versioned-list form) so rustc gets `--extern <alias>=…` to
+    # match the consumer's `use <alias>::…`. Without this, semver
+    # 1.0.28 builds with `--extern serde_core` and dies E0433 on
+    # `use serde::…`.
+    edgeRenamesFor = treeSpec: edges:
+      let
+        normalize = builtins.replaceStrings [ "-" ] [ "_" ];
+        renameOf = e:
+          let t = treeSpec.crates.${e.package_key} or null;
+          in
+            if t == null || (e.name or null) == null
+               || normalize e.name == normalize (rustcCrateName t)
+            then null
+            else { crateName = t.name; entry = { version = t.version; rename = e.name; }; };
+        renames = builtins.filter (r: r != null) (map renameOf edges);
+      in
+        lib.foldl'
+          (acc: r: acc // {
+            ${r.crateName} = (acc.${r.crateName} or [ ]) ++ [ r.entry ];
+          })
+          { }
+          renames;
+
     mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
       let
         # Multi-target spec (#25): iterate only crates ACTUALLY REACHABLE
@@ -753,13 +787,26 @@ let
             if sectionCrate != null && sectionCrate ? features
             then sectionCrate.features
             else crate.features;
-        baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
+        # Spec-declared args (build_rust_crate_args spread or legacy
+        # reconstruction). Factored out so crateRenames can layer the
+        # edge-derived renames over whatever the spec declared (older
+        # full specs carried real per-crate crate_renames; v9+ read
+        # empty — see edgeRenamesFor). NOTE: build_rust_crate_args may
+        # carry `crateRenames = null` (Rust Option → JSON null), so
+        # filter on null, not just attr presence.
+        specArgs = if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
-                else legacyArgs crate) // {
+                else legacyArgs crate;
+        declaredRenames =
+          let r = specArgs.crateRenames or null;
+          in if r == null then { } else r;
+        baseArgs = specArgs // {
           src = (mkSrcOf hostPkgs) filteredWorkspaceSrc crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
           features = featuresFor;
+          crateRenames = declaredRenames
+            // edgeRenamesFor treeSpec (deps.runtime ++ deps.build);
         } // binsFor key crate
         # Defensive: ALWAYS forward `links` from the top-level
         # CrateSpec field (gen-cargo populates this from cargo
