@@ -52,11 +52,6 @@ on:
         type: string
         required: false
         default: "true"
-      publish-mode:
-        description: "full = bump+ship on push (rides crates.io new-crate rate limit in-job, capped 30m); drip = publish-only cron tick that rides remaining capacity and exits green. A consumer sets this to drip on schedule events and full otherwise."
-        type: string
-        required: false
-        default: "full"
     secrets:
       CRATES_API_TOKEN:
         required: true
@@ -87,8 +82,8 @@ jobs:
     name: Bump workspace + tag
     runs-on: ubuntu-latest
     # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops)
-    # and on drip ticks (a scheduled capacity-ride must never bump/tag).
-    if: github.actor != 'github-actions[bot]' && inputs.publish-mode != 'drip'
+    # and on the scheduled drip tick (a capacity-ride must never bump/tag).
+    if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
@@ -149,7 +144,9 @@ jobs:
   drip:
     name: Drip-publish remaining capacity
     runs-on: ubuntu-latest
-    if: inputs.publish-mode == 'drip'
+    # Fires only on the consumer's */15 schedule (the reusable workflow sees
+    # the caller's triggering event), so push/dispatch never drips.
+    if: github.event_name == 'schedule'
     permissions:
       contents: read
     steps:
