@@ -91,10 +91,13 @@ jobs:
         env:
           HOST: ${{ inputs.registry-host }}
           TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        # crossplane's `xpkg push` authenticates via the standard Docker keychain
+        # (go-containerregistry reads ~/.docker/config.json). The crossplane CLI
+        # has NO `xpkg login` subcommand — `docker login` writes the credential
+        # crossplane then reads.
         run: |
           set -euo pipefail
-          echo "$TOKEN" | nix shell nixpkgs#crossplane-cli --command \
-            crossplane xpkg login -u "${{ github.actor }}" --password-stdin -r "$HOST"
+          echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
 
       - name: Build + push Function xpkg (Nix-built runtime image embedded)
         env:
