@@ -52,6 +52,11 @@ on:
         type: string
         required: false
         default: "true"
+      publish-mode:
+        description: "full = bump+ship on push (rides crates.io new-crate rate limit in-job, capped 30m); drip = publish-only cron tick that rides remaining capacity and exits green. A consumer wires `${{ github.event_name == 'schedule' && 'drip' || 'full' }}`."
+        type: string
+        required: false
+        default: "full"
     secrets:
       CRATES_API_TOKEN:
         required: true
@@ -66,10 +71,12 @@ permissions:
 # Serialize releases per repository. Two pushes to main otherwise trigger
 # two bump runs from the same base; the first run's bump-commit push
 # advances main, making the second run's push non-fast-forward — the second
-# bump is then lost. Queue rather than cancel: a release already in flight
-# (commit + tag + publish) must finish. Only the ENTRY workflow's
-# concurrency is honored by GitHub (a nested reusable-workflow call inherits
-# the caller's), so the same group across the rust/cargo/polymorphic
+# bump is then lost. The same group also serializes a */15 drip tick against
+# a still-running push ship (which rides the rate limit for up to 30m) so
+# they don't race for crates.io new-crate tokens. Queue rather than cancel:
+# a release already in flight (commit + tag + publish) must finish. Only the
+# ENTRY workflow's concurrency is honored by GitHub (a nested reusable call
+# inherits the caller's), so the same group across the rust/cargo/polymorphic
 # entrypoints is safe + gives true per-repo serialization.
 concurrency:
   group: auto-release-${{ github.repository }}
@@ -79,8 +86,9 @@ jobs:
   bump:
     name: Bump workspace + tag
     runs-on: ubuntu-latest
-    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops).
-    if: github.actor != 'github-actions[bot]'
+    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops)
+    # and on drip ticks (a scheduled capacity-ride must never bump/tag).
+    if: github.actor != 'github-actions[bot]' && inputs.publish-mode != 'drip'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
@@ -126,7 +134,35 @@ jobs:
         with:
           no-verify: ${{ inputs.no-verify }}
           rename-prefix: ${{ inputs.rename-prefix }}
+          publish-mode: full
         env:
           # Org-level secret name is CRATES_API_TOKEN; cargo reads
           # CARGO_REGISTRY_TOKEN. Bridge the names here.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+
+  # Drip: a scheduled (cron) tick that publishes only what crates.io
+  # capacity currently allows and defers the rest — the resume engine
+  # that finishes a large new-crate bootstrap hands-off, across the
+  # natural rate-limit refill, until every member is on the registry.
+  # No bump, no tag; idempotent (skips already-published); a no-op in
+  # seconds once the bootstrap converges, so it's safe to leave armed.
+  drip:
+    name: Drip-publish remaining capacity
+    runs-on: ubuntu-latest
+    if: inputs.publish-mode == 'drip'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/rust-workspace-publish@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+          rename-prefix: ${{ inputs.rename-prefix }}
+          publish-mode: drip
+        env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
