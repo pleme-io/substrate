@@ -47,6 +47,14 @@ on:
 permissions:
   contents: write
 
+# Serialize releases per repository — two pushes to main otherwise race two
+# bump runs from the same base and the second push is rejected non-ff (its
+# bump lost). Queue rather than cancel; an in-flight release must finish.
+# Only the entry workflow's concurrency is honored by GitHub.
+concurrency:
+  group: auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   bump:
     runs-on: ubuntu-latest

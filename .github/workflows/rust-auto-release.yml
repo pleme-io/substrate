@@ -63,6 +63,18 @@ on:
 permissions:
   contents: write
 
+# Serialize releases per repository. Two pushes to main otherwise trigger
+# two bump runs from the same base; the first run's bump-commit push
+# advances main, making the second run's push non-fast-forward — the second
+# bump is then lost. Queue rather than cancel: a release already in flight
+# (commit + tag + publish) must finish. Only the ENTRY workflow's
+# concurrency is honored by GitHub (a nested reusable-workflow call inherits
+# the caller's), so the same group across the rust/cargo/polymorphic
+# entrypoints is safe + gives true per-repo serialization.
+concurrency:
+  group: auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   bump:
     name: Bump workspace + tag

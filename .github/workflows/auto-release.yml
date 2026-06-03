@@ -39,6 +39,15 @@ on:
 permissions:
   contents: write
 
+# Serialize releases per repository — two pushes to main otherwise race two
+# bump runs from the same base and the second push is rejected non-ff (its
+# bump lost). Queue rather than cancel; an in-flight release must finish.
+# This is the canonical entrypoint (the 3-line consumer shim), so its
+# concurrency is the one GitHub honors for repos using the polymorphic flow.
+concurrency:
+  group: auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   detect:
     name: Detect repo type
