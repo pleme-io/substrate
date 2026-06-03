@@ -159,6 +159,16 @@
         goToolImageFlakeBuilder = ./lib/build/go/tool-image-flake.nix;
         goActionReleaseFlakeBuilder = ./lib/build/go/action-release-flake.nix;
 
+        # Borealis pattern-registry §4f gap-fills (highest leverage, Nix).
+        # goPrivateModuleBuilder — hermetic buildGoModule for PRIVATE org Go
+        # deps (deploy-token FOD vendor-fetch OR Athens GOPROXY), no `--impure`,
+        # cartorio-attestable. nodeDockerImageBuilder — JS-service OCI wrapper
+        # mirroring mkGoDockerImage, completing L2 language coverage.
+        # Also surfaced per-system via substrate.lib.${system}.<name>.
+        goPrivateModuleBuilder = ./lib/build/go/private-module.nix;
+        goDockerImageBuilder = ./lib/build/go/docker.nix;
+        nodeDockerImageBuilder = ./lib/build/docker/node-image.nix;
+
         # Zero-argument Rust-tool flake factory. Reads the consumer's
         # Cargo.toml to derive toolName + repo + packageName. Consumer
         # flake collapses to:

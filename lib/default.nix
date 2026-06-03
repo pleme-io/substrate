@@ -483,6 +483,53 @@ in rec {
   goToolBuilder = ./build/go/tool.nix;
 
   # ============================================================================
+  # GO PRIVATE-MODULE BUILDER (standalone import path) — registry §4f highest
+  # ============================================================================
+  # Hermetic buildGoModule for repos that import PRIVATE org Go deps. Closes
+  # the no-`--impure`, cartorio-attestable private-OCI gap via a deploy-token
+  # FOD vendor-fetch OR an Athens GOPROXY route. Provides:
+  #   mkGoPrivateModule        — build one private-dep Go binary
+  #   mkGoPrivateModuleOverlay — overlay form for several
+  #
+  # Usage:
+  #   goPrivateModuleBuilder = import "${substrate}/lib/build/go/private-module.nix";
+  #   bin = goPrivateModuleBuilder.mkGoPrivateModule pkgs {
+  #     pname = "tundra-foo"; version = "0.1.0"; src = ./.;
+  #     vendorHash = "sha256-…";
+  #     privateFetch = { kind = "deploy-token";
+  #       privatePrefixes = [ "github.com/pleme-io" ];
+  #       host = "github.com"; credentialFile = "/nix/store/…"; };
+  #   };
+  goPrivateModuleBuilder = ./build/go/private-module.nix;
+  inherit ((import ./build/go/private-module.nix)) mkGoPrivateModule mkGoPrivateModuleOverlay;
+
+  # ============================================================================
+  # GO SERVICE DOCKER IMAGE BUILDER (standalone import path)
+  # ============================================================================
+  # Minimal, secure OCI images for Go services (Alpine/distroless, non-root,
+  # multi-arch, OCI v1.1 labels). Peer of mkNodeDockerImageL2 below.
+  #
+  # Usage:
+  #   goDockerImageBuilder = import "${substrate}/lib/build/go/docker.nix";
+  #   img = goDockerImageBuilder.mkGoDockerImage pkgs { name = "svc"; binary = bin; };
+  goDockerImageBuilder = ./build/go/docker.nix;
+
+  # ============================================================================
+  # NODE SERVICE DOCKER IMAGE BUILDER (L2, standalone import path) — registry §4f
+  # ============================================================================
+  # JS-service OCI wrapper mirroring mkGoDockerImage (node interpreter + built
+  # app dir, distroless/tini knobs, OCI v1.1 labels). Completes the L2 language
+  # coverage (Rust ✓ Go ✓ Node ✓). Distinct from the web `mkNodeDockerImage`
+  # (static-SPA-over-hanabi); this one runs a long-running Node service.
+  #
+  # Usage:
+  #   nodeImageBuilder = import "${substrate}/lib/build/docker/node-image.nix";
+  #   img = nodeImageBuilder.mkNodeDockerImage pkgs {
+  #     name = "svc"; builtApp = npmPkg; entry = "dist/server.js";
+  #   };
+  nodeDockerImageBuilder = ./build/docker/node-image.nix;
+
+  # ============================================================================
   # GO MONOREPO SOURCE FACTORY (standalone import path)
   # ============================================================================
   # Shared source + ldflags for Go projects that produce multiple binaries
