@@ -21,11 +21,14 @@
   #
   # Required attrs:
   #   pname      — package name
-  #   version    — version string
   #   src        — source derivation
-  #   vendorHash — hash for Go module dependencies (null if no deps)
   #
-  # Optional attrs:
+  # Optional attrs (with sensible defaults — mirrors mkGoTool):
+  #   version    — version string (default "0.0.0")
+  #   vendorHash — Go module deps hash. OMIT ⇒ spec-sourced from gen's Go
+  #                build-spec for `src` via lockfile-builder (sentinel
+  #                "__from-spec__", delta > build-spec > IFD). Pass null for
+  #                in-tree / zero-dep; pass an explicit hash to pin.
   #   proxyVendor     — use proxy vendor mode (default: false)
   #   packages        — Go packages to check (default: "./...")
   #   tags            — Go build tags
@@ -35,9 +38,9 @@
   #   license         — license (default: lib.licenses.asl20)
   mkGoLibraryCheck = pkgs: {
     pname,
-    version,
+    version ? "0.0.0",
     src,
-    vendorHash,
+    vendorHash ? "__from-spec__",
     proxyVendor ? false,
     packages ? [ "./..." ],
     tags ? [],
@@ -57,8 +60,18 @@
       (check.attrs "extraAttrs" extraAttrs)
     ];
     pkgArgs = lib.concatStringsSep " " packages;
+    # Spec-sourced vendorHash (backward-compatible; mirrors mkGoTool). Sentinel
+    # "__from-spec__" ⇒ consumer OMITTED it ⇒ consult gen's Go build-spec for
+    # `src` via the Go lockfile-builder (delta > build-spec > IFD). An
+    # explicitly-passed value (incl. null for in-tree / zero-dep) wins verbatim.
+    goLockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
+    effectiveVendorHash =
+      if vendorHash == "__from-spec__"
+      then goLockfileBuilder.resolveVendorHash { inherit src; }
+      else vendorHash;
   in pkgs.buildGoModule ({
-    inherit pname version src vendorHash proxyVendor tags;
+    inherit pname version src proxyVendor tags;
+    vendorHash = effectiveVendorHash;
     doCheck = false;
     # Only compile — don't install binaries
     buildPhase = ''
