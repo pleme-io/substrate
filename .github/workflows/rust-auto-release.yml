@@ -41,7 +41,7 @@ on:
         description: "Space-separated git pathspecs the bump commit stages. Default covers root + all workspace member Cargo.toml files."
         type: string
         required: false
-        default: "Cargo.toml Cargo.lock Cargo.nix"
+        default: "Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock"
       rename-prefix:
         description: "Prefix used when auto-renaming a conflicting crate at registry-publish time."
         type: string

@@ -28,7 +28,7 @@ on:
       add-paths:
         type: string
         required: false
-        default: "Cargo.toml Cargo.lock Cargo.nix"
+        default: "Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock"
       no-verify:
         type: string
         required: false
