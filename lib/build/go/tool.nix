@@ -27,7 +27,21 @@
   #   pname       — package name
   #   version     — version string (without "v" prefix)
   #   src         — source derivation (fetchFromGitHub, etc.)
-  #   vendorHash  — hash for Go module dependencies (null if vendored in-tree)
+  #
+  # vendorHash (spec-sourced when omitted — backward-compatible):
+  #   The hash for Go module dependencies (null if vendored in-tree / no deps).
+  #
+  #   * When the consumer PASSES vendorHash explicitly — including an explicit
+  #     `null` for in-tree modules — that value WINS verbatim. This preserves
+  #     full backward compatibility for every existing mkGoTool caller.
+  #   * When the consumer OMITS vendorHash, the builder consults gen's produced
+  #     Go build-spec for `src` via the Go lockfile-builder (delta > build-spec
+  #     > IFD ladder). The vendorHash comes from the spec when the module has
+  #     external deps (gen's `has_external_deps`), and is `null` otherwise.
+  #
+  #   The sentinel default `"__from-spec__"` distinguishes "omitted" from a
+  #   real consumer-supplied value (including null) — a string default that no
+  #   real SRI hash collides with.
   #
   # Optional attrs:
   #   subPackages     — list of Go packages to build (default: builds all)
@@ -58,7 +72,10 @@
     pname,
     version,
     src,
-    vendorHash,
+    # Sentinel default → "consult the spec". A consumer-supplied value
+    # (including explicit `null` for in-tree modules) overrides the sentinel
+    # and wins verbatim. See the vendorHash doc block above.
+    vendorHash ? "__from-spec__",
     subPackages ? null,
     ldflags ? null,
     versionLdflags ? {},
@@ -76,6 +93,22 @@
     platforms ? pkgs.lib.platforms.all,
   }: let
     lib = pkgs.lib;
+
+    # ── Spec-sourced vendorHash (backward-compatible) ─────────────────
+    # The sentinel `"__from-spec__"` means the consumer OMITTED vendorHash →
+    # consult gen's produced Go build-spec for `src` via the Go lockfile-builder
+    # (delta > build-spec > IFD ladder). Any other value — including an explicit
+    # `null` for in-tree modules — was passed by the consumer and wins verbatim.
+    # `modRoot` narrows the spec lookup to the module subdir for monorepos.
+    vendorHashFromSpec = vendorHash == "__from-spec__";
+    specSrc =
+      if modRoot != null then (src + "/${modRoot}") else src;
+    goLockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
+    effectiveVendorHash =
+      if vendorHashFromSpec
+      then goLockfileBuilder.resolveVendorHash { src = specSrc; }
+      else vendorHash;
+
     check = import ../../types/assertions.nix;
     _ = check.all [
       (check.nonEmptyStr "pname" pname)
@@ -131,7 +164,8 @@
         else null;
 
   in builtins.seq goVersionAssert (pkgs.buildGoModule ({
-    inherit pname version src vendorHash proxyVendor doCheck tags;
+    inherit pname version src proxyVendor doCheck tags;
+    vendorHash = effectiveVendorHash;
 
     nativeBuildInputs = completionAttrs.nativeBuildInputs ++ extraBuildInputs;
 

@@ -1,0 +1,94 @@
+# go-gen-spec — fleet-wide gen Go build-spec + Go.gen.lock maintenance.
+#
+# The Go analogue of reusable-gen-spec.yml — the spread engine for the
+# Go.gen.lock slim-delta migration. Any Go-module repo adopts it with a thin
+# caller:
+#
+#   # .github/workflows/go-gen-spec.yml
+#   name: go-gen-spec
+#   on:
+#     push: { branches: [main], paths: ["**/go.mod", "**/go.sum"] }
+#     pull_request: { paths: ["**/go.mod", "**/go.sum"] }
+#   jobs:
+#     go-gen-spec:
+#       uses: pleme-io/substrate/.github/workflows/go-gen-spec.yml@main
+#       secrets: inherit
+#
+# Mechanism (conditional logic in Rust, not shell):
+#   `gen build . --commit` auto-detects the go.mod and regenerates BOTH the
+#   committed full `Go.build-spec.json` AND the slim `Go.gen.lock` delta (the
+#   producer emits both since gen-gomod's gomod-parity work), atomically
+#   committing if drifted (gen-spec-bot identity), no-op when fresh.
+#
+#   - push to main : regen + commit + push back via the typed action.
+#   - pull request : regen without commit; fail the PR if either artifact
+#                    drifted (author must include the regen commit).
+#
+# Uses PUBLISHED gen (`nix run github:pleme-io/gen`) — NOT a from-source build
+# — so it works in any consumer repo. substrate's Go lockfile-builder consumes
+# the committed Go.gen.lock as the highest-priority spec source (delta >
+# build-spec > IFD), so adopting this workflow is what eliminates eval-time IFD
+# for the repo.
+#
+# NOTE: Go support requires gen's gomod-parity branch to be MERGED + PUBLISHED
+# — the default `gen-ref` below must resolve to a gen build that carries the
+# gomod adapter. Until the branch is merged, pin `gen-ref` to the published
+# gomod-parity rev.
+name: go-gen-spec
+
+on:
+  workflow_call:
+    inputs:
+      gen-ref:
+        description: "gen flake ref to run (pin for reproducibility). Go support requires the gomod-parity branch merged + published."
+        type: string
+        default: "github:pleme-io/gen"
+
+concurrency:
+  group: go-gen-spec-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  go-gen-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Regen Go.build-spec.json + Go.gen.lock. On main: --commit (atomic,
+      # gen-spec-bot, no-op when fresh). On PR: regen only.
+      - name: Regen spec + delta (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: nix run ${{ inputs.gen-ref }} -- build . --commit
+
+      - name: Regen spec + delta (PR — no commit)
+        if: github.event_name == 'pull_request'
+        run: nix run ${{ inputs.gen-ref }} -- build .
+
+      # Drift = the PR didn't include a fresh regen of either artifact.
+      - name: Fail PR if regen was not included
+        if: github.event_name == 'pull_request'
+        run: |
+          drift=""
+          git diff --quiet -- Go.build-spec.json || drift="$drift Go.build-spec.json"
+          git diff --quiet -- Go.gen.lock        || drift="$drift Go.gen.lock"
+          if [ -n "$drift" ]; then
+            echo "::error::stale artifacts:$drift — run \`gen build . --commit\` locally and include the regen commit."
+            git --no-pager diff -- Go.gen.lock Go.build-spec.json | head -200
+            exit 1
+          fi
+
+      - uses: pleme-io/actions/git-push-with-token@v1
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "false"
