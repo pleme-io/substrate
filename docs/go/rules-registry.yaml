@@ -13,6 +13,7 @@
 #   JOB-*     concurrency-and-jobs        DOC-*   documentation-and-discoverability
 #   VER-*     versioning-and-compatibility
 #   TEST-*    testing-and-quality         SEC-*   security-and-supply-chain
+#   UI-*      uiux-look-and-feel
 #
 # FSM rules (the delivery type system) are NOT listed here; they live in
 # go-software-delivery-standard.md under "Delivery FSM Type System".
@@ -535,3 +536,41 @@ rules:
   - id: SEC-12
     dimension: security-and-supply-chain
     enforcement: "provenance-attest action emits the SLSA-style attestation alongside the cosign signature; tameshi computes the BLAKE3 Merkle tree; sekiban (K8s admission) + inshou (Nix rebuild) fail-close on a broken chain; the shigoto-go DAG sequences sign -> attest -> provenance -> publish; --skip-verification is logged via logging-go and surfaced in the action summary."
+
+  # --- uiux-look-and-feel --------------------------------------------------
+  - id: UI-01
+    dimension: uiux-look-and-feel
+    enforcement: "forbidigo + depguard ban lipgloss/charmbracelet/non-borealis TUI imports outside the borealis leaves and _test.go; grep gate requires a human-surface binary import borealis; gsds-ui-lint flags a theme/Styles literal authored outside borealis.FromConfig/Nord and raw ANSI escapes in Run/handler bodies; borealis.Render is the only sanctioned emitter."
+  - id: UI-02
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint rejects hex-shaped string literals, ANSI escape literals, and lipgloss.Color(...) outside borealis/theme; staticcheck flags theme.Color from a non-token constant; colour flows only through borealis.Role + Theme.RoleColor; unit test asserts every domain state maps to a borealis.Role."
+  - id: UI-03
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint flags strings.Repeat padding + integer Padding/Margin/Width literals in tool code (route to comp/style); a -o table command must resolve a comp.Tabler (rendered via comp.Table); golden tests pin aligned comp.Table/StatusList/KV/Header/Rule output."
+  - id: UI-04
+    dimension: uiux-look-and-feel
+    enforcement: "a shared borealis/logging-go mapper turns errs.SeverityOf into a borealis.Role (exhaustive-linted like LevelForSeverity); gsds-ui-lint flags a comp.Glyph/Badge Role selected by strings.Contains/err.Error() rather than SeverityOf; golden table test asserts the Notice->Success/Info, Warning->Warning, Error->Danger map (exit/log/screen agree)."
+  - id: UI-05
+    dimension: uiux-look-and-feel
+    enforcement: "forbidigo bans fmt.Fprint*(os.Stderr, err) and bespoke red-text helpers in cmd/command packages; grep gate asserts a cli-go CLI entrypoint is borealis.Execute/fangx.Execute (fang ColorScheme decorator); harness asserts a failing command's stderr carries the human message + a Code affix and no Go-internal wrapError noise (ERR-12 taint)."
+  - id: UI-06
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint bans hand-rolled isatty/term.IsTerminal in tool code (route through the borealis colour-profile seam) and flags borealis styling on the -o json/-o yaml stdout path; conformance harness captures stdout/stderr separately asserting piped/-o json stdout is byte-clean (no SGR) while a forced-TTY run is styled."
+  - id: UI-07
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint asserts the colour decision flows from borealis.Config.NoColor()/ColorMode (flags a direct os.LookupEnv(NO_COLOR) outside borealis); --no-color global maps to ColorNever; conformance test runs every command with NO_COLOR=1 asserting zero SGR escapes AND that each status row still carries its glyph/label (never colour-as-sole-signal)."
+  - id: UI-08
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint flags a hand-rolled colour-profile/palette switch and colour emitted outside the borealis/lipgloss profile seam; harness renders a fixture under truecolor/256/16/no-colour asserting the role set stays distinguishable; an Accessible=true run asserts forms use huh accessible mode and no animated widget is constructed; Mode (auto/light/dark) governed through the same seam."
+  - id: UI-09
+    dimension: uiux-look-and-feel
+    enforcement: "forbidigo + depguard ban a direct charm.land/huh import outside huhx/_test.go and a hand-rolled huh.Theme; gsds-ui-lint asserts every huh.NewForm is .WithTheme(huhx.HuhTheme(t)) and TTY-guarded with a non-interactive errors-go-error fallback; conformance test pipes empty stdin asserting a required-input prompt fails with exit 64 rather than hanging."
+  - id: UI-10
+    dimension: uiux-look-and-feel
+    enforcement: "forbidigo + depguard ban direct charm.land/bubbletea + charm.land/bubbles imports outside bubblesx/tui/_test.go; gsds-ui-lint asserts spinner/progress/table models are built from bubblesx.New(t) and a live program is TTY-gated with a static-comp fallback; golden test asserts a tui component View equals the corresponding comp render; live widgets never touch the -o json/-o yaml data stream."
+  - id: UI-11
+    dimension: uiux-look-and-feel
+    enforcement: "caixa-validate rejects a borealis import in a Biblioteca (:kind from caixa.lisp); depguard scopes fangx/huhx/bubblesx/tui imports to cmd/** + command packages (a leaf import in internal/<domain> fails); go build ./... + the closure-size check enforce the core-vs-leaf boundary (Law 6/Law 8); a domain type implements comp.Tabler/borealis.Renderable without importing a leaf."
+  - id: UI-12
+    dimension: uiux-look-and-feel
+    enforcement: "gsds-ui-lint asserts borealis.Config is loaded via the shikumi cfg.Load/bootstrap.Config path and FromConfig is the only resolver (flags a borealis.Theme literal in tool code and a shikumi.Load inside a theme path); a no-shikumi.Load-in-FromConfig check mirrors CFG-01; a Theme captured in a package var is flagged (mirrors CFG-11); zero Config.Theme selects the Nord brand default."

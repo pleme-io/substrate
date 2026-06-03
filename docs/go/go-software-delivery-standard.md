@@ -46,8 +46,8 @@ relevant checks are green.
 - **Per-dimension rule sections.** The standard is organized along the
   navigation dimensions a follower traverses: repo layout, naming, CLI UX,
   configuration, observability, errors, lifecycle/health, networking,
-  concurrency/jobs, documentation, versioning, testing, and security. Each rule
-  is rendered as:
+  concurrency/jobs, documentation, versioning, testing, security, and UI/UX
+  (terminal look-and-feel). Each rule is rendered as:
 
   > **ID** — the rule. *Why:* the rationale. *Enforcement:* the gate that makes
   > it hold. *Demonstrated by:* the canonical example / live evidence.
@@ -122,6 +122,8 @@ repo/skill. This is navigation infrastructure; its presence is enforced by
 | **`shigoto-go` / `shigoto`** | The job/DAG/scheduler library (Go) and its Rust sibling. The four delivery FSMs share its `Advance`/`Gate`/`ErrIllegalTransition` idiom. | `pleme-io/shigoto-go` |
 | **shikumi-go, errors-go, logging-go, cli-go, lifecycle-go, todoku-go, pleme-actions-shared-go** | The eight mandated runtime libraries (config, typed errors, logging, CLI, lifecycle/health, HTTP client, jobs, action I/O). See the [Concern → library → symbol map](#concern--library--symbol-map). | `pleme-io/<name>` |
 | **tameshi / sekiban / inshou / provas** | The attestation ecosystem: tameshi computes the BLAKE3 Merkle provenance tree; sekiban is the K8s admission webhook; inshou gates Nix rebuilds; together they fail-close on a broken integrity chain ([SEC-12](#dimension-security-and-supply-chain-sec)). | `pleme-io/tameshi` et al.; `attestation` skill |
+| **borealis** | THE pleme-io terminal design system — one `Theme` token bundle, one render verb (`borealis.Render`), and one producer per charm-stack themeable surface. Every `*-go` primitive renders its user-facing output through it so two fleet tools cannot drift in how they look. The brand is the Nord *Aurora* palette (Polar Night surfaces, Frost primary, Aurora semantic), hardcoded today and ishou-generation-bound as target state. The whole UI/UX dimension ([UI-01](#dimension-uiux-look-and-feel-ui)..[UI-12](#dimension-uiux-look-and-feel-ui)) is rooted here. | `pleme-io/borealis` |
+| **comp / style / fangx / huhx / bubblesx / tui** | borealis's render surfaces. `comp` is the render-to-string typed-value set (`Header`/`Badge`/`Glyph`/`Rule`/`StatusList`/`KV`/`Table`); `style` derives Lip Gloss styles from a `Theme`. The three GATED LEAVES map a `Theme` onto each charm-stack themeable surface: `fangx` (CLI help/errors via fang), `huhx` (huh interactive forms), `bubblesx` (bubbles widgets). `tui` carries live `tea.Model` components. | `pleme-io/borealis/{comp,style,fangx,huhx,bubblesx,tui}` |
 
 ## Identity-derivation table
 
@@ -170,6 +172,7 @@ constructs it. Enforced present by
 | HTTP client / auth / retry / timeout | `todoku-go` | `todoku.New` | `main`/factory (struct field) | [NET-01](#dimension-networking-net)..[NET-13](#dimension-networking-net) |
 | Jobs / DAG / scheduler / gates | `shigoto-go` | `shigoto.NewScheduler` / `shigoto.Advance` / `shigoto.Gate` | service `main`; the delivery FSMs | [JOB-01](#dimension-concurrency-and-jobs-job)..[JOB-14](#dimension-concurrency-and-jobs-job) |
 | GitHub-Action I/O + bootstrap | `pleme-actions-shared-go` | `actions.ParseInputs` / `actions.SetOutput` / `bootstrap.Config[T]` | action `main` | [NAME-12](#dimension-naming-name), [CFG-14](#dimension-configuration-cfg) |
+| Terminal look-and-feel / theming / rendering | `borealis` | `borealis.Theme` / `borealis.Render` / `borealis.FromConfig` (+ `comp` / `fangx` / `huhx` / `bubblesx` / `tui`) | `main`/`bootstrap.Config` (theme resolved once) | [UI-01](#dimension-uiux-look-and-feel-ui)..[UI-12](#dimension-uiux-look-and-feel-ui) |
 
 ### Inter-library composition graph
 
@@ -3384,7 +3387,7 @@ greppable term-coverage check); a missing term fails the meta-check.
 
 **DOC-13** — The standard MUST carry a role-based reading-order on-ramp
 (navigate/build/run → author → ship) so a new engineer reads the relevant 20%
-first instead of all 13 dimensions + 4 FSMs flat.
+first instead of all 14 dimensions + 4 FSMs flat.
 *Why:* "How to use this document" describes organization but a navigator needs a
 PATH; 80% of the document is enforcement detail a runner does not yet need.
 *Enforcement:* `caixa-validate --meta` asserts the on-ramp is present in "How to
@@ -4741,6 +4744,366 @@ filesystem secret scan runs on the image tarball + store path in the CVE step.
 `CVE-2025-1234 # expires 2026-09-01 — upstream fix pending`; CI fails when that date
 passes; a nightly rescan flips a deployed digest to `Degraded` when a new CRITICAL
 lands; a build-baked test secret is caught by the tarball scan.
+
+---
+
+## Dimension: UI/UX Look-and-Feel (UI)
+
+This dimension governs how a Go binary LOOKS and how a human navigates it — the
+terminal-UI counterpart of the [Observability](#dimension-observability-obs) and
+[CLI UX](#dimension-cli-ux-cli) dimensions. As with logging (`logging-go`),
+errors (`errors-go`), and config (`shikumi-go`), there is exactly ONE owning
+library — [`borealis`](https://github.com/pleme-io/borealis), THE pleme-io
+terminal design system (BOREALIS theory §2.9 / §3.5) — and every user-facing
+character a tool emits to a human is produced through it. The principle behind
+every rule below is the borealis principle: *tokens are the source of truth;
+every framework's theme struct is a render target of those tokens; NEVER
+hand-author colour or spacing — derive it from one `borealis.Theme`.* The
+dimension applies to any binary with a human surface (a `Binario` CLI, a
+`Servico`'s operator-facing diagnostics, a `Supervisor`'s status board); a pure
+machine-to-machine service with no human output is exempt, and a library
+([`Biblioteca`](#glossary)) MUST NOT import borealis at all (it renders nothing —
+[UI-11](#dimension-uiux-look-and-feel-ui)).
+
+**UI-01** — Every Go binary that emits human-facing terminal output MUST render
+it through `borealis` — the single fleet-wide terminal design system. The
+resolved token bundle MUST be the one canonical type `borealis.Theme` (an alias
+of `theme.Theme`), resolved exactly ONCE at startup via `borealis.FromConfig(cfg)`
+and threaded as a value; the single render verb `borealis.Render(t, x)` is the
+only sanctioned emitter of styled text. Direct `lipgloss`/`fmt`-with-ANSI/
+hand-rolled escape-sequence rendering, a second design-system import, or a
+per-tool `Styles`/`Theme` struct are FORBIDDEN. A binary with no human surface
+(a headless `Servico`) is exempt until it grows its first human-facing line.
+*Why:* a single render verb fed by a single token bundle is the borealis
+uniformity contract — it is the visual analogue of "one `logging-go` logger"
+([OBS-01](#dimension-observability-obs)) and "one `cli-go` App"
+([CLI-01](#dimension-cli-ux-cli)): so two fleet tools cannot drift in how their
+output looks. `borealis.Render` dispatches over a `Renderable`, a `fmt.Stringer`,
+a `comp.Tabler`, `[]comp.Item`, `[]comp.Pair`, and a plain string, with a total
+muted fallback, so a tool never reaches for a bespoke formatter. Composes with
+[CLI-07](#dimension-cli-ux-cli)/[CLI-08](#dimension-cli-ux-cli) and
+[OBS-01](#dimension-observability-obs).
+*Enforcement:* forbidigo + depguard ban `charm.land/lipgloss`, `charmbracelet/*`,
+and any non-`borealis` TUI/styling import outside the borealis leaves and
+`_test.go`; a grep gate asserts a binary with a human surface imports `borealis`;
+a `gsds-ui-lint` analyzer flags a `theme.Theme`/`*Styles` literal authored outside
+`borealis.FromConfig`/`borealis.Nord` and any raw ANSI escape literal in `Run`/
+handler bodies.
+*Demonstrated by:* `main` resolves `t, _ := borealis.FromConfig(cfg.Borealis)`
+once and every status line is `borealis.Render(t, result)`; no `lipgloss` import
+appears outside the borealis dependency.
+
+**UI-02** — Colour and visual semantics MUST be expressed through the typed
+`borealis` token + role vocabulary, NEVER as a hand-authored hex/ANSI literal. A
+tool maps its domain states onto the six semantic `borealis.Role`s
+(`Neutral`, `Active`, `Info`, `Success`, `Warning`, `Danger`); the `Theme`
+decides the actual `Color` via `Theme.RoleColor(role)`. Surfaces, text, and
+borders MUST come from the named token fields (`Bg`/`Panel`/`Surface`,
+`Fg`/`Muted`/`Subtle`, `Border`/`BorderSubtle`, `Primary`/`Secondary`/`Accent`).
+A raw hex string, a bare `lipgloss.Color("#...")`, or an ANSI SGR integer in tool
+code is FORBIDDEN — the only place a literal Nord hex value lives is the
+`borealis/theme` palette constants (`theme.Nord0`…`Nord15`).
+*Why:* colour decisions in one place is the borealis instinct (BOREALIS §2.9) —
+roles are the stable contract, the palette is the render target, and a tool that
+hard-codes `#BF616A` for "error" both breaks theming and silently diverges from
+every other tool's red. Routing through `Role` also makes [accessibility
+downsampling](#dimension-uiux-look-and-feel-ui) ([UI-08](#dimension-uiux-look-and-feel-ui))
+a one-place transform. Composes with
+[OBS-08](#dimension-observability-obs)/[ERR-04](#dimension-errors-err).
+*Enforcement:* `gsds-ui-lint` rejects a hex-shaped string literal
+(`^#[0-9A-Fa-f]{3,8}$`), an ANSI escape literal, and a `lipgloss.Color(...)` call
+in any package other than `borealis/theme`; staticcheck flags a `theme.Color`
+assigned from a non-token constant; a unit test asserts every domain state maps
+to a `borealis.Role`.
+*Demonstrated by:* a build step renders its status with
+`comp.Glyph(t, borealis.Success)` / `comp.Badge(t, "FAILED", borealis.Danger)`;
+grepping the tree for `#` hex literals returns only `borealis/theme/theme.go`.
+
+**UI-03** — Layout, spacing, and alignment MUST be composed from the `borealis`
+component + token surface, NOT hand-built with raw padding strings, manual
+`strings.Repeat`, or magic-number column widths. Multi-row and tabular output
+goes through the `comp` set: `comp.Table` (driven by a typed
+`comp.Tabler { Columns() []comp.Column; Rows() [][]string }`) for tables,
+`comp.StatusList` for glyph+label+detail rows, `comp.KV` for aligned key/value
+pairs, `comp.Header` for a branded banner, and `comp.Rule` for dividers. Spacing,
+borders, and panel/card framing come from `style.New(t)` styles
+(`Title`/`Section`/`Panel`/`Card`) — derived from the `Theme` — never from
+hand-tuned `Padding`/`Margin` integers scattered through tool code. Column widths
+auto-size to the widest cell unless pinned via `comp.Column.Width`.
+*Why:* a shared component grid is what makes `-o table` buildable across the
+fleet's many SDK response shapes with zero per-tool column code (BOREALIS §2.9 /
+the `comp.Tabler` seam): a domain type declares its `Columns`/`Rows` once and
+borealis aligns, rules, and frames it identically everywhere. Hand-built spacing
+is the visual equivalent of an inline `fmt.Sprintf` log — it drifts and cannot be
+re-themed. Composes with [CLI-07](#dimension-cli-ux-cli) (`-o table`) and
+[UI-01](#dimension-uiux-look-and-feel-ui).
+*Enforcement:* `gsds-ui-lint` flags `strings.Repeat(" ", …)`/manual
+padding-string construction and integer `Padding`/`Margin`/`Width` literals in
+tool code (route them to `style`/`comp`); a `-o table` command MUST resolve a
+`comp.Tabler` (the analyzer asserts the result type implements it or is rendered
+via `comp.Table`); golden tests pin the aligned output.
+*Demonstrated by:* `secret list -o table` returns a `[]Secret` whose element type
+implements `comp.Tabler`, rendered via `borealis.Render(t, secrets)`; a section
+header is `style.New(t).Section.Render("Targets")`; no manual column math exists.
+
+**UI-04** — Status and result rendering MUST be DERIVED from the typed
+`errors-go` Severity (and, for non-error state, an explicit `borealis.Role`),
+NEVER hand-classified at the render site. The fixed mapping is total:
+`SeverityNotice` → `Success`/`Info` role, `SeverityWarning` → `Warning` role,
+`SeverityError` → `Danger` role; a non-error in-progress/pending state is the
+`Active` role, an inactive/unknown state is `Neutral`. The rendered glyph,
+badge, and colour all follow from that one role — a tool MUST NOT pick a red ✗ or
+a green ✓ by branching on a string. The same severity that drives the exit code
+([CLI-09](#dimension-cli-ux-cli)/[ERR-07](#dimension-errors-err)) and the log
+level ([OBS-08](#dimension-observability-obs)) drives the glyph, so the three
+surfaces (exit, log, screen) agree by construction.
+*Why:* errors-go already classifies every failure by Severity; the on-screen
+status is a pure function of that metadata, exactly as the log level
+([OBS-08](#dimension-observability-obs) `logging.LogError` → `LevelForSeverity`)
+and the exit code ([ERR-07](#dimension-errors-err) `errs.ExitCode`) are. Three
+independent hand-classifications is three ways to disagree about whether
+something failed. Composes with
+[ERR-04](#dimension-errors-err)/[ERR-07](#dimension-errors-err)/[OBS-08](#dimension-observability-obs).
+*Enforcement:* a shared `borealis`/`logging-go` helper turns a `SeverityOf(err)`
+into a `borealis.Role` (the single mapper, exhaustive-linted like
+`LevelForSeverity`); `gsds-ui-lint` flags a `comp.Glyph`/`comp.Badge` whose `Role`
+is selected by `strings.Contains`/`err.Error()` matching rather than
+`errs.SeverityOf`; a golden table test asserts the three-rung severity→role map.
+*Demonstrated by:* a failed step renders
+`comp.StatusList(t, []comp.Item{{Role: roleOf(errs.SeverityOf(err)), Label: name, Detail: errs.CodeOf(err)}})`
+where `roleOf` is the shared exhaustive mapper; the same `err` exits 70 and logs
+at ERROR.
+
+**UI-05** — Errors shown to a human MUST be rendered through `borealis` from the
+`errors-go` value, surfacing its severity, message, and machine `Code` — NEVER
+printed with `fmt.Fprintln(os.Stderr, err)` or a bespoke red-text helper. For a
+CLI, the styled help/usage/error surface MUST be the `fangx` (fang) decorator
+wired to the borealis `ColorScheme(t)`, so `--help`, usage-on-error, version, and
+completions are themed from the same Nord tokens as everything else
+(`borealis.Execute(ctx, root)` / `fangx.Execute(ctx, root, t)`). The error body a
+human reads MUST be the human message ([CLI-10](#dimension-cli-ux-cli) lowercase,
+no Go-internal noise); the machine `Code` is shown as a stable, greppable affix,
+and the internal wrap chain MUST NOT leak into a user-facing or RPC-body
+rendering ([ERR-12](#dimension-errors-err)).
+*Why:* the CLI help/errors surface is one of the exactly-three charm-stack
+themeable surfaces (BOREALIS §2.9); routing it through `fangx`'s `ColorScheme`
+closes the "headline auto-help gap" and means a tool gets styled, consistent
+error/usage rendering for free. Rendering from the typed error (not a string)
+keeps the severity → colour decision a pure function ([UI-04](#dimension-uiux-look-and-feel-ui)).
+Composes with [CLI-08](#dimension-cli-ux-cli)/[CLI-10](#dimension-cli-ux-cli)/
+[ERR-12](#dimension-errors-err)/[OBS-08](#dimension-observability-obs).
+*Enforcement:* forbidigo bans `fmt.Fprint*(os.Stderr, …)` carrying an `error` and
+bespoke "print in red" helpers in `cmd/`/command packages; a grep gate asserts a
+`cli-go` CLI's entrypoint is `borealis.Execute`/`fangx.Execute` (the fang
+decorator), not a bare `cobra`/`app.Run` without the borealis `ColorScheme`; the
+conformance harness asserts a failing command's stderr carries the human message
++ a `Code`-shaped affix and no Go-internal `*fmt.wrapError` noise.
+*Demonstrated by:* `main` is
+`cli.Exit(borealis.Execute(ctx, root))`; a validator failure prints a Nord-themed,
+lowercase `ttl: must be in [1, 3600] (E_USAGE)` to stderr; the wrap chain is never
+shown.
+
+**UI-06** — Output MUST be TTY-AWARE: a binary detects whether stdout/stderr is an
+interactive terminal and renders accordingly. When a stream is a TTY and colour is
+permitted, output is styled (borealis colour, glyphs, alignment, optionally live
+widgets); when a stream is NOT a TTY (a pipe, a file, a CI log) the DATA stream
+([CLI-07](#dimension-cli-ux-cli) stdout) MUST be plain and machine-parseable — and
+when the requested `--output` is `json`/`yaml`, stdout MUST be EXACTLY one valid
+document with NO styling, spinners, colour, or borealis decoration interleaved
+([CLI-07](#dimension-cli-ux-cli)/[CLI-08](#dimension-cli-ux-cli)). Human
+diagnostics (progress, status) remain on stderr and MAY stay styled when stderr is
+a TTY. Detection MUST go through the borealis/charm colour-profile seam, never a
+hand-rolled `isatty`.
+*Why:* a CLI is simultaneously a human surface and a machine boundary; the
+`-o json | jq` contract ([CLI-07](#dimension-cli-ux-cli)) breaks the instant a
+colour code or spinner frame lands on stdout. lipgloss v2's explicit colour
+profile + the borealis `Color`/`Mode` knobs are the no-hidden-global seam that
+makes "styled for a human, plain for a pipe" automatic. Composes with
+[CLI-07](#dimension-cli-ux-cli)/[CLI-08](#dimension-cli-ux-cli)/[UI-08](#dimension-uiux-look-and-feel-ui).
+*Enforcement:* `gsds-ui-lint` bans a hand-rolled `isatty`/`term.IsTerminal` call
+in tool code (route through the borealis seam) and flags borealis styling applied
+to the `-o json`/`-o yaml` stdout path; the conformance harness captures
+stdout/stderr separately and asserts piped/`-o json` stdout is byte-clean (no SGR
+escapes) while a forced-TTY run is styled.
+*Demonstrated by:* `tool secret list -o json | jq` is pure JSON; `tool secret
+list` in an interactive terminal is a Nord-styled `comp.Table`; the same command
+redirected to a file emits a plain aligned table with no escape codes.
+
+**UI-07** — Colour output MUST honour the `NO_COLOR` convention and the typed
+`borealis.Config.Color` knob, and a tool MUST be fully usable with colour
+disabled. Setting `NO_COLOR` in the environment (the cross-tool standard) OR
+`color: never` in config (`ColorNever`) MUST suppress ALL colour — borealis
+records this via `Config.NoColor()`, which the gated leaves consult when building
+their framework theme structs. `color: always` (`ColorAlways`) forces colour even
+when not a TTY; `color: auto` (`ColorAuto`, the default) downsamples to the
+detected terminal profile. Information MUST NEVER be conveyed by colour ALONE: a
+status distinguished by colour MUST also carry a glyph/label
+(`comp.Glyph`/`comp.Badge` already pair a role-coloured glyph with text), so a
+no-colour or colour-blind reader loses nothing.
+*Why:* `NO_COLOR` is a widely-honoured user-agency convention and a hard
+accessibility floor; colour-as-sole-signal fails colour-blind users and every
+no-colour pipe. borealis already encodes the knob (`ColorMode` +
+`Config.NoColor()`) and pairs glyph-with-label by construction in `comp` — the
+rule is to consume it, never to re-decide colour per tool. Composes with
+[UI-02](#dimension-uiux-look-and-feel-ui)/[UI-06](#dimension-uiux-look-and-feel-ui)/[UI-08](#dimension-uiux-look-and-feel-ui)
+and the [`--no-color`](#dimension-cli-ux-cli) global ([CLI-05](#dimension-cli-ux-cli)).
+*Enforcement:* `gsds-ui-lint` asserts the colour decision flows from
+`borealis.Config.NoColor()`/`ColorMode` (flags a direct `os.LookupEnv("NO_COLOR")`
+outside borealis and a colour decision keyed off anything else); the
+`--no-color` global ([CLI-05](#dimension-cli-ux-cli)) maps to `ColorNever`; a
+conformance test runs every command with `NO_COLOR=1` asserting zero SGR escapes
+AND that each status row still carries its glyph/label.
+*Demonstrated by:* `NO_COLOR=1 tool status` emits the same `comp.StatusList` rows
+with glyphs (`✓`/`▲`/`✗`) and labels but no colour; `--no-color` and `color:
+never` produce byte-identical plain output; `color: always` keeps colour through a
+pipe.
+
+**UI-08** — Rendering MUST be ACCESSIBLE by construction: it MUST downsample to
+the detected terminal colour profile (truecolor → 256 → 16 → no-colour) without
+loss of meaning, and a typed `borealis.Config.Accessible` mode MUST bias every
+surface toward high-contrast, no-colour-dependent, screen-reader-friendly output.
+Downsampling MUST go through the borealis/lipgloss colour-profile seam (Nord
+tokens degrade to the nearest profile colour) — never a hand-rolled palette
+switch. When `Accessible` is set, interactive forms MUST pass `huh`'s accessible
+mode through ([UI-09](#dimension-uiux-look-and-feel-ui)), live/animated widgets
+MUST degrade to static, plain output ([UI-10](#dimension-uiux-look-and-feel-ui)),
+and components bias toward high-contrast token pairings. The `Mode`
+(`auto`/`light`/`dark`) knob governs background adaptation through the same seam.
+*Why:* a design system that only looks right on a truecolor dark terminal is not a
+fleet standard; Nord is a role-grouped palette precisely so it degrades
+predictably, and lipgloss v2's explicit profile + `LightDark` seam is the correct
+no-hidden-global mechanism. An explicit `Accessible` mode is the difference
+between "usually readable" and "guaranteed usable with a screen reader / 16-colour
+TTY / high-contrast need". Composes with
+[UI-07](#dimension-uiux-look-and-feel-ui)/[UI-09](#dimension-uiux-look-and-feel-ui)/[UI-10](#dimension-uiux-look-and-feel-ui).
+*Enforcement:* `gsds-ui-lint` flags a hand-rolled colour-profile/palette switch
+and a colour emitted outside the borealis profile seam; the conformance harness
+renders a fixture under truecolor/256/16/no-colour profiles asserting the role set
+is distinguishable in each; an `Accessible=true` run asserts forms are in huh
+accessible mode and no animated widget is constructed.
+*Demonstrated by:* the canonical tool's golden tests pin its `comp.StatusList`
+output under all four profiles; `BOREALIS_ACCESSIBLE=1 tool init` (an
+`Accessible` config) runs the setup form in huh's accessible mode with a static
+status board.
+
+**UI-09** — Interactive prompts and forms MUST be built with `huh` THROUGH the
+borealis `huhx` leaf — a tool MUST NOT hand-roll a prompt loop, read raw
+keypresses for a yes/no, or import `huh` and author its own `huh.Theme`. A form is
+constructed with `huh.NewForm(...).WithTheme(huhx.HuhTheme(t))` so prompts,
+selects, multi-selects, text inputs, and validation styling inherit the same Nord
+tokens (focused/blurred field colours, error indicators, selected-option accent)
+as help text and widgets. When `borealis.Config.Accessible` is set, the form MUST
+ALSO be put into huh's accessible mode at the form level
+([UI-08](#dimension-uiux-look-and-feel-ui)). Interactivity MUST degrade: a
+non-TTY/piped invocation or a missing required input MUST NOT block on a prompt —
+it MUST fail with an actionable `errors-go` error
+([CLI-10](#dimension-cli-ux-cli)) telling the operator which flag/env to supply.
+*Why:* interactive forms are one of the exactly-three charm-stack themeable
+surfaces (BOREALIS §2.9); `huhx.HuhTheme(t)` eliminates per-tool form styling so
+every wizard looks the same. A prompt that blocks in a pipeline or CI is a
+hang-the-build hazard, so interactivity must always have a non-interactive escape.
+Composes with [CLI-06](#dimension-cli-ux-cli)/[CLI-10](#dimension-cli-ux-cli)/
+[UI-06](#dimension-uiux-look-and-feel-ui)/[UI-08](#dimension-uiux-look-and-feel-ui).
+*Enforcement:* forbidigo + depguard ban a direct `charm.land/huh` import outside
+`huhx`/`_test.go` and a hand-rolled `huh.Theme`; `gsds-ui-lint` asserts every
+`huh.NewForm` is `.WithTheme(huhx.HuhTheme(t))` and is guarded by a TTY check
+([UI-06](#dimension-uiux-look-and-feel-ui)) with a non-interactive
+`errors-go`-error fallback; a conformance test pipes empty stdin and asserts a
+required-input prompt fails with exit 64 rather than hanging.
+*Demonstrated by:* `tool init` (interactive) builds
+`huh.NewForm(...).WithTheme(huhx.HuhTheme(t))`; `tool init < /dev/null` does not
+hang — it exits 64 with `endpoint: required (set --endpoint or TOOL_ENDPOINT)`.
+
+**UI-10** — Live/animated terminal widgets (spinners, progress bars, tables,
+status boards, anything redrawing) MUST use the borealis `bubblesx` (stock
+bubbles widgets) and `tui` (live `tea.Model` components) leaves, themed from one
+`borealis.Theme` — a tool MUST NOT import `bubbletea`/`bubbles` directly and style
+widgets by hand. Per-component styles come from `bubblesx.New(t)` (e.g.
+`b.Spinner()` / `b.Progress()` / `b.TableStyles`); a live board is a borealis
+`tui` component carrying an injected `Theme` (`tui.NewStatusBoard(t, title,
+items…)`), whose `View` delegates to the static `comp` renderers so the live and
+golden surfaces stay byte-identical. Live widgets MUST render only to a TTY
+stderr/alt-screen ([UI-06](#dimension-uiux-look-and-feel-ui)) and MUST degrade to
+static `comp` output when not a TTY or when
+`Accessible`/`color: never`/`NO_COLOR` is in effect — they MUST NEVER touch the
+`-o json`/`-o yaml` data stream.
+*Why:* stock widgets are the third charm-stack themeable surface (BOREALIS §2.9);
+`bubblesx.New(t)` makes every spinner/progress/table inherit the Nord tokens, and
+having `tui` `View`s delegate to the static `comp` renderers means the animated
+surface and the golden-tested static surface can never diverge. A spinner frame on
+a non-TTY pipe is animation garbage in a log; it must degrade. Composes with
+[UI-03](#dimension-uiux-look-and-feel-ui)/[UI-06](#dimension-uiux-look-and-feel-ui)/[UI-08](#dimension-uiux-look-and-feel-ui)/[JOB-01](#dimension-concurrency-and-jobs-job).
+*Enforcement:* forbidigo + depguard ban direct `charm.land/bubbletea` and
+`charm.land/bubbles` imports outside `bubblesx`/`tui`/`_test.go`; `gsds-ui-lint`
+asserts a `spinner`/`progress`/`table` model is constructed from `bubblesx.New(t)`
+and a live program is gated by a TTY check with a static-`comp` fallback; a golden
+test asserts a `tui` component's `View` equals the corresponding `comp` render.
+*Demonstrated by:* a long reconcile shows `bubblesx.New(t).Spinner()` on a TTY and
+falls back to `comp.StatusList` lines when piped; `tui.NewStatusBoard(t, "Targets",
+items…)`'s `View` is byte-identical to `borealis.Render(t, items)` in its golden
+file.
+
+**UI-11** — The borealis dependency MUST be scoped to the human surface, and the
+weight of the charm-stack v2 leaves MUST stay import-gated. A `Biblioteca`
+([library](#glossary)) MUST NOT import `borealis` — a library renders nothing and
+returns typed values/`errors-go` errors for its consumer to render. The borealis
+CORE (`borealis` + `theme` + `comp` + `style`) carries NO heavy charm-stack
+dependency; the three v2 leaves (`fangx`/`huhx`/`bubblesx`) and the live `tui`
+leaf are imported ONLY by the `cmd/<bin>` / command packages that actually draw
+that surface, never pulled transitively into core logic. A domain type that wants
+to be renderable exposes the typed seam (`comp.Tabler`, or a
+`borealis.Renderable`'s `RenderBorealis(t) string`) WITHOUT importing a v2 leaf.
+*Why:* this is the borealis Law 6 (weight is import-gated) / Law 8 (no core↔core
+cycle) discipline: a fleet library must stay offline-buildable and dependency-light
+([LAYOUT-10](#dimension-repo-layout-and-module-layout)), and forcing fang/cobra/
+bubbletea into business logic both bloats the closure and couples pure code to a
+UI framework. The render-to-string `comp` set is the seam that lets even
+`shikumi-go/diag` and `logging-go/console` produce themed output without the heavy
+deps. Composes with
+[LAYOUT-03](#dimension-repo-layout-and-module-layout)/[LAYOUT-10](#dimension-repo-layout-and-module-layout)/[ERR-05](#dimension-errors-err).
+*Enforcement:* `caixa-validate` rejects a `borealis` import in a `Biblioteca`
+(`:kind` from `caixa.lisp`); depguard scopes `fangx`/`huhx`/`bubblesx`/`tui`
+imports to `cmd/**` + command packages (a leaf import in `internal/<domain>`
+business logic fails); `go build ./...` + the closure-size check enforce the
+core-vs-leaf boundary; a domain type implements `comp.Tabler`/`borealis.Renderable`
+without importing a leaf.
+*Demonstrated by:* the example's `internal/secret` package returns a `[]Secret`
+implementing `comp.Tabler` and imports no borealis leaf; only `cmd/tool` imports
+`fangx`/`huhx`/`bubblesx`; `nix build .#default` of a `Biblioteca` shows no
+charm-stack dep in its closure.
+
+**UI-12** — Theming and the visual surface are a typed, single-sourced
+configuration: the design system is configured ONCE via `borealis.Config`
+(`{Theme, Mode, Color, Accessible}`, yaml-tagged), loaded through `shikumi-go`
+like all other config ([CFG-01](#dimension-configuration-cfg)) and resolved to the
+canonical `Theme` exactly once via `borealis.FromConfig(cfg.Borealis)` — which is
+PURE and MUST NOT call `shikumi.Load` itself. A tool MUST NOT hand-author a theme:
+leaving `Config.Theme` zero selects the Nord brand default
+(`borealis.Nord()`/`Default()`); a YAML file MAY override individual tokens (pure
+data), which is the consume-an-upstream-generated-theme seam (BOREALIS Law 4 — the
+committed direction is ishou-generated tokens via `ishou render --target lipgloss`,
+replacing the hardcoded palette byte-for-byte when it lands). The resolved
+`borealis.Theme` is threaded as a value from `main`/`bootstrap.Config`; capturing
+it in a package-level global is FORBIDDEN.
+*Why:* one typed config surface for the look-and-feel mirrors the whole
+[Configuration](#dimension-configuration-cfg) dimension — the theme is just more
+config, loaded by the one loader, resolved by a pure consumer, threaded as a value
+([CFG-01](#dimension-configuration-cfg)..[CFG-04](#dimension-configuration-cfg)).
+Keeping `FromConfig` pure (no `shikumi.Load` inside) preserves the
+load-once/resolve-pure boundary; never hand-authoring a theme is the borealis
+*consume, don't author* law and the on-ramp to ishou generation. Composes with
+[CFG-01](#dimension-configuration-cfg)/[CFG-14](#dimension-configuration-cfg)/[UI-01](#dimension-uiux-look-and-feel-ui)/[UI-02](#dimension-uiux-look-and-feel-ui).
+*Enforcement:* `gsds-ui-lint` asserts the `borealis.Config` is loaded via the
+shikumi `cfg.Load`/`bootstrap.Config` path and `FromConfig` is the only resolver
+(flags a `borealis.Theme` literal authored in tool code and a `shikumi.Load`
+inside a theme path); a no-`shikumi.Load`-in-`FromConfig` check mirrors
+[CFG-01](#dimension-configuration-cfg); a `Theme` captured in a package var is
+flagged (mirrors [CFG-11](#dimension-configuration-cfg)).
+*Demonstrated by:* `main` does
+`t, _ := borealis.FromConfig(cfg.Borealis)` once (where `cfg` came from
+`shikumi`), passes `t` down by value, and a `config.yaml` with `borealis: { mode:
+dark, color: never }` round-trips; no `theme.Theme{...}` literal appears in tool
+code.
 
 ---
 
@@ -6714,6 +7077,7 @@ each dimension to one prefix. The mapping (source → canonical) is:
 | `VER-01..12` | `VER-01..17` |
 | `TQ-01..12` | `TEST-01..12` |
 | `SEC-01..12` | `SEC-01..19` |
+| (new dimension — no source prefix) | `UI-01..12` |
 | FSM cases `module-delivery` / `release-delivery` / `image-delivery` / `action-delivery` | `FSM-MODULE` / `FSM-RELEASE` / `FSM-IMAGE` / `FSM-ACTION` |
 | FSM shared invariants | `FSM-AUDIT` / `FSM-TRISTATE` / `FSM-FAIL` / `FSM-RESET` / `FSM-IDEMPOTENT` / `FSM-CAS` / `FSM-OBS` |
 
@@ -6812,6 +7176,20 @@ and the four delivery FSM gates pass, which mechanically asserts every box below
 - [ ] SEC-17 base-image + toolchain digest-pinned and recorded
 - [ ] SEC-18 signed commits + CODEOWNERS + branch protection + least-priv CI tokens + Go env hardening
 - [ ] SEC-19 expiring allowlist gate + deployed-digest ConMon rescan + artifact secret scan
+
+### UI/UX look-and-feel (UI)
+- [ ] UI-01 human-facing output rendered through `borealis` only (one `Theme`, one `Render` verb)
+- [ ] UI-02 colour via typed `borealis.Role`/`Theme` tokens; no hand-authored hex/ANSI outside `borealis/theme`
+- [ ] UI-03 layout/spacing/tables via `comp` + `style` grid; no manual padding/column math
+- [ ] UI-04 status/result role derived from `errors-go` Severity (exit/log/screen agree)
+- [ ] UI-05 errors + CLI help/usage rendered via `borealis`/`fangx` from the typed error
+- [ ] UI-06 TTY-aware: styled for a human, plain for a pipe; `-o json`/`-o yaml` stdout is one clean document
+- [ ] UI-07 `NO_COLOR`/`color: never` honoured; never colour-as-sole-signal (glyph+label)
+- [ ] UI-08 accessible: profile downsampling + typed `Accessible` mode
+- [ ] UI-09 interactive forms via `huh` through `huhx`; degrade non-interactively
+- [ ] UI-10 live widgets via `bubblesx`/`tui`; degrade to static `comp`; never on the data stream
+- [ ] UI-11 borealis scoped to the human surface; `Biblioteca` renders nothing; v2 leaves import-gated
+- [ ] UI-12 theme single-sourced via `borealis.Config` (shikumi-loaded, `FromConfig`-resolved, pure); no hand-authored theme
 
 ### Delivery FSMs (FSM-*)
 - [ ] FSM-MODULE gapless table; CAS push; in-FSM proxy timeout; retract-aware rollback; major-crossover gate; universal Fail; audited
