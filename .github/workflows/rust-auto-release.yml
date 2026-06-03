@@ -33,10 +33,10 @@ on:
         required: false
         default: patch
       source-paths:
-        description: "Space-separated globs the skip-detector inspects for changes since the last tag. Default fits a typical workspace layout; override for non-default layouts."
+        description: "Space-separated git pathspecs the skip-detector inspects for changes since the last tag. Default catches any Rust source (`*.rs`, matched at any depth) + the workspace manifests, so a SOURCE-only change (no Cargo.toml/Cargo.lock edit) still triggers a bump+publish. The old `Cargo.toml Cargo.lock` default silently skipped every source-only push (the 2026-06-03 never-publishing bug). Override for layouts with significant non-`.rs` source."
         type: string
         required: false
-        default: "Cargo.toml Cargo.lock"
+        default: "*.rs Cargo.toml Cargo.lock"
       add-paths:
         description: "Space-separated git pathspecs the bump commit stages. Default covers root + all workspace member Cargo.toml files."
         type: string
