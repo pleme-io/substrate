@@ -4958,10 +4958,29 @@ race), the gate yields `TagRejected`, never a silently-dropped push.
 - **CHECKSUM-DB-VERIFIED** — Verified is reached only after sum.golang.org has both
   the `h1:` and `/go.mod h1:` hashes and they verify; `VerifyGate`(c).
 - **CLEAN-TREE-AT-VALIDATE** — Validate is impossible with a dirty tree or un-pushed
-  commits; `ValidationGate`(a/b).
+  commits; `ValidationGate`(a/b). A revival that re-enters `Drafted` re-reads the
+  working tree (re-Validate), never bypassing this on stale facts (FSM-RESET).
+- **TAG-PUSH-IS-CAS** — `PushTag` is the compare-and-swap; a lost concurrent race
+  (remote tag now exists) yields `TagRejected`, not a silently-dropped push;
+  `forge tool release` is the serialized single writer ([FSM-CAS](#delivery-fsm-type-system)).
+- **PROXY-TIMEOUT-IN-FSM** — `Proxied → ProxyTimedOut` is reached only by
+  `ConfirmProxy` consuming `poll_budget_exhausted` (typed deadline,
+  [VER-16](#dimension-versioning-and-compatibility-ver)); no out-of-FSM mutation.
+- **ROLLBACK-RESPECTS-IMMUTABILITY** — `ModuleRollbackGate` refuses to delete a
+  proxy-cached tag (would violate IMMUTABLE-TAG); the only post-cache repudiation is
+  a retracting patch ([VER-14](#dimension-versioning-and-compatibility-ver)).
+- **MAJOR-CROSSOVER-ATOMIC** — when the major increments, `MajorCrossoverGate`
+  asserts suffix + all imports + prior-major-reachability over ONE snapshot
+  ([VER-17](#dimension-versioning-and-compatibility-ver)).
+- **UNIVERSAL-FAIL** — every non-terminal state has a `Fail(reason)` edge to
+  `DeliveryFailed` (RunnerDied/TokenExpired/NetworkPartition), so runner death mid-step
+  is defined ([FSM-FAIL](#delivery-fsm-type-system)).
+- **AUDITED** — every `advance` success emits an append-only Transition record
+  ([FSM-AUDIT](#delivery-fsm-type-system)).
 - **GAPLESS-TABLE** — every (State, Signal) pair is enumerated or returns
-  `ErrIllegalTransition` (the property test drives all 10×8 cells).
-- **TERMINAL-ABSORBING** — `Verified` + the four fail states accept no signal; only
+  `ErrIllegalTransition` (the property test drives every cell of the
+  States × Signals matrix, including the universal-Fail and timeout cells).
+- **TERMINAL-ABSORBING** — `Verified` + the five fail states accept no signal; only
   `Proxied` and `ProxyTimedOut` are non-terminal waiting states.
 
 #### Rust type sketch
@@ -5299,23 +5318,28 @@ closed: an outside consumer can install and observe the promised version).
 | From | Signal | Gate | To |
 |---|---|---|---|
 | Drafted *(start)* | Validate | `TagSemverGate` | Validated |
-| Drafted | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
 | Validated | CrossBuild | `CrossMatrixGate` | CrossBuilt |
-| Validated | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
-| CrossBuilt | Sign | `ChecksumGate` | Signed |
-| CrossBuilt | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
-| Signed | Release | `SignatureGate` | Released |
-| Signed | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
+| CrossBuilt | Scan | `ScanGate` (Pass/Indeterminate) | Scanned / CrossBuilt *(retry)* |
+| Scanned | AttachSBOM | `SBOMGate` | SBOMAttached |
+| SBOMAttached | Sign | `ChecksumGate` | Signed |
+| Signed | AttachProvenance | `ProvenanceGate` | ProvenanceAttested |
+| ProvenanceAttested | Release | `SignatureGate` | Released |
 | Released | UpdateFormula | `TapReachableGate` | FormulaUpdated |
-| Released | Rollback | `ReleaseExistsGate` | RolledBack *(fail)* |
-| Released | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
+| Released | ResumeUpload | `AssetsIncompleteGate` | Released *(resume; 1–5 assets)* |
+| Released | Rollback | `ReleaseExistsGate` (+RollbackReceipt) | RolledBack *(fail)* |
 | FormulaUpdated | Verify | `VersionMatchGate` | Verified *(ok)* |
-| FormulaUpdated | Rollback | `ReleaseExistsGate` | RolledBack *(fail)* |
-| FormulaUpdated | Fail | `AlwaysGate` | DeliveryFailed *(fail)* |
+| FormulaUpdated | Rollback | `FormulaRevertGate` (+RollbackReceipt) | RolledBack *(fail)* |
+| *(any non-terminal)* | Fail(reason) | `AlwaysGate` | DeliveryFailed *(fail)* |
 
-States: `Drafted` (start), `Validated`, `CrossBuilt`, `Signed`, `Released`,
-`FormulaUpdated`, `Verified` (terminal-ok), `DeliveryFailed`/`RolledBack`
-(terminal-fail).
+States: `Drafted` (start), `Validated`, `CrossBuilt`, `Scanned`, `SBOMAttached`,
+`Signed`, `ProvenanceAttested`, `Released`, `FormulaUpdated`, `Verified`
+(terminal-ok), `DeliveryFailed`/`RolledBack` (terminal-fail). The `Scan`/
+`AttachSBOM`/`AttachProvenance` states realize [SEC-16](#dimension-security-and-supply-chain-sec)
+(binary artifacts get an SBOM + scan + provenance, not just a checksum+signature).
+`ResumeUpload` repairs a partial Release (1–5 of the ≥6 required assets) instead of
+leaving an undefined partial; `Scan` returns to `CrossBuilt` on an Indeterminate
+verdict (infra flake, [FSM-TRISTATE](#delivery-fsm-type-system)) rather than a hard
+fail. The universal `Fail(reason)` escape is unchanged.
 
 #### Gates
 
@@ -5327,21 +5351,45 @@ States: `Drafted` (start), `Validated`, `CrossBuilt`, `Signed`, `Released`,
   exactly one non-empty artifact, each built with `CGO_ENABLED=0` (static,
   reproducible). Exactly 4 artifacts, no rogue goos/goarch. (Restates
   [SEC-01](#dimension-security-and-supply-chain-sec).)
-- **`ChecksumGate`** — a `checksums.txt` (SHA-256) covers every matrix artifact,
-  recomputed hashes match the manifest, and the build is byte-reproducible
-  (re-running at the same tag yields identical digests).
-- **`SignatureGate`** — the checksums manifest is cosign/GPG-signed and verifies
-  against the org public key; for cli/binary kinds each artifact has a detached
-  verifiable signature.
+- **`ScanGate`** (CrossBuilt→Scanned, [SEC-16](#dimension-security-and-supply-chain-sec)).
+  Tri-state: Pass iff a govulncheck/trivy scan over every cross-built binary is
+  clean; Indeterminate (scanner crashed/timed out) returns to `CrossBuilt` for retry;
+  a genuine finding fails to `DeliveryFailed(BuildError)`.
+- **`SBOMGate`** (Scanned→SBOMAttached, [SEC-16](#dimension-security-and-supply-chain-sec)).
+  Pass iff a syft SBOM (spdx-json) per artifact is attached to the Release.
+- **`ChecksumGate`** (SBOMAttached→Signed) — a `checksums.txt` (SHA-256) covers every
+  matrix artifact, recomputed hashes match the manifest, and the build is
+  byte-reproducible. The reproducible-digest comparison is precise: the SECOND build
+  runs in a CLEAN substrate runner (not the original, not local), and the gate
+  compares its digests against a recorded REFERENCE manifest; divergence fails to
+  `DeliveryFailed(BuildError)` with a "diff the two build manifests" diagnostic
+  (REPRODUCIBLE invariant).
+- **`ProvenanceGate`** (Signed→ProvenanceAttested, [SEC-16](#dimension-security-and-supply-chain-sec)/
+  [SEC-12](#dimension-security-and-supply-chain-sec)). Pass iff an SLSA provenance
+  attestation (builder identity, source digest, materials) is attached to the Release.
+- **`SignatureGate`** (ProvenanceAttested→Released) — the checksums manifest is
+  cosign/GPG-signed and verifies against the org public key; for cli/binary kinds each
+  artifact has a detached verifiable signature.
 - **`TapReachableGate`** — the GitHub Release for the tag exists with all 4 artifacts
-  + checksums + signature attached (≥6 assets), the Homebrew tap repo
-  (`org/homebrew-tap`) is reachable + writable with the release token, and the target
-  formula path is resolvable.
+  + checksums + signature + SBOM + provenance attached (≥8 assets), the Homebrew tap
+  repo (`org/homebrew-tap`) is reachable + writable with the release token, and the
+  target formula path is resolvable.
+- **`AssetsIncompleteGate`** (Released→Released, ResumeUpload) — Pass iff the Release
+  exists but carries 1–5 (incomplete) assets; the gate's Job re-uploads the missing
+  assets idempotently ([FSM-IDEMPOTENT](#delivery-fsm-type-system)). An incomplete
+  Release is NEITHER a clean `Released` NOR a `Fail` — it is a defined resume.
 - **`VersionMatchGate`** — the published binary, fetched via the updated formula,
   reports `--version` == the tag (stripped of `v`), and the formula's url/sha256 point
   at the released checksummed artifact.
-- **`ReleaseExistsGate`** — guards Rollback: a GitHub Release exists to retract and
-  the rollback actor holds delete/revert authority.
+- **`ReleaseExistsGate`** (Released→RolledBack) — Pass iff a GitHub Release exists and
+  the rollback actor holds authority; its POST-CONDITION is precise: the Release is
+  retracted/marked-draft and a typed `RollbackReceipt` (release retracted, prior
+  moving references restored, reason, severity=error) is emitted.
+- **`FormulaRevertGate`** (FormulaUpdated→RolledBack) — distinct from
+  `ReleaseExistsGate`: in addition to retracting the Release, its post-condition
+  reverts the tap formula's `url`/`sha256` to the prior version and restores moving
+  references; emits a `RollbackReceipt` enumerating each undone effect (FSM-RELEASE
+  rollback gates now carry receipts, matching FSM-IMAGE).
 - **`AlwaysGate`** — unconditional escape hatch; any non-terminal state may transition
   to `DeliveryFailed` when an out-of-band fault is reported (the typed `FailReason`
   rides in the signal).
@@ -5351,22 +5399,33 @@ States: `Drafted` (start), `Validated`, `CrossBuilt`, `Signed`, `Released`,
 - **REPRODUCIBLE** — every CrossBuild is byte-for-byte reproducible
   (`CGO_ENABLED=0`, pinned toolchain, `-trimpath`, fixed
   `-ldflags '-s -w -X main.version={tag}'`, `SOURCE_DATE_EPOCH` from the commit time);
-  enforced by `ChecksumGate`'s reproducible-digest comparison.
-- **CHECKSUMMED** — no artifact leaves CrossBuilt without a SHA-256 entry, and none is
-  Released without that manifest being signed and verified (`ChecksumGate` then
-  `SignatureGate` form an unbypassable pipeline).
+  `ChecksumGate` runs the SECOND build in a clean substrate runner and compares
+  against a recorded reference manifest, failing to `DeliveryFailed(BuildError)` with
+  a build-manifest diff on divergence.
+- **CHECKSUMMED + INVENTORIED** — no artifact leaves CrossBuilt without a SHA-256
+  entry, none is Released without the manifest signed+verified AND an SBOM + scan +
+  provenance attached ([SEC-16](#dimension-security-and-supply-chain-sec)); the
+  Scan → SBOM → Checksum → Provenance → Signature chain is unbypassable.
 - **MATRIX-COMPLETE** — the {linux,darwin} × {amd64,arm64} cross-product is total;
   `CrossMatrixGate` rejects any partial matrix.
 - **MONOTONIC-FORWARD** — the happy path is strictly linear Drafted → Validated →
-  CrossBuilt → Signed → Released → FormulaUpdated → Verified; the only non-forward
-  edges are Rollback (post-publish only) and Fail.
-- **ROLLBACK-AFTER-PUBLISH-ONLY** — Rollback is legal only from Released and
-  FormulaUpdated (states where a public Release exists); pre-publish states Fail
-  instead (nothing to retract).
+  CrossBuilt → Scanned → SBOMAttached → Signed → ProvenanceAttested → Released →
+  FormulaUpdated → Verified; the only non-forward edges are ResumeUpload (resume),
+  Scan-retry (Indeterminate), Rollback (post-publish only), and Fail.
+- **ROLLBACK-AFTER-PUBLISH-ONLY, RECEIPTED** — Rollback is legal only from Released
+  (`ReleaseExistsGate`) and FormulaUpdated (`FormulaRevertGate`); pre-publish states
+  Fail instead; BOTH rollback gates emit a typed `RollbackReceipt` (Release retracted,
+  formula reverted, moving refs restored).
+- **PARTIAL-PUBLISH-DEFINED** — an incomplete Release (1–5 assets) is a defined
+  `ResumeUpload` state, never an undefined partial; re-issuing `Release` is idempotent
+  ([FSM-IDEMPOTENT](#delivery-fsm-type-system)).
 - **TAG-IMMUTABLE** — the tag is validated once and is the immutable identity for the
   whole delivery; every later gate re-derives from it.
 - **VERIFY-CLOSES-LOOP** — Verified requires the externally-installed binary to report
   `--version` == tag; self-reported build success is never sufficient.
+- **AUDITED** — every transition emits an append-only record ([FSM-AUDIT](#delivery-fsm-type-system)).
+- **UNIVERSAL-FAIL** — every non-terminal state has a `Fail(reason)` edge
+  ([FSM-FAIL](#delivery-fsm-type-system)).
 - **TERMINAL-ABSORBING** + **ILLEGAL-IS-NOOP** — terminals accept no signal; any
   unenumerated (state, signal) returns the input state unchanged plus an error.
 
@@ -5718,27 +5777,46 @@ registry push by construction, not by convention.
 
 #### Transition table
 
-Each progress step has exactly ONE accepted signal whose two complementary gate
-cells partition the outcome (success-gate `G_x_ok` ⊕ fail-gate `G_x_fail`).
+Each progress step has exactly ONE accepted signal whose complementary gate cells
+partition the outcome (success-gate `G_x_ok` ⊕ fail-gate `G_x_fail` ⊕
+Indeterminate). **The order is cryptographically correct
+([SEC-13c](#dimension-security-and-supply-chain-sec)): scan the local tarball, push,
+THEN sign/attest by the pushed digest** — signing requires a pushed reference and
+scanning must precede push.
 
-| From | Signal | Gate (ok / fail) | To |
+| From | Signal | Gate (ok / fail / indeterminate) | To |
 |---|---|---|---|
 | Drafted *(start)* | Validate | `G_manifest_valid` / `G_manifest_invalid` | Validated / ValidationFailed |
 | Validated | BuildImage | `G_image_hardened` / `G_image_not_hardened` | ImageBuilt / ImageBuildFailed |
-| ImageBuilt | Sign | `G_cosign_present` / `G_cosign_absent` | Signed / SignFailed |
-| Signed | AttachSBOM | `G_sbom_attached` / `G_sbom_missing` | SBOMAttached / SBOMFailed |
-| SBOMAttached | ScanCVE | `G_cve_under_threshold` / `G_cve_over_threshold` | CVEGated / CVEGateFailed |
+| ImageBuilt | ScanCVE | `G_cve_under_threshold` / `G_cve_over_threshold` / `G_scan_indeterminate` | CVEGated / CVEGateFailed / ImageBuilt *(retry)* |
 | CVEGated | Push | `G_registry_push_ok` / `G_registry_push_fail` | Pushed / PushFailed |
-| Pushed | Deploy | `G_apply_accepted` / `G_apply_rejected` | Deployed / DeployFailed |
+| Pushed | Sign | `G_cosign_present` / `G_cosign_absent` | Signed / SignFailed |
+| Signed | AttachSBOM | `G_sbom_attached` / `G_sbom_missing` | SBOMAttached / SBOMFailed |
+| SBOMAttached | AttachProvenance | `G_provenance_attested` / `G_provenance_missing` | ProvenanceAttested / ProvenanceFailed |
+| ProvenanceAttested | Deploy | `G_apply_accepted` / `G_apply_rejected` | Deployed / DeployFailed |
 | Deployed | Verify | `G_readiness_green` / `G_readiness_red` | Verified *(ok)* / VerifyFailed |
-| DeployFailed | Rollback | `G_rollback_complete` | RolledBack *(fail)* |
-| VerifyFailed | Rollback | `G_rollback_complete` | RolledBack *(fail)* |
+| PushFailed | Cleanup | `G_registry_push_reverted` | PushReverted *(fail)* |
+| DeployFailed | RetryDeploy | `G_transient_and_budget` | ProvenanceAttested *(retry)* |
+| DeployFailed | Rollback | `G_rollback_complete` (ColdRollback if no prior) | RolledBack *(fail)* |
+| VerifyFailed | RetryVerify | `G_transient_and_budget` | Deployed *(retry)* |
+| VerifyFailed | Rollback | `G_rollback_complete` (ColdRollback if no prior) | RolledBack *(fail)* |
+| Verified | Reevaluate | `G_rescan_clean` / `G_rescan_degraded` | Verified / Degraded *(ConMon)* |
+| Degraded | Rollback | `G_rollback_complete` | RolledBack *(fail)* |
+| *(any non-terminal)* | Fail(reason) | `AlwaysGate` | DeliveryFailed *(fail; RunnerDied/etc.)* |
 
-Terminal-ok: `Verified`. Terminal-fail:
-`ValidationFailed`/`ImageBuildFailed`/`SignFailed`/`SBOMFailed`/`CVEGateFailed`/`PushFailed`/`DeployFailed`/`VerifyFailed`/`RolledBack`.
-Rollback is legal ONLY from the two post-push runtime failures (`DeployFailed`,
-`VerifyFailed`); every pre-push gate failure is a pure terminal with no outgoing
-edge.
+Terminal-ok: `Verified` (re-evaluable to `Degraded` for ConMon). Terminal-fail:
+`ValidationFailed`/`ImageBuildFailed`/`CVEGateFailed`/`PushFailed`(→`PushReverted`)/
+`SignFailed`/`SBOMFailed`/`ProvenanceFailed`/`DeployFailed`/`VerifyFailed`/
+`RolledBack`/`DeliveryFailed`. Notes on the gaps closed: `PushFailed → Cleanup →
+PushReverted` removes orphaned per-arch tags/digests after a partial push (GAP);
+`DeployFailed`/`VerifyFailed` gain BOUNDED operator-gated retry edges back to
+`ProvenanceAttested`/`Deployed` so a transient cluster fault does not force a full
+rebuild of an already-pushed-and-signed digest; `ScanCVE` Indeterminate (trivy
+crashed/timed out) returns to `ImageBuilt` for retry instead of becoming a hard CVE
+terminal ([FSM-TRISTATE](#delivery-fsm-type-system)); `Verified → Degraded` is the
+ConMon re-evaluation edge ([SEC-19](#dimension-security-and-supply-chain-sec)); and a
+FIRST deploy (no prior good revision) rolls back as `ColdRollback` (scale-to-zero /
+delete workload, nullable to-digest).
 
 #### Gates
 
@@ -5761,59 +5839,106 @@ edge.
   (`spdx-json`/`cyclonedx-json`) is attached to the image digest as a cosign attest
   predicate with subject-digest == built digest, itself cosign-verifiable
   ([SEC-04](#dimension-security-and-supply-chain-sec)).
-- **`G_cve_under_threshold`** / **`G_cve_over_threshold`** — a trivy/grype scan over
-  the attached SBOM yields `count(severity ≥ cveGate.failOn) ≤ cveGate.threshold`
-  (default failOn=HIGH, threshold=0) after the allowlist is subtracted, reproducible
-  against the pinned vuln DB ([SEC-05](#dimension-security-and-supply-chain-sec)).
-  `G_cve_over_threshold` is a hard stop — never push a CVE-failing image.
-- **`G_registry_push_ok`** / **`G_registry_push_fail`** — `forge image-release`
-  pushed every arch image + `.sig` + `.att`, created a multi-arch manifest-list, and
-  both `<arch>-<sha>` (immutable) and `<arch>-latest` (floating) tags resolve to the
-  pushed digests.
+- **`G_cve_under_threshold`** / **`G_cve_over_threshold`** / **`G_scan_indeterminate`**
+  — a trivy/grype scan over the local TARBALL (pre-push, [SEC-13c](#dimension-security-and-supply-chain-sec))
+  yields `count(severity ≥ cveGate.failOn) ≤ cveGate.threshold` (default failOn=HIGH,
+  threshold=0, [SEC-05](#dimension-security-and-supply-chain-sec)) after the allowlist
+  is subtracted, reproducible against the pinned vuln DB. TRI-STATE: if the scanner
+  itself crashed/timed out (the fact was not produced), the verdict is
+  `Indeterminate` and routes back to `ImageBuilt` for retry — a trivy crash is NOT a
+  CVE finding ([FSM-TRISTATE](#delivery-fsm-type-system)). `G_cve_over_threshold` (a
+  genuine finding) is a hard stop.
+- **`G_registry_push_ok`** / **`G_registry_push_fail`** — DECOMPOSED so a partial
+  push is observable: `images_pushed ∧ manifest_list_created ∧ sha_tag_resolves ∧
+  latest_tag_resolves`. Re-running `Push` at the same digest is idempotent (layers are
+  digest-immutable, already-pushed layers are no-ops, [FSM-IDEMPOTENT](#delivery-fsm-type-system)).
+- **`G_registry_push_reverted`** (PushFailed→PushReverted, Cleanup) — orphaned
+  per-arch tags/digests from a partial push are deleted (or proven unreferenced and
+  harmless); `PushFailed` is NO LONGER a dead terminal — it has this cleanup edge.
+- **`G_cosign_present`** runs AFTER push, binding the signature to the PUSHED digest
+  ([SEC-13c](#dimension-security-and-supply-chain-sec)).
+- **`G_provenance_attested`** / **`G_provenance_missing`** (SBOMAttached→ProvenanceAttested)
+  — an SLSA provenance attestation (builder identity, source digest, materials) is
+  attached to the pushed digest, cosign-verifiable ([SEC-12](#dimension-security-and-supply-chain-sec)/
+  [SEC-13](#dimension-security-and-supply-chain-sec)). This realizes the previously-missing
+  provenance state.
 - **`G_apply_accepted`** / **`G_apply_rejected`** — a K8s apply (FluxCD reconcile /
   `kubectl apply`) of the workload referencing the immutable `<arch>-<sha>` digest was
-  admitted (admission webhooks incl. cosign/tameshi passed, the object exists,
-  `observedGeneration == metadata.generation`).
-- **`G_readiness_green`** / **`G_readiness_red`** — within `readinessTimeout`: for
-  `service` all `readyReplicas == desiredReplicas` and every Pod readinessProbe green;
-  for `daemon` `numberReady == desiredNumberScheduled`; no CrashLoopBackOff /
+  admitted, AND the admitted object carries the restricted SecurityContext conjunct
+  set ([SEC-14](#dimension-security-and-supply-chain-sec): runAsNonRoot, RO-root,
+  dropped caps, seccomp, no host namespaces) evaluated by the sekiban/Kyverno
+  admission policy; `observedGeneration == metadata.generation`.
+- **`G_readiness_green`** / **`G_readiness_red`** — within the typed, lower-bounded
+  `shikumi-go` `readinessTimeout` (default `300s`, [SEC-13](#dimension-security-and-supply-chain-sec));
+  the timeout is INCLUSIVE → red (a rollout green at exactly-timeout+ε is `VerifyFailed`).
+  For `service` all `readyReplicas == desiredReplicas` and every Pod readinessProbe
+  green; for `daemon` `numberReady == desiredNumberScheduled`; no CrashLoopBackOff /
   ImagePullBackOff.
-- **`G_rollback_complete`** — the cluster is restored to the last-known-good immutable
-  digest, replicas reconverged on the previous revision, and a typed `RollbackReceipt`
-  (from-digest, to-digest, reason, severity=error) is emitted to the audit sink.
+- **`G_transient_and_budget`** (DeployFailed→ProvenanceAttested / VerifyFailed→Deployed,
+  RetryDeploy/RetryVerify) — Pass iff the fault is transient (API 503 / admission
+  flap / transient ImagePullBackOff / slow node scale-up) AND the operator-gated retry
+  budget is not exhausted; a bounded retry that abandons NEITHER the pushed-signed
+  digest NOR forces a rebuild (mirrors FSM-ACTION's operator-revival pattern).
+- **`G_rollback_complete`** — restore the LAST-KNOWN-GOOD immutable digest, replicas
+  reconverged, typed `RollbackReceipt` (from-digest, to-digest, reason, severity=error)
+  emitted. Precise on first-deploy: if `has_prior_good_revision` is false, rollback is
+  a `ColdRollback` — scale-to-zero / delete the workload, `to-digest` is NULL — a
+  distinct, defined outcome rather than an undefined "restore the prior digest".
+- **`G_rescan_clean`** / **`G_rescan_degraded`** (Verified→Verified / Verified→Degraded,
+  Reevaluate) — a scheduled `forge image-rescan` over the DEPLOYED digest re-scores it
+  against the threshold; a newly-crossed threshold flags `Degraded` (ConMon,
+  [SEC-19](#dimension-security-and-supply-chain-sec)), from which `Rollback` is legal.
 
 #### Invariants
 
 - **MONOTONIC PROGRESS** — the happy path is strictly linear Drafted → Validated →
-  ImageBuilt → Signed → SBOMAttached → CVEGated → Pushed → Deployed → Verified; no
-  skip/back edge exists (the only edges leaving a terminal-fail state are the two
-  Rollback edges).
-- **DIGEST IMMUTABILITY** — once ImageBuilt, the sha256 digest is frozen; Sign,
-  AttachSBOM, ScanCVE, Push, Deploy, Verify all bind to that exact digest; deployment
-  ALWAYS references the immutable `<arch>-<git-short-sha>`, the floating
-  `<arch>-latest` is convenience-only ([SEC-08](#dimension-security-and-supply-chain-sec)).
-- **NO UNSIGNED / NO UN-SBOMED PUSH** — `G_registry_push_ok` is unreachable unless
-  the path traversed Signed AND SBOMAttached AND CVEGated; CVEGated is the sole
-  predecessor of Pushed. (Restates [SEC-04](#dimension-security-and-supply-chain-sec)/
-  [SEC-05](#dimension-security-and-supply-chain-sec)/[SEC-06](#dimension-security-and-supply-chain-sec).)
-- **CVE GATE IS A HARD STOP** — `CVEGateFailed` has NO outgoing transition; a
-  CVE-failing image is never signed-around, force-pushed, or rolled into service; the
-  only recovery is a new Drafted cycle (patch deps).
-- **ROLLBACK CONVERGES TO LAST-GOOD** — Rollback is legal ONLY from DeployFailed and
-  VerifyFailed and always lands in RolledBack with the prior immutable digest restored
-  and a RollbackReceipt emitted; pre-push failures cannot Rollback (nothing was
-  deployed).
-- **TOTAL OUTCOME PER STEP** — every non-terminal state has exactly one accepted
-  signal whose two complementary gate cells partition the outcome; no third outcome
-  and no silently-dropped signal on a progress state.
-- **PURE FSM, IMPURE EDGES** — `advance` is pure and total; all IO (build, cosign,
-  syft, trivy, regctl push, kubectl apply, readiness poll) lives in the gate cohort
-  and is reduced to a `GateAggregate` BEFORE it reaches `advance`
+  ImageBuilt → CVEGated → Pushed → Signed → SBOMAttached → ProvenanceAttested →
+  Deployed → Verified ([SEC-13c](#dimension-security-and-supply-chain-sec) order:
+  scan → push → sign/attest-by-digest); the only non-forward edges are the bounded
+  RetryDeploy/RetryVerify, the ScanCVE Indeterminate retry, Cleanup, the ConMon
+  Reevaluate, and Rollback.
+- **SCAN-BEFORE-PUSH, SIGN-AFTER-PUSH** — `ScanCVE` is the sole predecessor of `Push`
+  (no vulnerable image is ever pushed); `Sign`/`AttachSBOM`/`AttachProvenance` follow
+  `Push` and bind to the PUSHED digest (cosign cannot attach to an unpushed ref). A
+  property test asserts `Push` precedes `Sign`/`AttachSBOM` and `ScanCVE` precedes
+  `Push` ([SEC-13c](#dimension-security-and-supply-chain-sec)).
+- **DIGEST IMMUTABILITY** — once ImageBuilt, the sha256 digest is frozen; ScanCVE,
+  Push, Sign, AttachSBOM, AttachProvenance, Deploy, Verify all bind to that exact
+  digest; deployment ALWAYS references the immutable `<arch>-<git-short-sha>`, the
+  floating `<arch>-latest` is convenience-only ([SEC-08](#dimension-security-and-supply-chain-sec)).
+- **NO UNSCANNED PUSH, NO UNSIGNED SERVE** — `Push` is unreachable except from
+  `CVEGated`; `Deployed` is unreachable except from `ProvenanceAttested` (so a served
+  image is always scanned, pushed, signed, SBOM'd, AND provenance-attested). The push
+  tool itself refuses a digest lacking a verifiable scan record at push time
+  ([SEC-13](#dimension-security-and-supply-chain-sec)). (Restates
+  [SEC-04](#dimension-security-and-supply-chain-sec)/[SEC-05](#dimension-security-and-supply-chain-sec)/
+  [SEC-06](#dimension-security-and-supply-chain-sec)/[SEC-12](#dimension-security-and-supply-chain-sec).)
+- **CVE GATE IS A HARD STOP, SCANNER-FLAKE IS NOT** — a genuine `G_cve_over_threshold`
+  finding terminates at `CVEGateFailed`; a scanner crash (`G_scan_indeterminate`)
+  retries from `ImageBuilt` and never collapses an infra flake into a CVE terminal
+  ([FSM-TRISTATE](#delivery-fsm-type-system)).
+- **PARTIAL-PUSH CLEANED UP** — `PushFailed → Cleanup → PushReverted` removes orphaned
+  per-arch tags/digests; `PushFailed` is not a dead terminal.
+- **TRANSIENT RUNTIME FAULTS RETRY, NOT REBUILD** — `DeployFailed`/`VerifyFailed`
+  retry (bounded, operator-gated) to `ProvenanceAttested`/`Deployed`, reusing the
+  already-pushed-signed digest, before resorting to Rollback.
+- **ROLLBACK CONVERGES TO LAST-GOOD (OR COLD)** — Rollback lands in RolledBack with the
+  prior immutable digest restored + RollbackReceipt; on a first deploy with no prior,
+  it is a `ColdRollback` (scale-to-zero/delete, null to-digest).
+- **CONTINUOUS MONITORING** — `Verified → Degraded` (Reevaluate) lets a deployed digest
+  be flagged newly-vulnerable post-deploy ([SEC-19](#dimension-security-and-supply-chain-sec)).
+- **PURE FSM, IMPURE EDGES** — `advance` is pure and total; all IO (build, trivy,
+  regctl push, cosign, syft, provenance, kubectl apply, readiness poll, rescan) lives
+  in the gate cohort and is reduced to a tri-state `GateAggregate` BEFORE `advance`
   ([JOB-11](#dimension-concurrency-and-jobs-job)).
+- **PUSH IS A CAS** — `Push` is serialized (single-writer `forge image-release`); a
+  digest-exists race is a first-class signal, not a dropped push ([FSM-CAS](#delivery-fsm-type-system)).
+- **UNIVERSAL-FAIL** — every non-terminal state has a `Fail(reason)` edge to
+  `DeliveryFailed` so runner death mid-step is defined ([FSM-FAIL](#delivery-fsm-type-system)).
 - **EVERY TRANSITION IS AUDITED** — each `advance` success emits one append-only
   Transition record (from, signal, gate-aggregate, to, image-digest, severity) to the
   logging-go/errors-go sink; terminal-fail carries severity=error, terminal-ok
-  severity=notice.
+  severity=notice. (Now a SHARED property of all four machines, [FSM-AUDIT](#delivery-fsm-type-system).)
 
 #### Rust type sketch
 
@@ -6136,16 +6261,24 @@ operator-only revival ([JOB-14](#dimension-concurrency-and-jobs-job)).
 | BinaryBuilt | Fail | `G_FailureObserved` | Failed |
 | ActionYmlRendered | Release | `G_TagPresentAndAssetsUploaded` | Released |
 | ActionYmlRendered | Fail | `G_FailureObserved` | Failed |
-| Released | Verify | `G_PinnedRefResolvesAndRuns` | Verified *(ok)* |
+| Released | Verify | `G_PinnedRefResolvesAndRuns` | Verified |
 | Released | Rollback | `G_RollbackComplete` | RolledBack *(fail)* |
 | Released | Fail | `G_FailureObserved` | Failed |
+| Verified | PromoteMajorTag | `G_MajorTagPromoted` | Promoted *(ok)* |
+| Verified | Rollback | `G_RollbackComplete` | RolledBack *(fail)* |
 | Failed | Rollback | `G_RollbackComplete` | RolledBack *(fail)* |
 | Failed | OperatorRetry | `G_OperatorAuthorized` | WaitingForOperator |
-| WaitingForOperator | OperatorRetry | `G_OperatorAuthorized` | Drafted |
+| WaitingForOperator | OperatorRetry | `G_OperatorAuthorized` (+ResetFacts) | Drafted |
 | WaitingForOperator | OperatorAbandon | `G_RollbackComplete` | RolledBack *(fail)* |
 
-Terminal-ok: `Verified`. Terminal-fail: `RolledBack`. `Failed` is revivable (the
-Deadlettered analog); `WaitingForOperator` is an operator pause.
+Terminal-ok: `Promoted`. Terminal-fail: `RolledBack`. `Failed` is revivable (the
+Deadlettered analog); `WaitingForOperator` is an operator pause. KEY FIX
+([SEC-13c](#dimension-security-and-supply-chain-sec)-analog for actions): the moving
+major tag (e.g. `v1`) is force-updated to the new tag ONLY at `PromoteMajorTag`,
+AFTER `Verify` — so consumers pinned to `@v1` never get an UNVERIFIED release. The
+prior `v1` target SHA is captured at Release time so `G_RollbackComplete` can revert
+the major tag to exactly that SHA. `Verified` is no longer the terminal-ok; it is a
+verified-but-not-yet-promoted state, and `Promoted` is the terminal-ok.
 
 #### Gates
 
@@ -6171,25 +6304,37 @@ Deadlettered analog); `WaitingForOperator` is an operator pause.
   safe — all inputs hoisted to env), and the committed `action.yml` equals the
   `nix build .#action-yml` output.
 - **`G_TagPresentAndAssetsUploaded`** — a semver tag matching `^v\d+\.\d+\.\d+$`
-  points at the validated commit, a published GH Release is bound to it carrying one
-  asset per cross-built target (checksum-matched) plus the `action.yml` asset, and the
-  moving major-version tag (e.g. `v1`) is force-updated to the new tag.
+  points at the validated commit, and a published GH Release is bound to it carrying
+  one asset per cross-built target (checksum-matched) plus the `action.yml` asset.
+  The moving major-version tag (e.g. `v1`) is NOT touched here — its prior target SHA
+  is CAPTURED into the snapshot (`prior_major_tag_sha`) so promotion and rollback can
+  reason about it. The major tag is promoted only at `PromoteMajorTag` (post-Verify),
+  closing the gap where `@v1` consumers received an unverified release.
 - **`G_PinnedRefResolvesAndRuns`** — a smoke-test workflow referencing the action by
   its IMMUTABLE released ref (full commit SHA or the just-published tag) resolves, the
   binary parses every `INPUT_*` without a missing-required error, each declared output
   appears with the expected value (written to `GITHUB_OUTPUT`), the step exits 0 with
   no `::error::` workflow-command, and the resolved `action.yml` at the tag equals the
   verified-contract `action.yml`.
+- **`G_MajorTagPromoted`** (Verified→Promoted) — the moving major tag is force-updated
+  to the VERIFIED tag (only now), and the snapshot records that the prior target was
+  `prior_major_tag_sha` so a later rollback (from `Verified`) can revert it exactly.
 - **`G_FailureObserved`** — PURE; passes once a typed FailureRecord exists with a Cause
   in `{ValidationFailed, CrossBuildFailed, RenderMismatch, ReleasePublishFailed,
   VerifyFailed}` whose `FromState` == the state emitting Fail (never fail silently).
 - **`G_RollbackComplete`** — every side effect up to the failing state is provably
-  undone (tag + Release deleted, moving major tag reverted, working-tree `action.yml`
-  restored) with a `RollbackReceipt` enumerating each undone effect; built-binary Nix
-  store paths need not be GC'd (immutable, content-addressed, harmless).
-- **`G_OperatorAuthorized`** — an authenticated operator decision (recognized
-  release-owner principal, `Intent == Retry`, bound to the active FailureRecord)
-  authorizes re-attempt. (Mirrors shigoto `SigOperatorTransition` gating.)
+  undone (tag + Release deleted, working-tree `action.yml` restored) AND, if the major
+  tag was promoted, it is reverted to EXACTLY the captured `prior_major_tag_sha` (the
+  gate asserts the revert target, which the prior FSM could not because it recorded no
+  prior SHA); a `RollbackReceipt` enumerates each undone effect; built-binary Nix store
+  paths need not be GC'd (immutable, content-addressed, harmless).
+- **`G_OperatorAuthorized`** (+ ResetFacts on the `WaitingForOperator → Drafted` edge)
+  — an authenticated operator decision (recognized release-owner principal, `Intent ==
+  Retry`, bound to the active FailureRecord) authorizes re-attempt; the revival edge
+  into `Drafted` RESETS the captured Facts to a fresh snapshot (clears stale
+  `Failure`/`TagAndAssets`/`RollbackComplete`) and forces a re-`Validate` against the
+  current working tree — a revived delivery cannot pass `G_FailureObserved` on a stale
+  `Failure` or skip re-validation. (Mirrors shigoto `SigOperatorTransition` gating.)
 
 #### Invariants
 
@@ -6199,18 +6344,27 @@ Deadlettered analog); `WaitingForOperator` is an operator pause.
   `G_ActionYmlMatchesContract` make divergence unreachable). (Realizes
   [NAME-12](#dimension-naming-name).)
 - **I2 Monotonic forward progress** — Drafted → Validated → BinaryBuilt →
-  ActionYmlRendered → Released → Verified is the ONLY accepting path; you cannot
-  Release without BinaryBuilt AND ActionYmlRendered behind you.
+  ActionYmlRendered → Released → Verified → Promoted is the ONLY accepting path; you
+  cannot Release without BinaryBuilt AND ActionYmlRendered behind you, and you cannot
+  Promote the moving major tag without Verify behind you.
 - **I3 No release before proof of build + contract** — `G_TagPresentAndAssetsUploaded`
   is satisfiable only when a BuildManifest and a matched `action.yml` exist, so a tag
   is never pushed for an unbuildable or contract-divergent commit.
-- **I4 Immutability of a verified release** — once Verified, NO signal is legal; a new
-  delivery uses a new tag (fresh FSM from Drafted).
+- **I3a Major tag promoted only post-Verify** — `@v1` is repointed ONLY at
+  `PromoteMajorTag` (after `Verify`); consumers pinned to a moving major never receive
+  an unverified release, and the prior major SHA is captured for exact rollback.
+- **I4 Immutability of a PROMOTED release** — once `Promoted`, NO signal is legal; a
+  new delivery uses a new tag (fresh FSM from Drafted). `Verified` (pre-promotion) is
+  still rollback-able.
 - **I5 Total failure reachability** — every non-terminal pre-Verified state has a Fail
-  edge to Failed; failure is never a stuck state.
+  edge to Failed; failure is never a stuck state (UNIVERSAL-FAIL).
+- **I5a Fact reset on revival** — the `WaitingForOperator → Drafted` revival edge
+  resets the captured Facts and forces re-Validate; a revived run never reuses stale
+  facts ([FSM-RESET](#delivery-fsm-type-system)).
 - **I6 Rollback restores the world** — any path to RolledBack guarantees (via
-  `G_RollbackComplete`) all tags/releases/file mutations are undone; RolledBack is
-  observationally ≤ Drafted.
+  `G_RollbackComplete`) all tags/releases/file mutations are undone AND the major tag
+  is reverted to the captured `prior_major_tag_sha`; RolledBack is observationally ≤
+  Drafted.
 - **I7 Operator-gated revival only** — the ONLY way to re-attempt after Failed is
   through `G_OperatorAuthorized` (Failed → WaitingForOperator → Drafted); the automatic
   FSM never silently retries.
@@ -6549,18 +6703,216 @@ each dimension to one prefix. The mapping (source → canonical) is:
 |---|---|
 | `RLM-01..12` | `LAYOUT-01..12` |
 | `NAM-01..13` | `NAME-01..13` |
-| `cli-ux-01..12-*` (slug form) | `CLI-01..12` |
-| `CFG-001..014` | `CFG-01..14` |
+| `cli-ux-01..12-*` (slug form) | `CLI-01..13` |
+| `CFG-001..014` | `CFG-01..15` |
 | `OBS-01..14` | `OBS-01..14` (unchanged) |
 | `ERR-01..12` | `ERR-01..12` (unchanged) |
-| `LH-01..14` | `LIFE-01..14` |
-| `NET-01..13` | `NET-01..13` (unchanged) |
+| `LH-01..14` | `LIFE-01..16` |
+| `NET-01..13` | `NET-01..14` |
 | `CJ-01..14` | `JOB-01..14` |
-| `DOC-01..10` | `DOC-01..10` (unchanged) |
-| `VER-01..12` | `VER-01..12` (unchanged) |
+| `DOC-01..10` | `DOC-01..20` |
+| `VER-01..12` | `VER-01..17` |
 | `TQ-01..12` | `TEST-01..12` |
-| `SEC-01..12` | `SEC-01..12` (unchanged) |
+| `SEC-01..12` | `SEC-01..19` |
 | FSM cases `module-delivery` / `release-delivery` / `image-delivery` / `action-delivery` | `FSM-MODULE` / `FSM-RELEASE` / `FSM-IMAGE` / `FSM-ACTION` |
+| FSM shared invariants | `FSM-AUDIT` / `FSM-TRISTATE` / `FSM-FAIL` / `FSM-RESET` / `FSM-IDEMPOTENT` / `FSM-CAS` / `FSM-OBS` |
 
 All cross-references in this document and every entry in
-[`rules-registry.yaml`](./rules-registry.yaml) use the canonical IDs.
+[`rules-registry.yaml`](./rules-registry.yaml) use the canonical IDs. The standalone
+typed FSM spec is [`go-delivery-fsms.md`](./go-delivery-fsms.md).
+
+---
+
+## Conformance Checklist
+
+Every rule as a checkable item. A repo is GSDS-conformant iff `nix run .#check-all`
+and the four delivery FSM gates pass, which mechanically asserts every box below.
+`caixa-validate --conformance` emits this list with pass/fail per item.
+
+### Repo layout and module (LAYOUT)
+- [ ] LAYOUT-01 module path `github.com/pleme-io/<slug>` (`-go` suffix preserved)
+- [ ] LAYOUT-02 `go` directive pins MINOR only, not ahead of the toolchain
+- [ ] LAYOUT-03 `cmd/`/`internal/`/`pkg/` placement is mechanical and correct
+- [ ] LAYOUT-04 six required top-level files present, non-empty, canonical (LICENSE == MIT)
+- [ ] LAYOUT-05 no `.goreleaser.yml`; release is tag-only via substrate
+- [ ] LAYOUT-06 `flake.nix` consumes the matching substrate Go helper, no raw `buildGoModule`
+- [ ] LAYOUT-07 CI is the generated `auto-release.yml` shim; `run:` ≤3 lines; explicit minimal `permissions:` (SEC-18)
+- [ ] LAYOUT-08 single- vs multi-binary layout matches `:kind`/`:ecosystem`
+- [ ] LAYOUT-09 `caixa.lisp` declares a valid `:kind` + Go `:ecosystem`
+- [ ] LAYOUT-10 `go.sum` complete; only the 8 first-party libs; no local re-impl
+- [ ] LAYOUT-11 one canonical name, byte-identical across every surface
+- [ ] LAYOUT-12 no `vendor/`; deps via proxy + `go.sum` + `vendorHash`
+
+### Naming (NAME)
+- [ ] NAME-01..13 module/package/file/command/env/key/identifier naming + initialism caps
+
+### CLI UX (CLI)
+- [ ] CLI-01..12 cli-go App/Command model, kebab verbs, version, globals, precedence, render, exit shim
+- [ ] CLI-13 flag/subcommand rename/removal is MAJOR + hidden `DeprecatedAlias` for ≥1 minor
+
+### Configuration (CFG)
+- [ ] CFG-01..14 shikumi-go-only typed config, fixed precedence, SecretRef, Validate, reload classes, bootstrap order
+- [ ] CFG-15 `schema_version` + forward migration; no silent field-loss on upgrade
+
+### Observability (OBS)
+- [ ] OBS-01..14 one logging-go logger, JSON/stdout, levels, correlation/tenant, context, severity, otel bridge
+
+### Errors (ERR)
+- [ ] ERR-01..12 errors-go everywhere, Err-prefixed codes, severity, wrap discipline, exit codes, boundary classification
+
+### Lifecycle and health (LIFE)
+- [ ] LIFE-01..14 SignalContext, Shutdown order, probes, RunLoop, graceful stop
+- [ ] LIFE-15 canonical ports `:8081` `/healthz` `/readyz` `/metrics`
+- [ ] LIFE-16 README `## Usage` runnable `nix run .#<app> --` recipe
+
+### Networking (NET)
+- [ ] NET-01..13 todoku-go client, retry/idempotency, ctx, timeouts, auth, health, middleware order
+- [ ] NET-14 TLS MinVersion ≥1.2; no `InsecureSkipVerify`; no weak crypto/`math/rand`
+
+### Concurrency and jobs (JOB)
+- [ ] JOB-01..14 shigoto-go DAG/scheduler, stable JobIDs, pure gates, idempotent Execute, deadletter, audit
+
+### Documentation and discoverability (DOC)
+- [ ] DOC-01..10 godoc, examples, README shape, CHANGELOG, pkg.go.dev (MIT), Built-on, navigate-test, no-shell doc tooling
+- [ ] DOC-11 canonical example repos exist and pass (no dead `Demonstrated by:`)
+- [ ] DOC-12 Glossary present and complete
+- [ ] DOC-13 role-based reading on-ramp present
+- [ ] DOC-14 Identity-derivation table present; `caixa-validate` derives from it
+- [ ] DOC-15 Concern → library → symbol map present
+- [ ] DOC-16 inter-library composition graph present + acyclic + matches LIFE-12
+- [ ] DOC-17 gate-triage table (analyzers + FSM verdicts) present
+- [ ] DOC-18 generated-file sentinel + authored/generated manifest + regenerate loop
+- [ ] DOC-19 Tunables & defaults appendix present
+- [ ] DOC-20 annotation/escape-hatch catalog present; unknown `//gsds:` rejected
+
+### Versioning and compatibility (VER)
+- [ ] VER-01..10 strict semver, /vN suffix, immutable tags, tag-as-version, stability, crossover, deprecation, notes, pre-release, go.mod (+ go.work + toolchain)
+- [ ] VER-04a version-injection target declared (`:version-package`)
+- [ ] VER-11a single-module multi-binary monorepo (one go.mod, one version)
+- [ ] VER-11b true multi-module repo (N go.mod, path-prefixed tags)
+- [ ] VER-12 Tagged ⟺ tag exists (FSM coupling)
+- [ ] VER-13 consumer upgrade is `forge tool upgrade`; no two-major diamond
+- [ ] VER-14 bad version repudiated by `retract`, never tag deletion
+- [ ] VER-15 fleet major upgrade propagates root→leaf
+- [ ] VER-16 typed proxy poll deadline; in-FSM timeout
+- [ ] VER-17 major crossover is an FSM gate (atomic in one snapshot)
+
+### Testing and quality (TEST)
+- [ ] TEST-01..12 table tests, -race, coverage floor, golden, fuzz, vet+staticcheck, gofumpt, FSM gate, hermetic, parallel, error assertions, external test package
+
+### Security and supply chain (SEC)
+- [ ] SEC-01..12 static build, FIPS knob, non-root, SBOM, CVE gate, cosign, distroless, OCI labels, govulncheck, dep hygiene, secret scan, provenance
+- [ ] SEC-13 image security pipeline WIRED into the release app as a typed DAG; readinessTimeout typed
+- [ ] SEC-13a full gosec SAST + weak-crypto/TLS bans
+- [ ] SEC-13b substrate security/build libs are Rust, not shell
+- [ ] SEC-13c FSM-IMAGE order scan→push→sign/attest (cryptographically correct)
+- [ ] SEC-14 distroless-by-default + restricted Pod SecurityContext admission-gated
+- [ ] SEC-15 real FIPS boringcrypto post-build probe + CGO resolution
+- [ ] SEC-16 released binaries get SBOM + scan + provenance (FSM-RELEASE)
+- [ ] SEC-17 base-image + toolchain digest-pinned and recorded
+- [ ] SEC-18 signed commits + CODEOWNERS + branch protection + least-priv CI tokens + Go env hardening
+- [ ] SEC-19 expiring allowlist gate + deployed-digest ConMon rescan + artifact secret scan
+
+### Delivery FSMs (FSM-*)
+- [ ] FSM-MODULE gapless table; CAS push; in-FSM proxy timeout; retract-aware rollback; major-crossover gate; universal Fail; audited
+- [ ] FSM-RELEASE scan/SBOM/provenance states; resume partial publish; receipted rollback; reproducible-build divergence handled; universal Fail; audited
+- [ ] FSM-IMAGE scan→push→sign order; push-revert cleanup; tri-state CVE; transient retry; cold rollback; ConMon Degraded; CAS push; universal Fail; audited
+- [ ] FSM-ACTION post-Verify major-tag promotion; fact-reset on revival; exact-SHA rollback; injection-safe; universal Fail; audited
+- [ ] FSM shared: FSM-AUDIT, FSM-TRISTATE, FSM-FAIL, FSM-RESET, FSM-IDEMPOTENT, FSM-CAS, FSM-OBS all hold on all four machines
+- [ ] `forge tool status` surfaces current FSM state + last gate verdict + owning rule
+
+---
+
+## Coverage Statement
+
+This standard asserts coverage of every scenario raised across the four adversarial
+gap-analysis lenses. Each closed gap and its closing rule(s):
+
+### New-engineer-navigation lens
+- GAP-1 dead canonical example → DOC-11 + `caixa-validate --meta` resolves every `Demonstrated by:`.
+- GAP-2 no glossary → DOC-12 + the [Glossary](#glossary).
+- GAP-3 no getting-started path → [Day-one setup](#day-one-setup) + DOC-03a (README `## Install` parity).
+- GAP-4 no run recipe → LIFE-16 + [Run & debug recipes](#run--debug-recipes); LIFE-15 canonical ports.
+- GAP-5 devShell not first-class → TEST-07 (expanded toolchain) + [Day-one setup](#day-one-setup).
+- GAP-6 no debugging guidance → [Run & debug recipes](#run--debug-recipes) triage table + dlv recipe.
+- GAP-7 no identity table → DOC-14 + the [Identity-derivation table](#identity-derivation-table).
+- GAP-8 no concern→file map → DOC-15 + the [Concern → library → symbol map](#concern--library--symbol-map).
+- GAP-9 no inter-lib graph → DOC-16 + the [composition graph](#inter-library-composition-graph).
+- GAP-10 no scaffold/extend workflow → [Extending / scaffolding](#extending--scaffolding) + DOC-18.
+- GAP-11 edit→regenerate loop undrawn → DOC-18 + the [authored-vs-generated manifest](#authored-vs-generated-files).
+- GAP-12 no FSM-state readout → [FSM status / observability](#fsm-status--observability) + `forge tool status` (FSM-OBS).
+- GAP-13 no gate→fix map → DOC-17 + the gate-verdict tables.
+- GAP-14 licensing/vendoring contradictions → source notes rewritten to single MIT + single proxy mechanism (no `-mod=vendor`/Apache wording remains).
+- GAP-15 scattered thresholds → DOC-19 + the [Tunables & defaults](#tunables--defaults) appendix.
+- GAP-16 scattered escape hatches → DOC-20 + the [annotation catalog](#annotation--escape-hatch-catalog).
+- GAP-17 no reading order → DOC-13 on-ramp.
+- GAP-18 registry incompleteness → registry now carries rule text + rationale + demonstrated-by + FSM-* IDs and a `caixa-validate --meta` ID-parity check (see `rules-registry.yaml`).
+
+### SRE / delivery-failure-FSM lens
+- GAP-1 image partial-push dead terminal → FSM-IMAGE `PushFailed → Cleanup → PushReverted` + decomposed `G_registry_push_*` + idempotent re-push.
+- GAP-2 module tag-pushed-but-proxy-fails incoherent rollback → VER-14 + `ModuleRollbackGate` (retract, never delete a cached tag).
+- GAP-3 release formula partial publish → FSM-RELEASE `FormulaRevertGate` + RollbackReceipt + `ResumeUpload`.
+- GAP-4 action moving-tag before Verify → FSM-ACTION `PromoteMajorTag` (post-Verify) + captured `prior_major_tag_sha`.
+- GAP-5 no deploy/verify retry → FSM-IMAGE `RetryDeploy`/`RetryVerify` (`G_transient_and_budget`).
+- GAP-6 out-of-FSM proxy timeout → VER-16 + in-FSM `ConfirmProxy`/`poll_budget_exhausted`.
+- GAP-7 no runner-death Fail edge → FSM-FAIL universal `Fail(reason)` on all four machines.
+- GAP-8 revival reuses stale facts → FSM-RESET + FSM-ACTION I5a ResetFacts.
+- GAP-9 unquantified timeouts → SEC-13/VER-16 typed lower-bounded Durations with defaults + inclusive-timeout predicate.
+- GAP-10 reproducible-build divergence undefined → FSM-RELEASE `ChecksumGate` clean-runner second build + reference manifest + `DeliveryFailed(BuildError)` diagnostic.
+- GAP-11 first-deploy rollback undefined → FSM-IMAGE `ColdRollback` (null to-digest).
+- GAP-12 no idempotency rule → FSM-IDEMPOTENT + `ResumeUpload`.
+- GAP-13 no concurrency/CAS → FSM-CAS single-writer + `TagPushRaceLost` first-class signal.
+- GAP-14 image-release app lacks sign/SBOM/CVE → SEC-13 wires the typed DAG + push-tool precondition.
+- GAP-15 audit only in FSM-IMAGE → FSM-AUDIT lifted to all four machines.
+- GAP-16 Job-error vs genuine-fail collapsed → FSM-TRISTATE (`Indeterminate` → retryable).
+
+### Security / FedRAMP / supply-chain lens
+- A1/A3 pipeline not wired / no provenance → SEC-13 + FSM-RELEASE/IMAGE provenance states.
+- A2 sign-before-push/scan order wrong → SEC-13c + reordered FSM-IMAGE.
+- A4 security wrappers are shell → SEC-13b + extended DOC-10 meta-lint.
+- A5 FIPS probe not real + CGO collision → SEC-15.
+- A6 not distroless-by-default / no SecurityContext → SEC-14.
+- B1 binaries unscanned/uninventoried → SEC-16.
+- B2 base/toolchain not digest-pinned → SEC-17.
+- B3 gosec only two checks → SEC-13a.
+- B4 no TLS floor → NET-14.
+- B5 no source governance → SEC-18.
+- B6 no least-priv CI token → SEC-18 + LAYOUT-07 permissions check.
+- B7 no Go-env hardening → SEC-18.
+- B8 no expiring-allowlist gate → SEC-19.
+- B9 no deployed rescan → SEC-19 + FSM-IMAGE `Verified → Degraded`.
+- B10 no runtime-privilege assertions → SEC-14 + `G_apply_accepted` restricted conjunct.
+- B11 SBOM under-reports static-Go → SEC-13/SEC-16 (Nix dep-graph + non-trivial-component check).
+- C1 CVE failOn default disagreement → unified to `HIGH` (SEC-05 == FSM-IMAGE gate).
+- C2 no artifact-secret scan → SEC-19 filesystem scan.
+- C3 broken `go-docker.nix` callPackage → corrected to `docker.nix` (substrate fix tracked in SEC-13b's library-hygiene scope).
+- C4 no post-verify chain-break state → FSM-IMAGE `Verified → Degraded` ConMon edge.
+
+### Version-upgrade / multi-module lens
+- GAP-1 VER-11/LAYOUT-08 contradiction → split VER-11a (multi-binary) / VER-11b (multi-module).
+- GAP-2 versionPackage undocumented → VER-04a.
+- GAP-3 intra-repo diamond → VER-14 INTRA-REPO-MAJOR-COHERENCE.
+- GAP-4 monorepo vendorHash divergence → see note below (deferred-with-reason).
+- GAP-5 no consumer upgrade op → VER-13 `forge tool upgrade`.
+- GAP-6 no fleet upgrade DAG → VER-15 root→leaf topological propagation.
+- GAP-7 go.work unaddressed → VER-10 clause (5).
+- GAP-8 no `retract` path → VER-14.
+- GAP-9 CLI flag/subcommand compat → CLI-13.
+- GAP-10 deprecation-window gate mismatch → VER-07 parses `earliest-major-for-removal`.
+- GAP-11 config schema migration absent → CFG-15.
+- GAP-12 cross-version reload-class change → CFG-12 extension.
+- GAP-13 major crossover not an FSM state → VER-17 + FSM-MODULE `MajorCrossoverGate`.
+- GAP-14 `toolchain` directive unaddressed → VER-10 clause (6).
+- GAP-15 pseudo-version only blocks at release → VER-09 continuous PR warning.
+
+### Deliberately deferred (with reason)
+- **Upgrade-lens GAP-4 (monorepo `mkGoMonorepoBinary` hardcodes `vendorHash = null`).**
+  The RULE is closed at the standard level: VER-11a documents that a multi-binary
+  monorepo resolves its deps through the proxy + `go.sum` (the LAYOUT-12 mechanism),
+  which is the hermetic property SEC-10 requires, so `vendorHash = null` is the
+  documented, correct monorepo path (not a divergence to "fix"). The substrate
+  CODE-CHANGE to give `mkGoMonorepoBinary` an optional explicit `vendorHash` arg is a
+  builder enhancement deferred to substrate engineering — it is a `lib/build/go/`
+  source edit, out of scope for a docs/registry standard, and the standard already
+  records the reconciliation. No conformance gap remains; only an optional ergonomics
+  improvement is deferred.
