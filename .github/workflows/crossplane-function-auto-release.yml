@@ -1,0 +1,110 @@
+# Reusable workflow: publish a Crossplane composition-Function package on push to
+# main — the AUTO-RELEASE (default-on, ship-on-merge) shape for a repo that ships
+# ONE Crossplane Function whose runtime image is Nix-built (Pillar 8, no
+# Dockerfile).
+#
+# Why this exists (vs crossplane-provider-publish.yml):
+#   - provider-publish is TAG-triggered + has no runtime image (a provider IS its
+#     controller image, referenced separately).
+#   - a composition Function embeds a runtime image (the function-sdk-go gRPC
+#     server) INTO the xpkg via `crossplane xpkg build
+#     --embed-runtime-image-tarball`. That runtime image is a Nix `dockerTools`
+#     build — so the build + embed + push is the consumer's typed `.#function-release`
+#     flake app (= substrateLib.mkCrossplaneFunctionReleaseApp → forge crossplane
+#     function-release). This workflow just runs it on merge.
+#
+# Version model: hermetic-by-digest. Every push to main publishes a `sha-<short>`
+# tag; the consuming cluster's Function CR pins `@sha256:<digest>` (the ★★
+# HERMETIC SUPPLY CHAIN model — no floating tag at apply time). A human-readable
+# semver tag is published on demand via workflow_dispatch with `tag: v0.1.0`.
+#
+# Usage (consumer repo, the whole footprint):
+#   # .github/workflows/auto-release.yml
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch: { inputs: { tag: { required: false } } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/crossplane-function-auto-release.yml@main
+#       with:
+#         tag: ${{ inputs.tag || '' }}
+#       secrets: inherit
+
+name: crossplane-function-auto-release
+
+on:
+  workflow_call:
+    inputs:
+      release-app:
+        description: "Flake app that builds the runtime image + calls forge crossplane function-release."
+        type: string
+        default: "function-release"
+      tag:
+        description: "Explicit tag to publish (e.g. v0.1.0). Empty ⇒ derive sha-<short> from the merge commit."
+        type: string
+        default: ""
+      registry-host:
+        description: "OCI registry host to log into for the push."
+        type: string
+        default: "ghcr.io"
+      runner:
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build + embed runtime image + push Function xpkg
+    runs-on: ${{ inputs.runner }}
+    # Never re-trigger on a bot's own pushes.
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Resolve tag
+        id: tag
+        env:
+          EXPLICIT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EXPLICIT}" ]; then
+            tag="${EXPLICIT}"
+          else
+            tag="sha-$(git rev-parse --short HEAD)"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Registry login
+        env:
+          HOST: ${{ inputs.registry-host }}
+          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          echo "$TOKEN" | nix shell nixpkgs#crossplane-cli --command \
+            crossplane xpkg login -u "${{ github.actor }}" --password-stdin -r "$HOST"
+
+      - name: Build + push Function xpkg (Nix-built runtime image embedded)
+        env:
+          RELEASE_APP: ${{ inputs.release-app }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          nix run ".#${RELEASE_APP}" -- "$TAG"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: echo "::notice title=Crossplane function publish::Published Function xpkg tag ${TAG}. Pin the cluster's Function CR to its @sha256 digest (HERMETIC SUPPLY CHAIN)."

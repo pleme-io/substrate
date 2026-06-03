@@ -101,6 +101,10 @@
   # Generic multi-arch image release (uses forge CLI for push orchestration)
   imageReleaseModule = import ./service/image-release.nix { inherit pkgs forgeCmd; };
 
+  # Generic Crossplane-package release (Function / Configuration xpkg + push,
+  # over the typed `forge crossplane` verbs)
+  crossplaneReleaseModule = import ./service/crossplane-release.nix { inherit pkgs forgeCmd; };
+
   # Ruby gem/service builders (Docker image, regen, push, release)
   rubyBuildModule = import ./build/ruby/build.nix {
     inherit pkgs forgeCmd;
@@ -393,6 +397,8 @@ in rec {
   #     k8s   = { registry = "..."; mkImage = ...; };
   #   };
   inherit (imageReleaseModule) mkImageReleaseApp mkImageReleaseApps;
+  inherit (crossplaneReleaseModule)
+    mkCrossplaneFunctionReleaseApp mkCrossplaneConfigurationReleaseApp;
 
   # ============================================================================
   # TYPESCRIPT TOOL BUILDERS (from typescript-tool.nix)
