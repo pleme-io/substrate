@@ -150,6 +150,15 @@
         rustLibraryFlakeBuilder = ./lib/build/rust/library-flake.nix;
         zigToolReleaseFlakeBuilder = ./lib/build/zig/tool-release-flake.nix;
 
+        # Go release-flake builders (peers of the rust* family; also surfaced
+        # per-system via substrate.lib.${system}.<name> from ./lib/default.nix).
+        goToolReleaseFlakeBuilder = ./lib/build/go/tool-release-flake.nix;
+        goLibraryFlakeBuilder = ./lib/build/go/library-flake.nix;
+        goWorkspaceReleaseFlakeBuilder = ./lib/build/go/workspace-release-flake.nix;
+        goServiceFlakeBuilder = ./lib/build/go/service-flake.nix;
+        goToolImageFlakeBuilder = ./lib/build/go/tool-image-flake.nix;
+        goActionReleaseFlakeBuilder = ./lib/build/go/action-release-flake.nix;
+
         # Zero-argument Rust-tool flake factory. Reads the consumer's
         # Cargo.toml to derive toolName + repo + packageName. Consumer
         # flake collapses to:

@@ -517,6 +517,37 @@ in rec {
   goMonorepoBinaryBuilder = ./build/go/monorepo-binary.nix;
 
   # ============================================================================
+  # GO RELEASE-FLAKE BUILDERS (standalone import paths)
+  # ============================================================================
+  # The Go peers of the rust*ReleaseFlakeBuilder family — one function →
+  # complete flake outputs per Go software kind. Surfaced per-system as
+  # substrate.lib.${system}.<name> (this attrset IS substrate.lib.${system}),
+  # so generated consumer flakes reference e.g.
+  #   substrate.lib.${system}.goToolReleaseFlakeBuilder
+  # exactly like the rust equivalents. Release is wired through the
+  # language-generic util/release-helpers.nix with language = "go"
+  # (pull-model tag-only for libraries; goreleaser/forge for binaries+images).
+  #
+  # Kind → builder:
+  #   CLI tool        → goToolReleaseFlakeBuilder
+  #   library         → goLibraryFlakeBuilder        (pull-model, tag-only)
+  #   multi-binary    → goWorkspaceReleaseFlakeBuilder
+  #   service/daemon  → goServiceFlakeBuilder (+ goServiceModule / goServiceTypedBuilder)
+  #   CLI-as-image    → goToolImageFlakeBuilder
+  #   GitHub action   → goActionReleaseFlakeBuilder
+  goToolReleaseFlakeBuilder = ./build/go/tool-release-flake.nix;
+  goLibraryFlakeBuilder = ./build/go/library-flake.nix;
+  goWorkspaceReleaseFlakeBuilder = ./build/go/workspace-release-flake.nix;
+  goServiceFlakeBuilder = ./build/go/service-flake.nix;
+  goServiceModule = ./build/go/service-module.nix;
+  goServiceTypedBuilder = ./build/go/service-typed.nix;
+  goToolImageFlakeBuilder = ./build/go/tool-image-flake.nix;
+  goActionReleaseFlakeBuilder = ./build/go/action-release-flake.nix;
+
+  # Single-source Go devShell (mkGoDevShell — previously inlined ≥3 times).
+  goDevenv = ./build/go/devenv.nix;
+
+  # ============================================================================
   # VERSIONED OVERLAY GENERATOR (standalone import path)
   # ============================================================================
   # Generates versioned overlay entries for N tracks × M components, plus

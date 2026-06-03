@@ -1,32 +1,42 @@
 # Complete multi-system flake outputs for a Go CLI tool.
 # Wraps go-tool.nix + eachSystem + overlays for zero-boilerplate
-# consumer flakes.
+# consumer flakes — the Go peer of build/rust/tool-release-flake.nix.
 #
 # Usage in a flake:
-#   outputs = { self, nixpkgs, flake-utils, substrate, ... }:
-#     (import "${substrate}/lib/go-tool-flake.nix" {
+#   outputs = { self, nixpkgs, flake-utils, substrate, forge, ... }:
+#     (import "${substrate}/lib/build/go/tool-release-flake.nix" {
 #       inherit nixpkgs;
+#       forge = forge or null;          # optional — enables the release apps
 #     }) {
 #       toolName = "kubectl-tree";
 #       version = "0.4.6";
 #       src = self;
-#       vendorHash = "sha256-...";
+#       vendorHash = "sha256-...";       # null = in-tree vendoring (go-gen-spec)
+#       repo = "pleme-io/kubectl-tree";  # optional — enables release/bump apps
 #     };
+#
+# Release surface (mirrors the Rust tool-release-flake): when `repo` is set,
+# apps.{release,bump} delegate to the language-generic `forge tool <verb>
+# --language go` (see util/release-helpers.nix). apps.{check-all,lock-platform}
+# are always present. Go uses the PULL model — `forge tool release` tags +
+# pushes a semver git tag (no upload); proxy.golang.org fetches lazily.
 #
 # Module trio (NixOS + nix-darwin + home-manager): pass `module = { ... }` to
 # auto-emit nixosModules.default / darwinModules.default / homeManagerModules.default.
 # See substrate/lib/module-trio.nix for the spec shape.
 {
   nixpkgs,
+  forge ? null,
 }:
 {
   toolName,
   systems ? ["aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux"],
   module ? null,
+  repo ? null,
   ...
 } @ args:
 let
-  toolArgs = builtins.removeAttrs args [ "toolName" "systems" "module" ];
+  toolArgs = builtins.removeAttrs args [ "toolName" "systems" "module" "repo" ];
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
   pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   hygiene = import ../../util/flake-hygiene.nix {
@@ -39,27 +49,40 @@ let
     else true;
 
   goToolBuilder = import ./tool.nix;
+  goDevenv = import ./devenv.nix;
+  releaseHelpers = import ../../util/release-helpers.nix;
 
   mkPerSystem = system: let
     pkgs = import nixpkgs { inherit system; };
+    lib = pkgs.lib;
     package = goToolBuilder.mkGoTool pkgs ({
       pname = toolName;
     } // toolArgs);
+    # forge binary resolution: prefer the passed flake input, else PATH lookup.
+    forgeCmd =
+      if forge != null then "${forge.packages.${system}.default}/bin/forge"
+      else "forge";
+    # Release lifecycle apps — language-generic, parameterised with language="go".
+    releaseArgs = { hostPkgs = pkgs; inherit toolName forgeCmd; language = "go"; };
   in {
     packages = {
       default = package;
       ${toolName} = package;
     };
     devShells = {
-      default = pkgs.mkShellNoCC {
-        packages = with pkgs; [ go gopls gotools ];
-      };
+      default = goDevenv.mkGoDevShell pkgs {};
     };
     apps = {
       default = {
         type = "app";
         program = "${package}/bin/${toolName}";
       };
+      check-all = releaseHelpers.mkCheckAllApp releaseArgs;
+      lock-platform = releaseHelpers.mkLockPlatformApp releaseArgs;
+    } // lib.optionalAttrs (repo != null) {
+      # `repo` is required by `forge tool release` (the GitHub coordinate).
+      release = releaseHelpers.mkReleaseApp (releaseArgs // { inherit repo; });
+      bump = releaseHelpers.mkBumpApp releaseArgs;
     };
   };
 
