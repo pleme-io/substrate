@@ -63,6 +63,16 @@ jobs:
         # Docker keychain (~/.docker/config.json).
         run: echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
 
+      - name: skopeo registries.conf (runner ships v1; nixpkgs skopeo needs v2)
+        # The ubuntu runner's /etc/containers/registries.conf is v1; the nixpkgs
+        # skopeo forge uses rejects it ("must be in v2 format"). Point skopeo at a
+        # minimal v2 file via CONTAINERS_REGISTRIES_CONF.
+        run: |
+          set -euo pipefail
+          conf="$RUNNER_TEMP/registries.conf"
+          printf 'unqualified-search-registries = []\n' > "$conf"
+          echo "CONTAINERS_REGISTRIES_CONF=$conf" >> "$GITHUB_ENV"
+
       - name: Build + push image (idempotent — <arch>-<sha> + <arch>-latest tags)
         env:
           RELEASE_APP: ${{ inputs.release-app }}
