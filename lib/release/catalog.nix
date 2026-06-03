@@ -14,7 +14,7 @@
 #
 # Usage from a doc generator:
 #   builtins.attrNames substrate.lib.release.catalog
-#   → ["rust-workspace" "rust-single-crate" "npm" "python" "helm"
+#   → ["rust-workspace" "rust-single-crate" "go" "npm" "python" "helm"
 #      "ansible-collection" "ruby-gem" "github-action"]
 
 {
@@ -40,6 +40,25 @@
     semantics = "skip-already-published, rate-limit sleep+retry";
     status = "shipping";
     reference-impl = "pleme-io/todoku, tsunagu, garasu, shikumi, ... (single-crate libs)";
+  };
+
+  go = {
+    detect = "go.mod";
+    # Pull-model: proxy.golang.org indexes lazily on first `go get` — there
+    # is NO upload step (contrast cargo publish). The only publish side
+    # effect is `git push origin <tag>` (LAYOUT-05 / VER-12, FSM-MODULE).
+    upstream = "pkg.go.dev (via proxy.golang.org — pull-model, lazy index)";
+    bump-action = "pleme-io/substrate#relver (typed semver tag engine — tag-only, no manifest version field)";
+    publish-action = "(no-op — pull-model; publish = the tag push itself, proxy.golang.org pulls lazily)";
+    workflow = "pleme-io/substrate/.github/workflows/go-auto-release.yml@main";
+    secrets = [ "BOT_PAT?" ];  # GITHUB_TOKEN suffices for the tag push
+    semantics = "FSM-MODULE: Drafted→Validated(go vet/test/build + go.sum tidy)→Tagged(relver semver bump + annotated tag + push; honor /vN)→Proxied(NO-OP confirm pkg.go.dev/proxy.golang.org)→Verified(hermetic go get resolves exact version)";
+    status = "shipping";
+    reference-impl = "(pending first consumer — Go SDKs / CLI)";
+    # cli/binary RELEASE-FSM (FSM-RELEASE): go-binary-release.yml (goreleaser
+    # cross-build + checksum + cosign + GH Release + Homebrew brews).
+    # daemon/service IMAGE-FSM (FSM-IMAGE): lib/build/go/service-flake.nix
+    # `forge image-release` (cosign + SBOM + CVE) — not duplicated here.
   };
 
   npm = {

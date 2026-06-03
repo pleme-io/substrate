@@ -15,6 +15,7 @@ name: auto-release
 # The repo type is inferred from manifest presence:
 #   Cargo.toml + [workspace]  → rust-workspace
 #   Cargo.toml + [package]    → rust-single-crate
+#   go.mod                    → go (pull-model module, FSM-MODULE)
 #   pyproject.toml            → python
 #   package.json              → npm
 #   Chart.yaml                → helm
@@ -65,6 +66,17 @@ jobs:
     needs: detect
     if: needs.detect.outputs.repo-type == 'rust-single-crate'
     uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets: inherit
+
+  go:
+    name: 'go · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'go'
+    # FSM-MODULE: pull-model, tag-only — go-auto-release.yml's only publish
+    # side effect is the tag push; proxy.golang.org indexes lazily.
+    uses: pleme-io/substrate/.github/workflows/go-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
     secrets: inherit

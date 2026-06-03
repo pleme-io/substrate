@@ -29,7 +29,7 @@
       role = "polymorphic dispatcher input";
       outputs = [ "repo-type" "manifest-path" ];
       detects = [
-        "rust-workspace" "rust-single-crate" "npm" "python" "helm"
+        "rust-workspace" "rust-single-crate" "go" "npm" "python" "helm"
         "ansible-collection" "ruby-gem" "github-action" "unknown"
       ];
     };
@@ -47,6 +47,15 @@
       backend = "tatara-lisp";
       ecosystem = "rust-single-crate";
       tool = "cargo set-version --bump <type>";
+    };
+    go-relver = {
+      # Go has no manifest version field — the GIT TAG is the version
+      # (pull-model). relver is the typed semver/changed-since-tag/idempotent
+      # tag-create+push engine; the "bump" is the tag, not a file edit.
+      uses = "pleme-io/substrate#relver";
+      backend = "rust (relver binary)";
+      ecosystem = "go";
+      tool = "relver next --bump <type> (tag-only; honor /vN via --tag-glob)";
     };
     npm-bump = {
       uses = "pleme-io/actions/npm-bump@main";
@@ -88,6 +97,17 @@
       ecosystem = "rust-single-crate";
       tool = "cargo publish";
       retry-on = [ "rate-limit" ];
+    };
+    go-noop = {
+      # Pull-model: there is NO upload. pkg.go.dev / proxy.golang.org fetch
+      # lazily on first `go get` after the tag push (FSM-MODULE Proxied state
+      # is a NO-OP confirmation, not a publish). Documented here so the
+      # polymorphic dispatcher has a publish row for every ecosystem.
+      uses = "(none — pull-model)";
+      backend = "none";
+      ecosystem = "go";
+      tool = "no-op confirm: poll proxy.golang.org @v/<version>.info then hermetic `go get`";
+      retry-on = [ "proxy-not-yet-indexed (poll budget → ProxyTimedOut, retryable)" ];
     };
     npm-publish = {
       uses = "pleme-io/actions/npm-publish@main";

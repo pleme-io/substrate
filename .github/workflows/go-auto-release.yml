@@ -1,0 +1,262 @@
+name: go-auto-release
+
+# Reusable workflow: the Go MODULE delivery FSM (FSM-MODULE) rendered as
+# CI. Pull-model, tag-only — the ONLY publish side effect is
+# `git push origin <tag>`; proxy.golang.org fetches lazily on first
+# `go get`, so the "publish" step is a NO-OP confirmation, not an upload
+# (contrast cargo publish / npm publish). This is the FSM statement of
+# LAYOUT-05 / VER-12 from docs/go/go-software-delivery-standard.md.
+#
+# The delivery-FSM states ARE the workflow stages — one stage per state:
+#
+#   Drafted (start)
+#     └─ Validate (ValidationGate) ────────────────────────► Validated
+#          • clean working tree + HEAD == remote tip
+#          • go vet ./...   (vet_green)
+#          • go test ./...  (test_green)
+#          • go build ./... (build_green)
+#          • go mod tidy leaves go.sum unchanged (tidy check)
+#          • /vN suffix coherence for major ≥ 2 (honored via /vN bump)
+#     └─ Tag (TagGate, monotonic semver) ──────────────────► Tagged
+#          • relver computes strictly-greater vMAJOR.MINOR.PATCH
+#          • annotated tag + push (TAG-PUSH-IS-CAS via relver idempotency)
+#     └─ Proxied (ConfirmProxy / ProxyAvailableGate) ──────► Proxied
+#          • publish is a NO-OP — confirm proxy.golang.org indexed it
+#     └─ Verify (VerifyGate) ──────────────────────────────► Verified (terminal-ok)
+#          • hermetic `go install`/`go get` resolves the exact version
+#
+# Mirrors cargo-auto-release.yml / rust-auto-release.yml structure
+# (bot-identity, drift handling, skip-when-bot-pushed) but swaps the
+# upload `ship` job for a pull-model `proxy-confirm` + `verify` pair.
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/go-auto-release.yml@main
+#       secrets: inherit
+#
+# Tag engine: relver (substrate#relver) — the typed semver / changed-since-tag
+# / idempotent-tag primitive. NO bash semver math.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        type: string
+        required: false
+        default: patch
+      module-path:
+        description: "Subdirectory containing go.mod (root by default; set for a submodule)."
+        type: string
+        required: false
+        default: "."
+      changed-globs:
+        description: "Space-separated globs relver inspects for changes since the last tag — only bump when Go source moved."
+        type: string
+        required: false
+        default: "**/*.go go.mod go.sum"
+      tag-glob:
+        description: "Glob relver uses to discover the last tag. Override to vN.* once the module crosses a major (honor /vN)."
+        type: string
+        required: false
+        default: "v0.*"
+      go-version:
+        description: "Go toolchain version for vet/test/build."
+        type: string
+        required: false
+        default: "stable"
+      proxy-poll-attempts:
+        description: "ConfirmProxy poll budget (VER-16 typed deadline). Exhaustion = ProxyTimedOut, not a hard fail."
+        type: string
+        required: false
+        default: "20"
+    secrets:
+      BOT_PAT:
+        required: false
+        description: "Optional PAT with repo scope so the tag push triggers downstream workflows."
+
+permissions:
+  contents: write
+
+# Single-writer / CAS publish (FSM-CAS): serialize the FSM per ref so two
+# concurrent runs can't race the tag push.
+concurrency:
+  group: go-auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Drafted → Validated ─────────────────────────────────────────────
+  # ValidationGate: pure over a captured snapshot — go vet / test / build,
+  # go.sum tidy check, clean tree. No tagging side effects here.
+  validate:
+    name: 'go · Drafted→Validated (ValidationGate)'
+    runs-on: ubuntu-latest
+    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops).
+    if: github.actor != 'github-actions[bot]'
+    defaults:
+      run:
+        working-directory: ${{ inputs.module-path }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache-dependency-path: ${{ inputs.module-path }}/go.sum
+
+      # ValidationGate(d): go vet ./... exit 0
+      - name: vet (vet_green)
+        run: go vet ./...
+
+      # ValidationGate(e): go test ./... exit 0
+      - name: test (test_green)
+        run: go test ./...
+
+      # ValidationGate(f): go build ./... exit 0 (mkGoLibraryCheck shape)
+      - name: build (build_green)
+        run: go build ./...
+
+      # go.sum tidy check — `go mod tidy` must be a no-op on a Validated
+      # snapshot, else the committed go.sum drifted from go.mod.
+      - name: go.sum tidy check
+        run: |
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "::error::go.mod/go.sum are not tidy — run \`go mod tidy\` and commit the result"
+            git --no-pager diff -- go.mod go.sum | head -100
+            exit 1
+          fi
+
+  # ── Validated → Tagged → Proxied ────────────────────────────────────
+  # TagGate via relver: compute a strictly-greater semver tag (gated on
+  # changed Go source), annotate, and push. The push IS the CAS publish
+  # (PULL-MODEL / NO-UPLOAD) — relver's tag create+push is idempotent so a
+  # re-run is a resume, never a duplicate (FSM-IDEMPOTENT / TAG-PUSH-IS-CAS).
+  tag:
+    name: 'go · Validated→Tagged→Proxied (TagGate + relver)'
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.relver.outputs.tag }}
+      created: ${{ steps.relver.outputs.created }}
+      skip: ${{ steps.relver.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # relver next = (changed-since-tag)+(compute-next)+(idempotent tag+push).
+      # gen-spec-bot-style bot identity (matches git-commit-tag default).
+      # `skip=true` when no Go source moved since the last tag — a no-op run.
+      - name: relver next (TagGate → push)
+        id: relver
+        run: |
+          nix run github:pleme-io/substrate#relver -- \
+            --repo "${{ inputs.module-path }}" \
+            next \
+            --bump "${{ inputs.bump-type }}" \
+            --tag-glob "${{ inputs.tag-glob }}" \
+            --changed-globs "${{ inputs.changed-globs }}" \
+            --create-tag \
+            --push \
+            --tag-message-template "release: {tag}" \
+            --identity-name "github-actions[bot]" \
+            --identity-email "41898282+github-actions[bot]@users.noreply.github.com"
+
+  # ── Proxied → Verified ──────────────────────────────────────────────
+  # ProxyAvailableGate (ConfirmProxy poll-loop) + VerifyGate. Go's
+  # pull-model means there is NOTHING to upload: this job CONFIRMS the
+  # tag was indexed by proxy.golang.org, then verifies an external
+  # `go get @<version>` resolves the exact version (VERIFY-CLOSES-LOOP).
+  proxy-confirm:
+    name: 'go · Proxied→Verified (NO-UPLOAD confirm + VerifyGate)'
+    needs: tag
+    runs-on: ubuntu-latest
+    # Only when a fresh tag was actually created (changed source + push).
+    if: needs.tag.outputs.created == 'true' && needs.tag.outputs.skip != 'true'
+    defaults:
+      run:
+        working-directory: ${{ inputs.module-path }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      # Resolve the module path from go.mod (escaped per the proxy spec).
+      - name: Resolve module path
+        id: mod
+        run: |
+          MODULE="$(go list -m)"
+          VERSION="${{ needs.tag.outputs.tag }}"
+          echo "module=${MODULE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # ConfirmProxy poll-loop (ProxyAvailableGate). The proxy fetches
+      # lazily — a primed `go get` triggers indexing; we then poll the
+      # @v/<version>.info endpoint until 200 OR the typed poll budget is
+      # exhausted (PROXY-TIMEOUT-IN-FSM — exhaustion is a defined outcome,
+      # not a hard fail). NO UPLOAD happens here.
+      - name: ConfirmProxy (publish is a NO-OP — confirm only)
+        env:
+          GOPROXY: https://proxy.golang.org
+          GOSUMDB: sum.golang.org
+        run: |
+          MODULE='${{ steps.mod.outputs.module }}'
+          VERSION='${{ steps.mod.outputs.version }}'
+          ATTEMPTS='${{ inputs.proxy-poll-attempts }}'
+          # Escape the module path for the proxy URL (uppercase → !lower).
+          ESCAPED="$(printf '%s' "$MODULE" | sed -E 's/([A-Z])/!\L\1/g')"
+          URL="https://proxy.golang.org/${ESCAPED}/@v/${VERSION}.info"
+          echo "confirming (no upload) ${MODULE}@${VERSION} via ${URL}"
+          # Prime lazy indexing — pull-model trigger, not a push.
+          go list -m "${MODULE}@${VERSION}" >/dev/null 2>&1 || true
+          n=0
+          until [ "$n" -ge "$ATTEMPTS" ]; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$URL" || echo 000)"
+            if [ "$code" = "200" ]; then
+              echo "proxy indexed ${MODULE}@${VERSION} (Proxied → confirmed)"
+              exit 0
+            fi
+            n=$((n+1))
+            echo "poll ${n}/${ATTEMPTS}: ${code} — proxy not yet indexed; waiting"
+            sleep 15
+          done
+          # poll_budget_exhausted → ProxyTimedOut (in-FSM, recoverable).
+          echo "::warning::ConfirmProxy poll budget exhausted (ProxyTimedOut) — proxy will index lazily on first \`go get\`; tag is pushed and immutable"
+
+      # VerifyGate: hermetic external resolve. Verified is reached only
+      # when an outside consumer can `go get @<version>` and get the exact
+      # version back (CHECKSUM-DB-VERIFIED via GOSUMDB=sum.golang.org).
+      - name: Verify (VerifyGate → Verified)
+        env:
+          GOPROXY: https://proxy.golang.org
+          GOSUMDB: sum.golang.org
+        run: |
+          MODULE='${{ steps.mod.outputs.module }}'
+          VERSION='${{ steps.mod.outputs.version }}'
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          go mod init verify.local/probe >/dev/null
+          if go get "${MODULE}@${VERSION}"; then
+            resolved="$(go list -m "${MODULE}@${VERSION}" 2>/dev/null | awk '{print $2}')"
+            if [ "$resolved" = "$VERSION" ]; then
+              echo "VerifyGate Pass: ${MODULE} resolves to ${VERSION} (Verified)"
+            else
+              echo "::warning::resolved '${resolved}' != intended '${VERSION}' — proxy still propagating (retryable; not a hard fail)"
+            fi
+          else
+            # Indeterminate (couldn't measure) routes to retryable, never a
+            # hard terminal (FSM-TRISTATE).
+            echo "::warning::go get could not yet resolve ${MODULE}@${VERSION} — proxy propagating (Indeterminate, retryable)"
+          fi

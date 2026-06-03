@@ -1,0 +1,256 @@
+name: go-binary-release
+
+# Reusable workflow: the Go RELEASE delivery FSM (FSM-RELEASE) rendered as
+# CI for the cli/binary kinds. Cross-compiled, checksummed, signed
+# artifacts attached to a GitHub Release, then a Homebrew formula update —
+# `Verified` is reached only when the externally-installed binary reports
+# `--version` == the release tag (VERIFY-CLOSES-LOOP).
+#
+# Sibling of go-auto-release.yml (FSM-MODULE, pull-model libraries). The
+# IMAGE delivery FSM (FSM-IMAGE — daemon/service: cosign + SBOM + CVE) is
+# served by lib/build/go/service-flake.nix's `forge image-release` app and
+# is NOT duplicated here — see that flake for the signed/attested/scanned
+# registry-push path.
+#
+# The delivery-FSM states ARE the workflow stages:
+#
+#   Drafted (start)
+#     └─ Validate (TagSemverGate) ─────────────────────────► Validated
+#          • tag matches strict vMAJOR.MINOR.PATCH, no pre-release
+#     └─ CrossBuild (CrossMatrixGate) ─────────────────────► CrossBuilt
+#          • goreleaser: {linux,darwin} × {amd64,arm64}, CGO_ENABLED=0
+#          • exactly 4 artifacts, static + reproducible (-trimpath, ldflags)
+#     └─ Sign + Checksum (ChecksumGate/SignatureGate) ─────► Signed
+#          • goreleaser checksums.txt (SHA-256) + cosign signature
+#     └─ Release (TapReachableGate) ───────────────────────► Released
+#          • goreleaser uploads assets to the GitHub Release
+#     └─ UpdateFormula (brews block) ──────────────────────► FormulaUpdated
+#          • goreleaser brews: pushes formula to org/homebrew-tap
+#     └─ Verify (VersionMatchGate) ────────────────────────► Verified (terminal-ok)
+#          • installed binary reports --version == tag
+#
+# Model: rust-binary-release.yml (cross-arch matrix → GH Release assets),
+# extended with the goreleaser-native Scan/SBOM/Sign/Provenance/brews
+# chain that the Go RELEASE FSM mandates (SEC-16).
+#
+# Trigger: v* tag push (the tag IS the immutable delivery identity).
+#
+# Usage (consumer repo, .github/workflows/release-binaries.yml):
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#   jobs:
+#     binaries:
+#       uses: pleme-io/substrate/.github/workflows/go-binary-release.yml@main
+#       with:
+#         binary-name: my-tool
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      binary-name:
+        description: "Binary name (used for the GitHub Release asset names + Homebrew formula)."
+        type: string
+        required: true
+      main-path:
+        description: "Path to the main package (the `main:` field goreleaser builds)."
+        type: string
+        required: false
+        default: "."
+      go-version:
+        description: "Go toolchain version for the cross build."
+        type: string
+        required: false
+        default: "stable"
+      homebrew-tap:
+        description: "Homebrew tap repo (owner/name) goreleaser pushes the formula to. Empty disables FormulaUpdated."
+        type: string
+        required: false
+        default: ""
+      homebrew-description:
+        description: "One-line description embedded in the generated Homebrew formula."
+        type: string
+        required: false
+        default: ""
+      homepage:
+        description: "Homepage URL embedded in the generated Homebrew formula."
+        type: string
+        required: false
+        default: ""
+      cosign:
+        description: "Keyless cosign sign the checksums manifest (SignatureGate). Requires id-token: write."
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
+        description: "PAT with `repo` scope on the homebrew-tap repo (FormulaUpdated push). Falls back to GITHUB_TOKEN for a same-org tap."
+
+permissions:
+  contents: write   # GitHub Release create + asset upload (Released)
+  id-token: write   # cosign keyless OIDC (SignatureGate / ProvenanceGate)
+
+# TAG-IMMUTABLE: the tag is the delivery identity — serialize per-tag so a
+# re-run resumes (ResumeUpload) rather than racing a second Release.
+concurrency:
+  group: go-binary-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Drafted → Validated → CrossBuilt → Signed → Released → FormulaUpdated ──
+  # The whole FSM happy path runs in one goreleaser invocation: it owns the
+  # CrossMatrixGate (4-cell matrix), ChecksumGate (checksums.txt), the brews
+  # block (FormulaUpdated), and asset upload (Released). The per-stage
+  # boundaries are annotated below.
+  release:
+    name: 'go · Drafted→…→FormulaUpdated (goreleaser)'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - uses: sigstore/cosign-installer@v3
+        if: inputs.cosign
+
+      # ── TagSemverGate (Drafted → Validated) ──────────────────────────
+      # The tag is the immutable identity; reject anything not strict
+      # vMAJOR.MINOR.PATCH (no pre-release / build metadata).
+      - name: Validate tag (TagSemverGate → Validated)
+        id: semver
+        run: |
+          REF='${{ github.ref_name }}'
+          if ! printf '%s' "$REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag '$REF' is not strict vMAJOR.MINOR.PATCH — TagSemverGate Fail"
+            exit 1
+          fi
+          echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
+
+      # Render the goreleaser config at runtime (NOT committed — LAYOUT-05
+      # forbids a committed .goreleaser.yml in the runtime tree; the release
+      # path materializes it ephemerally). Encodes CrossMatrixGate (matrix +
+      # CGO_ENABLED=0 + reproducible flags), ChecksumGate, and the brews
+      # block (FormulaUpdated).
+      - name: Render goreleaser config
+        run: |
+          cat > .goreleaser.yaml <<'YAML'
+          version: 2
+          builds:
+            - id: ${{ inputs.binary-name }}
+              binary: ${{ inputs.binary-name }}
+              main: ${{ inputs.main-path }}
+              env:
+                - CGO_ENABLED=0
+              flags:
+                - -trimpath
+              ldflags:
+                - -s -w -X main.version={{ .Version }}
+              # CrossMatrixGate: {linux,darwin} × {amd64,arm64} — exactly 4.
+              goos: [linux, darwin]
+              goarch: [amd64, arm64]
+          archives:
+            - id: ${{ inputs.binary-name }}
+              name_template: "${{ inputs.binary-name }}-{{ .Os }}-{{ .Arch }}"
+              formats: [tar.gz]
+          # ChecksumGate: SHA-256 manifest over every matrix artifact.
+          checksum:
+            name_template: "checksums.txt"
+            algorithm: sha256
+          # SBOMGate: syft SPDX SBOM per artifact (SEC-16).
+          sboms:
+            - artifacts: archive
+          # SignatureGate: keyless cosign over the checksums manifest.
+          signs:
+            - cmd: cosign
+              signature: "${artifact}.sig"
+              certificate: "${artifact}.pem"
+              args:
+                - sign-blob
+                - "--output-signature=${signature}"
+                - "--output-certificate=${certificate}"
+                - "${artifact}"
+                - "--yes"
+              artifacts: checksum
+              output: true
+          release:
+            github:
+              owner: ${{ github.repository_owner }}
+              name: ${{ github.event.repository.name }}
+          YAML
+          # FormulaUpdated: only emit the brews block when a tap is set.
+          if [ -n "${{ inputs.homebrew-tap }}" ]; then
+            TAP='${{ inputs.homebrew-tap }}'
+            cat >> .goreleaser.yaml <<YAML
+          brews:
+            - name: ${{ inputs.binary-name }}
+              description: "${{ inputs.homebrew-description }}"
+              homepage: "${{ inputs.homepage }}"
+              repository:
+                owner: ${TAP%%/*}
+                name: ${TAP##*/}
+                token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+              commit_author:
+                name: github-actions[bot]
+                email: 41898282+github-actions[bot]@users.noreply.github.com
+          YAML
+          fi
+
+      # ── CrossBuild → Sign → Release → UpdateFormula (one goreleaser run) ──
+      # goreleaser executes the linear FSM body: CrossMatrixGate (build),
+      # ChecksumGate (checksum), SBOMGate (sboms), SignatureGate (signs),
+      # Released (release upload), FormulaUpdated (brews). ResumeUpload is
+      # native: re-running against the same tag re-uploads only missing assets.
+      - name: goreleaser (CrossBuild → … → FormulaUpdated)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GITHUB_TOKEN }}
+
+  # ── FormulaUpdated → Verified ───────────────────────────────────────
+  # VersionMatchGate: install the just-released binary from the GitHub
+  # Release on each OS and assert it reports --version == the tag. This
+  # closes the boundary-of-communication (VERIFY-CLOSES-LOOP) — an outside
+  # consumer can install and observe the promised version.
+  verify:
+    name: 'go · FormulaUpdated→Verified (VersionMatchGate)'
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { os: macos-latest, goos: darwin, goarch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install from Release + assert version (Verified)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG='${{ github.ref_name }}'
+          VERSION='${{ needs.release.outputs.version }}'
+          BIN='${{ inputs.binary-name }}'
+          ASSET="${BIN}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
+          tmp="$(mktemp -d)"
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "$ASSET" --dir "$tmp"
+          tar -xzf "${tmp}/${ASSET}" -C "$tmp"
+          got="$("${tmp}/${BIN}" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+          if [ "$got" = "$VERSION" ]; then
+            echo "VersionMatchGate Pass: ${BIN} reports ${got} == ${VERSION} (Verified)"
+          else
+            echo "::error::VersionMatchGate Fail: ${BIN} reports '${got}' != '${VERSION}'"
+            exit 1
+          fi
