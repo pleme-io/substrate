@@ -626,8 +626,8 @@ let
       { crateName = crate.name; version = crate.version; edition = crate.edition;
         features = crate.features; crateRenames = crate.crate_renames; release = true;
         preBuild = "export CARGO_CRATE_NAME=${rustcCrateName crate};"; }
-      // (if crate.proc_macro then { procMacro = true; } else {})
-      // (if crate.build_script != null then { build = crate.build_script; } else {})
+      // (if (crate.proc_macro or false) then { procMacro = true; } else {})
+      // (if (crate.build_script or null) != null then { build = crate.build_script; } else {})
       // (if (crate.links or null) != null then { links = crate.links; } else {})
       // (if (crate.lib_target or null) != null
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
