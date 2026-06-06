@@ -199,32 +199,35 @@ let
     # keep the parameter default self-contained.
     defaultCrateOverrides ? (pkgs.defaultCrateOverrides // (plemeCrateOverridesFor pkgs.stdenv.hostPlatform.rust.rustcTarget)),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
-    # Auto-detected: pulls from `pkgs.gen` when substrate's rust
-    # overlay (or any overlay that adds `gen`) is composed. When
-    # neither overlay-`gen` nor caller-passed `gen` is available,
-    # auto-fetch from substrate's own flake.lock pin via
-    # `builtins.getFlake`. This closes the bootstrap-loop class
-    # where consumers using `lockfileBuilder.mkProject` directly
-    # (repo-forge, etc.) hit a missing-spec throw because they
-    # never wired gen — substrate self-heals via its own pinned
-    # gen rev. Per the GEN TYPED-SPEC CONTRACT
+    # Current-gen guarantee (theory/TOOLCHAIN-FRESHNESS.md §X.2.1): the
+    # build-time gen used for the IFD auto-regen is ALWAYS the pinned
+    # gen from `gen-pin.json`, never the operator's profile/overlay
+    # `pkgs.gen`. The overlay/profile gen drifts — a stale profile gen
+    # (e.g. 0.1.0 vs source 0.1.8) silently does the pre-delta-only
+    # thing, writing the RETIRED Cargo.build-spec.json and leaving the
+    # delta un-refreshed, which poisons every downstream regen. Pinning
+    # the IFD gen makes that class unrepresentable. Only the stale-delta
+    # IFD path invokes gen at all (fresh deltas reconstruct in pure Nix
+    # via lockfile-delta.nix), so this strictly fixes the already-broken
+    # path. A caller may still override by passing `gen` explicitly —
+    # this is only the default. Per the GEN TYPED-SPEC CONTRACT
     # (`theory/GEN-TYPED-SPEC-CONTRACT.md`), regeneration is
     # BACKGROUND TO REBUILD — never a manual step.
     gen ?
       let
-        overlayGen = pkgs.gen or null;
         # gen rev from substrate's `gen-pin.json` (NOT flake.lock — gen
         # is no longer a flake input, which broke the substrate↔gen lock
         # cycle). `gen-pin.json` lives next to this file and is the single
         # source of truth for the gen pin. This IFD-time `getFlake`
-        # against the locked rev does NOT grow any lock.
+        # against the locked rev does NOT grow any lock. Kept current by
+        # AUTO-RELEASE bumping the pin on every gen release.
         genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
         genRev = genPin.rev;
         autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
         autoGen = autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.host-tool
           or autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
       in
-        if overlayGen != null then overlayGen else autoGen,
+        autoGen,
     # Host pkgs for the IFD auto-regen. When `pkgs` is pkgsStatic (cross
     # builds), `pkgs.buildPackages` is pkgsStatic itself — not the
     # build-machine's darwin/linux native pkgs. The IFD always runs at
