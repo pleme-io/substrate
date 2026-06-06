@@ -27,7 +27,6 @@ let
   mkSource = nameToPath: name: version: gitNar: pkg:
     let
       source = pkg.source or null;
-      key = "${name}-${version}";
     in
     if source == null then
       { kind = "path"; relative_path = nameToPath.${name} or "."; }
@@ -42,12 +41,19 @@ let
       let
         after = lib.removePrefix "git+" source;
         parts = lib.splitString "#" after;
+        rev = elemAt parts 1;
+        # Look up git_nar by the `name-version-rev` key first (post-migration
+        # deltas; disambiguates two revs of one version) then fall back to the
+        # legacy `name-version` key (pre-migration deltas). TOOLCHAIN-FRESHNESS
+        # §X.4b.b.
+        revKey = "${name}-${version}-${rev}";
+        legacyKey = "${name}-${version}";
       in
       {
         kind = "git";
         url = stripQuery (elemAt parts 0);
-        rev = elemAt parts 1;
-        sha256 = gitNar.${key} or null;
+        inherit rev;
+        sha256 = gitNar.${revKey} or gitNar.${legacyKey} or null;
       }
     else
       throw "lockfile-delta: unrecognized Cargo.lock source `${source}` for ${name}";
@@ -113,8 +119,29 @@ let
           (map (p: { inherit (p) name; value = p.version; })
             (filter (p: !(p ? source)) pkgs));
 
-        lockByKey = listToAttrs
-          (map (p: { name = "${p.name}-${p.version}"; value = p; }) pkgs);
+        # Git packages are indexed under BOTH the rev-key (`name-version-rev`,
+        # the post-migration key that disambiguates two revs of one version —
+        # TOOLCHAIN-FRESHNESS §X.4b.b) AND the legacy `name-version` key (for
+        # deltas generated before the migration). Non-git: `name-version` only.
+        # `resolvedKeys` (derived from the delta's edge package_keys) then
+        # resolves under whichever convention the committed delta used.
+        gitRevOf = p:
+          let source = p.source or null;
+          in
+          if source != null && lib.hasPrefix "git+" source then
+            let parts = lib.splitString "#" (lib.removePrefix "git+" source);
+            in if builtins.length parts > 1 then elemAt parts 1 else null
+          else null;
+        lockByKey = listToAttrs (lib.concatMap
+          (p:
+            let
+              base = "${p.name}-${p.version}";
+              rev = gitRevOf p;
+            in
+            if rev != null
+            then [ { name = "${base}-${rev}"; value = p; } { name = base; value = p; } ]
+            else [ { name = base; value = p; } ])
+          pkgs);
 
         # Declaration-order workspace member keys; root = first (gen convention).
         workspace_members =
@@ -158,17 +185,17 @@ let
           crate_renames = { };
           quirks = [ ];
         };
-        mkCrate = pkg:
-          let
-            key = "${pkg.name}-${pkg.version}";
-            scalars = perCrate.${key} or { };
-          in
-          crateDefaults // scalars // {
+        # `k` is the resolved key in the delta's own convention
+        # (`name-version-rev` for git in post-migration deltas, `name-version`
+        # otherwise). Use it for the per_crate lookup so it matches the delta's
+        # keying exactly — TOOLCHAIN-FRESHNESS §X.4b.b.
+        mkCrate = k: pkg:
+          crateDefaults // (perCrate.${k} or { }) // {
             inherit (pkg) name version;
             source = mkSource nameToPath pkg.name pkg.version gitNar pkg;
           };
         crates = listToAttrs (map
-          (k: { name = k; value = mkCrate lockByKey.${k}; })
+          (k: { name = k; value = mkCrate k lockByKey.${k}; })
           (builtins.filter (k: builtins.hasAttr k lockByKey) resolvedKeys));
       in
       seq d2ok {
