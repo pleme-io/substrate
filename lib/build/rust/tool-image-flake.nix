@@ -19,7 +19,9 @@
 #   nix run .#release  — push all arch images to ghcr.io/${repo} via forge
 {
   nixpkgs,
-  crate2nix,
+  # Optional: only the crate2nix build path needs it. Consumers passing
+  # `genBuild = true` (gen/lockfile-builder path) omit it.
+  crate2nix ? null,
   flake-utils,
   fenix ? null,
   devenv ? null,
@@ -45,7 +47,7 @@ let
   mkPerSystem = system: let
     rustToolImage = import ./tool-image.nix {
       inherit system nixpkgs devenv;
-      crate2nix = crate2nix.packages.${system}.default;
+      crate2nix = if crate2nix != null then crate2nix.packages.${system}.default else null;
       fenix = if fenix != null then fenix else null;
       forge = if forge != null then forge.packages.${system}.default else null;
     };

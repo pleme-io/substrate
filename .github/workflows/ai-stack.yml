@@ -56,10 +56,15 @@ jobs:
 
   posthog:
     needs: [hf-upload, modal-deploy]
-    if: always() && secrets.POSTHOG_API_KEY != ''
+    # `secrets` is unavailable in job-level `if:` — gate the STEP on a
+    # job-env copy instead (the 0-job parse-failure class).
+    if: always()
     runs-on: ubuntu-latest
+    env:
+      POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
     steps:
-      - uses: pleme-io/actions/posthog-event@main
+      - if: env.POSTHOG_API_KEY != ''
+        uses: pleme-io/actions/posthog-event@main
         with:
           api-key: ${{ secrets.POSTHOG_API_KEY }}
           project-id: ${{ secrets.POSTHOG_PROJECT_ID }}

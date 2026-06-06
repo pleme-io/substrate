@@ -199,32 +199,35 @@ let
     # keep the parameter default self-contained.
     defaultCrateOverrides ? (pkgs.defaultCrateOverrides // (plemeCrateOverridesFor pkgs.stdenv.hostPlatform.rust.rustcTarget)),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
-    # Auto-detected: pulls from `pkgs.gen` when substrate's rust
-    # overlay (or any overlay that adds `gen`) is composed. When
-    # neither overlay-`gen` nor caller-passed `gen` is available,
-    # auto-fetch from substrate's own flake.lock pin via
-    # `builtins.getFlake`. This closes the bootstrap-loop class
-    # where consumers using `lockfileBuilder.mkProject` directly
-    # (repo-forge, etc.) hit a missing-spec throw because they
-    # never wired gen — substrate self-heals via its own pinned
-    # gen rev. Per the GEN TYPED-SPEC CONTRACT
+    # Current-gen guarantee (theory/TOOLCHAIN-FRESHNESS.md §X.2.1): the
+    # build-time gen used for the IFD auto-regen is ALWAYS the pinned
+    # gen from `gen-pin.json`, never the operator's profile/overlay
+    # `pkgs.gen`. The overlay/profile gen drifts — a stale profile gen
+    # (e.g. 0.1.0 vs source 0.1.8) silently does the pre-delta-only
+    # thing, writing the RETIRED Cargo.build-spec.json and leaving the
+    # delta un-refreshed, which poisons every downstream regen. Pinning
+    # the IFD gen makes that class unrepresentable. Only the stale-delta
+    # IFD path invokes gen at all (fresh deltas reconstruct in pure Nix
+    # via lockfile-delta.nix), so this strictly fixes the already-broken
+    # path. A caller may still override by passing `gen` explicitly —
+    # this is only the default. Per the GEN TYPED-SPEC CONTRACT
     # (`theory/GEN-TYPED-SPEC-CONTRACT.md`), regeneration is
     # BACKGROUND TO REBUILD — never a manual step.
     gen ?
       let
-        overlayGen = pkgs.gen or null;
         # gen rev from substrate's `gen-pin.json` (NOT flake.lock — gen
         # is no longer a flake input, which broke the substrate↔gen lock
         # cycle). `gen-pin.json` lives next to this file and is the single
         # source of truth for the gen pin. This IFD-time `getFlake`
-        # against the locked rev does NOT grow any lock.
+        # against the locked rev does NOT grow any lock. Kept current by
+        # AUTO-RELEASE bumping the pin on every gen release.
         genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
         genRev = genPin.rev;
         autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
         autoGen = autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.host-tool
           or autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
       in
-        if overlayGen != null then overlayGen else autoGen,
+        autoGen,
     # Host pkgs for the IFD auto-regen. When `pkgs` is pkgsStatic (cross
     # builds), `pkgs.buildPackages` is pkgsStatic itself — not the
     # build-machine's darwin/linux native pkgs. The IFD always runs at
@@ -626,8 +629,8 @@ let
       { crateName = crate.name; version = crate.version; edition = crate.edition;
         features = crate.features; crateRenames = crate.crate_renames; release = true;
         preBuild = "export CARGO_CRATE_NAME=${rustcCrateName crate};"; }
-      // (if crate.proc_macro then { procMacro = true; } else {})
-      // (if crate.build_script != null then { build = crate.build_script; } else {})
+      // (if (crate.proc_macro or false) then { procMacro = true; } else {})
+      // (if (crate.build_script or null) != null then { build = crate.build_script; } else {})
       // (if (crate.links or null) != null then { links = crate.links; } else {})
       // (if (crate.lib_target or null) != null
           then { libName = crate.lib_target.name; libPath = crate.lib_target.path; }
@@ -714,6 +717,40 @@ let
         then { runtime = edges.runtime_dependencies; build = edges.build_dependencies; }
         else { runtime = crate.runtime_dependencies; build = crate.build_dependencies; };
 
+    # Edge-derived crate renames — renamed deps à la
+    # `serde = { package = "serde_core" }` (semver 1.0.28+).
+    #
+    # v9+ specs serialize the per-crate `crate_renames` field empty
+    # (skip_serializing) and the delta reconstruction defaults it to {},
+    # so the ONLY surviving source of rename truth is the resolve edge
+    # itself: `name` is cargo metadata's NodeDep.name (the extern name
+    # as written in consumer source — the rename when renamed, else the
+    # dep's lib target name) while `package_key` is the actual package.
+    # When the edge name differs from the dep's rustc crate name, emit a
+    # buildRustCrate `crateRenames` entry (keyed by dep crateName, in
+    # the versioned-list form) so rustc gets `--extern <alias>=…` to
+    # match the consumer's `use <alias>::…`. Without this, semver
+    # 1.0.28 builds with `--extern serde_core` and dies E0433 on
+    # `use serde::…`.
+    edgeRenamesFor = treeSpec: edges:
+      let
+        normalize = builtins.replaceStrings [ "-" ] [ "_" ];
+        renameOf = e:
+          let t = treeSpec.crates.${e.package_key} or null;
+          in
+            if t == null || (e.name or null) == null
+               || normalize e.name == normalize (rustcCrateName t)
+            then null
+            else { crateName = t.name; entry = { version = t.version; rename = e.name; }; };
+        renames = builtins.filter (r: r != null) (map renameOf edges);
+      in
+        lib.foldl'
+          (acc: r: acc // {
+            ${r.crateName} = (acc.${r.crateName} or [ ]) ++ [ r.entry ];
+          })
+          { }
+          renames;
+
     mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
       let
         # Multi-target spec (#25): iterate only crates ACTUALLY REACHABLE
@@ -753,13 +790,26 @@ let
             if sectionCrate != null && sectionCrate ? features
             then sectionCrate.features
             else crate.features;
-        baseArgs = (if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
+        # Spec-declared args (build_rust_crate_args spread or legacy
+        # reconstruction). Factored out so crateRenames can layer the
+        # edge-derived renames over whatever the spec declared (older
+        # full specs carried real per-crate crate_renames; v9+ read
+        # empty — see edgeRenamesFor). NOTE: build_rust_crate_args may
+        # carry `crateRenames = null` (Rust Option → JSON null), so
+        # filter on null, not just attr presence.
+        specArgs = if crate ? build_rust_crate_args && crate.build_rust_crate_args != {}
                 then crate.build_rust_crate_args
-                else legacyArgs crate) // {
+                else legacyArgs crate;
+        declaredRenames =
+          let r = specArgs.crateRenames or null;
+          in if r == null then { } else r;
+        baseArgs = specArgs // {
           src = (mkSrcOf hostPkgs) filteredWorkspaceSrc crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
           features = featuresFor;
+          crateRenames = declaredRenames
+            // edgeRenamesFor treeSpec (deps.runtime ++ deps.build);
         } // binsFor key crate
         # Defensive: ALWAYS forward `links` from the top-level
         # CrateSpec field (gen-cargo populates this from cargo

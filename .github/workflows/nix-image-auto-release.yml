@@ -1,0 +1,79 @@
+# Reusable workflow: publish a Nix-built OCI image on push to main — the
+# AUTO-RELEASE shape for a repo whose artifact is a `dockerTools` image exposed
+# as a `nix run .#release` app (substrateLib.mkImageReleaseApp → forge
+# image-release). Pillar 8: the image is Nix-built, never a Dockerfile.
+#
+# Complements:
+#   - container-stack.yml      → Dockerfile (docker-build-and-push) images
+#   - crossplane-function-auto-release.yml → Function xpkg (embeds a Nix image)
+# This one is for the plain multi-arch Nix image case.
+#
+# Usage (consumer repo, the whole footprint):
+#   # .github/workflows/image-release.yml
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/nix-image-auto-release.yml@main
+#       secrets: inherit
+
+name: nix-image-auto-release
+
+on:
+  workflow_call:
+    inputs:
+      release-app:
+        description: "Flake app that builds + pushes the image (substrateLib.mkImageReleaseApp)."
+        type: string
+        default: "release"
+      registry-host:
+        description: "OCI registry host to log into for the push."
+        type: string
+        default: "ghcr.io"
+      runner:
+        type: string
+        default: "ubuntu-24.04"
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build + push Nix image
+    runs-on: ${{ inputs.runner }}
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Registry login
+        env:
+          HOST: ${{ inputs.registry-host }}
+          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        # forge image-release pushes via skopeo/regctl, which read the standard
+        # Docker keychain (~/.docker/config.json).
+        run: echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
+
+      - name: skopeo registries.conf (runner ships v1; nixpkgs skopeo needs v2)
+        # The ubuntu runner's /etc/containers/registries.conf is v1; the nixpkgs
+        # skopeo forge uses rejects it ("must be in v2 format"). Point skopeo at a
+        # minimal v2 file via CONTAINERS_REGISTRIES_CONF.
+        run: |
+          set -euo pipefail
+          conf="$RUNNER_TEMP/registries.conf"
+          printf 'unqualified-search-registries = []\n' > "$conf"
+          echo "CONTAINERS_REGISTRIES_CONF=$conf" >> "$GITHUB_ENV"
+
+      - name: Build + push image (idempotent — <arch>-<sha> + <arch>-latest tags)
+        env:
+          RELEASE_APP: ${{ inputs.release-app }}
+        run: nix run ".#${RELEASE_APP}"

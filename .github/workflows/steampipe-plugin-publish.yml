@@ -69,7 +69,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: ${{ inputs.go-version }}, cache: true }
+        # Block form: an unquoted `${{ }}` inside a flow mapping
+        # (`with: { … }`) is invalid YAML — the expression's `{`
+        # terminates the flow scalar and the whole file fails
+        # validation (0-job failed run on every push).
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
       - name: Build plugin
         env:
           PLUGIN: ${{ inputs.plugin-name }}

@@ -138,14 +138,33 @@ let
           edgeMaps;
         resolvedKeys = lib.unique (edgeOwnerKeys ++ edgePackageKeys ++ workspace_members);
 
+        # Every reconstructed crate must carry the FULL per-crate shape the
+        # lockfile-builder reads — the delta is slim (per_crate stores only
+        # non-default scalars; crates with all-default scalars are absent),
+        # so we layer the stored scalars over complete defaults. The builder
+        # forces `proc_macro`/`build_script` as conditions (legacyArgs) and
+        # reads `features`/`crate_renames`; for v10 the real per-target
+        # features come from `target_resolves`, so the per-crate `features`
+        # here is just the old-spec fallback default. (Field-subset
+        # equivalence oracle missed this; the system-build canary caught it.)
+        crateDefaults = {
+          edition = "2021";
+          proc_macro = false;
+          build_script = null;
+          links = null;
+          lib_target = null;
+          binaries = [ ];
+          features = [ ];
+          crate_renames = { };
+          quirks = [ ];
+        };
         mkCrate = pkg:
           let
             key = "${pkg.name}-${pkg.version}";
-            scalars = perCrate.${key} or { edition = "2021"; };
+            scalars = perCrate.${key} or { };
           in
-          scalars // {
+          crateDefaults // scalars // {
             inherit (pkg) name version;
-            edition = scalars.edition or "2021";
             source = mkSource nameToPath pkg.name pkg.version gitNar pkg;
           };
         crates = listToAttrs (map

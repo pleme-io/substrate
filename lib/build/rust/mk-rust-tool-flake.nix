@@ -53,8 +53,22 @@ let
     else throw "mkRustToolFlake: ${toString src}/Cargo.toml missing — not a cargo workspace?";
 
   hasCommittedSpec = pathExists (src + "/Cargo.build-spec.json");
+  # Delta-only repos (.gitignore Cargo.build-spec.json, commit the slim
+  # Cargo.gen.lock) reconstruct the same BuildSpec shape in PURE NIX —
+  # including flake_metadata / workspace_members / root_crate — so the
+  # metadata resolution below stays IFD-free for them. Priority mirrors
+  # lockfile-builder's loadBuildSpec: delta > committed build-spec >
+  # synthesized single-package > workspace IFD. Without this, a
+  # delta-only WORKSPACE repo (gen itself, post spec-retirement) fell
+  # through to the IFD branch on every `nix run github:pleme-io/<tool>`
+  # — eval-time `gen build` with network, which is exactly what the
+  # delta exists to eliminate (and what 2h-dead gen-spec CI runs
+  # bootstrapping gen-from-gen on 2-core runners looked like).
+  deltaSpec =
+    (import ./lockfile-delta.nix { lib = inputs.nixpkgs.lib; }).reconstruct src;
   committedSpec =
-    if hasCommittedSpec
+    if deltaSpec != null then deltaSpec
+    else if hasCommittedSpec
     then fromJSON (readFile (src + "/Cargo.build-spec.json"))
     else null;
 
@@ -98,22 +112,24 @@ let
   # (#[serde(rename_all = "camelCase")]). When the consumer authors
   # `[package.metadata.pleme]` in Cargo.toml, build the
   # `module_trio` map here so substrate consumes it verbatim.
-  plemeMetaFor = pkg:
+  # Parameterized over the CONTAINING manifest (`toml`) because [[bin]]
+  # lives at the manifest's top level, not under [package] — the root
+  # call site passes the root cargoToml; the delta-only member-meta
+  # synthesis below passes the MEMBER's own Cargo.toml.
+  plemeMetaForToml = toml: pkg:
     let
       pkgPleme = (pkg.metadata.pleme or {});
       packageName = pkg.name;
       # First-[[bin]]-name defaults: many fleet crates name the binary
       # differently from the package (hibikine package → hibiki bin,
-      # namimado-cli → namimado, etc.). [[bin]] lives at TOP LEVEL of
-      # Cargo.toml (not under [package]), so we consult cargoToml.bin
-      # via closure capture. Default `hm-leaf` to the first [[bin]]
-      # name when present so HM modules land at the BINARY name
+      # namimado-cli → namimado, etc.). Default `hm-leaf` to the first
+      # [[bin]] name when present so HM modules land at the BINARY name
       # (operators set `programs.hibiki.enable`, not
       # `programs.hibikine.enable`). Author override:
       # `[package.metadata.pleme] hm-leaf = "<name>"`.
       firstBinName =
-        if cargoToml ? bin && builtins.length cargoToml.bin > 0
-        then (builtins.head cargoToml.bin).name or packageName
+        if toml ? bin && builtins.length toml.bin > 0
+        then (builtins.head toml.bin).name or packageName
         else packageName;
       defaultBin = pkgPleme."hm-leaf" or firstBinName;
       defaultBinaryName = pkgPleme."binary-name" or defaultBin;
@@ -123,7 +139,12 @@ let
       {
         default_bin = defaultBin;
         repo =
-          if pkg ? repository
+          # isString: workspace members inherit via `repository.workspace
+          # = true`, which fromTOML reads as an attrset — the member-meta
+          # synthesis resolves inheritance before calling here, but guard
+          # anyway so an unresolved attrset degrades to null instead of a
+          # string-op eval error.
+          if pkg ? repository && builtins.isString pkg.repository
           then parseOwnerRepo pkg.repository
           else null;
       } // (
@@ -164,7 +185,7 @@ let
         workspace_members = [ { name = packageName; relative_path = "."; } ];
         root_crate = "${packageName}-${pkg.version or "0.0.0"}";
         crates."${packageName}-${pkg.version or "0.0.0"}" = { name = packageName; };
-        flake_metadata."${packageName}" = plemeMetaFor pkg;
+        flake_metadata."${packageName}" = plemeMetaForToml cargoToml pkg;
       } else null;  # workspace case → IFD path below
 
   # Workspace IFD fallback: when no committed spec AND consumer is a
@@ -202,8 +223,53 @@ let
       Members: ${builtins.concatStringsSep ", " (map (k: spec.crates.${k}.name) spec.workspace_members)}
     '';
 
+  # D1-conformant member-meta synthesis: the slim delta INTENTIONALLY
+  # omits `default_bin`/`repo` (both derivable in pure Nix from the
+  # member's own Cargo.toml — see gen_delta.rs MemberDelta) and only
+  # carries entries for members that authored `[package.metadata.pleme]`.
+  # When the spec has no entry for the picked member, derive it from the
+  # member's manifest with the same plemeMetaForToml the single-package
+  # synthesis uses. Without this, every delta-only WORKSPACE tool repo
+  # (gen itself) threw "no flake_metadata" here.
+  memberKeyOf = name:
+    let ms = builtins.filter (k: (spec.crates.${k}.name or null) == name) spec.workspace_members;
+    in if ms == [ ] then null else builtins.head ms;
+  synthesizedMemberMeta = name:
+    let
+      key = memberKeyOf name;
+      rel = if key == null then null else spec.crates.${key}.source.relative_path or null;
+      tomlPath =
+        if rel == null then null
+        else if rel == "." then cargoTomlPath
+        else src + "/${rel}/Cargo.toml";
+      toml =
+        if tomlPath != null && pathExists tomlPath
+        then builtins.fromTOML (readFile tomlPath)
+        else null;
+      # Workspace inheritance (`<field>.workspace = true` → the root
+      # manifest's [workspace.package].<field>) for the fields
+      # plemeMetaForToml consumes as strings. Unresolvable inheritance
+      # drops the field (downstream `or` fallbacks handle absence).
+      inheritedFix = pkg: field:
+        let v = pkg.${field} or null;
+        in
+          if builtins.isAttrs v && (v.workspace or false) then
+            let w = ((cargoToml.workspace or { }).package or { }).${field} or null;
+            in if w == null then removeAttrs pkg [ field ] else pkg // { ${field} = w; }
+          else pkg;
+    in
+      if toml != null && toml ? package
+      then plemeMetaForToml toml
+        (builtins.foldl' inheritedFix toml.package [ "repository" "description" ])
+      else null;
+
   meta = spec.flake_metadata.${pickedMember}
-    or (throw "mkRustToolFlake: spec has no flake_metadata for `${pickedMember}` — regenerate at gen v2+.");
+    or (
+      let m = synthesizedMemberMeta pickedMember;
+      in
+        if m != null then m
+        else throw "mkRustToolFlake: spec has no flake_metadata for `${pickedMember}` — regenerate at gen v2+."
+    );
 
   # toolName drives the overlay attribute + packages.${system}.${toolName}.
   # MUST be the cargo crate / binary name (for `pkgs.${packageAttr}` HM

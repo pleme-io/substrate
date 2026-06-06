@@ -33,7 +33,10 @@
 {
   nixpkgs,
   system,
-  crate2nix,
+  # crate2nix is only needed for the (default) crate2nix build path. The
+  # gen path (genBuild = true) drives lockfile-builder instead and leaves
+  # crate2nix null.
+  crate2nix ? null,
   fenix ? null,
   devenv ? null,
   forge ? null,
@@ -41,6 +44,11 @@
   darwinHelpers = import ../../util/darwin.nix;
   dockerHelpers = import ../../util/docker-helpers.nix;
   rustOverlay = import ./overlay.nix;
+  # gen build path: lockfile-builder consumes gen's Cargo.build-spec.json
+  # (auto-regen via IFD when absent) + Cargo.gen.lock for git-dep source
+  # hashes — which the actual fetcher computes, so it is immune to the
+  # crate2nix-vs-fetchgit hash drift. Imported lazily per target pkgs below.
+  plemeCrateOverrides = import ./pleme-crate-overrides.nix;
 
   # Host pkgs — used for devShell, apps, and native builds
   hostOverlays = if fenix != null
@@ -71,11 +79,44 @@ in {
   env ? [],
   # For workspace crates: the member name in Cargo.toml
   packageName ? null,
+  # Build via gen's lockfile-builder (Cargo.gen.lock hashes) instead of
+  # crate2nix's Cargo.nix. Eliminates the crate2nix-vs-fetchgit git-dep
+  # hash drift (the recurring `hash mismatch in fixed-output derivation`
+  # image-build failure). Requires Cargo.gen.lock in the workspace root
+  # (Cargo.build-spec.json is auto-derived via gen IFD when absent).
+  genBuild ? false,
   ...
 }:
 let
   effectivePackageName = if packageName != null then packageName else toolName;
   hasArch = arch: builtins.elem arch architectures;
+
+  # Construct the crate project for a given target pkgs, via gen
+  # (lockfile-builder) or crate2nix. Both return the same shape
+  # ({ workspaceMembers.<name>.build } / { rootCrate.build }), so the
+  # binary-extraction + image-build code below is builder-agnostic.
+  # `extraBuildInputs` lets the native (host) build add darwin shims.
+  mkProjectFor = pkgs: extraBuildInputs: let
+    pkgOverride = attrs: {
+      buildInputs = (attrs.buildInputs or []) ++ buildInputs ++ extraBuildInputs;
+      nativeBuildInputs = (attrs.nativeBuildInputs or []) ++ nativeBuildInputs;
+    };
+  in
+    if genBuild then
+      (import ./lockfile-builder.nix { inherit pkgs; }).mkProject {
+        inherit src;
+        defaultCrateOverrides =
+          pkgs.defaultCrateOverrides // plemeCrateOverrides // {
+            ${effectivePackageName} = pkgOverride;
+          } // crateOverrides;
+      }
+    else
+      import cargoNix {
+        inherit pkgs;
+        defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+          ${effectivePackageName} = pkgOverride;
+        } // crateOverrides;
+      };
 
   # ============================================================================
   # DOCKER IMAGE BUILDER
@@ -87,15 +128,7 @@ let
     targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
     targetPkgs = import nixpkgs { system = targetSystem; };
 
-    project = import cargoNix {
-      pkgs = targetPkgs;
-      defaultCrateOverrides = targetPkgs.defaultCrateOverrides // {
-        ${effectivePackageName} = attrs: {
-          buildInputs = (attrs.buildInputs or []) ++ buildInputs;
-          nativeBuildInputs = (attrs.nativeBuildInputs or []) ++ nativeBuildInputs;
-        };
-      } // crateOverrides;
-    };
+    project = mkProjectFor targetPkgs [];
 
     binary = if project ? workspaceMembers
       then project.workspaceMembers.${effectivePackageName}.build
@@ -125,17 +158,7 @@ let
   # ============================================================================
   # NATIVE BINARY (for local dev/testing on host system)
   # ============================================================================
-  nativeProject = import cargoNix {
-    pkgs = hostPkgs;
-    defaultCrateOverrides = hostPkgs.defaultCrateOverrides // {
-      ${effectivePackageName} = attrs: {
-        buildInputs = (attrs.buildInputs or [])
-          ++ buildInputs
-          ++ (darwinHelpers.mkDarwinBuildInputs hostPkgs);
-        nativeBuildInputs = (attrs.nativeBuildInputs or []) ++ nativeBuildInputs;
-      };
-    } // crateOverrides;
-  };
+  nativeProject = mkProjectFor hostPkgs (darwinHelpers.mkDarwinBuildInputs hostPkgs);
 
   nativeBinary = if nativeProject ? workspaceMembers
     then nativeProject.workspaceMembers.${effectivePackageName}.build
@@ -198,7 +221,7 @@ in {
     inherit devenv nixpkgs;
     devenvModule = ../../devenv/rust-tool.nix;
     tools = devTools ++ [ hostPkgs.rust-analyzer ];
-    extraPackages = [ crate2nix ] ++ runtimeDeps;
+    extraPackages = (if crate2nix != null then [ crate2nix ] else []) ++ runtimeDeps;
     inherit buildInputs;
   };
 
@@ -211,7 +234,10 @@ in {
     # Primary release app: pushes all architectures via forge image-release
     # Tags: {arch}-{git-short-sha} (immutable) + {arch}-latest (floating)
     release = releaseApp;
-
+  }
+  # The crate2nix regenerate app only applies to the crate2nix build path.
+  # The gen path (genBuild) regenerates via `gen build .` instead.
+  // (if crate2nix != null then {
     regenerate-cargo-nix = {
       type = "app";
       program = toString (hostPkgs.writeShellScript "${toolName}-regenerate-cargo-nix" ''
@@ -219,5 +245,5 @@ in {
         ${crate2nix}/bin/crate2nix generate
       '');
     };
-  };
+  } else {});
 }

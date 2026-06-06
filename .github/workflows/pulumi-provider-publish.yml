@@ -101,10 +101,15 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
+      # Block form: unquoted `${{ }}` inside a flow mapping is invalid
+      # YAML (0-job parse-failure class).
       - uses: actions/setup-go@v5
-        with: { go-version: ${{ inputs.go-version }}, cache: true }
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
       - uses: actions/setup-python@v5
-        with: { python-version: ${{ inputs.python-version }} }
+        with:
+          python-version: ${{ inputs.python-version }}
       - name: Build Python SDK
         run: |
           set -euo pipefail
@@ -134,7 +139,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: ${{ inputs.go-version }}, cache: true }
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
