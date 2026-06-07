@@ -152,6 +152,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
+      # relver is invoked via `nix run` (below) — the runner needs nix.
+      - uses: DeterminateSystems/nix-installer-action@main
+
       # relver next = (changed-since-tag)+(compute-next)+(idempotent tag+push).
       # gen-spec-bot-style bot identity (matches git-commit-tag default).
       # `skip=true` when no Go source moved since the last tag — a no-op run.
