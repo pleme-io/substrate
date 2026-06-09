@@ -3,7 +3,7 @@
   description = "substrate - Reusable Nix build patterns for service deployment";
 
   inputs = {
-    # THE fleet nixpkgs anchor. Pinned to a concrete nixos-25.11 rev (not the
+    # THE fleet nixpkgs anchor. Pinned to a concrete nixos-26.05 rev (not the
     # floating branch) so substrate is the single source of truth: every repo
     # does `nixpkgs.follows = "substrate/nixpkgs"` and gets THIS exact rev,
     # regardless of when it last locked. Bump here = one deliberate fleet-wide
@@ -53,6 +53,22 @@
     # a3ebee0 is the rev cartorio + lacre run on cleanly.
     devenv = {
       url = "github:cachix/devenv/a3ebee0b80ce56ae4acba2c971c09ee6eca75338";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    # THE fleet's nix-darwin + home-manager pins. Both are the 26.05
+    # release line — release-aligned to the nixpkgs anchor above so the
+    # whole tuple (nixpkgs + nix-darwin + home-manager) moves together.
+    # Each follows substrate's nixpkgs, so the single nixpkgs commit is
+    # shared across all three (no skew, perfectly-together tuple).
+    # Consumers do `nix-darwin.follows = "substrate/nix-darwin"` and
+    # `home-manager.follows = "substrate/home-manager"` to inherit THESE
+    # exact revs. Bump here = one deliberate fleet-wide move.
+    nix-darwin = {
+      url = "github:LnL7/nix-darwin/731951a251ca96cbd12a8e1bde63737e21947644";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    home-manager = {
+      url = "github:nix-community/home-manager/4eb4fec41674d5b059aa2eedf0f98453890546fa";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
