@@ -8,7 +8,15 @@
     # does `nixpkgs.follows = "substrate/nixpkgs"` and gets THIS exact rev,
     # regardless of when it last locked. Bump here = one deliberate fleet-wide
     # nixpkgs move (then `nix flake update substrate` across the fleet).
-    nixpkgs.url = "github:NixOS/nixpkgs/addf7cf5f383a3101ecfba091b98d0a1263dc9b8";
+    #
+    # 26.05.20260603 (2026-06-03), chosen CONTEMPORANEOUS with the nix-darwin +
+    # home-manager pins below — it is home-manager release-26.05's own tested
+    # nixpkgs, so the whole tuple `nix flake check`s clean with zero release
+    # skew. (The prior anchor addf7cf was 26.05.20251208 — same release LABEL
+    # but ~6 months older and incompatible with current home-manager, which
+    # imports lib/services/lib.nix that postdated it. Aligning by label ≠ by
+    # commit; the tuple must be pinned to commits that go perfectly together.)
+    nixpkgs.url = "github:NixOS/nixpkgs/6b316287bae2ee04c9b93c8c858d930fd07d7338";
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
