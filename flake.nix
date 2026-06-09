@@ -3,7 +3,12 @@
   description = "substrate - Reusable Nix build patterns for service deployment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    # THE fleet nixpkgs anchor. Pinned to a concrete nixos-25.11 rev (not the
+    # floating branch) so substrate is the single source of truth: every repo
+    # does `nixpkgs.follows = "substrate/nixpkgs"` and gets THIS exact rev,
+    # regardless of when it last locked. Bump here = one deliberate fleet-wide
+    # nixpkgs move (then `nix flake update substrate` across the fleet).
+    nixpkgs.url = "github:NixOS/nixpkgs/addf7cf5f383a3101ecfba091b98d0a1263dc9b8";
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
