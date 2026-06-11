@@ -366,11 +366,17 @@ in rec {
     };
     datadog = {
       mkServer = { site ? "datadoghq.com" }: {
-        command = "npx"; args = [ "-y" "@winor30/mcp-server-datadog" ];
+        package = pkgs.callPackage ./pkgs/mcp-server-datadog.nix { };
+        command = "mcp-server-datadog";
         env.DATADOG_SITE = site; description = "Datadog — metrics/APM/logs (${site})";
       };
       credEnvs = [ "DATADOG_API_KEY" "DATADOG_APP_KEY" ];
     };
+    # The npx-based kinds below resolve their server from a mutable per-user
+    # npm cache at startup — non-hermetic, and a corrupted cache kills the
+    # server at runtime (this broke datadog-akeyless before it was pinned).
+    # All are disabled by default; before enabling one, pin it like datadog:
+    # a derivation in ./pkgs/ + `package`/`command` instead of npx.
     splunk = {
       # UNVERIFIED package — disabled by default at call sites.
       mkServer = { url }: {
