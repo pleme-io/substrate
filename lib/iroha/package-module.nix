@@ -43,6 +43,33 @@
 #     }                             — exec command = "<resolved-pkg>/bin/<binaryName>",
 #                   args = [ subcommand ] ++ args; the unit is resolved INSIDE the
 #                   fragment where cfg/pkgs exist (cfg.package override respected);
+#     mcp         ? null | {        — MCP distribution (subsumes module-trio's
+#                                     withMcp + withAnvilMcp), HM only:
+#       subcommand ? "mcp"          — null or "" → no subcommand token;
+#       args       ? [ ]            — after the subcommand;
+#       env        ? { }; scopes ? [ ]; agents ? [ ];
+#       shim       ? false          — adds <ns>.<name>.enableMcpBin (bool, off):
+#                   when flipped (and cfg.enable), home.file installs an
+#                   executable ~/.local/bin/<name>-mcp text shim running
+#                   `exec <resolved-pkg>/bin/<binaryName> <subcommand+args> "$@"`
+#                   via ${pkgs.bash}/bin/bash — module-trio withMcp semantics;
+#       anvil      ? true           — registers via iroha.mcp.mkMcpRegistration
+#                   (command form, "<resolved-pkg>/bin/<binaryName>") into
+#                   blackmatter.components.anvil.mcp.servers.<name>, gated
+#                   mkIf cfg.enable (+ the HM platform gate);
+#     };
+#     http        ? null | {        — user-level HTTP service (subsumes
+#                                     module-trio's withHttp), HM only:
+#       subcommand ? "serve"        — null or "" → no subcommand token;
+#       addr       ? "127.0.0.1:7860";
+#     }                             — adds <ns>.<name>.http.{enable (bool, off),
+#                   addr (str, default = http.addr)} options; when flipped (and
+#                   cfg.enable), a user daemon unit (mkDaemonUnit, name
+#                   "<name>-http", command = "<resolved-pkg>/bin/<binaryName>",
+#                   args = [ subcommand "--addr" cfg.http.addr ]) lands via the
+#                   same per-platform dispatch as the user daemon: darwin →
+#                   launchd.agents."<name>-http", linux →
+#                   systemd.user.services."<name>-http";
 #     extra       ? { homeManager ? null; nixos ? null; darwin ? null; }
 #                   — per-class extension modules appended to the corresponding
 #                   emitted module's imports (NOT gated on enable);
@@ -66,7 +93,7 @@
 #                   daemon: launchd.daemons.<name> = unit.launchdDaemon;
 #     meta        :: { name, optionPath, enablePath, packageAttr, platforms,
 #                      hasDaemon, daemonScope (null when no daemon), hasSettings,
-#                      version = "0.1.0" };
+#                      hasMcp, hasHttp, version = "0.1.0" };
 #     surface     :: the underlying mkOptionSurface result (introspection +
 #                    escape hatch: packageFor / render / optionPath reusable);
 #   }
@@ -77,12 +104,17 @@
 #   - `extraPackages` not a list;
 #   - `surface` not an attrset;
 #   - `daemon` neither null nor an attrset; `daemon.scope` outside user|system;
+#   - `mcp` neither null nor an attrset, or carrying keys other than
+#     subcommand/args/env/scopes/agents/shim/anvil;
+#   - `http` neither null nor an attrset, or carrying keys other than
+#     subcommand/addr;
 #   - `extra` not an attrset, or carrying keys other than homeManager/nixos/darwin.
 { lib }:
 let
   core = import ./core.nix { inherit lib; };
   optionSurface = import ./option-surface.nix { inherit lib; };
   daemonLib = import ./daemon.nix { inherit lib; };
+  mcpLib = import ./mcp.nix { inherit lib; };
 
   validPlatforms = [
     "darwin"
@@ -96,6 +128,19 @@ let
     "homeManager"
     "nixos"
     "darwin"
+  ];
+  validMcpKeys = [
+    "subcommand"
+    "args"
+    "env"
+    "scopes"
+    "agents"
+    "shim"
+    "anvil"
+  ];
+  validHttpKeys = [
+    "subcommand"
+    "addr"
   ];
 
   mkPackageModule =
@@ -180,6 +225,43 @@ let
               logDir = d.logDir or null;
             };
 
+      mcpSpec =
+        let
+          m = args.mcp or null;
+        in
+        if m == null then
+          null
+        else if !(builtins.isAttrs m) then
+          throw "iroha.package-module.mkPackageModule: `mcp` must be null or { subcommand ? \"mcp\", args ? [ ], env ? { }, scopes ? [ ], agents ? [ ], shim ? false, anvil ? true } — got ${builtins.typeOf m}."
+        else if removeAttrs m validMcpKeys != { } then
+          throw "iroha.package-module.mkPackageModule: `mcp` accepts only the keys ${lib.concatStringsSep ", " validMcpKeys} — got unknown key(s) ${lib.concatStringsSep ", " (builtins.attrNames (removeAttrs m validMcpKeys))}."
+        else
+          {
+            subcommand = m.subcommand or "mcp";
+            args = m.args or [ ];
+            env = m.env or { };
+            scopes = m.scopes or [ ];
+            agents = m.agents or [ ];
+            shim = m.shim or false;
+            anvil = m.anvil or true;
+          };
+
+      httpSpec =
+        let
+          h = args.http or null;
+        in
+        if h == null then
+          null
+        else if !(builtins.isAttrs h) then
+          throw "iroha.package-module.mkPackageModule: `http` must be null or { subcommand ? \"serve\", addr ? \"127.0.0.1:7860\" } — got ${builtins.typeOf h}."
+        else if removeAttrs h validHttpKeys != { } then
+          throw "iroha.package-module.mkPackageModule: `http` accepts only the keys ${lib.concatStringsSep ", " validHttpKeys} — got unknown key(s) ${lib.concatStringsSep ", " (builtins.attrNames (removeAttrs h validHttpKeys))}."
+        else
+          {
+            subcommand = h.subcommand or "serve";
+            addr = h.addr or "127.0.0.1:7860";
+          };
+
       extraMods =
         let
           e = args.extra or { };
@@ -199,16 +281,16 @@ let
       hasSystemDaemon = daemonSpec != null && daemonSpec.scope == "system";
       daemonIsPeriodic = daemonSpec != null && daemonSpec.schedule != null;
       hasSettings = surface.settingsSpec != null;
+      hasMcp = mcpSpec != null;
+      hasHttp = httpSpec != null;
+      hasMcpShim = hasMcp && mcpSpec.shim;
+      hasAnvil = hasMcp && mcpSpec.anvil;
 
       # subcommand null|"" → just args, no empty token.
-      daemonArgv =
-        (
-          if daemonSpec.subcommand == null || daemonSpec.subcommand == "" then
-            [ ]
-          else
-            [ daemonSpec.subcommand ]
-        )
-        ++ daemonSpec.args;
+      subTokens = sub: if sub == null || sub == "" then [ ] else [ sub ];
+      daemonArgv = subTokens daemonSpec.subcommand ++ daemonSpec.args;
+      mcpArgv = subTokens mcpSpec.subcommand ++ mcpSpec.args;
+      httpArgvFor = cfg: subTokens httpSpec.subcommand ++ [ "--addr" cfg.http.addr ];
 
       # Resolved INSIDE fragments where cfg/pkgs exist — mkDaemonUnit is pure
       # and takes the already-resolved absolute command string.
@@ -224,6 +306,48 @@ let
             schedule
             logDir
             ;
+        };
+
+      # The "<name>-http" user unit — same resolution discipline as unitFor.
+      httpUnitFor =
+        { cfg, pkgs }:
+        daemonLib.mkDaemonUnit {
+          name = "${name}-http";
+          description = "${description} HTTP service";
+          command = "${surface.packageFor { inherit cfg pkgs; }}/bin/${binaryName}";
+          args = httpArgvFor cfg;
+        };
+
+      # mcp/http option islands live in a sibling options module (NOT in the
+      # surface's `extra` slot — that slot stays the caller's escape hatch).
+      # HM-only, matching module-trio: the shim and the http unit are
+      # home-level concerns.
+      mcpHttpOptionsModule =
+        { lib, ... }:
+        {
+          options = lib.setAttrByPath surface.optionPath (
+            lib.optionalAttrs hasMcpShim {
+              enableMcpBin = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = "Install a `${name}-mcp` shim at ~/.local/bin/${name}-mcp that runs `${binaryName} ${toString mcpSpec.subcommand}` (stdio transport) — useful for registering with blackmatter-anvil.";
+              };
+            }
+            // lib.optionalAttrs hasHttp {
+              http = {
+                enable = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Run ${name} as a user-level HTTP service (`${binaryName} ${toString httpSpec.subcommand} --addr <addr>`).";
+                };
+                addr = lib.mkOption {
+                  type = lib.types.str;
+                  default = httpSpec.addr;
+                  description = "Listen address for the ${name} HTTP service.";
+                };
+              };
+            }
+          );
         };
 
       onDarwin = builtins.elem "darwin" platforms;
@@ -248,6 +372,8 @@ let
           cfg = lib.getAttrFromPath surface.optionPath config;
           render = surface.render { inherit cfg pkgs; };
           unit = unitFor { inherit cfg pkgs; };
+          httpUnit = httpUnitFor { inherit cfg pkgs; };
+          resolvedBin = "${surface.packageFor { inherit cfg pkgs; }}/bin/${binaryName}";
         in
         {
           config = lib.mkIf (cfg.enable && hmPlatformOk pkgs) (
@@ -258,6 +384,35 @@ let
                 home.sessionVariables.${surface.settingsSpec.envVar} =
                   config.home.homeDirectory + "/" + surface.settingsSpec.relPath;
               }
+              # MCP shim — module-trio withMcp semantics: a text shim on
+              # ~/.local/bin that execs the resolved binary over stdio.
+              ++ lib.optionals hasMcpShim [
+                (lib.mkIf cfg.enableMcpBin {
+                  home.file.".local/bin/${name}-mcp" = {
+                    executable = true;
+                    text = ''
+                      #!${pkgs.bash}/bin/bash
+                      exec ${resolvedBin}${lib.optionalString (mcpArgv != [ ]) " ${lib.escapeShellArgs mcpArgv}"} "$@"
+                    '';
+                  };
+                })
+              ]
+              # Anvil registration — through iroha.mcp.mkMcpRegistration
+              # (command form: the path is pre-resolved here, where
+              # cfg.package overrides are visible). serverEntry is placed
+              # directly so the registration stays a LAZY leaf under the
+              # servers option — a disabled module never forces the package.
+              ++ lib.optionals hasAnvil [
+                {
+                  blackmatter.components.anvil.mcp.servers.${name} =
+                    (mcpLib.mkMcpRegistration {
+                      inherit name description;
+                      command = resolvedBin;
+                      args = mcpArgv;
+                      inherit (mcpSpec) env scopes agents;
+                    }).serverEntry;
+                }
+              ]
               # Platform branches as TWO mkIfs (the selector lives in the
               # condition, never in an if/then/else over the body shape —
               # see the module-trio.nix recursion note).
@@ -276,6 +431,16 @@ let
                     }
                   )
                 ))
+              ]
+              # HTTP user unit — same per-platform dispatch as the user
+              # daemon, gated on the http.enable island.
+              ++ lib.optionals hasHttp [
+                (lib.mkIf (cfg.http.enable && pkgs.stdenv.hostPlatform.isDarwin) {
+                  launchd.agents."${name}-http" = httpUnit.launchdAgent;
+                })
+                (lib.mkIf (cfg.http.enable && !pkgs.stdenv.hostPlatform.isDarwin) {
+                  systemd.user.services."${name}-http" = httpUnit.systemdUser;
+                })
               ]
             )
           );
@@ -331,26 +496,29 @@ let
         };
 
       mkClassModule =
-        class: fragment: extraMod:
+        class: extraImports: fragment: extraMod:
         core.tag class {
           imports = [
             surface.module
-            fragment
           ]
+          ++ extraImports
+          ++ [ fragment ]
           ++ lib.optional (extraMod != null) extraMod;
         };
     in
     {
-      homeManager = mkClassModule core.classes.homeManager hmFragment extraMods.homeManager;
-      nixos = mkClassModule core.classes.nixos nixosFragment extraMods.nixos;
-      darwin = mkClassModule core.classes.darwin darwinFragment extraMods.darwin;
+      homeManager = mkClassModule core.classes.homeManager (lib.optional (
+        hasMcpShim || hasHttp
+      ) mcpHttpOptionsModule) hmFragment extraMods.homeManager;
+      nixos = mkClassModule core.classes.nixos [ ] nixosFragment extraMods.nixos;
+      darwin = mkClassModule core.classes.darwin [ ] darwinFragment extraMods.darwin;
       meta = {
         inherit name packageAttr platforms;
         optionPath = surface.optionPath;
         enablePath = surface.enablePath;
         hasDaemon = daemonSpec != null;
         daemonScope = if daemonSpec == null then null else daemonSpec.scope;
-        inherit hasSettings;
+        inherit hasSettings hasMcp hasHttp;
         version = "0.1.0";
       };
       inherit surface;

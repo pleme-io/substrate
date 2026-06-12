@@ -1,7 +1,7 @@
 # Tests — iroha.package-module (the keystone: lazy coupling-killer, package
 # + extras install, cfg.package override, settings render, user/system
-# daemon per-platform dispatch, platform gates, class tagging, extra
-# fragments, meta, typed throws).
+# daemon per-platform dispatch, mcp anvil registration + shim, http user
+# unit, platform gates, class tagging, extra fragments, meta, typed throws).
 { lib, iroha }:
 let
   inherit (iroha) mkPackageModule;
@@ -24,6 +24,7 @@ let
     };
     tend = "TEND_DRV";
     helper = "HELPER_DRV";
+    bash = "BASH_DRV";
   };
   stubPkgsDarwin = stubPkgsLinux // {
     stdenv.hostPlatform = {
@@ -65,6 +66,12 @@ let
           default = { };
         };
         launchd.agents = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
+        # the anvil landing pad — freeform servers attr, as declared by
+        # blackmatter-anvil's mcpServerOpts in the real universe
+        blackmatter.components.anvil.mcp.servers = lib.mkOption {
           type = lib.types.attrsOf lib.types.anything;
           default = { };
         };
@@ -187,6 +194,33 @@ let
     name = "tend";
     description = "tend repo daemon";
     surface.namespace = "blackmatter.components";
+  };
+  pmMcp = mkPackageModule {
+    name = "tend";
+    description = "tend repo daemon";
+    mcp = {
+      scopes = [ "dev" ];
+      agents = [ "claude" ];
+      shim = true;
+    };
+  };
+  pmMcpNoAnvil = mkPackageModule {
+    name = "tend";
+    description = "tend repo daemon";
+    mcp.anvil = false;
+  };
+  pmMcpBareArgs = mkPackageModule {
+    name = "tend";
+    description = "tend repo daemon";
+    mcp = {
+      subcommand = "";
+      args = [ "--stdio" ];
+    };
+  };
+  pmHttp = mkPackageModule {
+    name = "tend";
+    description = "tend repo daemon";
+    http = { };
   };
 
   modArgs = {
@@ -391,6 +425,185 @@ in
     expected = "from-extra";
   };
 
+  # ── mcp: anvil registration ──────────────────────────────────────────
+  mcp-anvil-enabled-registers-server = {
+    expr =
+      let
+        entry =
+          (evalHM stubPkgsLinux [
+            pmMcp.homeManager
+            en
+          ]).config.blackmatter.components.anvil.mcp.servers.tend;
+      in
+      {
+        cmdEndsBin = lib.hasSuffix "/bin/tend" entry.command;
+        args = entry.args;
+        scopes = entry.scopes;
+        agents = entry.agents;
+        enable = entry.enable;
+      };
+    expected = {
+      cmdEndsBin = true;
+      args = [ "mcp" ];
+      scopes = [ "dev" ];
+      agents = [ "claude" ];
+      enable = true;
+    };
+  };
+  # Disabled module → no registration. Evaluated against the pkgs that
+  # LACKS the package attr: the anvil entry is a lazy leaf, so the
+  # coupling-killer extends to mcp.
+  mcp-anvil-disabled-module-absent = {
+    expr =
+      (evalHM stubPkgsNoTend [
+        pmMcp.homeManager
+      ]).config.blackmatter.components.anvil.mcp.servers;
+    expected = { };
+  };
+  mcp-anvil-false-no-registration = {
+    expr =
+      (evalHM stubPkgsLinux [
+        pmMcpNoAnvil.homeManager
+        en
+      ]).config.blackmatter.components.anvil.mcp.servers;
+    expected = { };
+  };
+  mcp-empty-subcommand-args-only = {
+    expr =
+      (evalHM stubPkgsLinux [
+        pmMcpBareArgs.homeManager
+        en
+      ]).config.blackmatter.components.anvil.mcp.servers.tend.args;
+    expected = [ "--stdio" ];
+  };
+
+  # ── mcp: shim option ─────────────────────────────────────────────────
+  mcp-shim-option-exists-default-off = {
+    expr =
+      let
+        r = evalHM stubPkgsLinux [
+          pmMcp.homeManager
+          en
+        ];
+      in
+      {
+        optExists = r.options.programs.tend ? enableMcpBin;
+        fileAbsent = !(r.config.home.file ? ".local/bin/tend-mcp");
+      };
+    expected = {
+      optExists = true;
+      fileAbsent = true;
+    };
+  };
+  mcp-shim-flipped-creates-home-file = {
+    expr =
+      let
+        f =
+          (evalHM stubPkgsLinux [
+            pmMcp.homeManager
+            en
+            { programs.tend.enableMcpBin = true; }
+          ]).config.home.file.".local/bin/tend-mcp";
+      in
+      {
+        executable = f.executable;
+        hasBash = lib.hasPrefix "#!BASH_DRV/bin/bash" f.text;
+        hasExecBin = lib.hasInfix "exec TEND_DRV/bin/tend" f.text;
+        hasSub = lib.hasInfix "mcp" f.text;
+        hasPassthrough = lib.hasInfix ''"$@"'' f.text;
+      };
+    expected = {
+      executable = true;
+      hasBash = true;
+      hasExecBin = true;
+      hasSub = true;
+      hasPassthrough = true;
+    };
+  };
+
+  # ── http: user unit per-platform dispatch ────────────────────────────
+  http-option-default-off-no-unit = {
+    expr =
+      (evalHM stubPkgsLinux [
+        pmHttp.homeManager
+        en
+      ]).config.systemd.user.services;
+    expected = { };
+  };
+  http-enabled-linux-lands-systemd-user = {
+    expr =
+      let
+        c =
+          (evalHM stubPkgsLinux [
+            pmHttp.homeManager
+            en
+            { programs.tend.http.enable = true; }
+          ]).config;
+        exec = c.systemd.user.services."tend-http".Service.ExecStart;
+      in
+      {
+        hasSvc = c.systemd.user.services ? "tend-http";
+        execHasBin = lib.hasInfix "/bin/tend" exec;
+        execHasServe = lib.hasInfix "serve" exec;
+        execHasAddr = lib.hasInfix "--addr" exec && lib.hasInfix "127.0.0.1:7860" exec;
+        agents = c.launchd.agents;
+      };
+    expected = {
+      hasSvc = true;
+      execHasBin = true;
+      execHasServe = true;
+      execHasAddr = true;
+      agents = { };
+    };
+  };
+  http-enabled-darwin-lands-launchd-agent = {
+    expr =
+      let
+        c =
+          (evalHM stubPkgsDarwin [
+            pmHttp.homeManager
+            en
+            { programs.tend.http.enable = true; }
+          ]).config;
+        pa = c.launchd.agents."tend-http".config.ProgramArguments;
+      in
+      {
+        hasAgent = c.launchd.agents ? "tend-http";
+        hasServe = builtins.elem "serve" pa;
+        hasAddr = builtins.elem "--addr" pa && builtins.elem "127.0.0.1:7860" pa;
+        services = c.systemd.user.services;
+      };
+    expected = {
+      hasAgent = true;
+      hasServe = true;
+      hasAddr = true;
+      services = { };
+    };
+  };
+  http-addr-override-wins = {
+    expr =
+      lib.hasInfix "0.0.0.0:9999"
+        (evalHM stubPkgsLinux [
+          pmHttp.homeManager
+          en
+          {
+            programs.tend.http = {
+              enable = true;
+              addr = "0.0.0.0:9999";
+            };
+          }
+        ]).config.systemd.user.services."tend-http".Service.ExecStart;
+    expected = true;
+  };
+  http-requires-parent-enable = {
+    expr =
+      (evalHM stubPkgsLinux [
+        pmHttp.homeManager
+        { programs.tend.http.enable = true; }
+      ]).config.systemd.user.services;
+    expected = { };
+  };
+
   # ── meta + surface introspection ─────────────────────────────────────
   meta-fields-exact = {
     expr = pm.meta;
@@ -413,6 +626,8 @@ in
       hasDaemon = true;
       daemonScope = "user";
       hasSettings = true;
+      hasMcp = false;
+      hasHttp = false;
       version = "0.1.0";
     };
   };
@@ -424,6 +639,20 @@ in
       hasDaemon = false;
       daemonScope = null;
       hasSettings = false;
+    };
+  };
+  meta-has-mcp-has-http = {
+    expr = {
+      mcpOnMcp = pmMcp.meta.hasMcp;
+      httpOnMcp = pmMcp.meta.hasHttp;
+      mcpOnHttp = pmHttp.meta.hasMcp;
+      httpOnHttp = pmHttp.meta.hasHttp;
+    };
+    expected = {
+      mcpOnMcp = true;
+      httpOnMcp = false;
+      mcpOnHttp = false;
+      httpOnHttp = true;
     };
   };
   surface-exposed-with-lazy-package-default = {
@@ -537,6 +766,54 @@ in
         }).meta.optionPath
       ).success;
     expected = false;
+  };
+  mcp-bad-shape-or-key-throws = {
+    expr = {
+      badShape =
+        (builtins.tryEval
+          (mkPackageModule {
+            name = "x";
+            description = "d";
+            mcp = "yes";
+          }).meta.hasMcp
+        ).success;
+      unknownKey =
+        (builtins.tryEval
+          (mkPackageModule {
+            name = "x";
+            description = "d";
+            mcp.subcmd = "m";
+          }).meta.hasMcp
+        ).success;
+    };
+    expected = {
+      badShape = false;
+      unknownKey = false;
+    };
+  };
+  http-bad-shape-or-key-throws = {
+    expr = {
+      badShape =
+        (builtins.tryEval
+          (mkPackageModule {
+            name = "x";
+            description = "d";
+            http = 80;
+          }).meta.hasHttp
+        ).success;
+      unknownKey =
+        (builtins.tryEval
+          (mkPackageModule {
+            name = "x";
+            description = "d";
+            http.port = 80;
+          }).meta.hasHttp
+        ).success;
+    };
+    expected = {
+      badShape = false;
+      unknownKey = false;
+    };
   };
 }
 # ── class tagging: HM module under a nixos-class eval is REJECTED ──────

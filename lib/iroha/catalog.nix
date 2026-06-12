@@ -59,8 +59,8 @@
     maturity = "Working";
     since = "2026-06-12";
     description = "THE package module: one spec emits three class-tagged modules (homeManager/nixos/darwin) + reflection meta — the standardized interface configuration composes over.";
-    subsumes = "The DESTINATION for mkModuleTrio, fleet-app-module.nix, and blackmatter-component-flake module emission. Covered today: enable/package/settings surface, user+system daemons, platform gates, per-class extension modules. NOT yet covered (mkModuleTrio remains canonical for these): withMcp/withAnvilMcp shims, withHttp service, extraPackages-by-overlay-attr quirks, shikumiGateOnEnable. Promotion per surface as consumers migrate.";
-    dependsOn = [ "core" "option-surface" "daemon" ];
+    subsumes = "The DESTINATION for mkModuleTrio, fleet-app-module.nix, and blackmatter-component-flake module emission. Covered today: enable/package/settings surface, user+system daemons, mcp (anvil registration + PATH shim), http user service, platform gates, per-class extension modules. NOT yet covered (mkModuleTrio remains canonical for these): extraPackages-by-overlay-attr quirks, shikumiGateOnEnable, anvilGateOnEnable=false semantics. Promotion per surface as consumers migrate.";
+    dependsOn = [ "core" "option-surface" "daemon" "mcp" ];
     exports = [ "mkPackageModule" ];
   };
 
@@ -117,6 +117,105 @@
     subsumes = "Hand-written legacy alias modules across blackmatter's profile generations; ad-hoc keep-the-old-option-working fragments.";
     dependsOn = [ "core" ];
     exports = [ "mkDeprecationShim" "mkEnableAlias" ];
+  };
+
+  wrapped-package = {
+    file = "wrapped-package.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "Typed wrapper chokepoint: { basePackage, flags, env, pathAdd, rename, multicall } compiled to symlinkJoin+wrapProgram; passthru.iroha.wrapSpec gives round-trip auditability (CLOSED-LOOP rule 3).";
+    subsumes = "The six hand-rolled wrapper idioms (symlinkJoin+wrapProgram PATH-pin, multicall symlinks, binary rename, env-export, makeWrapper launcher, writeShellScriptBin glue); wrapper-manager's shape (adopted, dependency skipped).";
+    dependsOn = [ ];
+    exports = [ "mkWrappedPackage" ];
+  };
+
+  typed-app = {
+    file = "typed-app.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "Typed flake-app constructor (binary + argv + env): zero-wrapper fast path; otherwise a compiled export/exec wrapper — bash is emitted, never authored (NO SHELL law).";
+    subsumes = "Ad-hoc writeShellScript app wrappers in parts/packages.nix and infra helpers (kubectl contexts, kikai lifecycle, push-image).";
+    dependsOn = [ ];
+    exports = [ "mkTypedApp" ];
+  };
+
+  mcp = {
+    file = "mcp.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "The single binary-to-agent-distribution primitive: anvil serverOpts-shaped registration (command|package form, scopes, agents) as data + HM fragment. Fixes module-trio's latent package+resolved-path double-resolution.";
+    subsumes = "mkMcpServerEntry / mkAnvilRegistration / module-trio withAnvilMcp drift — one entry shape.";
+    dependsOn = [ ];
+    exports = [ "mkMcpRegistration" ];
+  };
+
+  vm-check = {
+    file = "vm-check.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "testers.runNixOSTest wrapper — the integration tier proving profile/host compositions boot and serve (SELinux-M3-style gates; Linux builders / pangea-jit-builders).";
+    subsumes = "Ad-hoc VM test wiring; substrate's per-repo NixOS-test boilerplate.";
+    dependsOn = [ ];
+    exports = [ "mkVmCheck" ];
+  };
+
+  settings-shikumi = {
+    file = "settings-shikumi.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "shikumi schema -> option-surface settings.fields projection: one schema, two projections (Rust TieredConfig + Nix options) that cannot drift — the CONFIGURATION-MANAGEMENT missing link. Bounds on non-integer aliases carried but inert (documented ceiling).";
+    subsumes = "Hand-duplicated shikumiTypedGroups blocks; the Rust-vs-Nix config surface drift class.";
+    dependsOn = [ ];
+    exports = [ "mkSettingsFromShikumi" "shikumiTypeToFieldType" ];
+  };
+
+  fleet-inventory = {
+    file = "fleet-inventory.nix";
+    tier = "extended";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "Machines x services x instances x roles/tags placement (clan-core shape, dependency skipped): one declaration places a multi-machine service; modulesFor projects per-machine module sets; invariants are throw-free data.";
+    subsumes = "The hand-rolled registry+projection pairs (lib/vpn-links.nix linksForNode, lib/clusters.nix) and every future multi-node service's bespoke registry.";
+    dependsOn = [ ];
+    exports = [ "mkFleetInventory" ];
+  };
+
+  host-matrix = {
+    file = "host-matrix.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "Typed node registry: one declaration -> nixosConfigurations + darwinConfigurations + deploy-rs node data + colmena hive + tag projections; ONE shared module-list builder makes config/deploy drift unrepresentable; manifest feeds HM sharedModules on BOTH platforms (dissolves the dual-list drift). deployRs is typed data — path realization stays consumer-side (never faked).";
+    subsumes = "lib/nodes.nix hand-listed node entries; the mkDarwin + inline sharedModules stack; lib/deploy.nix; tag-driven image emission wiring.";
+    dependsOn = [ "core" ];
+    exports = [ "mkHostMatrix" ];
+  };
+
+  flake-unit = {
+    file = "flake-unit.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "The flake-parts faces: mkFlakeUnit projects a package-module unit into flake.modules.<class>.<name> (dendritic shape) + legacy-alias outputs + perSystem packages/checks/overlay; mkDendriticRoot = mkFlake + import-tree veneer; mkDevPartition isolates dev-only inputs from consumer locks (the 233-repo wedge amplifier).";
+    subsumes = "Hand-rolled trio exports in consumer flakes; the inline overlays.default duplication; hand-curated parts imports lists (once the dead-parts purge lands).";
+    dependsOn = [ ];
+    exports = [ "mkFlakeUnit" "mkDendriticRoot" "mkDevPartition" ];
+  };
+
+  component-flake = {
+    file = "component-flake.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-12";
+    description = "THE BLACKMATTER SWALLOW SURFACE: blackmatter-component-flake.nix v2 — same consumer contract (parity suite asserts attr-name sets + deep metadata equality against the legacy implementation), re-emitted through iroha letters; typed throws replace silent key drops; the legacy eval-nixos-module check was broken by construction (stub prefix conflict) — v2's actually runs.";
+    subsumes = "lib/blackmatter-component-flake.nix (20+ blackmatter sub-repos migrate by changing one import path; authored consumer modules pass through verbatim).";
+    dependsOn = [ "core" "checks" ];
+    exports = [ "mkComponentFlake" ];
   };
 
   catalog = {

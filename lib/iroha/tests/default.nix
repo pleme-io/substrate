@@ -25,6 +25,15 @@ let
     profile = ./profile.nix;
     shim = ./shim.nix;
     catalog = ./catalog.nix;
+    wrapped-package = ./wrapped-package.nix;
+    typed-app = ./typed-app.nix;
+    mcp = ./mcp.nix;
+    vm-check = ./vm-check.nix;
+    settings-shikumi = ./settings-shikumi.nix;
+    fleet-inventory = ./fleet-inventory.nix;
+    host-matrix = ./host-matrix.nix;
+    flake-unit = ./flake-unit.nix;
+    component-flake = ./component-flake.nix;
   };
 
   suites = lib.mapAttrs (_: f: import f { inherit lib iroha; }) suiteFiles;
