@@ -136,6 +136,24 @@
       inherit systems;
 
       flake = {
+        # iroha (いろは) — the pleme-io Nix primitive alphabet.
+        # One controlled, composable primitive set: option surfaces, package
+        # modules, daemon units, overlay algebra, manifest, profiles, shims,
+        # proof harness. Pure { lib } — system-independent, zero pkgs at
+        # import. Consumers:
+        #   iroha = inputs.substrate.iroha;                      # ready-bound
+        #   iroha = import "${substrate}/lib/iroha" { inherit lib; };  # own lib
+        # Self-test surface: checks.<system>.iroha (every letter's suite).
+        iroha = import ./lib/iroha { lib = nixpkgs.lib; };
+        irohaPath = ./lib/iroha;
+
+        # Aggregate-before-assert eval-test derivation for the alphabet.
+        checks = eachSystem (system: {
+          iroha =
+            (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck
+            (import nixpkgs { inherit system; });
+        });
+
         # Devenv modules for consumer repos
         # Import these in devenv.shells.default.imports or devenv.lib.mkShell modules
         devenvModules = {

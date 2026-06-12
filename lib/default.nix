@@ -1905,4 +1905,14 @@ in rec {
     nonrootGid;
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
   sharedDevShell = sharedDevShellModule;
+
+  # ──────────────────────────────────────────────────────────────────
+  # IROHA (いろは) — the pleme-io Nix primitive alphabet (from ./iroha/)
+  # ──────────────────────────────────────────────────────────────────
+  # Pure-lib primitive set: mkOptionSurface, mkPackageModule, mkDaemonUnit,
+  # overlay algebra, mkManifest, mkProfile, mkDeprecationShim, eval-check
+  # harness, catalog reflection. Also exported flake-level as
+  # `substrate.iroha` (system-independent; this per-system binding is a
+  # convenience for pkgs-bound consumers of substrate.lib.${system}).
+  iroha = import ./iroha { inherit (pkgs) lib; };
 }
