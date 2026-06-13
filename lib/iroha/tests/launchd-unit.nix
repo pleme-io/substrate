@@ -160,6 +160,18 @@ in
     };
   };
 
+  # ── serviceConfig export = the bare plist (HM launchd.agents.config) ─
+  bare-serviceconfig-for-hm-agent = {
+    # the top-level serviceConfig is the daemon's serviceConfig, unwrapped —
+    # what an HM launchd agent's `config` consumes directly.
+    expr = caltick.serviceConfig == caltick.daemon.serviceConfig;
+    expected = true;
+  };
+  bare-serviceconfig-has-program-arguments = {
+    expr = caltick.serviceConfig.ProgramArguments;
+    expected = [ "/bin/tick" "--once" ];
+  };
+
   # ── typed throws (lazy — force the field that throws) ────────────────
   missing-label-throws = {
     expr = (builtins.tryEval (mkLaunchdUnit { command = "/x"; }).daemon.serviceConfig.Label).success;

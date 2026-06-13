@@ -121,6 +121,12 @@ let
     in
     {
       inherit daemon scheduleKind;
+      # The bare plist attrs (Label / ProgramArguments / schedule / …) WITHOUT
+      # the nix-darwin daemon wrapper — this is what a home-manager
+      # `launchd.agents.<name>.config` expects (HM agents take the plist
+      # directly, not under serviceConfig). `command` is daemon-only, so an HM
+      # agent uses programArguments. tatara-builders consumes this.
+      inherit serviceConfig;
     };
 in
 {
