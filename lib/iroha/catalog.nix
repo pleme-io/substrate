@@ -223,10 +223,10 @@
     tier = "standard";
     maturity = "Working";
     since = "2026-06-13";
-    description = "SYSTEM-class service MODULE emitter: a typed enable+config surface -> a full systemd.service (nixos) / launchd.daemon (darwin) with the root/system power fields iroha.daemon excludes (Type/EnvironmentFile/StateDirectory/RuntimeDirectory/User/Group/RemainAfterExit/ExecStartPre-Post/hardening). Composes mkOptionSurface + core.tag.";
+    description = "SYSTEM-class service MODULE emitter: a typed enable+config surface -> a full systemd.service (nixos) / launchd.daemon (darwin) with the root/system power fields iroha.daemon excludes (Type/EnvironmentFile/StateDirectory/RuntimeDirectory/User/Group/RemainAfterExit/ExecStartPre-Post/hardening). Composes mkOptionSurface + core.tag. mkServiceUnit is the PURE keep-alive systemd-service renderer (data -> { service, programArguments }) that bespoke modules — those whose ExecStart depends on their own typed options + a generated config file, AND which emit extra config (tmpfiles, HM bridges) alongside the unit (toride-system) — consume INSIDE their config block to farm the service shape while keeping their knobs; serviceExtra is the service-level path/restartIfChanged passthrough (siblings of serviceConfig).";
     subsumes = "The ~50 hand-rolled system-service modules in pleme-io/nix (attic-store-push, k3s-kubeconfig-export, toride-system, dns-split-horizon, vaultwarden, edge-router, power, ...).";
     dependsOn = [ "core" "option-surface" ];
-    exports = [ "mkServiceModule" ];
+    exports = [ "mkServiceModule" "mkServiceUnit" ];
   };
 
   service-bundle = {

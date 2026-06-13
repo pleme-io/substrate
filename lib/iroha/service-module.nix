@@ -1,4 +1,6 @@
-# iroha.service-module — L2: a full SYSTEM-class service MODULE emitter.
+# iroha.service-module — L2: a full SYSTEM-class service MODULE emitter
+#                          + the pure systemd keep-alive unit renderer it
+#                          stands on.
 #
 # iroha.daemon (the L2 sibling) emits unit ATTRS for the dominant
 # user-level keep-alive/periodic pattern and EXPLICITLY excludes the
@@ -8,9 +10,30 @@
 # files reach for: it emits a complete class-tagged MODULE — an option
 # surface (enable + caller-typed extras) plus a full system
 # `systemd.services.<name>` (NixOS) and a minimal `launchd.daemons.<name>`
-# (nix-darwin) projection that DO carry those fields. It does NOT emit a
-# package option (system services run absolute paths the caller resolves)
-# and it does NOT emit a home-manager projection (these are system units).
+# (nix-darwin) projection that DO carry those fields.
+#
+# TWO exports, layered (mirroring scheduled-job's mkScheduledUnit/mkScheduledJob):
+#
+#   mkServiceUnit — the PURE keep-alive systemd-service renderer (data ->
+#     data). Takes already-resolved values (the caller owns the option
+#     surface + reads its own cfg) and returns:
+#       { service :: systemd.services.<x>; programArguments :: argv; }
+#     This is the composable core: a BESPOKE module (one whose ExecStart is a
+#     function of its own options + a generated config file, AND which emits
+#     extra config — tmpfiles, home-manager bridges — alongside the unit;
+#     toride-system, dns-split-horizon, vaultwarden) keeps its hand-authored
+#     option surface + extra config and reaches for mkServiceUnit INSIDE its
+#     `config` block to farm only the repeating system-service SHAPE
+#     (serviceConfig composition / Type / Restart / hardening / ordering /
+#     service-level passthrough) without surrendering its knobs. Systemd-only.
+#
+#   mkServiceModule — the FULL dual-platform MODULE wrapper. Composes
+#     mkOptionSurface (enable + extraOptions) + core.tag for class tagging,
+#     uses mkServiceUnit for the NixOS systemd half, and adds the launchd
+#     projection. The surface for services whose ExecStart is STATIC at
+#     construction time. It does NOT emit a package option (system services
+#     run absolute paths the caller resolves) and it does NOT emit a
+#     home-manager projection (these are system units).
 #
 # ExecStart is built from EITHER an `execStart` string (verbatim, already
 # an absolute command line) OR a `command` + `args` pair. When `command`
@@ -24,10 +47,29 @@
 # is given it falls back to `[ "/bin/sh" "-c" execStart ]` — documented
 # because a bare string cannot be word-split safely into an argv.
 #
+# hardening + serviceConfigExtra merge INTO serviceConfig (wins last).
+# serviceExtra merges onto the SERVICE-LEVEL attrs (siblings of serviceConfig
+# — path, restartIfChanged, unitConfig; wins last). All default `{}`.
+#
 # COMPOSES iroha.mkOptionSurface for the enable + extraOptions skeleton
 # (package = false, settings = null) and iroha.core.tag for class tagging.
 #
 # Exports (pure { lib }, zero pkgs — pkgs binds late as a module arg):
+#
+#   mkServiceUnit :: {
+#     description :: str (required);
+#     execStart   ? null (str) | command ? null (str) + args ? [ ] (listOf str);
+#                                  exactly one of execStart / command;
+#     type        ? "simple"   — "simple"|"oneshot"|"notify"|"forking";
+#     wants ? [ ]; requires ? [ ]; after ? [ "network.target" ]; before ? [ ];
+#     environment ? { } (attrsOf str); environmentFile ? null (str);
+#     stateDirectory ? null; runtimeDirectory ? null; workingDirectory ? null;
+#     user ? null; group ? null;
+#     restart ? "on-failure"; restartSec ? null (int|str); remainAfterExit ? null;
+#     execStartPre ? [ ]; execStartPost ? [ ];
+#     wantedBy ? [ "multi-user.target" ];
+#     hardening ? { }; serviceConfigExtra ? { }; serviceExtra ? { };
+#   } -> { service :: systemd.services.<x> attrs; programArguments :: argv; }
 #
 #   mkServiceModule :: {
 #     name        :: str (required) — unit name + last option-path segment;
@@ -39,59 +81,16 @@
 #     extraOptions ? { } | (lib -> attrs) — extra typed option declarations
 #                                     merged under the option root (function
 #                                     form receives lib);
-#     service     :: {              — the system unit spec
-#       execStart   ? null (str)    — verbatim absolute command line; OR
-#       command     ? null (str)    — absolute program path …
-#       args        ? [ ] (listOf str) — … with these args, escaped + joined;
-#                                     exactly one of execStart / command is
-#                                     required;
-#       type        ? "simple"      — "simple"|"oneshot"|"notify"|"forking";
-#       wants       ? [ ];
-#       requires    ? [ ];
-#       after       ? [ "network.target" ];
-#       before      ? [ ];
-#       environment ? { } (attrsOf str);
-#       environmentFile ? null (str);
-#       stateDirectory  ? null (str);
-#       runtimeDirectory ? null (str);
-#       workingDirectory ? null (str);
-#       user        ? null (str);
-#       group       ? null (str);
-#       restart     ? "on-failure";
-#       restartSec  ? null (int|str);
-#       remainAfterExit ? null (bool) — for oneshot units;
-#       execStartPre  ? [ ] (listOf str);
-#       execStartPost ? [ ] (listOf str);
-#       wantedBy    ? [ "multi-user.target" ];
-#       hardening   ? { }           — caller-typed attrs merged into
-#                                     serviceConfig (ProtectSystem,
-#                                     NoNewPrivileges, …);
-#       serviceConfigExtra ? { }    — raw serviceConfig passthrough (wins
-#                                     last);
-#     };
+#     service     :: { … the mkServiceUnit spec fields above (minus
+#                       description, which comes from the top-level arg) … };
 #   } -> {
 #     nixos :: class-tagged module (_class "nixos") —
 #       options.<ns>.<name>.{ enable, …extraOptions };
-#       config = mkIf cfg.enable {
-#         systemd.services.<name> = {
-#           inherit description;
-#           wants/requires/after/before/wantedBy (only non-empty lists);
-#           environment (only when non-empty);
-#           serviceConfig =
-#             { ExecStart, Type, Restart }
-#             // optional { RestartSec, EnvironmentFile, StateDirectory,
-#                           RuntimeDirectory, WorkingDirectory, User, Group,
-#                           RemainAfterExit, ExecStartPre, ExecStartPost }
-#             // hardening // serviceConfigExtra;
-#         };
-#       };
+#       config = mkIf cfg.enable { systemd.services.<name> = <unit.service>; };
 #     darwin :: class-tagged module (_class "darwin") —
 #       config = mkIf cfg.enable {
 #         launchd.daemons.<name>.serviceConfig = {
-#           ProgramArguments = [command] ++ args  (or [ "/bin/sh" "-c"
-#                              execStart ] when only execStart is given),
-#           KeepAlive = (type != "oneshot"),
-#           RunAtLoad = true,
+#           ProgramArguments, KeepAlive = (type != "oneshot"), RunAtLoad = true,
 #           EnvironmentVariables (when environment non-empty),
 #           WorkingDirectory (when set),
 #         };
@@ -104,7 +103,7 @@
 #     meta :: { name, optionPath, enablePath, kind = "system-service" };
 #   }
 #
-# Throws (every message prefixed "iroha.service-module.mkServiceModule: "):
+# Throws (every message prefixed "iroha.service-module."):
 #   - `name` / `description` missing;
 #   - `service` missing, or neither `execStart` nor `command` given, or BOTH
 #     given (ambiguous);
@@ -133,7 +132,7 @@ let
         else if builtins.isInt arg || builtins.isFloat arg then
           toString arg
         else
-          throw "iroha.service-module.mkServiceModule: Exec arguments must be strings, paths, or numbers — got ${builtins.typeOf arg}."
+          throw "iroha.service-module: Exec arguments must be strings, paths, or numbers — got ${builtins.typeOf arg}."
       )
     );
   escapeSystemdExecArgs = lib.concatMapStringsSep " " escapeSystemdExecArg;
@@ -145,6 +144,111 @@ let
     "forking"
   ];
 
+  # ── shared exec resolution (execStart XOR command + args) ─────────────
+  resolveExec =
+    spec:
+    let
+      hasExecStart = (spec.execStart or null) != null;
+      hasCommand = (spec.command or null) != null;
+    in
+    if hasExecStart && hasCommand then
+      throw "iroha.service-module: takes exactly one of `execStart` (verbatim line) or `command` (+ `args`) — got both."
+    else if hasExecStart then
+      {
+        execStart = spec.execStart;
+        programArguments = [
+          "/bin/sh"
+          "-c"
+          spec.execStart
+        ];
+      }
+    else if hasCommand then
+      let
+        argv = [ spec.command ] ++ (spec.args or [ ]);
+      in
+      {
+        execStart = escapeSystemdExecArgs argv;
+        programArguments = argv;
+      }
+    else
+      throw "iroha.service-module: needs one of `execStart` (str) or `command` (str — absolute program path; the caller resolves the package).";
+
+  # ── PURE keep-alive systemd-service renderer (data -> { service }) ────
+  mkServiceUnit =
+    spec:
+    let
+      description =
+        spec.description
+          or (throw "iroha.service-module.mkServiceUnit: `description` (str) is required.");
+      exec = resolveExec spec;
+
+      type = spec.type or "simple";
+      _typeChecked =
+        if builtins.elem type validTypes then
+          type
+        else
+          throw "iroha.service-module: `type` must be one of ${lib.concatStringsSep ", " validTypes} — got '${toString type}'.";
+
+      wants = spec.wants or [ ];
+      requires = spec.requires or [ ];
+      after = spec.after or [ "network.target" ];
+      before = spec.before or [ ];
+      environment = spec.environment or { };
+      environmentFile = spec.environmentFile or null;
+      stateDirectory = spec.stateDirectory or null;
+      runtimeDirectory = spec.runtimeDirectory or null;
+      workingDirectory = spec.workingDirectory or null;
+      user = spec.user or null;
+      group = spec.group or null;
+      restart = spec.restart or "on-failure";
+      restartSec = spec.restartSec or null;
+      remainAfterExit = spec.remainAfterExit or null;
+      execStartPre = spec.execStartPre or [ ];
+      execStartPost = spec.execStartPost or [ ];
+      wantedBy = spec.wantedBy or [ "multi-user.target" ];
+      hardening = spec.hardening or { };
+      serviceConfigExtra = spec.serviceConfigExtra or { };
+      serviceExtra = spec.serviceExtra or { };
+
+      serviceConfig =
+        {
+          ExecStart = exec.execStart;
+          Type = _typeChecked;
+          Restart = restart;
+        }
+        // optionalAttrs (restartSec != null) { RestartSec = restartSec; }
+        // optionalAttrs (environmentFile != null) { EnvironmentFile = environmentFile; }
+        // optionalAttrs (stateDirectory != null) { StateDirectory = stateDirectory; }
+        // optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
+        // optionalAttrs (workingDirectory != null) { WorkingDirectory = workingDirectory; }
+        // optionalAttrs (user != null) { User = user; }
+        // optionalAttrs (group != null) { Group = group; }
+        // optionalAttrs (remainAfterExit != null) { RemainAfterExit = remainAfterExit; }
+        // optionalAttrs (execStartPre != [ ]) { ExecStartPre = execStartPre; }
+        // optionalAttrs (execStartPost != [ ]) { ExecStartPost = execStartPost; }
+        // hardening
+        // serviceConfigExtra;
+
+      service =
+        {
+          inherit description;
+          inherit serviceConfig;
+        }
+        // optionalAttrs (wants != [ ]) { inherit wants; }
+        // optionalAttrs (requires != [ ]) { inherit requires; }
+        // optionalAttrs (after != [ ]) { inherit after; }
+        // optionalAttrs (before != [ ]) { inherit before; }
+        // optionalAttrs (wantedBy != [ ]) { inherit wantedBy; }
+        // optionalAttrs (environment != { }) { inherit environment; }
+        // serviceExtra;
+    in
+    {
+      inherit service;
+      inherit (exec) programArguments;
+      darwinKeepAlive = type != "oneshot";
+    };
+
+  # ── FULL dual-platform module wrapper ─────────────────────────────────
   mkServiceModule =
     args:
     let
@@ -159,58 +263,7 @@ let
         args.service
           or (throw "iroha.service-module.mkServiceModule: `service` (attrs — the system unit spec) is required.");
 
-      # ── exec line: exactly one of execStart / command ───────────────────
-      hasExecStart = (service.execStart or null) != null;
-      hasCommand = (service.command or null) != null;
-      execStart =
-        if hasExecStart && hasCommand then
-          throw "iroha.service-module.mkServiceModule: `service` takes exactly one of `execStart` (verbatim line) or `command` (+ `args`) — got both."
-        else if hasExecStart then
-          service.execStart
-        else if hasCommand then
-          escapeSystemdExecArgs ([ service.command ] ++ (service.args or [ ]))
-        else
-          throw "iroha.service-module.mkServiceModule: `service` needs one of `execStart` (str) or `command` (str — absolute program path; the caller resolves the package).";
-
-      # launchd ProgramArguments: prefer the structured argv (verbatim, no
-      # escaping); fall back to a shell wrapper when only execStart is given
-      # (a bare string cannot be word-split into an argv safely).
-      programArguments =
-        if hasCommand then
-          [ service.command ] ++ (service.args or [ ])
-        else
-          [
-            "/bin/sh"
-            "-c"
-            execStart
-          ];
-
-      type = service.type or "simple";
-      _typeChecked =
-        if builtins.elem type validTypes then
-          type
-        else
-          throw "iroha.service-module.mkServiceModule: `service.type` must be one of ${lib.concatStringsSep ", " validTypes} — got '${toString type}'.";
-
-      wants = service.wants or [ ];
-      requires = service.requires or [ ];
-      after = service.after or [ "network.target" ];
-      before = service.before or [ ];
-      environment = service.environment or { };
-      environmentFile = service.environmentFile or null;
-      stateDirectory = service.stateDirectory or null;
-      runtimeDirectory = service.runtimeDirectory or null;
-      workingDirectory = service.workingDirectory or null;
-      user = service.user or null;
-      group = service.group or null;
-      restart = service.restart or "on-failure";
-      restartSec = service.restartSec or null;
-      remainAfterExit = service.remainAfterExit or null;
-      execStartPre = service.execStartPre or [ ];
-      execStartPost = service.execStartPost or [ ];
-      wantedBy = service.wantedBy or [ "multi-user.target" ];
-      hardening = service.hardening or { };
-      serviceConfigExtra = service.serviceConfigExtra or { };
+      unit = mkServiceUnit (service // { inherit description; });
 
       # ── option surface (enable + extras; no package, no settings) ───────
       surface = optionSurface.mkOptionSurface {
@@ -228,38 +281,6 @@ let
       optionPath = surface.optionPath;
       enablePath = surface.enablePath;
 
-      # ── systemd serviceConfig (NixOS system) ────────────────────────────
-      serviceConfig =
-        {
-          ExecStart = execStart;
-          Type = _typeChecked;
-          Restart = restart;
-        }
-        // optionalAttrs (restartSec != null) { RestartSec = restartSec; }
-        // optionalAttrs (environmentFile != null) { EnvironmentFile = environmentFile; }
-        // optionalAttrs (stateDirectory != null) { StateDirectory = stateDirectory; }
-        // optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
-        // optionalAttrs (workingDirectory != null) { WorkingDirectory = workingDirectory; }
-        // optionalAttrs (user != null) { User = user; }
-        // optionalAttrs (group != null) { Group = group; }
-        // optionalAttrs (remainAfterExit != null) { RemainAfterExit = remainAfterExit; }
-        // optionalAttrs (execStartPre != [ ]) { ExecStartPre = execStartPre; }
-        // optionalAttrs (execStartPost != [ ]) { ExecStartPost = execStartPost; }
-        // hardening
-        // serviceConfigExtra;
-
-      systemdService =
-        {
-          inherit description;
-          inherit serviceConfig;
-        }
-        // optionalAttrs (wants != [ ]) { inherit wants; }
-        // optionalAttrs (requires != [ ]) { inherit requires; }
-        // optionalAttrs (after != [ ]) { inherit after; }
-        // optionalAttrs (before != [ ]) { inherit before; }
-        // optionalAttrs (wantedBy != [ ]) { inherit wantedBy; }
-        // optionalAttrs (environment != { }) { inherit environment; };
-
       nixosFragment =
         {
           config,
@@ -270,19 +291,19 @@ let
         in
         {
           config = lib.mkIf cfg.enable {
-            systemd.services.${name} = systemdService;
+            systemd.services.${name} = unit.service;
           };
         };
 
       # ── launchd (nix-darwin daemon) — minimal projection ────────────────
       launchdServiceConfig =
         {
-          ProgramArguments = programArguments;
-          KeepAlive = type != "oneshot";
+          ProgramArguments = unit.programArguments;
+          KeepAlive = unit.darwinKeepAlive;
           RunAtLoad = true;
         }
-        // optionalAttrs (environment != { }) { EnvironmentVariables = environment; }
-        // optionalAttrs (workingDirectory != null) { WorkingDirectory = workingDirectory; };
+        // optionalAttrs ((service.environment or { }) != { }) { EnvironmentVariables = service.environment; }
+        // optionalAttrs ((service.workingDirectory or null) != null) { WorkingDirectory = service.workingDirectory; };
 
       darwinFragment =
         {
@@ -317,5 +338,5 @@ let
     };
 in
 {
-  inherit mkServiceModule;
+  inherit mkServiceUnit mkServiceModule;
 }

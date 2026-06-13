@@ -3,7 +3,33 @@
 # the system power fields daemon.nix excludes, class tagging, typed throws).
 { lib, iroha }:
 let
-  inherit (iroha) mkServiceModule;
+  inherit (iroha) mkServiceModule mkServiceUnit;
+
+  # ── mkServiceUnit (the PURE keep-alive systemd-service renderer) ──────
+  # A bespoke module reaches for this INSIDE its config block: it owns the
+  # option surface + reads cfg + emits extra config (tmpfiles, HM bridges),
+  # and farms only the systemd.services SHAPE. Modelled on toride-system:
+  # verbatim cfg-dependent ExecStart, Type=simple, RestartSec, custom
+  # ordering.
+  torideUnit = mkServiceUnit {
+    description = "Toride — split-horizon DNS for LAN/Tailscale";
+    execStart = "/nix/store/x/bin/toride daemon /nix/store/y-toride.conf";
+    type = "simple";
+    after = [ "network-online.target" "dnsmasq.service" ];
+    wants = [ "network-online.target" ];
+    wantedBy = [ "multi-user.target" ];
+    restart = "on-failure";
+    restartSec = 5;
+  };
+  # service-level passthrough (path + restartIfChanged) via serviceExtra.
+  extraUnit = mkServiceUnit {
+    description = "extra";
+    command = "/bin/x";
+    serviceExtra = {
+      restartIfChanged = false;
+      path = [ "P" "Q" ];
+    };
+  };
 
   # ── stub NixOS option universe ───────────────────────────────────────
   nixosUniverse =
@@ -383,6 +409,74 @@ in
         "enable"
       ];
     };
+  };
+
+  # ── mkServiceUnit: pure keep-alive renderer (data -> { service }) ─────
+  unit-toride-service-shape = {
+    # the exact systemd.services.toride attrs the bespoke module emits.
+    expr = torideUnit.service;
+    expected = {
+      description = "Toride — split-horizon DNS for LAN/Tailscale";
+      after = [ "network-online.target" "dnsmasq.service" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        ExecStart = "/nix/store/x/bin/toride daemon /nix/store/y-toride.conf";
+        Type = "simple";
+        Restart = "on-failure";
+        RestartSec = 5;
+      };
+    };
+  };
+  unit-serviceextra-is-service-level = {
+    # path + restartIfChanged sit at the SERVICE level, never in serviceConfig.
+    expr = {
+      restartIfChanged = extraUnit.service.restartIfChanged;
+      path = extraUnit.service.path;
+      leaked = extraUnit.service.serviceConfig ? path;
+    };
+    expected = {
+      restartIfChanged = false;
+      path = [ "P" "Q" ];
+      leaked = false;
+    };
+  };
+  unit-command-form-escapes-and-argv = {
+    expr = {
+      execStart = extraUnit.service.serviceConfig.ExecStart;
+      argv = extraUnit.programArguments;
+      keepAlive = extraUnit.darwinKeepAlive;
+    };
+    expected = {
+      execStart = ''"/bin/x"'';
+      argv = [ "/bin/x" ];
+      keepAlive = true;
+    };
+  };
+  unit-bare-has-no-serviceextra-keys = {
+    expr = {
+      hasPath = torideUnit.service ? path;
+      hasRestartIfChanged = torideUnit.service ? restartIfChanged;
+    };
+    expected = {
+      hasPath = false;
+      hasRestartIfChanged = false;
+    };
+  };
+  unit-missing-description-throws = {
+    expr = (builtins.tryEval (mkServiceUnit { execStart = "/x"; }).service.description).success;
+    expected = false;
+  };
+  unit-bad-type-throws = {
+    expr =
+      (builtins.tryEval
+        (mkServiceUnit {
+          description = "d";
+          execStart = "/x";
+          type = "bogus";
+        }).service.serviceConfig.Type
+      ).success;
+    expected = false;
   };
 
   # ── class tagging: the nixos module is rejected under a darwin eval ──
