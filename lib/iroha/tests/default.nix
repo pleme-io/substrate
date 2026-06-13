@@ -42,6 +42,9 @@ let
     config-owner = ./config-owner.nix;
     remote-builders = ./remote-builders.nix;
     conf-checks = ./conf-checks.nix;
+    udev-tune = ./udev-tune.nix;
+    gitops = ./gitops.nix;
+    resource-policy = ./resource-policy.nix;
   };
 
   suites = lib.mapAttrs (_: f: import f { inherit lib iroha; }) suiteFiles;

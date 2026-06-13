@@ -306,6 +306,39 @@
     exports = [ "mkConfChecks" "mkConfChecksFor" ];
   };
 
+  udev-tune = {
+    file = "udev-tune.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Device-appear / link-up driven tuning as a typed module: typed udev match attrs -> rule lines (RUN+= action or systemctl start <tuneService>@) + the triggered oneshot tuning services. NixOS-only (udev is Linux).";
+    subsumes = "rio's hand-rolled services.udev.extraRules NVMe tuning + the i40e-tune@ NIC link-up oneshot template (rio + mar).";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkUdevTune" ];
+  };
+
+  gitops = {
+    file = "gitops.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Pull-based GitOps reconcile behind one option surface with per-platform backends: NixOS -> services.comin (remote url/branch/poll), macOS -> a launchd periodic darwin-rebuild --flake <repo>#<attr>.";
+    subsumes = "The two hand-written pull-gitops backend modules (comin on NixOS, launchd darwin-rebuild on macOS) behind one pleme.gitops surface.";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkGitopsModule" ];
+  };
+
+  resource-policy = {
+    file = "resource-policy.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Typed CPU/memory/IO/task resource envelope rendered onto systemd units (CPUQuota/CPUWeight/MemoryMax/TasksMax/IOWeight/AllowedCPUs/OOMScoreAdjust) + best-effort sanity assertions. NixOS-only.";
+    subsumes = "The node-budget (breathe L2) + sshd-survivability systemd resource-control projections.";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkResourcePolicy" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";
