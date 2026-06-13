@@ -62,6 +62,21 @@ let
         publicKey = "cache.demo.io-1:KEY";
       }
     ];
+    vpnLinks.rio-cid = {
+      interface = "wg-rc";
+      profile = "mesh";
+      mtu = 1420;
+      a = {
+        node = "rio";
+        address = "10.0.0.1/24";
+        secrets.privateKey = "rio/wg/key";
+      };
+      b = {
+        node = "cid";
+        address = "10.0.0.2/24";
+        secrets.privateKey = "cid/wg/key";
+      };
+    };
   };
 
   profileTable.server-base = {
@@ -70,6 +85,13 @@ let
 
   f = kata.mkFleet {
     config = blanks;
+    inherit universes;
+    profiles = profileTable;
+  };
+
+  # A fleet with no vpnLinks blank — wireguard must be null.
+  noVpn = kata.mkFleet {
+    config = builtins.removeAttrs blanks [ "vpnLinks" ];
     inherit universes;
     profiles = profileTable;
   };
@@ -84,6 +106,44 @@ in
   domains-helpers-live = {
     expr = f.domains.fqdn "rio";
     expected = "rio.bristol.demo.io";
+  };
+
+  # ── composed letters: mkFleet stands on ssh-aliases + wireguard ──────
+  ssh-aliases-composed-from-domains = {
+    expr = {
+      hasBare = f.sshAliases ? rio;
+      hasFqdn = f.sshAliases ? "rio.bristol.demo.io";
+      user = f.sshAliases.rio.user;
+    };
+    expected = {
+      hasBare = true;
+      hasFqdn = true;
+      user = "ops";
+    };
+  };
+  ssh-aliases-for-skips-self = {
+    expr = (f.sshAliasesFor "rio") ? rio;
+    expected = false;
+  };
+  wireguard-composed-from-vpnlinks = {
+    expr =
+      let
+        l = builtins.head (f.wireguard.linksForNode "rio");
+      in
+      {
+        selfNode = l.self.node;
+        peerNode = l.peer.node;
+        iface = l.interface;
+      };
+    expected = {
+      selfNode = "rio";
+      peerNode = "cid";
+      iface = "wg-rc";
+    };
+  };
+  wireguard-null-without-vpnlinks = {
+    expr = noVpn.wireguard;
+    expected = null;
   };
   trust-keys-threaded-into-users = {
     expr = {

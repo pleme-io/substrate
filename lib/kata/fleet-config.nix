@@ -132,6 +132,7 @@ let
       };
       apps = freeAttrs "iroha.mkManifest `apps` (ecosystem schema verbatim).";
       appClasses = freeAttrs "iroha.mkManifest `classes`.";
+      vpnLinks = freeAttrs "kata.mkWireguardLinks `registry` — attrsOf link (point-to-point or hub-and-spoke). When non-empty, mkFleet exposes `wireguard` (the per-node projection).";
       caches = mkOption {
         type = types.listOf (
           types.submodule {

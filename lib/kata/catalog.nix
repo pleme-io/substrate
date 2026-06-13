@@ -72,10 +72,12 @@
     tier = "kernel";
     maturity = "Working";
     since = "2026-06-12";
-    description = "mkFleet: one call from validated blanks to the complete fleet-repo output surface — domains + users module + app manifest + host matrix (nixos/darwin configurations, deploy data) + aggregated cross-checked invariants + buildable check.";
-    subsumes = "The hand-assembled glue between lib/nodes.nix, lib/hm-modules.nix, darwinConfigurations/default.nix, lib/deploy.nix, and the profile imports in the nix repo (consumed via iroha.mkHostMatrix/mkManifest).";
+    description = "mkFleet: one call from validated blanks to the complete fleet-repo output surface — domains + ssh-aliases + wireguard + users module + app manifest + host matrix (nixos/darwin configurations, deploy data) + aggregated cross-checked invariants + buildable check. The fleet primitive STANDS ON the lib letters: ssh-aliases derives from domains, wireguard from the vpnLinks blank — composed for free.";
+    subsumes = "The hand-assembled glue between lib/nodes.nix, lib/hm-modules.nix, darwinConfigurations/default.nix, lib/deploy.nix, lib/ssh-aliases.nix, lib/vpn.nix, and the profile imports in the nix repo (consumed via iroha.mkHostMatrix/mkManifest).";
     dependsOn = [
       "domains"
+      "ssh-aliases"
+      "wireguard"
       "users"
       "fleet-config"
     ];

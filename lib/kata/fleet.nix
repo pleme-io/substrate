@@ -42,6 +42,10 @@
 #   } -> {
 #     config       — the VALIDATED blanks (defaults applied);
 #     domains      — kata.mkDomains result;
+#     sshAliases   — kata.mkSshAliases over the fleet domains (full set);
+#     sshAliasesFor — node -> kata.mkSshAliases skipping that node (self);
+#     wireguard    — kata.mkWireguardLinks over config.vpnLinks, or null
+#                    when no vpnLinks blank is set;
 #     users        — kata.mkUsers result (keys threaded from trust.*);
 #     manifest     — iroha.mkManifest result | null (when apps == { });
 #     hostMatrix   — iroha.mkHostMatrix result (nodes projected: profile
@@ -62,6 +66,8 @@
 { lib }:
 let
   domainsLib = import ./domains.nix { inherit lib; };
+  sshAliasesLib = import ./ssh-aliases.nix { inherit lib; };
+  wireguardLib = import ./wireguard.nix { inherit lib; };
   usersLib = import ./users.nix { inherit lib; };
   fleetConfig = import ./fleet-config.nix { inherit lib; };
   iroha = import ../iroha { inherit lib; };
@@ -93,6 +99,18 @@ let
       cfg = fleetConfig.validateFleet config;
 
       domains = domainsLib.mkDomains cfg.domains;
+
+      # ── Composed letters: the fleet primitive STANDS ON the lib letters ──
+      # ssh-aliases derives from the fleet domains; wireguard derives from
+      # the vpnLinks registry blank. A fleet repo gets both for free from
+      # one mkFleet call — no separate letter wiring.
+      sshAliases = sshAliasesLib.mkSshAliases { fleet = domains; };
+      sshAliasesFor = node: sshAliasesLib.mkSshAliases {
+        fleet = domains;
+        skipHosts = [ node ];
+      };
+      wireguard =
+        if cfg.vpnLinks == { } then null else wireguardLib.mkWireguardLinks { registry = cfg.vpnLinks; };
 
       users = usersLib.mkUsers (
         cfg.users
@@ -191,6 +209,9 @@ let
       config = cfg;
       inherit
         domains
+        sshAliases
+        sshAliasesFor
+        wireguard
         users
         manifest
         hostMatrix
