@@ -191,11 +191,15 @@ let
       exec = resolveExec spec;
 
       type = spec.type or "simple";
+      # `type = null` OMITS the Type key entirely (a service relying on
+      # systemd's implicit `simple` default — softflowd). Default stays "simple".
       _typeChecked =
-        if builtins.elem type validTypes then
+        if type == null then
+          null
+        else if builtins.elem type validTypes then
           type
         else
-          throw "iroha.service-module: `type` must be one of ${lib.concatStringsSep ", " validTypes} — got '${toString type}'.";
+          throw "iroha.service-module: `type` must be one of ${lib.concatStringsSep ", " validTypes} (or null to omit) — got '${toString type}'.";
 
       wants = spec.wants or [ ];
       requires = spec.requires or [ ];
@@ -221,8 +225,8 @@ let
       serviceConfig =
         {
           ExecStart = exec.execStart;
-          Type = _typeChecked;
         }
+        // optionalAttrs (_typeChecked != null) { Type = _typeChecked; }
         # Restart defaults to "on-failure"; pass `restart = null` to OMIT it
         # entirely (a oneshot that must run exactly once, no retry —
         # k3s-kubeconfig-export). The default is unchanged for keep-alive units.

@@ -463,6 +463,25 @@ in
       hasRestartIfChanged = false;
     };
   };
+  unit-type-null-omits-type = {
+    # a service relying on systemd's implicit `simple` default (softflowd).
+    expr =
+      let
+        sc = (mkServiceUnit {
+          description = "softflowd";
+          execStart = "/x -D";
+          type = null;
+        }).service.serviceConfig;
+      in
+      {
+        hasType = sc ? Type;
+        keepAlive = (mkServiceUnit { description = "softflowd"; execStart = "/x"; type = null; }).darwinKeepAlive;
+      };
+    expected = {
+      hasType = false;
+      keepAlive = true;
+    };
+  };
   unit-type-exec-accepted = {
     # the full systemd Type enum is accepted (reconverge is Type=exec).
     expr = (mkServiceUnit {
