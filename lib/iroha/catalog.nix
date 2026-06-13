@@ -213,7 +213,7 @@
     maturity = "Working";
     since = "2026-06-12";
     description = "THE BLACKMATTER SWALLOW SURFACE: blackmatter-component-flake.nix v2 — same consumer contract (parity suite asserts attr-name sets + deep metadata equality against the legacy implementation), re-emitted through iroha letters; typed throws replace silent key drops; the legacy eval-nixos-module check was broken by construction (stub prefix conflict) — v2's actually runs.";
-    subsumes = "lib/blackmatter-component-flake.nix (20+ blackmatter sub-repos migrate by changing one import path; authored consumer modules pass through verbatim).";
+    subsumes = "lib/blackmatter-component-flake.nix — SWALLOWED 2026-06-12: the legacy path is now a delegation shim over mkComponentFlake, so all ~20 blackmatter sub-repos run v2 with zero consumer edits; the frozen TRUE legacy implementation lives at tests/fixtures/legacy-component-flake.nix as the parity oracle; authored consumer modules pass through verbatim.";
     dependsOn = [ "core" "checks" ];
     exports = [ "mkComponentFlake" ];
   };

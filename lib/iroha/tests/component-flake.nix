@@ -1,8 +1,17 @@
 # Tests — iroha.component-flake (THE BLACKMATTER SWALLOW: parity against
-# the legacy lib/blackmatter-component-flake.nix over shared fixtures —
-# top-level attr-name sets per output class, metadata deep-equality,
-# verbatim module/overlay/package passthrough, devShell parity, eval-check
-# semantics incl. the captured legacy eval-nixos-module bug, typed throws).
+# the TRUE legacy implementation over shared fixtures — top-level attr-name
+# sets per output class, metadata deep-equality, verbatim
+# module/overlay/package passthrough, devShell parity, eval-check semantics
+# incl. the captured legacy eval-nixos-module bug, typed throws).
+#
+# 2026-06-12: the live lib/blackmatter-component-flake.nix was RETIRED and is
+# now a delegation shim over iroha.mkComponentFlake. Two bindings below:
+#   legacy — the frozen TRUE legacy implementation
+#            (fixtures/legacy-component-flake.nix), so parity keeps being
+#            asserted against the real pre-swallow semantics forever;
+#   shim   — the live ../../blackmatter-component-flake.nix, pinned by the
+#            shim-* tests to behave exactly as v2 (typed throws, working
+#            eval-nixos-module check, identical metadata).
 #
 # Stub inputs: real nixpkgs lib; legacyPackages stubbed with fake
 # mkShellNoCC/runCommand that return inspectable attrsets, so the suite
@@ -12,7 +21,8 @@
 { lib, iroha }:
 let
   inherit (iroha) mkComponentFlake;
-  legacy = import ../../blackmatter-component-flake.nix;
+  legacy = import ./fixtures/legacy-component-flake.nix;
+  shim = import ../../blackmatter-component-flake.nix;
 
   sortedNames = s: builtins.sort builtins.lessThan (builtins.attrNames s);
 
@@ -90,6 +100,7 @@ let
   };
   legacyFull = legacy fullSpec;
   mineFull = mkComponentFlake fullSpec;
+  shimFull = shim fullSpec;
 
   minimalSpec = {
     self = stubSelf;
@@ -327,6 +338,10 @@ in
   # commonStubs (systemd vs systemd.services, system vs
   # system.activationScripts) — the legacy eval-nixos-module check throws
   # by construction. v2 fixes the universe; same check attr name passes.
+  # 2026-06-12: the legacy implementation was retired (the live file is now
+  # a shim over v2); `legacy` here is the frozen fixture, so this test keeps
+  # pinning the TRUE pre-swallow breakage forever. The shim-* tests below
+  # pin the post-delegation reality of the live file.
   eval-check-nixos-legacy-broken-mine-fixed = {
     expr = {
       legacy = legacyCheckEvals legacyFull.checks."x86_64-linux".eval-nixos-module;
@@ -336,6 +351,44 @@ in
       legacy = false;
       mine = true;
     };
+  };
+
+  # ── the live shim IS v2 (post-retirement pins, 2026-06-12) ───────────
+  # lib/blackmatter-component-flake.nix delegates to iroha.mkComponentFlake;
+  # these tests fail if the shim ever drifts from the v2 semantics.
+  shim-nixos-eval-check-now-works = {
+    # The legacy implementation's eval-nixos-module check threw by
+    # construction; through the shim the same consumer call gets v2's
+    # working check.
+    expr = shimFull.checks."x86_64-linux".eval-nixos-module.env == { };
+    expected = true;
+  };
+  shim-metadata-deep-equal-v2 = {
+    expr = shimFull.blackmatter == mineFull.blackmatter;
+    expected = true;
+  };
+  shim-top-level-attr-names-equal-v2 = {
+    expr = sortedNames shimFull;
+    expected = sortedNames mineFull;
+  };
+  shim-typed-throws-active = {
+    # Unknown top-level arg + unknown modules.* key — silently dropped by
+    # the retired legacy implementation, typed throws through the shim.
+    expr = [
+      (builtins.tryEval (shim (minimalSpec // { bogus = 1; }))).success
+      (builtins.tryEval (shim (
+        minimalSpec
+        // {
+          modules = {
+            homemanager = { };
+          };
+        }
+      ))).success
+    ];
+    expected = [
+      false
+      false
+    ];
   };
   eval-check-broken-module-fails-both = {
     expr = {
