@@ -267,10 +267,10 @@
     tier = "standard";
     maturity = "Working";
     since = "2026-06-13";
-    description = "Periodic/scheduled work as a MODULE: a typed enable+command+schedule -> systemd oneshot service + timer (nixos) / launchd StartInterval|StartCalendarInterval (darwin). The oneshot+timer sibling of service-module's keep-alive shape.";
-    subsumes = "mkScheduledFleetMutation (nightly fetch/flake-update), the rio NIC-tune timers, attic-cache-warmer, cron-like fleet jobs.";
+    description = "Periodic/scheduled work as a MODULE: a typed enable+command+schedule -> systemd oneshot service + timer (nixos) / launchd StartInterval|StartCalendarInterval (darwin). The oneshot+timer sibling of service-module's keep-alive shape. mkScheduledUnit is the PURE systemd-unit renderer (data -> { service, timer }) that bespoke modules — those whose ExecStart/schedule depend on their own typed options (attic-store-push) — consume INSIDE their config block to farm the unit shape while keeping their knobs; serviceConfigExtra (Type override) + serviceExtra (service-level path/restartIfChanged passthrough) make every load-bearing field expressible.";
+    subsumes = "mkScheduledFleetMutation (nightly fetch/flake-update), the rio NIC-tune timers, attic-cache-warmer, attic-store-push, cron-like fleet jobs.";
     dependsOn = [ "core" "option-surface" ];
-    exports = [ "mkScheduledJob" ];
+    exports = [ "mkScheduledJob" "mkScheduledUnit" ];
   };
 
   config-owner = {
