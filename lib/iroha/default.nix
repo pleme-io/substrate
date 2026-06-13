@@ -62,6 +62,7 @@ let
   udevTune = import ./udev-tune.nix { inherit lib; };
   gitops = import ./gitops.nix { inherit lib; };
   resourcePolicy = import ./resource-policy.nix { inherit lib; };
+  launchdUnit = import ./launchd-unit.nix { inherit lib; };
 in
 core
 // checks
@@ -92,6 +93,7 @@ core
 // udevTune
 // gitops
 // resourcePolicy
+// launchdUnit
 // {
   catalog = import ./catalog.nix { inherit lib; };
   tests = import ./tests { inherit lib; };

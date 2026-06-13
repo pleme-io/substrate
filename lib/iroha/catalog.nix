@@ -339,6 +339,17 @@
     exports = [ "mkResourcePolicy" "mkResourceServiceConfig" ];
   };
 
+  launchd-unit = {
+    file = "launchd-unit.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "PURE nix-darwin launchd unit renderer (data -> launchd.daemons.<name> attrs) — the launchd analog of service-module's mkServiceUnit + scheduled-job's mkScheduledUnit. command (nix-darwin shortcut) | programArguments exec; startInterval | startCalendarInterval | none schedule; RunAtLoad / KeepAlive / Standard{Out,Error}Path / EnvironmentVariables / WorkingDirectory; serviceConfigExtra + daemonExtra passthrough. A bespoke darwin module consumes it INSIDE its config block to farm the launchd unit shape while keeping its option surface + activation hooks.";
+    subsumes = "The hand-rolled launchd.daemons/agents in pleme-io/nix darwin modules (pleme/darwin/gitops, pleme/darwin/power, shared/tatara-builders).";
+    dependsOn = [ ];
+    exports = [ "mkLaunchdUnit" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";

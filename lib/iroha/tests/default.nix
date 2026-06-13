@@ -45,6 +45,7 @@ let
     udev-tune = ./udev-tune.nix;
     gitops = ./gitops.nix;
     resource-policy = ./resource-policy.nix;
+    launchd-unit = ./launchd-unit.nix;
   };
 
   suites = lib.mapAttrs (_: f: import f { inherit lib iroha; }) suiteFiles;
