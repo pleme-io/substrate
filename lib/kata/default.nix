@@ -19,11 +19,13 @@
 { lib }:
 let
   domains = import ./domains.nix { inherit lib; };
+  sshAliases = import ./ssh-aliases.nix { inherit lib; };
   users = import ./users.nix { inherit lib; };
   fleetConfig = import ./fleet-config.nix { inherit lib; };
   fleet = import ./fleet.nix { inherit lib; };
 in
 domains
+// sshAliases
 // users
 // fleetConfig
 // fleet

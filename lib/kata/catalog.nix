@@ -23,6 +23,17 @@
     exports = [ "mkDomains" ];
   };
 
+  ssh-aliases = {
+    file = "ssh-aliases.nix";
+    tier = "kernel";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "ssh_config Host entries from a fleet domains value: four addressable identities per node (bare MagicDNS, .local mDNS, primary FQDN, transport FQDNs), shaped as blackmatter.components.ssh.extraHosts. Pairs with mkDomains.";
+    subsumes = "nix repo lib/ssh-aliases.nix (promoted — it was already generic; the nix repo's copy becomes a frozen parity oracle).";
+    dependsOn = [ ];
+    exports = [ "mkSshAliases" ];
+  };
+
   users = {
     file = "users.nix";
     tier = "kernel";
