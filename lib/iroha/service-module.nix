@@ -65,7 +65,8 @@
 #     environment ? { } (attrsOf str); environmentFile ? null (str);
 #     stateDirectory ? null; runtimeDirectory ? null; workingDirectory ? null;
 #     user ? null; group ? null;
-#     restart ? "on-failure"; restartSec ? null (int|str); remainAfterExit ? null;
+#     restart ? "on-failure" (null OMITS Restart — a no-retry oneshot);
+#     restartSec ? null (int|str); remainAfterExit ? null;
 #     execStartPre ? [ ]; execStartPost ? [ ];
 #     wantedBy ? [ "multi-user.target" ];
 #     hardening ? { }; serviceConfigExtra ? { }; serviceExtra ? { };
@@ -214,8 +215,11 @@ let
         {
           ExecStart = exec.execStart;
           Type = _typeChecked;
-          Restart = restart;
         }
+        # Restart defaults to "on-failure"; pass `restart = null` to OMIT it
+        # entirely (a oneshot that must run exactly once, no retry —
+        # k3s-kubeconfig-export). The default is unchanged for keep-alive units.
+        // optionalAttrs (restart != null) { Restart = restart; }
         // optionalAttrs (restartSec != null) { RestartSec = restartSec; }
         // optionalAttrs (environmentFile != null) { EnvironmentFile = environmentFile; }
         // optionalAttrs (stateDirectory != null) { StateDirectory = stateDirectory; }

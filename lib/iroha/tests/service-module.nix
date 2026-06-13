@@ -463,6 +463,29 @@ in
       hasRestartIfChanged = false;
     };
   };
+  unit-restart-null-omits-restart = {
+    # a no-retry oneshot (k3s-kubeconfig-export): restart=null -> no Restart key.
+    expr =
+      let
+        sc = (mkServiceUnit {
+          description = "export";
+          execStart = "/x";
+          type = "oneshot";
+          remainAfterExit = true;
+          restart = null;
+        }).service.serviceConfig;
+      in
+      {
+        hasRestart = sc ? Restart;
+        type = sc.Type;
+        remain = sc.RemainAfterExit;
+      };
+    expected = {
+      hasRestart = false;
+      type = "oneshot";
+      remain = true;
+    };
+  };
   unit-missing-description-throws = {
     expr = (builtins.tryEval (mkServiceUnit { execStart = "/x"; }).service.description).success;
     expected = false;
