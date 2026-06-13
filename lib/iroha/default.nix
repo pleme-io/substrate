@@ -55,6 +55,10 @@ let
   serviceBundle = import ./service-bundle.nix { inherit lib; };
   registryAccumulator = import ./registry-accumulator.nix { inherit lib; };
   activationHook = import ./activation-hook.nix { inherit lib; };
+  scheduledJob = import ./scheduled-job.nix { inherit lib; };
+  configOwner = import ./config-owner.nix { inherit lib; };
+  remoteBuilders = import ./remote-builders.nix { inherit lib; };
+  confChecks = import ./conf-checks.nix { inherit lib; };
 in
 core
 // checks
@@ -78,6 +82,10 @@ core
 // serviceBundle
 // registryAccumulator
 // activationHook
+// scheduledJob
+// configOwner
+// remoteBuilders
+// confChecks
 // {
   catalog = import ./catalog.nix { inherit lib; };
   tests = import ./tests { inherit lib; };

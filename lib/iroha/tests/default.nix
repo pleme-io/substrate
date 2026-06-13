@@ -38,6 +38,10 @@ let
     service-bundle = ./service-bundle.nix;
     registry-accumulator = ./registry-accumulator.nix;
     activation-hook = ./activation-hook.nix;
+    scheduled-job = ./scheduled-job.nix;
+    config-owner = ./config-owner.nix;
+    remote-builders = ./remote-builders.nix;
+    conf-checks = ./conf-checks.nix;
   };
 
   suites = lib.mapAttrs (_: f: import f { inherit lib iroha; }) suiteFiles;

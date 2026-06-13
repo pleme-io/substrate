@@ -17,6 +17,7 @@ let
     wireguard = ./wireguard.nix;
     kubeconfig = ./kubeconfig.nix;
     secret-seed = ./secret-seed.nix;
+    topology = ./topology.nix;
     users = ./users.nix;
     fleet-config = ./fleet-config.nix;
     fleet = ./fleet.nix;

@@ -106,6 +106,17 @@
     exports = [ "mkSecretSeed" ];
   };
 
+  topology = {
+    file = "topology.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Projects the fleet (domains + per-node metadata + networks + optional wireguard) into nix-topology-shaped pure data + derived edges + invariants, so the topology renderer reads the kata source of truth instead of a hand-redeclared mesh.";
+    subsumes = "The nix repo parts/topology.nix inline node/network mesh (duplicating the kata registry).";
+    dependsOn = [ "domains" ];
+    exports = [ "mkTopology" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";

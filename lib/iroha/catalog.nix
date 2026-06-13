@@ -262,6 +262,50 @@
     exports = [ "mkActivationHook" ];
   };
 
+  scheduled-job = {
+    file = "scheduled-job.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Periodic/scheduled work as a MODULE: a typed enable+command+schedule -> systemd oneshot service + timer (nixos) / launchd StartInterval|StartCalendarInterval (darwin). The oneshot+timer sibling of service-module's keep-alive shape.";
+    subsumes = "mkScheduledFleetMutation (nightly fetch/flake-update), the rio NIC-tune timers, attic-cache-warmer, cron-like fleet jobs.";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkScheduledJob" ];
+  };
+
+  config-owner = {
+    file = "config-owner.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Single typed OWNER of a contended config region: sets the owned fragment at a high priority band (default force) so it wins over plain competitors, with optional assertions. Reuses the profile.nix band-leaf descent.";
+    subsumes = "The contended-knob disambiguation pattern: post-build-hook, nix-cache, sysctl-overrides mkOverride collisions, nix-provider.";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkConfigOwner" ];
+  };
+
+  remote-builders = {
+    file = "remote-builders.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Typed remote build machines -> nix.buildMachines + nix.distributedBuilds + programs.ssh Host blocks (ProxyCommand when set), deterministically sorted.";
+    subsumes = "The pangea-builder consumer shape (~600 lines: buildMachines + ssh_config + known_hosts + wake-aware SSM ProxyCommand).";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkRemoteBuilders" ];
+  };
+
+  conf-checks = {
+    file = "conf-checks.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Assert OPTION VALUES on a BUILT config's .config (expected/satisfies/present), emitting mkEvalChecks-compatible cases; mkConfChecksFor runs per-config asserts across many configs. Missing paths fail cleanly (no eval abort).";
+    subsumes = "The nix repo parts/checks.nix hand-rolled 557-line config-conformance harness.";
+    dependsOn = [ "checks" ];
+    exports = [ "mkConfChecks" "mkConfChecksFor" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";
