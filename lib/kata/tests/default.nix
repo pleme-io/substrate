@@ -15,6 +15,8 @@ let
     domains = ./domains.nix;
     ssh-aliases = ./ssh-aliases.nix;
     wireguard = ./wireguard.nix;
+    kubeconfig = ./kubeconfig.nix;
+    secret-seed = ./secret-seed.nix;
     users = ./users.nix;
     fleet-config = ./fleet-config.nix;
     fleet = ./fleet.nix;

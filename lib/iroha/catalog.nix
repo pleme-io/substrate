@@ -218,6 +218,50 @@
     exports = [ "mkComponentFlake" ];
   };
 
+  service-module = {
+    file = "service-module.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "SYSTEM-class service MODULE emitter: a typed enable+config surface -> a full systemd.service (nixos) / launchd.daemon (darwin) with the root/system power fields iroha.daemon excludes (Type/EnvironmentFile/StateDirectory/RuntimeDirectory/User/Group/RemainAfterExit/ExecStartPre-Post/hardening). Composes mkOptionSurface + core.tag.";
+    subsumes = "The ~50 hand-rolled system-service modules in pleme-io/nix (attic-store-push, k3s-kubeconfig-export, toride-system, dns-split-horizon, vaultwarden, edge-router, power, ...).";
+    dependsOn = [ "core" "option-surface" ];
+    exports = [ "mkServiceModule" ];
+  };
+
+  service-bundle = {
+    file = "service-bundle.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Curated-service bundle: a typed bundle-enable + per-feature mkIf -> services.<upstream> mkMerge module, each feature independently gateable, configs merge without clobbering.";
+    subsumes = "The ~10 home-* family modules' hand-rolled enable-fan-out pattern (home-services/storage/automation/network-extras/data-services/media-automation, home-observability, darwin containers).";
+    dependsOn = [ "core" ];
+    exports = [ "mkServiceBundle" ];
+  };
+
+  registry-accumulator = {
+    file = "registry-accumulator.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Typed attrsOf entries (each with enable) -> filtered + deterministically-sorted merge into one config sink. Composes core.mkFields + core.tag.";
+    subsumes = "The recurring registry->sink pattern: binary-caches->substituters, kubeconfig-paths->KUBECONFIG, edge-router blocklists.";
+    dependsOn = [ "core" ];
+    exports = [ "mkRegistryAccumulator" ];
+  };
+
+  activation-hook = {
+    file = "activation-hook.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Typed enable -> idempotent cross-platform OS activation-script step (NixOS system.activationScripts rich {text,deps}; nix-darwin flat .text). enable=false = always-on. The body is the one sanctioned (generated, idempotent) bash.";
+    subsumes = "disable-determinate-nixd, admin-users, passwordless-sudo, pmset, mac-app-sync, attic-default-server, home-materialization activation steps.";
+    dependsOn = [ "core" ];
+    exports = [ "mkActivationHook" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";

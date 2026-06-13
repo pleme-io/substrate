@@ -34,6 +34,10 @@ let
     host-matrix = ./host-matrix.nix;
     flake-unit = ./flake-unit.nix;
     component-flake = ./component-flake.nix;
+    service-module = ./service-module.nix;
+    service-bundle = ./service-bundle.nix;
+    registry-accumulator = ./registry-accumulator.nix;
+    activation-hook = ./activation-hook.nix;
   };
 
   suites = lib.mapAttrs (_: f: import f { inherit lib iroha; }) suiteFiles;

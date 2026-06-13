@@ -84,6 +84,28 @@
     exports = [ "mkFleet" ];
   };
 
+  kubeconfig = {
+    file = "kubeconfig.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Renders a per-cluster kubeconfig artifact (Nix attrset, apiVersion=v1/kind=Config) from typed cluster-access facts (token or clientCert auth, CA ref/data/insecure). Pure data: secret refs stay placeholders, materialized at the consumer. Deterministic (sorted).";
+    subsumes = "The >=3x duplicated hand-typed kubeconfig YAML (fleet-rio-kubectl, fleet-pleme-dev-kubectl, darwin k3s-cluster.nix, nixos-k3s-server kubeconfig.nix).";
+    dependsOn = [ ];
+    exports = [ "mkKubeconfig" ];
+  };
+
+  secret-seed = {
+    file = "secret-seed.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "The sops-nix -> systemd-oneshot -> kubectl-apply Kubernetes Secret bootstrap pattern as one typed module factory: deterministic sops.secrets + an idempotent oneshot (create --dry-run=client -o yaml | apply -f -). Composes iroha.mkOptionSurface + core.tag.";
+    subsumes = "The rio hand-rolled seed-grafana-admin/seed-grafana-oidc/seed-rio-cloudflare-credentials services + the copy-paste-documented pattern in nodes/rio/CLAUDE.md.";
+    dependsOn = [ ];
+    exports = [ "mkSecretSeed" ];
+  };
+
   catalog = {
     file = "catalog.nix";
     tier = "kernel";

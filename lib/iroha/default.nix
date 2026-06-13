@@ -51,6 +51,10 @@ let
   hostMatrix = import ./host-matrix.nix { inherit lib; };
   flakeUnit = import ./flake-unit.nix { inherit lib; };
   componentFlake = import ./component-flake.nix { inherit lib; };
+  serviceModule = import ./service-module.nix { inherit lib; };
+  serviceBundle = import ./service-bundle.nix { inherit lib; };
+  registryAccumulator = import ./registry-accumulator.nix { inherit lib; };
+  activationHook = import ./activation-hook.nix { inherit lib; };
 in
 core
 // checks
@@ -70,6 +74,10 @@ core
 // hostMatrix
 // flakeUnit
 // componentFlake
+// serviceModule
+// serviceBundle
+// registryAccumulator
+// activationHook
 // {
   catalog = import ./catalog.nix { inherit lib; };
   tests = import ./tests { inherit lib; };
