@@ -80,6 +80,19 @@ let
     };
   };
 
+  # sshd-survivability shape: protected floor (memoryMin) + top weights.
+  survivability = mkResourcePolicy {
+    name = "sshd-survivability";
+    description = "sshd resource guarantees";
+    units = {
+      sshd = {
+        cpuWeight = 10000;
+        memoryMin = "64M";
+        ioWeight = 10000;
+      };
+    };
+  };
+
   # BAD cpuWeight (0) — the assertion must fire (assertion = false).
   badWeightZero = mkResourcePolicy {
     name = "bad-weight";
@@ -200,6 +213,24 @@ in
       IOWeight = 100;
       MemoryMax = "2G";
       MemoryHigh = "1G";
+    };
+  };
+
+  # ── memoryMin (protected floor) lands as MemoryMin (sshd-survivability) ──
+  memory-min-lands = {
+    expr =
+      let
+        sc = (evalNixos [ survivability.nixos { systemd.sshd-survivability.enable = true; } ]).config.systemd.services.sshd.serviceConfig;
+      in
+      {
+        inherit (sc) CPUWeight IOWeight MemoryMin;
+        hasMemoryMax = sc ? MemoryMax;
+      };
+    expected = {
+      CPUWeight = 10000;
+      IOWeight = 10000;
+      MemoryMin = "64M";
+      hasMemoryMax = false;
     };
   };
 

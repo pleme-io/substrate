@@ -58,6 +58,7 @@
 #       unitPolicy = {
 #         cpuQuota   ? null — str ("50%", "200%") | int (percent -> "<n>%");
 #         cpuWeight  ? null — int (systemd 1..10000; asserted);
+#         memoryMin  ? null — str ("64M") | int (bytes); a protected floor;
 #         memoryMax  ? null — str ("2G") | int (bytes);
 #         memoryHigh ? null — str ("1G") | int (bytes); asserted <= memoryMax
 #                             when both numeric-parseable;
@@ -165,6 +166,7 @@ let
           let
             cpuQuota = p.cpuQuota or null;
             cpuWeight = p.cpuWeight or null;
+            memoryMin = p.memoryMin or null;
             memoryMax = p.memoryMax or null;
             memoryHigh = p.memoryHigh or null;
             tasksMax = p.tasksMax or null;
@@ -175,6 +177,7 @@ let
           { }
           // optionalAttrs (cpuQuota != null) { CPUQuota = renderCpuQuota unitName cpuQuota; }
           // optionalAttrs (cpuWeight != null) { CPUWeight = cpuWeight; }
+          // optionalAttrs (memoryMin != null) { MemoryMin = memoryMin; }
           // optionalAttrs (memoryMax != null) { MemoryMax = memoryMax; }
           // optionalAttrs (memoryHigh != null) { MemoryHigh = memoryHigh; }
           // optionalAttrs (tasksMax != null) { TasksMax = tasksMax; }
