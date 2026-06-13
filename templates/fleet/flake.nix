@@ -63,6 +63,10 @@
       fleetSshAliases = fleet.sshAliases;
       fleetWireguard = fleet.wireguard;
 
+      # One typed query over the whole fleet:
+      #   nix eval .#fleetReport --json | jq
+      fleetReport = fleet.report;
+
       checks = nixpkgs.lib.genAttrs [ "aarch64-darwin" "x86_64-linux" ] (
         system: fleet.checksFor (import nixpkgs { inherit system; })
       );

@@ -46,6 +46,10 @@
 #     sshAliasesFor — node -> kata.mkSshAliases skipping that node (self);
 #     wireguard    — kata.mkWireguardLinks over config.vpnLinks, or null
 #                    when no vpnLinks blank is set;
+#     report       — pure-data fleet summary composed from every letter:
+#                    { name, hostCount, nodes.<n> = { class, system, tags,
+#                      fqdn, allFqdns, sshUser, deploys, profiles,
+#                      wireguardLinks } } — one query over the whole fleet;
 #     users        — kata.mkUsers result (keys threaded from trust.*);
 #     manifest     — iroha.mkManifest result | null (when apps == { });
 #     hostMatrix   — iroha.mkHostMatrix result (nodes projected: profile
@@ -214,6 +218,27 @@ let
         };
       };
 
+      # ── Encapsulated fleet report — one typed query over every letter ──
+      # Pure data: per-node facts pulled from domains, ssh-aliases,
+      # wireguard, and the node spec. Operators introspect the whole fleet
+      # with `nix eval .#... .report --json` instead of reading N files.
+      report = {
+        name = cfg.name;
+        hostCount = builtins.length domains.hosts;
+        nodes = lib.mapAttrs (
+          name: node:
+          {
+            inherit (node) class system tags;
+            fqdn = if domains.locations or { } ? ${name} then domains.fqdn name else null;
+            allFqdns = if domains.locations or { } ? ${name} then domains.allFqdns name else [ ];
+            sshUser = if node.sshUser != null then node.sshUser else domains.sshUserFor name;
+            deploys = node.deploy != null;
+            profiles = node.profiles;
+            wireguardLinks = if wireguard == null then [ ] else wireguard.linkNamesForNode name;
+          }
+        ) cfg.nodes;
+      };
+
       prefix = p: lib.mapAttrs' (n: v: lib.nameValuePair "${p}:${n}" v);
 
       invariants =
@@ -234,6 +259,7 @@ let
         users
         manifest
         hostMatrix
+        report
         invariants
         ;
       inherit (hostMatrix)

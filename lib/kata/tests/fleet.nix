@@ -156,6 +156,32 @@ in
       }).passed;
     expected = true;
   };
+  report-encapsulates-the-fleet = {
+    expr = {
+      name = f.report.name;
+      hostCount = f.report.hostCount;
+      rioFqdn = f.report.nodes.rio.fqdn;
+      rioUser = f.report.nodes.rio.sshUser;
+      rioDeploys = f.report.nodes.rio.deploys;
+      rioWg = f.report.nodes.rio.wireguardLinks;
+      cidClass = f.report.nodes.cid.class;
+      cidDeploys = f.report.nodes.cid.deploys;
+    };
+    expected = {
+      name = "demo";
+      hostCount = 2;
+      rioFqdn = "rio.bristol.demo.io";
+      rioUser = "ops";
+      rioDeploys = true;
+      rioWg = [ "rio-cid" ];
+      cidClass = "darwin";
+      cidDeploys = false;
+    };
+  };
+  report-wireguard-empty-without-vpnlinks = {
+    expr = noVpn.report.nodes.rio.wireguardLinks;
+    expected = [ ];
+  };
   wireguard-cross-invariant-fails-on-ghost-node = {
     expr =
       let
