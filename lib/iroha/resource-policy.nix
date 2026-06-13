@@ -92,6 +92,51 @@ let
   optionSurface = import ./option-surface.nix { inherit lib; };
   inherit (lib) optionalAttrs;
 
+  # cpuQuota: int percent -> "<n>%"; string passes through. (label feeds the
+  # typed throw.)
+  renderCpuQuota =
+    label: q:
+    if builtins.isInt q then
+      "${toString q}%"
+    else if builtins.isString q then
+      q
+    else
+      throw "iroha.resource-policy: ${label} `cpuQuota` must be an int (percent) or a string (\"50%\"), got ${builtins.typeOf q}.";
+
+  # ── PURE: one unit's resource policy -> its serviceConfig overlay ─────
+  # The composable core mkResourcePolicy stands on. A BESPOKE module that
+  # already owns a `systemd.services.<unit>.serviceConfig` block inside a
+  # cfg-gated `config` (where the full mkResourcePolicy MODULE — option surface
+  # + enable gate, placed in `imports` — cannot reach) consumes this directly:
+  #   systemd.services.atticd.serviceConfig = mkResourceServiceConfig { cpuQuota = …; … };
+  # Only the non-null fields are emitted. Mirrors mkServiceUnit / mkScheduledUnit.
+  mkResourceServiceConfig =
+    policy:
+    if !(builtins.isAttrs policy) then
+      throw "iroha.resource-policy.mkResourceServiceConfig: policy must be an attrset, got ${builtins.typeOf policy}."
+    else
+      let
+        cpuQuota = policy.cpuQuota or null;
+        cpuWeight = policy.cpuWeight or null;
+        memoryMin = policy.memoryMin or null;
+        memoryMax = policy.memoryMax or null;
+        memoryHigh = policy.memoryHigh or null;
+        tasksMax = policy.tasksMax or null;
+        ioWeight = policy.ioWeight or null;
+        allowedCPUs = policy.allowedCPUs or null;
+        oomScoreAdjust = policy.oomScoreAdjust or null;
+      in
+      { }
+      // optionalAttrs (cpuQuota != null) { CPUQuota = renderCpuQuota "mkResourceServiceConfig" cpuQuota; }
+      // optionalAttrs (cpuWeight != null) { CPUWeight = cpuWeight; }
+      // optionalAttrs (memoryMin != null) { MemoryMin = memoryMin; }
+      // optionalAttrs (memoryMax != null) { MemoryMax = memoryMax; }
+      // optionalAttrs (memoryHigh != null) { MemoryHigh = memoryHigh; }
+      // optionalAttrs (tasksMax != null) { TasksMax = tasksMax; }
+      // optionalAttrs (ioWeight != null) { IOWeight = ioWeight; }
+      // optionalAttrs (allowedCPUs != null) { AllowedCPUs = allowedCPUs; }
+      // optionalAttrs (oomScoreAdjust != null) { OOMScoreAdjust = oomScoreAdjust; };
+
   mkResourcePolicy =
     args:
     let
@@ -114,16 +159,6 @@ let
           args.units;
 
       unitNames = builtins.attrNames units;
-
-      # ── cpuQuota: int percent -> "<n>%"; string passes through ──────────
-      renderCpuQuota =
-        unitName: q:
-        if builtins.isInt q then
-          "${toString q}%"
-        else if builtins.isString q then
-          q
-        else
-          throw "iroha.resource-policy.mkResourcePolicy: unit '${unitName}' `cpuQuota` must be an int (percent) or a string (\"50%\"), got ${builtins.typeOf q}.";
 
       # ── conservative byte-size parse for the MemoryHigh<=MemoryMax check ─
       # Accepts a bare int (bytes) or a "<n><suffix>" string where suffix is
@@ -157,36 +192,9 @@ let
             in
             if suffix == "" then n else n * sizeSuffixes.${suffix};
 
-      # ── per-unit serviceConfig overlay (only NON-NULL fields) ───────────
-      unitServiceConfig =
-        unitName: p:
-        if !(builtins.isAttrs p) then
-          throw "iroha.resource-policy.mkResourcePolicy: unit '${unitName}' policy must be an attrset, got ${builtins.typeOf p}."
-        else
-          let
-            cpuQuota = p.cpuQuota or null;
-            cpuWeight = p.cpuWeight or null;
-            memoryMin = p.memoryMin or null;
-            memoryMax = p.memoryMax or null;
-            memoryHigh = p.memoryHigh or null;
-            tasksMax = p.tasksMax or null;
-            ioWeight = p.ioWeight or null;
-            allowedCPUs = p.allowedCPUs or null;
-            oomScoreAdjust = p.oomScoreAdjust or null;
-          in
-          { }
-          // optionalAttrs (cpuQuota != null) { CPUQuota = renderCpuQuota unitName cpuQuota; }
-          // optionalAttrs (cpuWeight != null) { CPUWeight = cpuWeight; }
-          // optionalAttrs (memoryMin != null) { MemoryMin = memoryMin; }
-          // optionalAttrs (memoryMax != null) { MemoryMax = memoryMax; }
-          // optionalAttrs (memoryHigh != null) { MemoryHigh = memoryHigh; }
-          // optionalAttrs (tasksMax != null) { TasksMax = tasksMax; }
-          // optionalAttrs (ioWeight != null) { IOWeight = ioWeight; }
-          // optionalAttrs (allowedCPUs != null) { AllowedCPUs = allowedCPUs; }
-          // optionalAttrs (oomScoreAdjust != null) { OOMScoreAdjust = oomScoreAdjust; };
-
-      systemdServices = lib.mapAttrs (unitName: p: {
-        serviceConfig = unitServiceConfig unitName p;
+      # ── per-unit serviceConfig overlay (the hoisted pure renderer) ──────
+      systemdServices = lib.mapAttrs (_unitName: p: {
+        serviceConfig = mkResourceServiceConfig p;
       }) units;
 
       # ── best-effort sanity assertions (per unit) ────────────────────────
@@ -271,5 +279,5 @@ let
     };
 in
 {
-  inherit mkResourcePolicy;
+  inherit mkResourcePolicy mkResourceServiceConfig;
 }

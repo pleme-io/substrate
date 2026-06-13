@@ -333,10 +333,10 @@
     tier = "standard";
     maturity = "Working";
     since = "2026-06-13";
-    description = "Typed CPU/memory/IO/task resource envelope rendered onto systemd units (CPUQuota/CPUWeight/MemoryMax/TasksMax/IOWeight/AllowedCPUs/OOMScoreAdjust) + best-effort sanity assertions. NixOS-only.";
-    subsumes = "The node-budget (breathe L2) + sshd-survivability systemd resource-control projections.";
+    description = "Typed CPU/memory/IO/task resource envelope rendered onto systemd units (CPUQuota/CPUWeight/MemoryMin/MemoryMax/MemoryHigh/TasksMax/IOWeight/AllowedCPUs/OOMScoreAdjust) + best-effort sanity assertions. NixOS-only. mkResourceServiceConfig is the PURE per-unit renderer (policy -> serviceConfig overlay) that a bespoke module owning a cfg-gated systemd.services.<unit>.serviceConfig block consumes directly (where the full module + enable gate can't reach).";
+    subsumes = "The node-budget (breathe L2) + sshd-survivability + attic-cache-warmer (atticd) systemd resource-control projections.";
     dependsOn = [ "core" "option-surface" ];
-    exports = [ "mkResourcePolicy" ];
+    exports = [ "mkResourcePolicy" "mkResourceServiceConfig" ];
   };
 
   catalog = {

@@ -216,6 +216,38 @@ in
     };
   };
 
+  # ── mkResourceServiceConfig: the PURE per-unit renderer (no module) ──
+  pure-renderer-only-nonnull-fields = {
+    expr = iroha.mkResourceServiceConfig {
+      cpuQuota = 400;
+      memoryHigh = "2G";
+      memoryMax = "4G";
+      ioWeight = 80;
+    };
+    expected = {
+      CPUQuota = "400%";
+      MemoryHigh = "2G";
+      MemoryMax = "4G";
+      IOWeight = 80;
+    };
+  };
+  pure-renderer-memorymin-and-string-quota = {
+    expr = iroha.mkResourceServiceConfig {
+      cpuQuota = "75%";
+      memoryMin = "64M";
+      allowedCPUs = "0-3";
+    };
+    expected = {
+      CPUQuota = "75%";
+      MemoryMin = "64M";
+      AllowedCPUs = "0-3";
+    };
+  };
+  pure-renderer-empty-policy-empty-config = {
+    expr = iroha.mkResourceServiceConfig { };
+    expected = { };
+  };
+
   # ── memoryMin (protected floor) lands as MemoryMin (sshd-survivability) ──
   memory-min-lands = {
     expr =
