@@ -66,6 +66,18 @@
     # { url = "https://cache.example.org"; publicKey = "cache.example.org-1:..."; }
   ];
 
+  # ── WireGuard links (optional) ────────────────────────────────────────
+  # Declare point-to-point or hub-and-spoke links here and mkFleet exposes
+  # `fleet.wireguard` — the per-node projection (linksForNode, secretsForNode,
+  # tlsSansForNode, systemdDepsForNode, ...). Omit entirely for no VPN.
+  vpnLinks = {
+    # alpha-beta = {
+    #   interface = "wg-ab"; profile = "mesh"; mtu = 1420;
+    #   a = { node = "alpha"; address = "10.0.0.1/24"; secrets = { privateKey = "alpha/wg/key"; psk = "ab/psk"; }; };
+    #   b = { node = "beta";  address = "10.0.0.2/24"; secrets.privateKey = "beta/wg/key"; };
+    # };
+  };
+
   # ── Secrets ───────────────────────────────────────────────────────────
   secrets = {
     backend = "sops";

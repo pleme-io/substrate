@@ -56,6 +56,13 @@
       fleetDeploy = fleet.deployRs;
       fleetRegistry = fleet.registry;
 
+      # Composed letters — derived for free from the one mkFleet call.
+      # `fleet.sshAliases` is shaped as blackmatter.components.ssh.extraHosts;
+      # `fleet.sshAliasesFor "<node>"` skips self; `fleet.wireguard` is the
+      # per-node WireGuard projection (null unless you declare `vpnLinks`).
+      fleetSshAliases = fleet.sshAliases;
+      fleetWireguard = fleet.wireguard;
+
       checks = nixpkgs.lib.genAttrs [ "aarch64-darwin" "x86_64-linux" ] (
         system: fleet.checksFor (import nixpkgs { inherit system; })
       );
