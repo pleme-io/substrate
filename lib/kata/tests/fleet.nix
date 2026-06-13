@@ -185,6 +185,34 @@ in
     expr = builtins.length (builtins.filter builtins.isFunction rioModules);
     expected = 1;
   };
+  users-module-external-placement-omits-baked-module = {
+    # placement "external": the consumer's profiles own account
+    # materialization — the function-valued users module must NOT appear
+    # in the node module list (it stays exported as f.users.module).
+    expr =
+      builtins.length (
+        builtins.filter builtins.isFunction
+          (kata.mkFleet {
+            config = blanks;
+            inherit universes;
+            profiles = profileTable;
+            usersModulePlacement = "external";
+          }).nixosConfigurations.rio.args.modules
+      );
+    expected = 0;
+  };
+  unknown-users-module-placement-throws = {
+    expr =
+      (builtins.tryEval
+        (kata.mkFleet {
+          config = blanks;
+          inherit universes;
+          profiles = profileTable;
+          usersModulePlacement = "everywhere";
+        }).config.name
+      ).success;
+    expected = false;
+  };
   caches-module-present = {
     expr =
       builtins.any (

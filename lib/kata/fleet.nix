@@ -26,6 +26,18 @@
 #     base ? { nixos ? [ ]; darwin ? [ ]; }
 #                                — modules baked into every node;
 #     shell ? null               — fleet shell drv for interactive users;
+#     usersModulePlacement ? "base"
+#                                — where kata.mkUsers' NixOS module lands:
+#                                  "base" (default) bakes users.module into
+#                                  base.nixos on every nixos node;
+#                                  "external" leaves account materialization
+#                                  to the consumer's profiles (a fleet whose
+#                                  profiles already declare the canonical
+#                                  accounts would double-define shell/groups
+#                                  otherwise — config decides, never a hidden
+#                                  hard-code). users.module stays exported and
+#                                  the users invariants run either way.
+#                                  Unknown value is a typed throw;
 #     extraInvariants ? { }      — consumer suites merged into invariants;
 #   } -> {
 #     config       — the VALIDATED blanks (defaults applied);
@@ -35,7 +47,8 @@
 #     hostMatrix   — iroha.mkHostMatrix result (nodes projected: profile
 #                    names resolved, sshUser defaulted from domains,
 #                    users module names resolved via hmModules,
-#                    users.module + caches module baked into base);
+#                    users.module (at placement "base") + caches module
+#                    baked into base);
 #     nixosConfigurations / darwinConfigurations — re-exported from
 #                    hostMatrix (the flake outputs);
 #     deployRs / colmena / byTag / registry — re-exported;
@@ -62,9 +75,21 @@ let
       hmModules ? { },
       base ? { },
       shell ? null,
+      usersModulePlacement ? "base",
       extraInvariants ? { },
     }:
     let
+      usersModulePlacements = [
+        "base"
+        "external"
+      ];
+
+      _placementGuard =
+        if !(builtins.elem usersModulePlacement usersModulePlacements) then
+          throw "kata.fleet.mkFleet: unknown usersModulePlacement '${toString usersModulePlacement}' — expected ${lib.concatStringsSep " or " (map (p: "\"${p}\"") usersModulePlacements)}."
+        else
+          true;
+
       cfg = fleetConfig.validateFleet config;
 
       domains = domainsLib.mkDomains cfg.domains;
@@ -131,7 +156,7 @@ let
         inherit universes;
         manifest = manifest;
         base = {
-          nixos = (base.nixos or [ ]) ++ [ users.module ];
+          nixos = (base.nixos or [ ]) ++ lib.optional (usersModulePlacement == "base") users.module;
           darwin = base.darwin or [ ];
         };
         nodes = lib.mapAttrs projectNode cfg.nodes;
@@ -162,7 +187,7 @@ let
         // prefix "fleet" crossInvariants
         // extraInvariants;
     in
-    {
+    builtins.seq _placementGuard {
       config = cfg;
       inherit
         domains
