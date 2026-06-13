@@ -147,10 +147,25 @@
         iroha = import ./lib/iroha { lib = nixpkgs.lib; };
         irohaPath = ./lib/iroha;
 
-        # Aggregate-before-assert eval-test derivation for the alphabet.
+        # kata (型) — the fleet-standard layer above iroha: typed fleet
+        # blanks (fleet-config), registries (domains/users), one-call
+        # assembly (mkFleet), and the instantiable fleet-repo template
+        # (templates.fleet). A private fleet repo is config-only.
+        kata = import ./lib/kata { lib = nixpkgs.lib; };
+        kataPath = ./lib/kata;
+
+        templates.fleet = {
+          path = ./templates/fleet;
+          description = "kata-standard private fleet repo — fill in fleet.nix, node hardware, secrets; all behavior from the vocabulary";
+        };
+
+        # Aggregate-before-assert eval-test derivations for the vocabulary.
         checks = eachSystem (system: {
           iroha =
             (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck
+            (import nixpkgs { inherit system; });
+          kata =
+            (import ./lib/kata { lib = nixpkgs.lib; }).tests.asCheck
             (import nixpkgs { inherit system; });
         });
 
