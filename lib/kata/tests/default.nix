@@ -14,6 +14,7 @@ let
   suiteFiles = {
     domains = ./domains.nix;
     ssh-aliases = ./ssh-aliases.nix;
+    wireguard = ./wireguard.nix;
     users = ./users.nix;
     fleet-config = ./fleet-config.nix;
     fleet = ./fleet.nix;

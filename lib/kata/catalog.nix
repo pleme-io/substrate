@@ -34,6 +34,17 @@
     exports = [ "mkSshAliases" ];
   };
 
+  wireguard = {
+    file = "wireguard.nix";
+    tier = "kernel";
+    maturity = "Working";
+    since = "2026-06-13";
+    description = "Per-node WireGuard projection over a typed link registry — both topologies (point-to-point + hub-and-spoke), 10 helpers (linksForNode/secretsForNode/k8sLinksForNode/tlsSansForNode/systemdDepsForNode/linkNamesForNode/hubForLink/isJitLink/addrFromCIDR/spokeAllowedIps). Same per-node shape regardless of topology; undeployable (unlocked-hub) links skipped.";
+    subsumes = "nix repo lib/vpn.nix (promoted — the link registry was the only fleet-specific input, now a parameter; the nix repo's copy becomes a frozen parity oracle).";
+    dependsOn = [ ];
+    exports = [ "mkWireguardLinks" ];
+  };
+
   users = {
     file = "users.nix";
     tier = "kernel";
