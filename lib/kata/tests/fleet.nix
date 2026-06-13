@@ -145,6 +145,45 @@ in
     expr = noVpn.wireguard;
     expected = null;
   };
+  wireguard-cross-invariant-passes-for-known-hosts = {
+    # f's vpnLinks reference rio + cid, both fleet hosts.
+    expr =
+      (iroha.mkEvalChecks {
+        name = "wg";
+        tests = {
+          inherit (f.invariants) "fleet:wireguard-nodes-are-fleet-hosts";
+        };
+      }).passed;
+    expected = true;
+  };
+  wireguard-cross-invariant-fails-on-ghost-node = {
+    expr =
+      let
+        bad = kata.mkFleet {
+          config = blanks // {
+            vpnLinks.ghost-link = {
+              interface = "wg-g";
+              profile = "mesh";
+              mtu = 1420;
+              a = {
+                node = "rio";
+                address = "10.0.0.1/24";
+                secrets.privateKey = "rio/wg/key";
+              };
+              b = {
+                node = "phantom";
+                address = "10.0.0.9/24";
+                secrets.privateKey = "phantom/wg/key";
+              };
+            };
+          };
+          inherit universes;
+          profiles = profileTable;
+        };
+      in
+      (iroha.mkEvalChecks { name = "bad"; tests = bad.invariants; }).passed;
+    expected = false;
+  };
   trust-keys-threaded-into-users = {
     expr = {
       ops = (kata.mkUsers {

@@ -193,6 +193,25 @@ let
           ) (builtins.attrNames cfg.nodes);
           expected = [ ];
         };
+        # Cross-letter consistency: every node named in a WireGuard link
+        # must be a known fleet host (domains.hosts). Catches a typo in a
+        # vpnLinks entry before it silently projects to nothing.
+        wireguard-nodes-are-fleet-hosts = {
+          expr =
+            let
+              knownHost = h: builtins.elem h domains.hosts;
+              linkNodes =
+                link:
+                (lib.optional (link ? a) link.a.node)
+                ++ (lib.optional (link ? b) link.b.node)
+                ++ (lib.optionals (link ? spokes) (
+                  lib.mapAttrsToList (n: _: n) link.spokes
+                ));
+              allLinkNodes = lib.concatMap linkNodes (builtins.attrValues cfg.vpnLinks);
+            in
+            builtins.filter (n: !(knownHost n)) (lib.unique allLinkNodes);
+          expected = [ ];
+        };
       };
 
       prefix = p: lib.mapAttrs' (n: v: lib.nameValuePair "${p}:${n}" v);
