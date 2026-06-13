@@ -463,6 +463,15 @@ in
       hasRestartIfChanged = false;
     };
   };
+  unit-type-exec-accepted = {
+    # the full systemd Type enum is accepted (reconverge is Type=exec).
+    expr = (mkServiceUnit {
+      description = "reconverge";
+      execStart = "/x";
+      type = "exec";
+    }).service.serviceConfig.Type;
+    expected = "exec";
+  };
   unit-restart-null-omits-restart = {
     # a no-retry oneshot (k3s-kubeconfig-export): restart=null -> no Restart key.
     expr =

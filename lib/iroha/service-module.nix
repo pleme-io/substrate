@@ -60,7 +60,8 @@
 #     description :: str (required);
 #     execStart   ? null (str) | command ? null (str) + args ? [ ] (listOf str);
 #                                  exactly one of execStart / command;
-#     type        ? "simple"   — "simple"|"oneshot"|"notify"|"forking";
+#     type        ? "simple"   — any systemd Type: simple|exec|forking|oneshot|
+#                                 dbus|notify|notify-reload|idle;
 #     wants ? [ ]; requires ? [ ]; after ? [ "network.target" ]; before ? [ ];
 #     environment ? { } (attrsOf str); environmentFile ? null (str);
 #     stateDirectory ? null; runtimeDirectory ? null; workingDirectory ? null;
@@ -138,11 +139,17 @@ let
     );
   escapeSystemdExecArgs = lib.concatMapStringsSep " " escapeSystemdExecArg;
 
+  # The complete systemd `Type=` enum (was a 4-subset; widened to the full set
+  # so the letter covers every real fleet unit — reconverge is Type=exec).
   validTypes = [
     "simple"
-    "oneshot"
-    "notify"
+    "exec"
     "forking"
+    "oneshot"
+    "dbus"
+    "notify"
+    "notify-reload"
+    "idle"
   ];
 
   # ── shared exec resolution (execStart XOR command + args) ─────────────
