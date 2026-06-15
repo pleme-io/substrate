@@ -121,6 +121,22 @@
 #                     binaries via separate overlay attrs (e.g. wasm-platform
 #                     bundles wasmtime + wasm-tools).
 #
+#   appBundle         attrset — opt into desktop GUI-app install (default:
+#                     null). When set, the HM module exposes
+#                     <hmNamespace>.<name>.installApp (mkEnableOption,
+#                     default false). On Darwin → a real `.app` (built by
+#                     the substrate `mkDarwinAppBundle` builder — NO
+#                     duplicated .app/.icns logic) symlinked into
+#                     ~/Applications + Launch Services registration. On
+#                     Linux → a `.desktop` entry + 256px PNG icon under
+#                     ~/.local/share + update-desktop-database. Fields:
+#                       appName            display name (default: name)
+#                       bundleId           CFBundleIdentifier (required)
+#                       iconSvg            path to source SVG (required)
+#                       desktopCategories  Linux Categories= (default "Utility;")
+#                       terminal           Linux Terminal= (default false)
+#                       minSystemVersion   LSMinimumSystemVersion (default "11.0")
+#
 #   darwinOnly        bool — gate the entire HM/Darwin module on
 #                     pkgs.stdenv.hostPlatform.isDarwin (default: false).
 #                     The package is omitted from home.packages and the
@@ -231,6 +247,30 @@ in
       darwinOnly         = spec.darwinOnly         or false;
       linuxOnly          = spec.linuxOnly          or false;
 
+      # ── GUI app-bundle install (COMPOUNDING) ─────────────────────────
+      # When set, the HM module turns the binary into a desktop-installed
+      # GUI app: on Darwin a real `.app` bundle (via the substrate
+      # `mkDarwinAppBundle` builder — NO duplicated .app/.icns logic) is
+      # symlinked into ~/Applications and registered with Launch Services;
+      # on Linux a `.desktop` entry + a 256px PNG icon land under
+      # ~/.local/share so the app shows up in the application menu.
+      #
+      # Spec shape (all under `spec.appBundle`):
+      #   appName            display name, e.g. "Mado" → Mado.app (default: name)
+      #   bundleId           CFBundleIdentifier, e.g. "io.pleme.mado"
+      #   iconSvg            path to the source SVG (1024×1024)
+      #   desktopCategories  Linux .desktop Categories= value
+      #                      (default: "Utility;")
+      #   terminal           Linux .desktop Terminal= (default: false — a
+      #                      GUI app launches its own window)
+      #   minSystemVersion   LSMinimumSystemVersion (default: "11.0")
+      #
+      # The whole feature is gated on `<hmNamespace>.<name>.installApp`
+      # (an mkEnableOption, default false). Independent of `enable`'s
+      # PATH-binary install — a consumer can install the app bundle
+      # without the bare binary on PATH, or both.
+      appBundle          = spec.appBundle          or null;
+
       shikumiTypedGroups = spec.shikumiTypedGroups or {};
 
       # ── Typed-group rendering helpers ────────────────────────────────
@@ -306,6 +346,18 @@ in
       hmOptions = pkgs: {
         enable = mkEnableOption description;
         package = mkPackageOption pkgs;
+      } // optionalAttrs (appBundle != null) {
+        installApp = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Install ${name} as a desktop GUI application — a real
+            `.app` bundle in ~/Applications on macOS (Spotlight /
+            Launchpad / Dock discoverable), or a `.desktop` entry +
+            icon under ~/.local/share on Linux (application menu).
+            Independent of `enable` (the bare PATH binary).
+          '';
+        };
       } // typedGroupsOptions // optionalAttrs withMcp {
         enableMcpBin = mkOption {
           type = types.bool;
@@ -465,6 +517,63 @@ in
           platformOk =
             (!darwinOnly || pkgs.stdenv.hostPlatform.isDarwin)
             && (!linuxOnly || pkgs.stdenv.hostPlatform.isLinux);
+
+          # ── GUI app-bundle install (reuses mkDarwinAppBundle) ─────────
+          # Resolved app-bundle config (null when the consumer didn't
+          # opt in). appName defaults to the spec name; bundleId is
+          # required when appBundle is set.
+          appCfg =
+            if appBundle == null then null
+            else {
+              appName          = appBundle.appName          or name;
+              bundleId         = appBundle.bundleId
+                or (throw "module-trio: appBundle for ${name} needs `bundleId`.");
+              iconSvg          = appBundle.iconSvg
+                or (throw "module-trio: appBundle for ${name} needs `iconSvg`.");
+              desktopCategories = appBundle.desktopCategories or "Utility;";
+              terminal         = appBundle.terminal         or false;
+              minSystemVersion = appBundle.minSystemVersion or "11.0";
+            };
+
+          # Darwin .app — built once, reusing the substrate builder.
+          # `import`ed at activation-time pkgs so it's the right arch.
+          darwinAppBundle =
+            if appCfg == null then null
+            else (import ./build/darwin/app-bundle.nix).mkDarwinAppBundle {
+              inherit pkgs;
+              name             = appCfg.appName;
+              exe              = cfg.package;
+              exeName          = binaryName;
+              iconSvg          = appCfg.iconSvg;
+              bundleId         = appCfg.bundleId;
+              version          = cfg.package.version or "0.1.0";
+              minSystemVersion = appCfg.minSystemVersion;
+            };
+
+          # Linux 256px PNG icon rendered from the SVG (resvg, pure).
+          linuxAppIcon =
+            if appCfg == null then null
+            else pkgs.runCommandLocal "${name}-icon-256.png" {
+              nativeBuildInputs = [ pkgs.resvg ];
+            } ''
+              resvg -w 256 -h 256 ${appCfg.iconSvg} "$out"
+            '';
+
+          # Linux .desktop entry — rendered by the typed generator
+          # (lib.generators.toINI / makeDesktopItem) rather than a hand
+          # string. makeDesktopItem is the canonical typed surface.
+          linuxDesktopItem =
+            if appCfg == null then null
+            else pkgs.makeDesktopItem {
+              name        = name;
+              desktopName = appCfg.appName;
+              exec        = "${cfg.package}/bin/${binaryName}";
+              icon        = name;
+              comment     = description;
+              categories  = lib.splitString ";"
+                (lib.removeSuffix ";" appCfg.desktopCategories);
+              terminal    = appCfg.terminal;
+            };
         in
         {
           # recursiveUpdate, not //, so when hmNamespace = "services" the
@@ -546,6 +655,39 @@ in
               home.file.${shikumiConfigPath} = {
                 source = yamlFormat.generate "${name}.yaml" shikumiCfg;
               };
+            })
+
+            # ── GUI app-bundle install ───────────────────────────────
+            # Two platform-split mkIfs (same module-system-tractability
+            # rule as the http/daemon services above). Gated on
+            # <hmNamespace>.<name>.installApp; independent of `enable`.
+            #
+            # Darwin: symlink the built `.app` into ~/Applications and
+            # nudge Launch Services so Spotlight/Dock pick it up.
+            (mkIf (appCfg != null && (cfg.installApp or false)
+                   && pkgs.stdenv.hostPlatform.isDarwin) {
+              home.file."Applications/${appCfg.appName}.app".source =
+                "${darwinAppBundle}/${appCfg.appName}.app";
+              home.activation."register-${name}-app" =
+                lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+                  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+                    -f "$HOME/Applications/${appCfg.appName}.app" 2>/dev/null || true
+                '';
+            })
+
+            # Linux: .desktop entry + 256px icon under ~/.local/share,
+            # plus an update-desktop-database nudge so menus refresh.
+            (mkIf (appCfg != null && (cfg.installApp or false)
+                   && pkgs.stdenv.hostPlatform.isLinux) {
+              home.file.".local/share/applications/${name}.desktop".source =
+                "${linuxDesktopItem}/share/applications/${name}.desktop";
+              home.file.".local/share/icons/hicolor/256x256/apps/${name}.png".source =
+                linuxAppIcon;
+              home.activation."register-${name}-desktop" =
+                lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+                  ${pkgs.desktop-file-utils}/bin/update-desktop-database \
+                    "$HOME/.local/share/applications" 2>/dev/null || true
+                '';
             })
 
             # Anvil MCP registration — independent of cfg.enable by

@@ -2,6 +2,9 @@
 #
 #   build (matrix: linux/macOS × x86_64/aarch64)
 #     -> attach binaries + .sha256 to GitHub Release on `v*` tag push
+#     -> (opt-in) also assemble + attach desktop app packages:
+#          macOS  → <AppName>-<version>-macos-<arch>.dmg  (drag-to-Applications)
+#          linux  → <AppName>-<version>-linux-<arch>.tar.gz (.desktop + icon + install.sh)
 #
 # Sibling of rust-release.yml; this one is feature-aware and binary-only
 # (no crates.io publish). Use it when a CLI ships with optional cargo
@@ -22,12 +25,30 @@
 #         no-default-features: true     # optional
 #         system-deps: "libxkbcommon-dev libwayland-dev"  # optional (ubuntu legs)
 #
+# GUI app (opt-in — non-GUI tools are unaffected, app-bundle defaults false):
+#
+#       with:
+#         binary-name: mado
+#         app-bundle: true
+#         app-name: Mado
+#         bundle-id: io.pleme.mado
+#         icon-svg: assets/mado-icon.svg
+#         desktop-categories: "System;TerminalEmulator;"
+#
 # GPU / windowing apps (winit/wgpu): pass `system-deps` the apt
 # packages the linux build needs (e.g. libxkbcommon-dev libwayland-dev
 # libwayland-cursor0 pkg-config). They are apt-get installed on the
 # ubuntu matrix legs BEFORE the build. macOS legs are untouched —
 # Metal ships in the SDK. This is the compounding extension every
 # GPU app reuses.
+#
+# App-bundle packaging reuses the SAME Info.plist keys + iconset slots
+# as substrate's pure-Nix `mkDarwinAppBundle` builder
+# (lib/build/darwin/app-bundle.nix); the only difference is the runner
+# uses the system `rsvg-convert` + `iconutil` (available on GHA macOS
+# runners, unlike the Nix sandbox) instead of resvg + png2icns. The
+# Nix-module path (channel 2) and this CI path (channel 1) therefore
+# produce equivalent `.app` bundles from one icon source of truth.
 
 name: Rust binary release
 
@@ -50,6 +71,30 @@ on:
         type: string
         default: ""
         description: "Space-separated apt packages installed on the ubuntu matrix legs before the build (GPU/windowing libs, e.g. libxkbcommon-dev libwayland-dev). Empty = no apt install. macOS legs unaffected."
+      app-bundle:
+        type: boolean
+        default: false
+        description: "When true, also assemble + attach desktop app packages (macOS .dmg + .app .zip; linux .tar.gz with .desktop + icon + install.sh). Opt-in so non-GUI tools are unaffected."
+      app-name:
+        type: string
+        default: ""
+        description: "Display name for the app bundle (e.g. Mado → Mado.app). Required when app-bundle=true."
+      bundle-id:
+        type: string
+        default: ""
+        description: "CFBundleIdentifier for the macOS .app (e.g. io.pleme.mado). Required when app-bundle=true."
+      icon-svg:
+        type: string
+        default: ""
+        description: "Repo-relative path to the source SVG icon (e.g. assets/mado-icon.svg). Required when app-bundle=true."
+      desktop-categories:
+        type: string
+        default: "Utility;"
+        description: "Linux .desktop Categories= value (e.g. 'System;TerminalEmulator;')."
+      min-system-version:
+        type: string
+        default: "11.0"
+        description: "LSMinimumSystemVersion for the macOS .app Info.plist."
 
 permissions:
   contents: write
@@ -99,10 +144,173 @@ jobs:
           features:            ${{ inputs.features }}
           no-default-features: ${{ inputs.no-default-features }}
 
-      - name: Attach to GitHub Release
+      # ── Derive the release version from the tag (vX.Y.Z → X.Y.Z) ─────
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          ref="${GITHUB_REF#refs/tags/}"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
+      # ── macOS app bundle → DMG (drag-to-Applications) + .app .zip ────
+      # The runner has rsvg-convert / sips / iconutil; iconutil IS
+      # available on GHA macOS runners (unlike the Nix sandbox), so we
+      # use the canonical `iconutil -c icns` path here. Same Info.plist
+      # keys as substrate's mkDarwinAppBundle.
+      - name: Assemble macOS .app
+        id: macapp
+        if: inputs.app-bundle && runner.os == 'macOS'
+        shell: bash
+        env:
+          APP_NAME:   ${{ inputs.app-name }}
+          BUNDLE_ID:  ${{ inputs.bundle-id }}
+          ICON_SVG:   ${{ inputs.icon-svg }}
+          EXE:        ${{ inputs.binary-name }}
+          VERSION:    ${{ steps.ver.outputs.version }}
+          MIN_SYS:    ${{ inputs.min-system-version }}
+        run: |
+          set -euo pipefail
+          brew list librsvg >/dev/null 2>&1 || brew install librsvg
+          app="${APP_NAME}.app"
+          contents="$app/Contents"
+          mkdir -p "$contents/MacOS" "$contents/Resources"
+
+          # binary
+          cp "dist/${EXE}-${{ matrix.suffix }}" "$contents/MacOS/${EXE}"
+          chmod +x "$contents/MacOS/${EXE}"
+
+          # icon: SVG → iconset PNGs → .icns (the 10 canonical slots)
+          iconset="${APP_NAME}.iconset"
+          mkdir -p "$iconset"
+          for spec in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" \
+                      "128:128x128" "256:128x128@2x" "256:256x256" \
+                      "512:256x256@2x" "512:512x512" "1024:512x512@2x"; do
+            px="${spec%%:*}"; slot="${spec##*:}"
+            rsvg-convert -w "$px" -h "$px" "$ICON_SVG" -o "$iconset/icon_${slot}.png"
+          done
+          iconutil -c icns "$iconset" -o "$contents/Resources/${APP_NAME}.icns"
+
+          # Info.plist — same keys as mkDarwinAppBundle
+          cat > "$contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>${APP_NAME}</string>
+            <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
+            <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
+            <key>CFBundleExecutable</key><string>${EXE}</string>
+            <key>CFBundleIconFile</key><string>${APP_NAME}.icns</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSMinimumSystemVersion</key><string>${MIN_SYS}</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # PkgInfo
+          printf 'APPL????' > "$contents/PkgInfo"
+
+          # Ad-hoc codesign so the .app isn't reported "damaged".
+          # NOT notarized — first-launch still needs right-click→Open or
+          # `xattr -dr com.apple.quarantine` (documented in INSTALL).
+          codesign -s - --force --deep "$app"
+
+          # .zip of the .app (some users prefer the bare bundle)
+          zipname="${APP_NAME}-${VERSION}-${{ matrix.suffix }}.zip"
+          ditto -c -k --keepParent "$app" "$zipname"
+          echo "zip=$zipname" >> "$GITHUB_OUTPUT"
+
+          # DMG with an /Applications symlink for drag-install
+          stage="dmg-stage"
+          mkdir -p "$stage"
+          cp -R "$app" "$stage/"
+          ln -s /Applications "$stage/Applications"
+          dmgname="${APP_NAME}-${VERSION}-${{ matrix.suffix }}.dmg"
+          hdiutil create -volname "${APP_NAME}" -srcfolder "$stage" \
+            -ov -format UDZO "$dmgname"
+          echo "dmg=$dmgname" >> "$GITHUB_OUTPUT"
+
+      # ── linux .tar.gz: binary + .desktop + icon + install.sh ────────
+      - name: Assemble linux app package
+        id: linapp
+        if: inputs.app-bundle && runner.os == 'Linux'
+        shell: bash
+        env:
+          APP_NAME:   ${{ inputs.app-name }}
+          ICON_SVG:   ${{ inputs.icon-svg }}
+          EXE:        ${{ inputs.binary-name }}
+          VERSION:    ${{ steps.ver.outputs.version }}
+          CATEGORIES: ${{ inputs.desktop-categories }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+          pkg="${EXE}-pkg"
+          mkdir -p "$pkg"
+          cp "dist/${EXE}-${{ matrix.suffix }}" "$pkg/${EXE}"
+          chmod +x "$pkg/${EXE}"
+
+          # icon: SVG → 256px PNG
+          rsvg-convert -w 256 -h 256 "$ICON_SVG" -o "$pkg/${EXE}.png"
+
+          # .desktop entry (Exec points at the installed ~/.local/bin path)
+          cat > "$pkg/${EXE}.desktop" <<DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Name=${APP_NAME}
+          Comment=${APP_NAME}
+          Exec=${EXE}
+          Icon=${EXE}
+          Terminal=false
+          Categories=${CATEGORIES}
+          DESKTOP
+
+          # tiny end-user installer (distributed artifact — allowed).
+          # The exe name is baked in at generation time (the workflow
+          # knows it), so the installer is pure copy-into-place glue.
+          cat > "$pkg/install.sh" <<INSTALL
+          #!/usr/bin/env sh
+          set -e
+          exe="${EXE}"
+          here="\$(cd "\$(dirname "\$0")" && pwd)"
+          mkdir -p "\$HOME/.local/bin" "\$HOME/.local/share/applications" \\
+                   "\$HOME/.local/share/icons/hicolor/256x256/apps"
+          install -m755 "\$here/\$exe" "\$HOME/.local/bin/\$exe"
+          install -m644 "\$here/\$exe.desktop" "\$HOME/.local/share/applications/\$exe.desktop"
+          install -m644 "\$here/\$exe.png" "\$HOME/.local/share/icons/hicolor/256x256/apps/\$exe.png"
+          command -v update-desktop-database >/dev/null 2>&1 && \\
+            update-desktop-database "\$HOME/.local/share/applications" || true
+          echo "Installed \$exe to ~/.local/bin (ensure it is on PATH)."
+          INSTALL
+          chmod +x "$pkg/install.sh"
+
+          tarname="${APP_NAME}-${VERSION}-${{ matrix.suffix }}.tar.gz"
+          tar -czf "$tarname" -C "$pkg" .
+          echo "tar=$tarname" >> "$GITHUB_OUTPUT"
+
+      - name: Attach binaries to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/${{ inputs.binary-name }}-${{ matrix.suffix }}
             dist/${{ inputs.binary-name }}-${{ matrix.suffix }}.sha256
+
+      - name: Attach macOS app packages to GitHub Release
+        if: inputs.app-bundle && runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.macapp.outputs.dmg }}
+            ${{ steps.macapp.outputs.zip }}
+
+      - name: Attach linux app package to GitHub Release
+        if: inputs.app-bundle && runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.linapp.outputs.tar }}
