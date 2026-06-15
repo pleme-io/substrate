@@ -198,6 +198,33 @@ in rec {
   darwinHelpers = ./util/darwin.nix;
 
   # ============================================================================
+  # DARWIN APP BUNDLE BUILDER (from build/darwin/app-bundle.nix)
+  # ============================================================================
+  # Turn any built binary + an SVG icon into a real, double-clickable,
+  # Spotlight-/Launchpad-/Dock-discoverable macOS `.app` bundle. Generates a
+  # valid multi-resolution `.icns` from the SVG entirely in-sandbox
+  # (resvg → PNGs → png2icns; no system `iconutil` reach). The Info.plist is a
+  # typed attrset rendered by `lib.generators.toPlist` (TYPED EMISSION).
+  #
+  # COMPOUNDING: every fleet GUI app (mado, namimado, escriba, hibiki, …) wraps
+  # its binary with one `mkDarwinAppBundle { … }` call — never a per-app
+  # hand-rolled bundle.
+  #
+  # Usage:
+  #   madoApp = substrateLib.mkDarwinAppBundle {
+  #     inherit pkgs;
+  #     name = "Mado";
+  #     exe = self.packages.${system}.default;   # bin/mado
+  #     exeName = "mado";
+  #     iconSvg = ./assets/mado-icon.svg;
+  #     bundleId = "io.pleme.mado";
+  #     version = "0.1.0";
+  #   };
+  #   # → Mado.app/Contents/{MacOS/mado, Info.plist, Resources/Mado.icns, PkgInfo}
+  inherit ((import ./build/darwin/app-bundle.nix)) mkDarwinAppBundle;
+  darwinAppBundleBuilder = ./build/darwin/app-bundle.nix;
+
+  # ============================================================================
   # HEALTH SUPERVISOR BUILDER (from health-supervisor.nix)
   # ============================================================================
   inherit (healthSupervisorModule) mkHealthSupervisor;
