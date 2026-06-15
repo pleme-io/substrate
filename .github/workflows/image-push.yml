@@ -20,6 +20,21 @@
 #
 # The flake must expose `packages.<system>.<imageAttr>` producing a Docker
 # image tarball (e.g. via pkgs.dockerTools.buildLayeredImage).
+#
+# ★ AUTOBUMP convention (org directive: pleme-io/CLAUDE.md ★★ AUTO-RELEASE →
+# "★ AUTOBUMP — exact-pin continuous delivery; never :latest"). On a merge to
+# main, pass a SORTABLE EXACT tag so subscribing environments auto-track the
+# newest build via Flux image-automation AND always know exactly what is running:
+#
+#     tag: <arch>-r${{ github.run_number }}-${{ github.sha }}
+#     # e.g.  amd64-r142-9c1f0ab   (r<n> is the numeric sort key; sha = trace)
+#
+# Build on a NATIVE-arch runner (`runner: rio-builder` for amd64) so the binary
+# matches the target — an off-target build mislabels the arch and `exec format
+# error`s at runtime. Use `additionalTags: <arch>-latest` ONLY as a human-facing
+# moving pointer; the DEPLOY target is always the exact `r<n>` tag, which a
+# cluster's committed `# {"$imagepolicy"}` marker pins. The `tag` default below
+# is `latest` for back-compat only — autobump-native repos MUST override it.
 
 name: image-push
 
