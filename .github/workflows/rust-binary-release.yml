@@ -20,6 +20,14 @@
 #         binary-name: my-tool
 #         features: "feat-a feat-b"     # optional
 #         no-default-features: true     # optional
+#         system-deps: "libxkbcommon-dev libwayland-dev"  # optional (ubuntu legs)
+#
+# GPU / windowing apps (winit/wgpu): pass `system-deps` the apt
+# packages the linux build needs (e.g. libxkbcommon-dev libwayland-dev
+# libwayland-cursor0 pkg-config). They are apt-get installed on the
+# ubuntu matrix legs BEFORE the build. macOS legs are untouched —
+# Metal ships in the SDK. This is the compounding extension every
+# GPU app reuses.
 
 name: Rust binary release
 
@@ -38,6 +46,10 @@ on:
         type: boolean
         default: false
         description: "When true, pass --no-default-features to cargo build"
+      system-deps:
+        type: string
+        default: ""
+        description: "Space-separated apt packages installed on the ubuntu matrix legs before the build (GPU/windowing libs, e.g. libxkbcommon-dev libwayland-dev). Empty = no apt install. macOS legs unaffected."
 
 permissions:
   contents: write
@@ -68,6 +80,15 @@ jobs:
       - name: Configure cross-linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      # GPU / windowing system libs (winit/wgpu). Only on the ubuntu
+      # legs and only when system-deps is non-empty. macOS uses the
+      # Metal SDK and needs nothing here.
+      - name: Install system deps (ubuntu only)
+        if: runner.os == 'Linux' && inputs.system-deps != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ inputs.system-deps }}
 
       - name: Build + stage
         uses: pleme-io/actions/rust-cross-build@v1

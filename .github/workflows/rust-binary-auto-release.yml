@@ -1,0 +1,147 @@
+name: rust-binary-auto-release
+
+# Reusable workflow: binary-only auto-release for git-dependency Rust
+# binaries / GPU apps that CANNOT publish to crates.io yet.
+#
+# WHY THIS EXISTS
+# ---------------
+# An app like mado depends on ~25 pleme-io crates via
+# `git = "https://github.com/pleme-io/..."`. `cargo publish` rejects
+# git deps, so the crates.io leg in cargo-auto-release.yml /
+# rust-auto-release.yml would fail red. This workflow delivers the
+# binary + autobump leg only: bump the single-crate version, commit,
+# tag `vX.Y.Z`, push the tag — and let a sibling consumer workflow
+# (release-binaries.yml, on `push: tags: ['v*']`) build the
+# cross-platform binaries and attach them to the GitHub Release.
+#
+# DESIGN: SPLIT (bump-reusable + existing rust-binary-release.yml)
+# ----------------------------------------------------------------
+# This workflow is BUMP + TAG ONLY. It does NOT build binaries. The
+# tag push (made with BOT_PAT, NOT the default GITHUB_TOKEN) triggers
+# the consumer's release-binaries.yml, which calls the existing
+# pleme-io/substrate/.github/workflows/rust-binary-release.yml@main
+# matrix builder. This reuses the proven matrix instead of
+# duplicating it here, and keeps each reusable single-purpose.
+#
+# A consumer therefore adopts TWO shims:
+#   .github/workflows/auto-release.yml      -> this workflow (on push main)
+#   .github/workflows/release-binaries.yml  -> rust-binary-release.yml (on tag v*)
+#
+# IMPORTANT: the tag push MUST use secrets.BOT_PAT. The default
+# GITHUB_TOKEN does NOT trigger downstream workflows on tag push, so
+# without BOT_PAT the binary build never runs. BOT_PAT is provided via
+# `secrets: inherit` from the consumer.
+#
+# FLIP TO CRATES.IO LATER
+# -----------------------
+# Once mado's git deps publish to crates.io and its Cargo.toml switches
+# the `git = ...` deps to `version = ...` deps, swap the consumer's
+# auto-release.yml to reference
+#   pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
+# (single-crate, publishes to crates.io) and drop release-binaries.yml
+# if binaries are no longer desired — or keep both (crates.io publish +
+# GitHub Release binaries) by adding the binary build back as a sibling
+# shim. cargo-auto-release.yml's `regenerate-cargo-nix: false` knob is
+# the path-dep escape hatch already wired for exactly this case.
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch:
+#       inputs:
+#         bump-type: { default: patch }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/rust-binary-auto-release.yml@main
+#       with:
+#         bump-type: ${{ inputs.bump-type || 'patch' }}
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        required: false
+        default: patch
+        description: "patch | minor | major"
+      source-paths:
+        type: string
+        required: false
+        default: "*.rs Cargo.toml"
+        description: "Space-separated globs the skip-detector inspects for changes since the last tag. Default matches any Rust source or the manifest."
+      # ---- pass-through binary inputs (forward-compat) ----
+      # In the SPLIT design the binary build is driven by the sibling
+      # release-binaries.yml shim, which passes these straight to
+      # rust-binary-release.yml. They are accepted here so a future
+      # combined-reusable variant can consume them without a signature
+      # change; the bump job below ignores them.
+      binary-name:
+        type: string
+        required: false
+        default: ""
+        description: "Cargo binary name. Consumed by the sibling release-binaries.yml shim, not by the bump job."
+      features:
+        type: string
+        required: false
+        default: ""
+        description: "Cargo features (space-separated). Consumed by the sibling release-binaries.yml shim."
+      no-default-features:
+        type: boolean
+        required: false
+        default: false
+        description: "Pass --no-default-features. Consumed by the sibling release-binaries.yml shim."
+    secrets:
+      BOT_PAT:
+        required: false
+
+permissions:
+  contents: write
+
+# Serialize releases per repository — two pushes to main otherwise race
+# two bump runs from the same base and the second tag push is rejected
+# non-ff. Queue rather than cancel; an in-flight release must finish.
+concurrency:
+  group: rust-binary-auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # Bump package.version, skipping when no source changed since the
+      # last tag. regenerate-cargo-nix MUST be false: this app has git
+      # deps to sibling pleme-io repos that CI does not check out, so
+      # crate2nix would fail.
+      - id: bump
+        uses: pleme-io/actions/cargo-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          source-paths: ${{ inputs.source-paths }}
+          regenerate-cargo-nix: "false"
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.bump.outputs.new-version }}
+          commit-message-template: "release: v{version}"
+          add-paths: "Cargo.toml Cargo.lock"
+
+      # Push with BOT_PAT so the tag push triggers the consumer's
+      # release-binaries.yml (GITHUB_TOKEN would NOT trigger it).
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
