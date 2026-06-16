@@ -366,6 +366,20 @@ in {
             if [ -d "${toString migrationsPath}" ]; then
               cp -r ${migrationsPath}/* $out/migrations/ || true
             fi
+            # Self-locate the C runtime in the minimal image. buildRustCrate's
+            # per-crate rustc ignores CARGO_BUILD_TARGET, so the binary is a
+            # native glibc ELF that references libgcc_s.so.1 (and libc) by
+            # soname with an EMPTY RPATH — nix can't see the reference, so
+            # dockerTools never adds libgcc to the image and the container
+            # dies with "libgcc_s.so.1: cannot open shared object file".
+            # Stamping an RPATH turns the dep into a store reference → it lands
+            # in the runtime closure → present + findable. (musl-static builds
+            # have no interpreter and are skipped — they need no RPATH.)
+            for b in "$out"/bin/*; do
+              if [ -f "$b" ] && ${pkgs.patchelf}/bin/patchelf --print-interpreter "$b" >/dev/null 2>&1; then
+                ${pkgs.patchelf}/bin/patchelf --set-rpath "${pkgs.stdenv.cc.cc.lib}/lib" "$b" || true
+              fi
+            done
           '';
         };
       } // crateOverrides;
