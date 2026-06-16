@@ -100,6 +100,14 @@ in {
   # ["KEY=value", ...]. Use for service-specific defaults that helm
   # values won't override.
   extraEnv ? [],
+  # Build-graph source. `true` (default) = the gen-cargo build-spec /
+  # lockfile-builder forward path. `false` = the committed crate2nix
+  # Cargo.nix (cargo-metadata feature resolution). Flip to false when a
+  # repo's gen build-spec mis-resolves cargo weak-dependency features
+  # (`dep?/feature`) and over-builds an optional driver — crate2nix's
+  # metadata pass resolves those correctly. Documented opt-out from
+  # crate2nix-builders.nix, now reachable at the flake surface.
+  useLockfileBuilder ? true,
 }: let
   _ = check.all [
     (check.nonEmptyStr "serviceName" serviceName)
@@ -137,7 +145,7 @@ in {
     };
     builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
   in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName extraEnv;
+    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName extraEnv useLockfileBuilder;
     buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
     nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
     architecture = arch;
