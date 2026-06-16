@@ -1,0 +1,77 @@
+name: esteira-rio-release
+
+# esteira PRIVATE lane (closed-source) — release on the rio self-hosted ARC
+# runner, never a billable GitHub-hosted runner. The repo's own
+# `nix run .#<release-app>` does the build + GHCR push (skopeo/regclient ride
+# in the nix closure — rio has no docker). See pleme-io/theory/ESTEIRA.md.
+#
+# Prereqs (operator, GitOps via FluxCD — never tofu/kubectl): the `rio`
+# gha-runner-scale-set on rio's k3s (pleme-io/k8s clusters/rio/infrastructure/arc/)
+# with the host /nix store + nix-daemon socket hostPath-mounted into the runner
+# pod. A repo opts into this lane via the pangea-github catalog
+# (actions_enabled: true) + membership in the rio-private-lane runner group.
+
+on:
+  workflow_call:
+    inputs:
+      release-app:
+        description: "flake app to run, e.g. release | function-release"
+        type: string
+        default: "release"
+      tag:
+        description: "arg passed after `--` (only used when needs-tag is true)"
+        type: string
+        default: ""
+      needs-tag:
+        description: "pass `-- <tag>` to the release app (e.g. crossplane function-release)"
+        type: boolean
+        default: false
+      runner:
+        description: "ARC scale-set name / self-hosted label to run on"
+        type: string
+        default: "rio"
+    secrets:
+      GHCR_TOKEN:
+        description: "optional override; falls back to the job's GITHUB_TOKEN (packages: write)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    name: Release on rio (nix run)
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: GHCR auth (for forge/skopeo in the nix closure)
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: |
+          install -d "$HOME/.docker"
+          auth=$(printf '%s' "${{ github.actor }}:${TOKEN}" | base64 -w0)
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$HOME/.docker/config.json"
+
+      - name: Release (nix run on rio)
+        shell: bash
+        run: |
+          # rio's host nix store + daemon socket are hostPath-mounted into the
+          # runner pod; the stock actions-runner image ships no nix binary, so
+          # PATH the host's default profile and talk to the host daemon.
+          export PATH="/nix/var/nix/profiles/default/bin:${PATH}"
+          export NIX_REMOTE=daemon
+          if ! command -v nix >/dev/null 2>&1; then
+            echo "::error::nix not on PATH — check the rio runner pod's /nix hostPath mount"
+            exit 2
+          fi
+          app="${{ inputs.release-app }}"
+          if [ "${{ inputs.needs-tag }}" = "true" ]; then
+            echo "→ nix run .#${app} -- ${{ inputs.tag }}"
+            nix run ".#${app}" -- "${{ inputs.tag }}"
+          else
+            echo "→ nix run .#${app}"
+            nix run ".#${app}"
+          fi

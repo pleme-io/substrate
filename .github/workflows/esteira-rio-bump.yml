@@ -1,0 +1,84 @@
+name: esteira-rio-bump
+
+# esteira PRIVATE lane autobump — tag the repo on the rio self-hosted ARC
+# runner. PURE git/shell: NO container actions (git-push-with-token is a
+# `using: docker` action and rio has no docker) and NO substrate-bump (it
+# installs Nix redundantly on NixOS rio). Mirrors substrate's auto-bump.yml,
+# retargeted to the rio runner. Pushing the tag with a PAT triggers the repo's
+# esteira-rio-release caller (GITHUB_TOKEN-pushed tags do NOT trigger workflows).
+# See pleme-io/theory/ESTEIRA.md.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        type: string
+        default: patch
+      skip-paths:
+        description: "space-separated globs; skip the bump if nothing changed in them since the last tag (empty = always bump)"
+        type: string
+        default: ""
+      runner:
+        description: "ARC scale-set name / self-hosted label to run on"
+        type: string
+        default: "rio"
+    secrets:
+      BOT_PAT:
+        description: "PAT used to push the tag so the release workflow triggers; falls back to GITHUB_TOKEN (which will NOT trigger downstream)."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ${{ inputs.runner }}
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN || github.token }}
+
+      - name: Skip when no relevant changes since last tag
+        id: changes
+        shell: bash
+        run: |
+          last=$(git tag -l 'v*' --sort=-v:refname | head -1 || true)
+          paths="${{ inputs.skip-paths }}"
+          if [ -z "$last" ] || [ -z "$paths" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$last" HEAD -- $paths; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next tag
+        if: steps.changes.outputs.skip == 'false'
+        id: next
+        shell: bash
+        run: |
+          last="${{ steps.changes.outputs.last }}"
+          if [ -z "$last" ]; then echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"; exit 0; fi
+          bump="${{ inputs.bump-type || 'patch' }}"
+          IFS='.' read -r maj min pat <<<"${last#v}"
+          case "$bump" in
+            major) maj=$((maj+1)); min=0; pat=0 ;;
+            minor) min=$((min+1)); pat=0 ;;
+            patch|*) pat=$((pat+1)) ;;
+          esac
+          echo "tag=v${maj}.${min}.${pat}" >> "$GITHUB_OUTPUT"
+
+      - name: Create + push tag
+        if: steps.changes.outputs.skip == 'false'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tag="${{ steps.next.outputs.tag }}"
+          git tag -a "$tag" -m "release: $tag (esteira rio lane)"
+          git push origin "$tag"
+          echo "tagged + pushed $tag"
