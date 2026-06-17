@@ -68,6 +68,7 @@
   minOs ? "14.0",
   sceneDelegate ? null,           # UISceneDelegate subclass → UIApplicationSceneManifest
   defgame ? null,                 # repo-relative (defgame …) lisp → the `game` app
+  goldenScreenshot ? null,        # repo-relative golden PNG → `integ-sim` default
   # ── platform ──
   iosTargets ? [ "aarch64-apple-ios" "aarch64-apple-ios-sim" ],
   systems ? [ "aarch64-darwin" ], # iOS build host is darwin-only
@@ -120,10 +121,12 @@ flake-utils.lib.eachSystem systems (system:
         Deploy targets the simulator / phone attached to THIS machine; there is
         no remote CI in the delivery path — the gate is a local verb too.
 
-        EDIT → CHECK (local gate) → DEPLOY (VM / phone)
+        EDIT → CHECK (local gate) → DEPLOY (VM / phone) — live or one-shot
 
+          nix run .#watch-sim     LIVE: rebuild + redeploy to the sim on every edit
           nix run .#watch         re-run the host tests on every change (TDD loop)
           nix run .#check         the local gate: lint + test + build-sim
+          nix run .#integ-sim     on-device integration: deploy + golden screenshot
           nix run .#test          the host test suite (the proven core layers)
           nix run .#lint          clippy -D warnings over the host crates
           nix run .#build-sim     cross-compile ${appCrate} → ${simTarget}
@@ -174,7 +177,17 @@ flake-utils.lib.eachSystem systems (system:
         -- ${cargo} test ${pflags}
     '';
 
-    runSimApp = mkApp "run-sim" ''
+    # Shared run-sim implementation: build the app, then deploy + launch it on the
+    # booted simulator via the typed embarque executor. `run-sim` (one-shot),
+    # `watch-sim` (re-run on every change — the live code-flow loop), and
+    # `integ-sim` (golden assertion) all drive THIS exact script, so the live loop,
+    # a manual deploy, and the integration gate are byte-identical. Optional env:
+    # ASOBI_SCREENSHOT (capture a PNG), ASOBI_GOLDEN + ASOBI_TOLERANCE (on-device
+    # visual-regression assertion — embarque diffs the shot against the golden and
+    # exits non-zero past the tolerance).
+    runSimScript = pkgs.writeShellScript "${appName}-run-sim-impl" ''
+      set -euo pipefail
+      ${impureEnv}
       ${cargo} build --target ${simTarget} ${appPflag}
       : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
       exec ${cargo} run -p ${embarqueCrate} -- sim-run \
@@ -186,7 +199,35 @@ flake-utils.lib.eachSystem systems (system:
         --min-os ${lib.escapeShellArg minOs} \
         --out "target/${appName}-sim.app" \
         ${sceneFlag} \
-        ''${ASOBI_SCREENSHOT:+--screenshot "$ASOBI_SCREENSHOT"}
+        ''${ASOBI_SCREENSHOT:+--screenshot "$ASOBI_SCREENSHOT"} \
+        ''${ASOBI_GOLDEN:+--golden "$ASOBI_GOLDEN" --tolerance "''${ASOBI_TOLERANCE:-0.02}"}
+    '';
+    runSimApp = { type = "app"; program = toString runSimScript; };
+
+    # LIVE CODE FLOW → the virtual phone: watch the source tree; on every change to
+    # a .rs/.lisp/.metal/.toml file, rebuild + redeploy to the simulator. The
+    # warm-reload loop (app relaunches each cycle, ~2s) — the realistic
+    # best-in-class live loop for a native iOS app; true state-preserving hot
+    # reload is the named frontier (see docs/live-dev.md).
+    watchSimApp = mkApp "watch-sim" ''
+      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      echo "live reload → simulator $ASOBI_SIM_UDID — edit any .rs/.lisp/.metal/.toml to redeploy"
+      exec ${pkgs.watchexec}/bin/watchexec --restart --clear \
+        --exts rs,lisp,metal,toml \
+        -- ${runSimScript}
+    '';
+
+    # ON-DEVICE INTEGRATION: deploy + launch on the simulator, capture a screenshot,
+    # and assert it matches a committed golden within ASOBI_TOLERANCE (default 2%).
+    # Proves the WHOLE render pipeline on the real Metal GPU — a visual-regression
+    # integration test that host `check` cannot reach. ASOBI_GOLDEN required.
+    integSimApp = mkApp "integ-sim" ''
+      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      export ASOBI_GOLDEN="''${ASOBI_GOLDEN:-${lib.optionalString (goldenScreenshot != null) goldenScreenshot}}"
+      : "''${ASOBI_GOLDEN:?set ASOBI_GOLDEN (or the goldenScreenshot config) to the golden PNG to assert against}"
+      export ASOBI_SCREENSHOT="''${ASOBI_SCREENSHOT:-target/${appName}-integ.png}"
+      echo "on-device integration → diff vs $ASOBI_GOLDEN (tol ''${ASOBI_TOLERANCE:-0.02})"
+      exec ${runSimScript}
     '';
 
     gameDeviceApp = mkApp "game-device" ''
@@ -235,7 +276,9 @@ flake-utils.lib.eachSystem systems (system:
     apps = {
       sdlc = sdlcGuide;
       watch = watchApp;
+      watch-sim = watchSimApp;
       check = checkApp;
+      integ-sim = integSimApp;
       test = testApp;
       lint = lintApp;
       build-sim = buildSimApp;
