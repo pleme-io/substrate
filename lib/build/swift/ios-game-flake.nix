@@ -116,11 +116,15 @@ flake-utils.lib.eachSystem systems (system:
     # heredoc (indented-string stripping would un-terminate it), no shell logic.
     sdlcGuideText =
       ''
-        ${appName} — the iOS-game SDLC devloop (nix run .#<app>)
+        ${appName} — the iOS-game SDLC devloop (nix run .#<app>), 100% LOCAL.
+        Deploy targets the simulator / phone attached to THIS machine; there is
+        no remote CI in the delivery path — the gate is a local verb too.
 
-        EDIT → PROVE (host) → DEPLOY (VM / phone)
+        EDIT → CHECK (local gate) → DEPLOY (VM / phone)
 
-          nix run .#test          run the host test suite (the proven core layers)
+          nix run .#watch         re-run the host tests on every change (TDD loop)
+          nix run .#check         the local gate: lint + test + build-sim
+          nix run .#test          the host test suite (the proven core layers)
           nix run .#lint          clippy -D warnings over the host crates
           nix run .#build-sim     cross-compile ${appCrate} → ${simTarget}
           nix run .#build-device  cross-compile ${appCrate} → ${devTarget}
@@ -151,6 +155,24 @@ flake-utils.lib.eachSystem systems (system:
     lintApp = mkApp "lint" "exec ${cargo} clippy ${pflags} --all-targets -- -D warnings";
     buildSimApp = mkApp "build-sim" "exec ${cargo} build --target ${simTarget} ${appPflag}";
     buildDeviceApp = mkApp "build-device" "exec ${cargo} build --target ${devTarget} ${appPflag}";
+
+    # The LOCAL gate — the "CI" for a local-delivery devloop. There is no remote
+    # CI in the iOS delivery path (the VM/phone are attached to THIS machine), so
+    # the regression gate is a local `nix run` verb, run before deploying.
+    checkApp = mkApp "check" ''
+      echo "▶ lint";      ${cargo} clippy ${pflags} --all-targets -- -D warnings
+      echo "▶ test";      ${cargo} test ${pflags}
+      echo "▶ build-sim"; ${cargo} build --target ${simTarget} ${appPflag}
+      echo "✓ check passed — lint + test + build-sim (ready to deploy locally)"
+    '';
+
+    # The inner TDD loop: re-run the host tests on every source change. The
+    # continuous-convergence shape of the devloop — edit, see green, deploy.
+    watchApp = mkApp "watch" ''
+      exec ${pkgs.watchexec}/bin/watchexec --clear --restart \
+        --exts rs,lisp,toml \
+        -- ${cargo} test ${pflags}
+    '';
 
     runSimApp = mkApp "run-sim" ''
       ${cargo} build --target ${simTarget} ${appPflag}
@@ -199,7 +221,7 @@ flake-utils.lib.eachSystem systems (system:
 
     devShell = pkgs.mkShellNoCC {
       name = appName;
-      packages = [ toolchain pkgs.cargo-nextest pkgs.git ] ++ (extraPackages pkgs);
+      packages = [ toolchain pkgs.cargo-nextest pkgs.git pkgs.watchexec ] ++ (extraPackages pkgs);
       shellHook = ''
         export DEVELOPER_DIR="''${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
         case ":$PATH:" in *":/usr/bin:"*) ;; *) export PATH="$PATH:/usr/bin" ;; esac
@@ -212,6 +234,8 @@ flake-utils.lib.eachSystem systems (system:
     devShells.default = devShell;
     apps = {
       sdlc = sdlcGuide;
+      watch = watchApp;
+      check = checkApp;
       test = testApp;
       lint = lintApp;
       build-sim = buildSimApp;

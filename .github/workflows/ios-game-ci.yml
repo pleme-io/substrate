@@ -1,8 +1,11 @@
-# Reusable iOS-game CI — the host + cross-compile gates of the ios-game-flake
-# SDLC (lib/build/swift/ios-game-flake.nix), run on a macOS runner where Xcode is
-# preinstalled so the impurity boundary (DEVELOPER_DIR + /usr/bin → xcrun/clang)
-# resolves. It runs the SAME `nix run .#<app>` verbs an operator runs locally, so
-# CI and the local devloop can never drift.
+# OPTIONAL reusable iOS-game host-gate. The CANONICAL SDLC for an iOS game is
+# LOCAL: the `nix run .#{check,watch,run-sim,game-device}` devloop in
+# lib/build/swift/ios-game-flake.nix delivers to the simulator/phone attached to
+# the operator's machine — a GitHub runner CANNOT reach a local VM/phone, so the
+# DEPLOY half is never CI. This workflow only mirrors the LOCAL `nix run .#check`
+# gate (lint/test/build-sim) on a macOS runner for teams that additionally want a
+# PR regression gate AND have macOS Actions budget (macOS minutes bill 10×). It is
+# strictly secondary to the local devloop; most repos need only `nix run .#check`.
 #
 # Consumer wrapper (≤10 lines, see pleme-io/asobi/.github/workflows/ci.yml):
 #
