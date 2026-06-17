@@ -1,0 +1,46 @@
+# Reusable iOS-game CI — the host + cross-compile gates of the ios-game-flake
+# SDLC (lib/build/swift/ios-game-flake.nix), run on a macOS runner where Xcode is
+# preinstalled so the impurity boundary (DEVELOPER_DIR + /usr/bin → xcrun/clang)
+# resolves. It runs the SAME `nix run .#<app>` verbs an operator runs locally, so
+# CI and the local devloop can never drift.
+#
+# Consumer wrapper (≤10 lines, see pleme-io/asobi/.github/workflows/ci.yml):
+#
+#   name: ci
+#   on: { push: { branches: [main] }, pull_request: {} }
+#   jobs:
+#     ci:
+#       uses: pleme-io/substrate/.github/workflows/ios-game-ci.yml@main
+#
+# Gates run here: lint (clippy -D warnings) → test (host suite) → build-sim
+# (cross-compile the app for the simulator target — proves the iOS toolchain).
+# The LIVE-deploy verbs (run-sim / game-device) need a booted simulator / a
+# tethered phone and stay operator-local — CI proves everything up to the artifact.
+name: ios-game-ci
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "macOS runner label (must have Xcode for the iOS SDK)"
+        type: string
+        default: "macos-14"
+      run-build-sim:
+        description: "also cross-compile the app for the simulator target"
+        type: boolean
+        default: true
+
+jobs:
+  ci:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: lint (clippy -D warnings)
+        run: nix run .#lint
+      - name: test (host suite)
+        run: nix run .#test
+      - name: build-sim (cross-compile for the simulator)
+        if: ${{ inputs.run-build-sim }}
+        run: nix run .#build-sim
