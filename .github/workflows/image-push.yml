@@ -69,6 +69,14 @@ on:
         description: "Runner label"
         type: string
         default: "ubuntu-24.04"
+      buildCores:
+        description: "nix --cores (per-derivation parallelism). Empty = nproc. Lower (e.g. 4) to cap peak RAM of heavy compiles (ruby/llvm) on memory-constrained self-hosted runners that OOM at nproc."
+        type: string
+        default: ""
+      maxJobs:
+        description: "nix --max-jobs (max concurrent derivations). Empty = nix default. Lower (e.g. 2) with a low buildCores to bound how many heavy builds stack at once on a small node."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -112,8 +120,21 @@ jobs:
       # Materialize the actual tarball into the workspace (a real file
       # under /github/workspace) before handing off.
       - name: Build image with Nix
+        env:
+          BUILD_CORES: ${{ inputs.buildCores }}
+          MAX_JOBS: ${{ inputs.maxJobs }}
         run: |
-          nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths
+          # Optional parallelism caps for memory-constrained runners: a high
+          # nproc compile (e.g. ruby-3.4.9 from source) can spike peak RAM past a
+          # small self-hosted node's free memory and get OOM-killed (signal 9).
+          # --cores bounds per-derivation parallelism; --max-jobs bounds concurrent
+          # derivations. Empty inputs leave nix at its defaults (zero blast radius
+          # for beefy runners).
+          FLAGS=""
+          if [ -n "$BUILD_CORES" ]; then FLAGS="$FLAGS --cores $BUILD_CORES"; fi
+          if [ -n "$MAX_JOBS" ]; then FLAGS="$FLAGS --max-jobs $MAX_JOBS"; fi
+          echo "nix build parallelism flags:${FLAGS:- (defaults)}"
+          nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths $FLAGS
           cp -L result image.tar.gz
 
       - name: Login to registry
