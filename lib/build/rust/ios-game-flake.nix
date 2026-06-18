@@ -192,7 +192,8 @@ flake-utils.lib.eachSystem systems (system:
       set -euo pipefail
       ${impureEnv}
       ${cargo} build --target ${simTarget} ${appPflag}
-      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      ASOBI_SIM_UDID="''${ASOBI_SIM_UDID:-$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1)}"
+      : "''${ASOBI_SIM_UDID:?no booted simulator found — boot one (xcrun simctl boot <device> / open Simulator.app), or set ASOBI_SIM_UDID}"
       exec ${cargo} run -p ${embarqueCrate} -- sim-run \
         --exe "target/${simTarget}/debug/${appBin}" \
         --app-name ${lib.escapeShellArg appName} \
@@ -213,7 +214,8 @@ flake-utils.lib.eachSystem systems (system:
     # best-in-class live loop for a native iOS app; true state-preserving hot
     # reload is the named frontier (see docs/live-dev.md).
     watchSimApp = mkApp "watch-sim" ''
-      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      ASOBI_SIM_UDID="''${ASOBI_SIM_UDID:-$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1)}"
+      : "''${ASOBI_SIM_UDID:?no booted simulator found — boot one (xcrun simctl boot <device> / open Simulator.app), or set ASOBI_SIM_UDID}"
       echo "live reload → simulator $ASOBI_SIM_UDID — edit any .rs/.lisp/.metal/.toml to redeploy"
       exec ${pkgs.watchexec}/bin/watchexec --restart --clear \
         --exts rs,lisp,metal,toml \
@@ -225,7 +227,8 @@ flake-utils.lib.eachSystem systems (system:
     # Proves the WHOLE render pipeline on the real Metal GPU — a visual-regression
     # integration test that host `check` cannot reach. ASOBI_GOLDEN required.
     integSimApp = mkApp "integ-sim" ''
-      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      ASOBI_SIM_UDID="''${ASOBI_SIM_UDID:-$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1)}"
+      : "''${ASOBI_SIM_UDID:?no booted simulator found — boot one (xcrun simctl boot <device> / open Simulator.app), or set ASOBI_SIM_UDID}"
       export ASOBI_GOLDEN="''${ASOBI_GOLDEN:-${lib.optionalString (goldenScreenshot != null) goldenScreenshot}}"
       : "''${ASOBI_GOLDEN:?set ASOBI_GOLDEN (or the goldenScreenshot config) to the golden PNG to assert against}"
       export ASOBI_SCREENSHOT="''${ASOBI_SCREENSHOT:-target/${appName}-integ.png}"
@@ -254,7 +257,8 @@ flake-utils.lib.eachSystem systems (system:
 
     gameApp = mkApp "game" ''
       ${cargo} build --target ${simTarget} ${appPflag}
-      : "''${ASOBI_SIM_UDID:?set ASOBI_SIM_UDID to a booted simulator UDID (xcrun simctl list devices booted)}"
+      ASOBI_SIM_UDID="''${ASOBI_SIM_UDID:-$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1)}"
+      : "''${ASOBI_SIM_UDID:?no booted simulator found — boot one (xcrun simctl boot <device> / open Simulator.app), or set ASOBI_SIM_UDID}"
       exec ${cargo} run -p ${embarqueCrate} -- game \
         --game ${lib.escapeShellArg defgame} \
         --exe "target/${simTarget}/debug/${appBin}" \
