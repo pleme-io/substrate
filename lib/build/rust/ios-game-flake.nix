@@ -252,7 +252,8 @@ flake-utils.lib.eachSystem systems (system:
         --app-name ${lib.escapeShellArg appName} \
         --version ${lib.escapeShellArg version} \
         --min-os ${lib.escapeShellArg minOs} \
-        --out "target/${appName}-device.app"
+        --out "target/${appName}-device.app" \
+        ${sceneFlag}
     '';
 
     gameApp = mkApp "game" ''
