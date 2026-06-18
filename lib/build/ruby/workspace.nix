@@ -48,6 +48,16 @@
   gemsetPath ? "/gemset.nix",
   shellHookExtra ? "",
   devShellExtras ? [],
+  # Optional explicit interpreter. Default (null) keeps the historical
+  # behaviour: ruby-nix defaults to the overlaid `pkgs.ruby` (whatever the
+  # pinned nixpkgs ships). Pass a PLAIN, versioned derivation (e.g.
+  # `pkgs.ruby_3_3`) to pin the gem-workspace interpreter — required when an
+  # embedder links libruby itself (rb-sys / magnus) and the gems must be
+  # ABI-coherent with THAT interpreter, not the floating default. A plain
+  # versioned ruby is not self-referential, so ruby-nix's `meta = ruby.meta`
+  # passthru resolves without the infinite recursion an overlaid `ruby`
+  # override would trigger.
+  ruby ? null,
 }:
 let
   pkgs = import nixpkgs {
@@ -55,6 +65,8 @@ let
     overlays = [ruby-nix.overlays.ruby];
   };
   lib = pkgs.lib;
+  # The interpreter handed to ruby-nix's builder. null → the overlaid default.
+  rubyInterp = if ruby != null then ruby else pkgs.ruby;
 
   # Load the bundix-generated gemset and rewrite any entry whose name
   # matches a pathGems key so ruby-nix sees it as a path source. The
@@ -85,9 +97,10 @@ let
   rnix-env = rnix {
     inherit name;
     gemset = rewritten;
+    ruby = rubyInterp;
   };
   env = rnix-env.env;
-  ruby = rnix-env.ruby;
+  rubyOut = rnix-env.ruby;
 
   writeShellScript = pkgs.writeShellScript;
 
@@ -103,7 +116,7 @@ let
     type = "app";
     program = toString (writeShellScript "test-${name}" ''
       set -euo pipefail
-      export PATH="${env}/bin:${ruby}/bin:$PATH"
+      export PATH="${env}/bin:${rubyOut}/bin:$PATH"
       export RUBYLIB="${rubylibEntries}:''${RUBYLIB:-}"
       export DRY_TYPES_WARNINGS=false
       cd "${self}"
@@ -112,7 +125,7 @@ let
   };
 
   devShell = pkgs.mkShell {
-    buildInputs = [ env ruby ] ++ devShellExtras;
+    buildInputs = [ env rubyOut ] ++ devShellExtras;
     shellHook = ''
       export RUBYLIB="${rubylibEntries}:''${RUBYLIB:-}"
       export DRY_TYPES_WARNINGS=false
@@ -126,6 +139,7 @@ in {
   # Exposed for composition — callers that want to spawn `bundle
   # exec` inside another script (e.g. Packer-driven infra apps) can
   # reach env / ruby / rubylib directly without re-deriving them.
-  inherit env ruby;
+  inherit env;
+  ruby = rubyOut;
   rubylib = rubylibEntries;
 }
