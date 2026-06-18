@@ -62,20 +62,22 @@
 let
   pkgs = import nixpkgs {
     inherit system;
-    # Pin `pkgs.ruby` — ruby-nix's DEFAULT interpreter source — to ruby_3_3
-    # (the bundix gemset's ruby) so a nixpkgs bump that floats the unversioned
-    # `ruby` default (3.3→3.4.x) can't drag the workspace onto an ABI-incoherent
-    # ruby (rebuilds every C-ext from source → OOM; libruby ABI the cache-built
-    # gems can't load — the pangea-operator embedded-image break, 2026-06-18).
-    # Override via the `ruby` param when the gemset is regenerated for another
-    # version. Pinning `pkgs.ruby` (vs passing ruby to rnix) avoids ruby-nix's
-    # ruby-env `meta = ruby.meta` infinite-recursion fixpoint.
-    overlays = [
-      ruby-nix.overlays.ruby
-      (_final: prev: { ruby = if ruby != null then ruby else prev.ruby_3_3; })
-    ];
+    overlays = [ruby-nix.overlays.ruby];
   };
   lib = pkgs.lib;
+
+  # The interpreter the workspace's gems build/install against — PINNED to
+  # ruby_3_3 (the bundix gemset's ruby) so a nixpkgs bump that floats the
+  # unversioned `ruby` default (3.3→3.4.x) can't drag the workspace onto an
+  # ABI-incoherent ruby (rebuilds every C-ext from source → OOM; libruby ABI
+  # the cache-built gems can't load — the pangea-operator embedded-image break,
+  # 2026-06-18). Taken from a CLEAN (un-overlaid) nixpkgs: the ruby-nix overlay
+  # rewrites `ruby_*` into ruby-env wrappers that reference `final.ruby`, so
+  # feeding an overlaid `ruby_3_3` back as the interpreter is a fixpoint
+  # (ruby-env.nix `meta = ruby.meta` → infinite recursion). Override via the
+  # `ruby` param when the gemset is regenerated for another version.
+  cleanPkgs = import nixpkgs { inherit system; };
+  rubyPkg = if ruby != null then ruby else cleanPkgs.ruby_3_3;
 
   # Load the bundix-generated gemset and rewrite any entry whose name
   # matches a pathGems key so ruby-nix sees it as a path source. The
@@ -102,12 +104,10 @@ let
   # flake-input sources (would otherwise serialize them as
   # `<derivation /nix/store/...>` strings that ruby-nix then
   # interprets as Booleans, breaking the build).
-  # ruby-nix defaults its interpreter to `pkgs.ruby`, which the overlay above
-  # pins to ruby_3_3 — so NO explicit `ruby` arg here (passing one trips
-  # ruby-nix's ruby-env `meta = ruby.meta` infinite recursion).
   rnix = ruby-nix.lib pkgs;
   rnix-env = rnix {
     inherit name;
+    ruby = rubyPkg;
     gemset = rewritten;
   };
   env = rnix-env.env;
