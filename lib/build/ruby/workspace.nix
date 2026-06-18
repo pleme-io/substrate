@@ -62,7 +62,18 @@
 let
   pkgs = import nixpkgs {
     inherit system;
-    overlays = [ruby-nix.overlays.ruby];
+    # Pin `pkgs.ruby` — ruby-nix's DEFAULT interpreter source — to ruby_3_3
+    # (the bundix gemset's ruby) so a nixpkgs bump that floats the unversioned
+    # `ruby` default (3.3→3.4.x) can't drag the workspace onto an ABI-incoherent
+    # ruby (rebuilds every C-ext from source → OOM; libruby ABI the cache-built
+    # gems can't load — the pangea-operator embedded-image break, 2026-06-18).
+    # Override via the `ruby` param when the gemset is regenerated for another
+    # version. Pinning `pkgs.ruby` (vs passing ruby to rnix) avoids ruby-nix's
+    # ruby-env `meta = ruby.meta` infinite-recursion fixpoint.
+    overlays = [
+      ruby-nix.overlays.ruby
+      (_final: prev: { ruby = if ruby != null then ruby else prev.ruby_3_3; })
+    ];
   };
   lib = pkgs.lib;
 
@@ -91,13 +102,12 @@ let
   # flake-input sources (would otherwise serialize them as
   # `<derivation /nix/store/...>` strings that ruby-nix then
   # interprets as Booleans, breaking the build).
-  # Pin the interpreter to the gemset's ruby (default ruby_3_3) so a drifted
-  # `pkgs.ruby` default never floats the workspace onto an ABI-incoherent ruby.
-  rubyPkg = if ruby != null then ruby else pkgs.ruby_3_3;
+  # ruby-nix defaults its interpreter to `pkgs.ruby`, which the overlay above
+  # pins to ruby_3_3 — so NO explicit `ruby` arg here (passing one trips
+  # ruby-nix's ruby-env `meta = ruby.meta` infinite recursion).
   rnix = ruby-nix.lib pkgs;
   rnix-env = rnix {
     inherit name;
-    ruby = rubyPkg;
     gemset = rewritten;
   };
   env = rnix-env.env;
