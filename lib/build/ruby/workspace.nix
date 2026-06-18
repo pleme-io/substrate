@@ -48,16 +48,6 @@
   gemsetPath ? "/gemset.nix",
   shellHookExtra ? "",
   devShellExtras ? [],
-  # The ruby the workspace's gems build/install against. MUST match the ruby
-  # the bundix gemset was generated for — bundix gemsets are 3.3 today. Default
-  # is PINNED to ruby_3_3 (not the unversioned `pkgs.ruby`, which a nixpkgs bump
-  # silently floated to 3.4.x): an unpinned ruby drifts ABI away from the
-  # gemset, rebuilding every C-ext from source (OOM) AND producing a libruby
-  # whose ABI the cache-built gems can't load (the self-consistent-SVH trap —
-  # the pangea-operator embedded image's ruby-3.4.9-vs-3.3-gems ABI break,
-  # 2026-06-18). Pass an explicit `ruby` only when the gemset is regenerated for
-  # that version. `null` ⇒ the pinned default.
-  ruby ? null,
 }:
 let
   pkgs = import nixpkgs {
@@ -65,19 +55,6 @@ let
     overlays = [ruby-nix.overlays.ruby];
   };
   lib = pkgs.lib;
-
-  # The interpreter the workspace's gems build/install against — PINNED to
-  # ruby_3_3 (the bundix gemset's ruby) so a nixpkgs bump that floats the
-  # unversioned `ruby` default (3.3→3.4.x) can't drag the workspace onto an
-  # ABI-incoherent ruby (rebuilds every C-ext from source → OOM; libruby ABI
-  # the cache-built gems can't load — the pangea-operator embedded-image break,
-  # 2026-06-18). Taken from a CLEAN (un-overlaid) nixpkgs: the ruby-nix overlay
-  # rewrites `ruby_*` into ruby-env wrappers that reference `final.ruby`, so
-  # feeding an overlaid `ruby_3_3` back as the interpreter is a fixpoint
-  # (ruby-env.nix `meta = ruby.meta` → infinite recursion). Override via the
-  # `ruby` param when the gemset is regenerated for another version.
-  cleanPkgs = import nixpkgs { inherit system; };
-  rubyPkg = if ruby != null then ruby else cleanPkgs.ruby_3_3;
 
   # Load the bundix-generated gemset and rewrite any entry whose name
   # matches a pathGems key so ruby-nix sees it as a path source. The
@@ -107,7 +84,6 @@ let
   rnix = ruby-nix.lib pkgs;
   rnix-env = rnix {
     inherit name;
-    ruby = rubyPkg;
     gemset = rewritten;
   };
   env = rnix-env.env;
