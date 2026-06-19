@@ -15,7 +15,10 @@
   nixpkgs,
   substrate,
   forge,
-  crate2nix,
+  # Optional: only the legacy useLockfileBuilder=false path forces it. Repos on
+  # the gen/lockfile-builder standard (committed Cargo.gen.lock + Cargo.build-spec.json)
+  # drop the crate2nix flake input and omit this.
+  crate2nix ? null,
   devenv ? null,
 }:
 {
@@ -46,7 +49,7 @@ let
     rustService = import ./service.nix {
       inherit system nixpkgs devenv;
       nixLib = substrate;
-      crate2nix = crate2nix.packages.${system}.default;
+      crate2nix = if crate2nix != null then crate2nix.packages.${system}.default else null;
       forge = forge.packages.${system}.default;
     };
   in rustService (serviceArgs // { src = self; });

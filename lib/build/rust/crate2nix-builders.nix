@@ -12,7 +12,12 @@
 # Cargo.nix via crate2nix's tools.nix (the pre-2026 behavior).
 # Kept as an explicit opt-out for repos in transition or with
 # resolver edge cases.
-{ pkgs, crate2nix }:
+# `crate2nix` is OPTIONAL (default null). It is forced ONLY in the legacy
+# `useLockfileBuilder = false` fallback (the crate2nix-generated Cargo.nix
+# path). On the default gen/lockfile-builder path it is never evaluated, so a
+# repo fully migrated to gen (committed Cargo.gen.lock delta + Cargo.build-spec.json)
+# can drop the crate2nix flake input entirely and pass nothing here.
+{ pkgs, crate2nix ? null }:
 
 let
   check = import ../../types/assertions.nix;
@@ -38,6 +43,11 @@ let
      else
        let generatedCargoNix =
              if builtins.pathExists cargoNix then cargoNix
+             else if crate2nix == null then
+               throw ("crate2nix-builders: useLockfileBuilder=false with no committed "
+                 + "Cargo.nix requires the `crate2nix` arg, but it is null. Either commit "
+                 + "Cargo.nix, pass crate2nix, or use the gen/lockfile-builder path "
+                 + "(useLockfileBuilder=true + committed Cargo.gen.lock + Cargo.build-spec.json).")
              else (import "${crate2nix}/tools.nix" {inherit pkgs;}).generatedCargoNix {
                name = serviceName; inherit src;
              };

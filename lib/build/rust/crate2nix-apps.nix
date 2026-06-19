@@ -76,7 +76,8 @@ in rec {
     atticToken ? defaultAtticToken,
     ghcrToken ? defaultGhcrToken,
     forge,
-    crate2nix,
+    crate2nix ? null,  # Optional — the crate2nix CLI used in apps comes via
+                       # mkRuntimeToolsEnv tool-name lookup, not this arg.
     nixHooks ? null,  # Optional: Nix hooks package for attic-push-hook
   }: let
     _ = check.all [

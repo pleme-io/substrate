@@ -21,7 +21,10 @@
   nixpkgs,
   system,  # Host platform (where commands run: aarch64-darwin, x86_64-linux, etc.)
   nixLib,
-  crate2nix,
+  # Optional: forced only by the legacy useLockfileBuilder=false fallback and
+  # the (now-obsolete) crate2nix-generate apps. Repos on the gen/lockfile-builder
+  # standard omit the crate2nix flake input; null flows through harmlessly.
+  crate2nix ? null,
   forge,
   nixHooks ? null,  # Optional: Nix hooks package for post-build-hook support
   devenv ? null,    # Optional: devenv flake input for enhanced dev shells
@@ -193,7 +196,7 @@ in {
     tools = devTools;
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
-    extraPackages = extraDevInputs ++ [ crate2nix ];
+    extraPackages = extraDevInputs ++ (pkgs.lib.optional (crate2nix != null) crate2nix);
     env = allDevEnvVars;
   };
 
@@ -213,32 +216,45 @@ in {
       '');
     };
 
-    # Generate Cargo.nix for crate2nix builds
+    # Regenerate the build spec. On the gen/lockfile-builder standard there is
+    # no Cargo.nix — the committed artifacts are the Cargo.gen.lock delta +
+    # Cargo.build-spec.json, regenerated with `gen build .`. The legacy
+    # crate2nix-generate path remains only when a crate2nix input is supplied.
     generateCargoNix = {
       type = "app";
-      program = toString (pkgs.writeShellScript "generate-cargo-nix" ''
-        echo "🔨 Generating Cargo.nix for ${serviceName}..."
-        ${crate2nix}/bin/crate2nix generate
-        echo "✅ Cargo.nix generated successfully!"
-        echo ""
-        echo "Don't forget to commit it:"
-        echo "  git add Cargo.nix"
-        echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
-      '');
+      program = toString (pkgs.writeShellScript "generate-cargo-nix" (
+        if crate2nix == null then ''
+          echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
+          echo "Regenerate the committed spec with:"
+          echo "    gen build ."
+          echo "(commits the Cargo.gen.lock delta + Cargo.build-spec.json)"
+        '' else ''
+          echo "🔨 Generating Cargo.nix for ${serviceName}..."
+          ${crate2nix}/bin/crate2nix generate
+          echo "✅ Cargo.nix generated successfully!"
+          echo ""
+          echo "Don't forget to commit it:"
+          echo "  git add Cargo.nix"
+          echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
+        ''));
     };
 
     # Alias for generateCargoNix
     regenerate-cargo-nix = {
       type = "app";
-      program = toString (pkgs.writeShellScript "regenerate-cargo-nix" ''
-        echo "🔨 Regenerating Cargo.nix for ${serviceName}..."
-        ${crate2nix}/bin/crate2nix generate
-        echo "✅ Cargo.nix regenerated successfully!"
-        echo ""
-        echo "Don't forget to commit it:"
-        echo "  git add Cargo.nix"
-        echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
-      '');
+      program = toString (pkgs.writeShellScript "regenerate-cargo-nix" (
+        if crate2nix == null then ''
+          echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
+          echo "Regenerate the committed spec with:  gen build ."
+        '' else ''
+          echo "🔨 Regenerating Cargo.nix for ${serviceName}..."
+          ${crate2nix}/bin/crate2nix generate
+          echo "✅ Cargo.nix regenerated successfully!"
+          echo ""
+          echo "Don't forget to commit it:"
+          echo "  git add Cargo.nix"
+          echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
+        ''));
     };
   };
 }
