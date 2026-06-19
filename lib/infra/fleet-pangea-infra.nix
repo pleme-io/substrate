@@ -56,6 +56,16 @@ let
   rnix-env = rnix {
     inherit name;
     gemset = self + "/gemset.nix";
+    # Pin the gem-workspace interpreter to the CACHED ruby_3_3. Without
+    # this it falls to the overlaid `pkgs.ruby`, which a nixpkgs bump
+    # floated 3.3→3.4.9 — an un-cached interpreter that compiles from
+    # source (RAM-heavy → OOM-crashes the nix daemon mid-flow-build) and
+    # is ABI-incoherent with the operator's rb-sys/magnus embed
+    # (imagePkgs.ruby_3_3). This is an EXPLICIT arg to ruby-nix (which
+    # declares `ruby ? pkgs.ruby`), NOT an overlay override, so it does
+    # not re-enter the ruby-nix fixpoint (the recursion that sank the
+    # overlay-level pin attempts). Mirrors lib/build/ruby/workspace.nix.
+    ruby = pkgs.ruby_3_3;
   };
   env = rnix-env.env;
   ruby = rnix-env.ruby;
