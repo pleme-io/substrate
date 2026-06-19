@@ -77,6 +77,18 @@ on:
         description: "nix --max-jobs (max concurrent derivations). Empty = nix default. Lower (e.g. 2) with a low buildCores to bound how many heavy builds stack at once on a small node."
         type: string
         default: ""
+      extraSubstituters:
+        description: "Extra Nix binary-cache URL(s) to pull from (space-separated). E.g. a self-hosted attic on the runner's node so heavy crates/gems SUBSTITUTE instead of compiling (the cure for cold-cache OOMs). Empty = no extra cache (zero blast radius for other consumers)."
+        type: string
+        default: ""
+      extraTrustedPublicKeys:
+        description: "Trusted public key(s) for extraSubstituters (space-separated, 'name:base64' form). Required when extraSubstituters is set, else Nix refuses the unsigned cache."
+        type: string
+        default: ""
+      netrcFile:
+        description: "Path to a netrc file (present on the runner) authenticating to extraSubstituters. For a token-gated attic cache, mount the read token as a netrc and point here. Empty = anonymous."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -111,8 +123,16 @@ jobs:
           # keeps the sandbox for ordinary derivations and only un-sandboxes
           # those that explicitly opt in via `__noChroot`.
           determinate: false
+          # The attic lines are injected into the DAEMON nix.conf at install
+          # time (trusted), so extra-substituters + extra-trusted-public-keys are
+          # honored regardless of trusted-user status. Empty inputs render blank
+          # lines → zero effect for consumers that don't opt in. netrc-file
+          # authenticates a token-gated cache (the file is mounted on the runner).
           extra-conf: |
             sandbox = relaxed
+            ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
+            ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
+            ${{ inputs.netrcFile && format('netrc-file = {0}', inputs.netrcFile) || '' }}
 
       # `nix build` writes ./result as a symlink into /nix/store/...
       # The oci-image-push Docker action doesn't have /nix/store mounted,
