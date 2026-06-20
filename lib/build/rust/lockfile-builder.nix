@@ -773,6 +773,29 @@ let
             if section != null
             then builtins.intersectAttrs section.crates treeSpec.crates
             else treeSpec.crates;
+        # ── co-fresh build-only binary-vendor leaves (E0460 fix) ──────
+        # Crate-name prefixes for the "vendored binary, non-reproducible
+        # rlib SVH" family. `protoc-bin-vendored{,-<plat>-<arch>}` each
+        # embed a ~5 MB protoc binary via include_bytes!; substrate sets
+        # no SOURCE_DATE_EPOCH / --remap-path-prefix, so the compiled
+        # rlib's strict-version-hash (SVH) is NOT bit-reproducible across
+        # independent builds of the SAME .drv. On a PARTIAL cache hit the
+        # parent rlib (substituted from nexus, baked against an OLD child
+        # SVH) is linked against a freshly-rebuilt child (NEW SVH) →
+        # rustc E0460 "found possibly newer version of crate
+        # protoc_bin_vendored_linux_x86_64 which protoc_bin_vendored
+        # depends on" (build.rs of any tonic/prost consumer). Forcing the
+        # whole family to build LOCALLY (allowSubstitutes = false) makes
+        # parent AND child realise CO-FRESH in one run, so the parent
+        # always records the exact child SVH present on the -L path —
+        # the skew becomes structurally unreachable. Fixes every musl
+        # container-image build with a gRPC/protoc build-dependency
+        # (~14 fleet repos). DESTINATION (not yet shipped): bit-
+        # reproducible rlibs (SOURCE_DATE_EPOCH + --remap-path-prefix +
+        # CA derivations) so a partial hit is HARMLESS rather than
+        # avoided — then this prefix list retires.
+        coFreshLeafPrefixes = [ "protoc-bin-vendored" ];
+        isCoFreshLeaf = name: lib.any (p: lib.hasPrefix p name) coFreshLeafPrefixes;
       in
       lib.mapAttrs (key: crate: let
         deps = depsFor treeSpec triple key crate;
@@ -883,7 +906,11 @@ let
         # (the multi-target universe). Restricts `built` to crates actually
         # reachable for this target — keeps apple-only drvs out of linux
         # trees and vice versa. See targetCrates definition above.
-        rawDrv = buildRustCrate (args // mergedExtras);
+        rawDrv =
+          let d = buildRustCrate (args // mergedExtras);
+          in if isCoFreshLeaf crate.name
+             then d.overrideAttrs (_: { allowSubstitutes = false; })
+             else d;
       in rawDrv // {
         propagatedFromOverride =
           lib.unique (ownPropagated ++ depPropagated);
