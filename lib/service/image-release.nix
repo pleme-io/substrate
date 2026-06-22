@@ -42,6 +42,11 @@ in rec {
     registry,
     mkImage,
     systems ? linuxSystems,
+    # Pre-push loader verification (default on). forge gates each image's
+    # declared arch against the tag it is pushed under — refusing a wrong-arch
+    # binary at the gate instead of shipping it to `exec format error`. Set
+    # false (per-app) to bypass; emits `--no-verify-elf` to forge.
+    verifyElf ? true,
   }: let
     check = import ../types/assertions.nix;
     _ = check.all [
@@ -64,7 +69,7 @@ in rec {
       exec ${forgeCmd} image-release \
         --name "${name}" \
         --registry "${registry}" \
-        ${imageArgs}
+        ${imageArgs} ${pkgs.lib.optionalString (!verifyElf) "--no-verify-elf"}
     '');
   };
 
