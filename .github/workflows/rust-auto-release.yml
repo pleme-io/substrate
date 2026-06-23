@@ -144,9 +144,13 @@ jobs:
   drip:
     name: Drip-publish remaining capacity
     runs-on: ubuntu-latest
-    # Fires only on the consumer's */15 schedule (the reusable workflow sees
-    # the caller's triggering event), so push/dispatch never drips.
-    if: github.event_name == 'schedule'
+    # Fires on the consumer's */15 schedule (auto-drain) AND on a manual
+    # workflow_dispatch (operator-forced "publish what's missing now" — the
+    # resume hand-off for a backlog that a cancelled/deferred ship stranded,
+    # without needing a fake source change to re-trigger the ship path). The
+    # reusable sees the caller's triggering event; a plain `push` still never
+    # drips (push bumps+ships fresh source instead).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     steps:
