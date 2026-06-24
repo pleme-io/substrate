@@ -106,6 +106,11 @@ jobs:
 
       - name: zig
         uses: mlugg/setup-zig@v1
+        with:
+          # Pin a real release — with no build.zig in a Rust project, setup-zig's
+          # version auto-resolution 404'd ("Unable to locate executable file: zig").
+          # 0.13.0 is a stable release cargo-zigbuild links cleanly against.
+          version: 0.13.0
 
       - name: cargo-zigbuild
         uses: taiki-e/install-action@v2
