@@ -1,0 +1,148 @@
+name: mac-autobump-release
+
+# Reusable workflow: PRIVATE macOS binary AUTOBUMP release.
+#
+# WHAT IT DOES
+# ------------
+# On every push to main, cross-compile a Rust CLI to a universal apple-darwin
+# binary on a rio self-hosted runner (no GitHub-hosted macOS minutes), then
+# publish a GitHub Release with a SORTABLE, EXACT, IMMUTABLE autobump tag
+# `<suffix>-r<run_number>-<sha>` (+ a moving `<suffix>-latest` pointer). A
+# release on a PRIVATE repo IS private — only repo collaborators (GitHub auth)
+# can download the asset. This is ★★ AUTO-RELEASE + ★ AUTOBUMP for the
+# macOS-binary artifact class, pointed at a private endpoint.
+#
+# WHY zigbuild ON A LINUX RUNNER
+# ------------------------------
+# rio's ARC runners are Linux/k3s. `cargo zigbuild` links a macOS binary from
+# Linux (zig supplies the libSystem/CRT stubs), so the whole build stays on
+# pleme-io-owned infra. Pure-Rust crates only (no macOS-framework deps). The
+# genuinely-new pleme-io primitive is `pleme-io/actions/darwin-zig-build`; the
+# release uses `pleme-io/actions/gh-release-create` (release-on-private-repo =
+# private). The official semver release is CUT FROM this stream later by tagging
+# `v<X.Y.Z>` on a chosen autobump commit.
+#
+# RUNNER IS A CONFIG KNOB (runtime flexibility)
+# ---------------------------------------------
+# `runner` defaults to `rio` (private self-hosted). If the rio ARC pod can't run
+# JS/composite setup actions, set `runner: ubuntu-latest` — still a PRIVATE repo,
+# still the same cross-compile, still autobump. `runner: macos-latest` would do a
+# native build instead (then drop the zig steps). The default is the destination
+# (rio-native); the override is the documented fallback.
+#
+# CONSUMER SHIM (.github/workflows/mac-release.yml):
+#
+#   on:
+#     push: { branches: [main] }
+#     workflow_dispatch:
+#   jobs:
+#     mac:
+#       uses: pleme-io/substrate/.github/workflows/mac-autobump-release.yml@main
+#       with:
+#         package: shaar-cli
+#         binary-name: shaar
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: "Cargo package (workspace member) to build, e.g. shaar-cli"
+        type: string
+        required: true
+      binary-name:
+        description: "Binary name produced by the package, e.g. shaar"
+        type: string
+        required: true
+      suffix:
+        description: "Artifact + tag-stream suffix"
+        type: string
+        default: "macos-universal"
+      target:
+        description: "apple-darwin target triple"
+        type: string
+        default: "universal2-apple-darwin"
+      features:
+        description: "Space-separated cargo features"
+        type: string
+        default: ""
+      no-default-features:
+        description: "Pass --no-default-features"
+        type: boolean
+        default: false
+      runner:
+        description: "ARC scale-set name / runner label (default rio; fallback ubuntu-latest)"
+        type: string
+        default: "rio"
+      prerelease:
+        description: "Mark the autobump release a prerelease (official cut = a v* tag)"
+        type: boolean
+        default: true
+    secrets:
+      BOT_PAT:
+        description: "optional; the job's GITHUB_TOKEN (contents: write) is used otherwise"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-autobump-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: Cross-compile + private autobump release
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rust toolchain (apple-darwin targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: zig
+        uses: mlugg/setup-zig@v1
+
+      - name: cargo-zigbuild
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Cross-compile → apple-darwin (universal)
+        uses: pleme-io/actions/darwin-zig-build@main
+        with:
+          binary-name: ${{ inputs.binary-name }}
+          package: ${{ inputs.package }}
+          suffix: ${{ inputs.suffix }}
+          target: ${{ inputs.target }}
+          features: ${{ inputs.features }}
+          no-default-features: ${{ inputs.no-default-features }}
+
+      - name: Autobump tags
+        id: tags
+        shell: bash
+        run: |
+          short="$(git rev-parse --short=7 HEAD)"
+          echo "exact=${{ inputs.suffix }}-r${{ github.run_number }}-${short}" >> "$GITHUB_OUTPUT"
+          echo "latest=${{ inputs.suffix }}-latest" >> "$GITHUB_OUTPUT"
+          echo "assets=dist/${{ inputs.binary-name }}-${{ inputs.suffix }} dist/${{ inputs.binary-name }}-${{ inputs.suffix }}.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Private release — exact immutable tag (deploy source)
+        uses: pleme-io/actions/gh-release-create@main
+        with:
+          tag: ${{ steps.tags.outputs.exact }}
+          assets: ${{ steps.tags.outputs.assets }}
+          prerelease: ${{ inputs.prerelease }}
+          if-exists: skip
+
+      - name: Private release — moving latest pointer (never a deploy source)
+        uses: pleme-io/actions/gh-release-create@main
+        with:
+          tag: ${{ steps.tags.outputs.latest }}
+          assets: ${{ steps.tags.outputs.assets }}
+          prerelease: ${{ inputs.prerelease }}
+          if-exists: update
