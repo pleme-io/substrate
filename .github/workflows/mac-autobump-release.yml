@@ -99,6 +99,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The minimal ghcr.io/actions/actions-runner image (the rio self-hosted
+      # pool) is leaner than GitHub-hosted runners — it lacks `xz`, which
+      # `tar xJ` needs to extract zig's .tar.xz (setup-zig fails otherwise).
+      # Install it. zig is the linker, so no gcc/build-essential is needed.
+      - name: Runner prerequisites
+        shell: bash
+        run: |
+          if ! command -v xz >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq xz-utils
+          fi
+
       - name: Rust toolchain (apple-darwin targets)
         uses: dtolnay/rust-toolchain@stable
         with:
