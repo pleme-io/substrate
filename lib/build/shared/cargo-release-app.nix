@@ -29,16 +29,38 @@ let
   # PATH so `cargo fmt` / `cargo clippy` / `cargo set-version` all route
   # to the bundled tools.
   toolchainPath = ''export PATH="${cargo}/bin:${pkgs.cargo-edit}/bin:${pkgs.git}/bin:$PATH"'';
+
+  # TYPED EMISSION (pleme-io/theory/TYPED-EMISSION.md): a conf dir holding the
+  # substrate format-ban clippy.toml (`disallowed-macros = ["std::format"]`).
+  # Pointed at via CLIPPY_CONF_DIR so `cargo clippy` enforces the ban WITHOUT
+  # the consumer repo committing the file — the substrate-side enforcement the
+  # `with-format-ban` helper was designed for. Opt-in via `formatBan = true`
+  # (default off → zero blast radius for existing tool repos).
+  formatBanConfDir = pkgs.runCommand "format-ban-conf" { } ''
+    mkdir -p $out
+    cp ${../rust/format-ban.clippy.toml} $out/clippy.toml
+  '';
 in rec {
   # ── check-all ─────────────────────────────────────────────────────
-  mkCheckAllApp = { name }: {
+  mkCheckAllApp = { name, formatBan ? false }: {
     type = "app";
     program = toString (pkgs.writeShellScript "${name}-check-all" ''
       set -euo pipefail
       ${toolchainPath}
       echo "Running checks for ${name}..."
       echo ""
-
+      ${pkgs.lib.optionalString formatBan ''
+        # TYPED EMISSION: enforce the format!() ban. If the repo commits its
+        # own clippy.toml with the entry, respect it; otherwise enforce via the
+        # substrate conf dir (no repo mutation).
+        if [ -f clippy.toml ] && grep -q 'disallowed-macros' clippy.toml; then
+          echo "==> format-ban: repo clippy.toml already enforces TYPED EMISSION"
+        else
+          echo "==> format-ban: enforcing TYPED EMISSION via substrate clippy.toml"
+          export CLIPPY_CONF_DIR="${formatBanConfDir}"
+        fi
+        echo ""
+      ''}
       echo "==> cargo fmt --check"
       ${cargoBin} fmt --check
       echo ""
@@ -215,8 +237,8 @@ in rec {
 
   # ── Combined factory ──────────────────────────────────────────────
   # Returns the full set of five library-lifecycle apps at once.
-  mkCargoReleaseApps = { name }: {
-    check-all = mkCheckAllApp { inherit name; };
+  mkCargoReleaseApps = { name, formatBan ? false }: {
+    check-all = mkCheckAllApp { inherit name formatBan; };
     bump = mkBumpApp { inherit name; };
     publish = mkPublishApp { inherit name; };
     release = mkReleaseApp { inherit name; };
