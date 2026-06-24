@@ -7,6 +7,7 @@
 #   mkHelmSdlcApps       - Per-chart SDLC apps: lint, package, push, release, template
 #   mkHelmAllApps        - Aggregate apps across multiple charts + per-chart apps
 #   mkHelmChartPackages  - Build chart tarballs as Nix packages (CI cacheable)
+#   mkHelmRenderTestApps - Pure-helm render tests: unittest + render-check apps
 {
   pkgs,
   forgeCmd ? "forge",
@@ -223,4 +224,43 @@ in
         helm package build/${chart.name} --destination $out
       '';
     }) {} charts;
+
+  # Render-test apps for a repo's charts, wrapping a typed render-test binary
+  # (the akeyless `charttest` keyway tool, or any cmd exposing the same
+  # `render`/`unittest`/`ci` subcommands). ALL logic lives in that binary —
+  # this recipe is launch plumbing only (zero shell logic), the same shape as
+  # mkHelmAllApps wrapping `forge helm …`. The binary is given a
+  # helm-with-unittest plugin on PATH so it can shell out via os/exec.
+  #
+  # cmd        - the render-test binary on PATH (default "charttest")
+  # configArg  - optional `--config <path>` the binary reads its chart list from
+  #
+  # Exposes three flake apps, each a thin `exec <cmd> <sub>`:
+  #   nix run .#render-check   nix run .#unittest   nix run .#render-test-ci
+  mkHelmRenderTestApps = {
+    cmd ? "charttest",
+    configArg ? "",
+  }:
+    let
+      # helm-unittest plugin: its $out holds helm-unittest/plugin.yaml, so $out
+      # is itself a valid HELM_PLUGINS dir — version-robust across nixpkgs revs
+      # that lack kubernetes-helm.withPlugins.
+      helmPlugins = pkgs.kubernetes-helmPlugins.helm-unittest;
+      mkApp = sub: name:
+        let
+          app = pkgs.writeShellApplication {
+            inherit name;
+            runtimeInputs = [ pkgs.kubernetes-helm pkgs.cacert pkgs.git ];
+            text = ''
+              export SSL_CERT_FILE="''${SSL_CERT_FILE:-${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt}"
+              export HELM_PLUGINS="${helmPlugins}''${HELM_PLUGINS:+:$HELM_PLUGINS}"
+              exec ${cmd} ${sub} ${configArg} "$@"
+            '';
+          };
+        in { type = "app"; program = "${app}/bin/${name}"; };
+    in {
+      render-check = mkApp "render" "helm-render-check";
+      unittest = mkApp "unittest" "helm-unittest";
+      render-test-ci = mkApp "ci" "helm-render-test-ci";
+    };
 }

@@ -1280,11 +1280,22 @@ in rec {
   #       { name = "pleme-worker"; chartDir = ./charts/pleme-worker; }
   #     ];
   #   };
+  #
+  # Example (render tests — wraps a typed render-test binary, zero shell logic):
+  #   charttest = pkgs.buildGoModule { … src = ./tools/charttest; … };
+  #   apps = substrateLib.mkHelmRenderTestApps {
+  #     cmd = "${charttest}/bin/charttest";
+  #     configArg = "--config charttest.yaml";
+  #   };
+  #   # nix run .#unittest        (binary runs helm-unittest over the configured charts)
+  #   # nix run .#render-check    (binary runs the non-zero-manifest gate)
+  #   # nix run .#render-test-ci  (both, with a JSON receipt + exit 0/1/2)
   inherit (helmBuildModule)
     mkHelmBumpApp
     mkHelmSdlcApps
     mkHelmAllApps
-    mkHelmChartPackages;
+    mkHelmChartPackages
+    mkHelmRenderTestApps;
   # Note: mkHelmLintApp/PackageApp/PushApp/ReleaseApp/TemplateApp were
   # listed historically but never defined in helm-build.nix; the typed
   # SDLC entry points are mkHelmSdlcApps + mkHelmAllApps.
