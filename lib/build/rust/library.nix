@@ -108,7 +108,11 @@ in {
     env = allDevEnvVars;
   };
 
+  # formatBan = true: every crates.io library enforces the TYPED EMISSION
+  # `format!()` ban in `check-all` (CLIPPY_CONF_DIR → the substrate clippy.toml),
+  # so the ban is enforced-by-construction, not clean-by-hand. A library that
+  # commits its own clippy.toml with the entry is respected as-is.
   apps = (import ../shared/cargo-release-app.nix {
     inherit pkgs crate2nix;
-  }).mkCargoReleaseApps { inherit name; };
+  }).mkCargoReleaseApps { inherit name; formatBan = true; };
 }
