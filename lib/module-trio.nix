@@ -215,9 +215,20 @@ in
 
       withSystemDaemon  = spec.withSystemDaemon or false;
       daemonSubcommand  = spec.daemonSubcommand or "daemon";
+      # An empty daemonSubcommand means the binary serves by default with NO
+      # subcommand (e.g. saber-api-server, which reads RUN_MODE / SABER_* from
+      # env + clap flags, never a positional). Mirror the anvilArgs filter
+      # above (L204-205): a "" subcommand must yield ZERO args, not a single
+      # empty-string arg. On NixOS the empty arg is harmless (mkNixOSService
+      # shell-splits `concatStringsSep " "` so a trailing "" vanishes), but on
+      # Darwin mkLaunchdDaemon sets ProgramArguments = [ command "" ] — a
+      # literal empty argv element clap rejects as an unexpected argument. The
+      # filter makes both platforms emit a clean argv. (extraArgs still append.)
+      systemDaemonBaseArgs = if daemonSubcommand == "" then [] else [ daemonSubcommand ];
 
       withUserDaemon       = spec.withUserDaemon       or false;
       userDaemonSubcommand = spec.userDaemonSubcommand or daemonSubcommand;
+      userDaemonBaseArgs   = if userDaemonSubcommand == "" then [] else [ userDaemonSubcommand ];
       userDaemonExtraArgs  = spec.userDaemonExtraArgs  or [];
       userDaemonEnv        = spec.userDaemonEnv        or {};
 
@@ -628,7 +639,7 @@ in
                   name = "${name}-daemon";
                   label = "io.pleme.${name}.daemon";
                   command = "${cfg.package}/bin/${binaryName}";
-                  args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
+                  args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
                   logDir = "${homeDir}/Library/Logs";
                 }))
@@ -637,7 +648,7 @@ in
                   name = "${name}-daemon";
                   description = "${description} daemon";
                   command = "${cfg.package}/bin/${binaryName}";
-                  args = [ userDaemonSubcommand ] ++ cfg.daemon.extraArgs;
+                  args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
                 }))
 
@@ -728,7 +739,7 @@ in
               name = "${name}-daemon";
               description = "${description} daemon";
               command = "${cfg.package}/bin/${binaryName}";
-              args = [ daemonSubcommand ] ++ cfg.daemon.extraArgs;
+              args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
               environment = cfg.daemon.environment;
             }))
 
@@ -751,7 +762,7 @@ in
               name = "${name}-daemon";
               label = "io.pleme.${name}.daemon";
               command = "${cfg.package}/bin/${binaryName}";
-              args = [ daemonSubcommand ] ++ cfg.daemon.extraArgs;
+              args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
               env = cfg.daemon.environment;
             }))
 
