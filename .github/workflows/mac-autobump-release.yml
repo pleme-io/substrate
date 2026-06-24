@@ -123,7 +123,19 @@ jobs:
           # 0.13.0 is a stable release cargo-zigbuild links cleanly against.
           version: 0.13.0
 
-      - name: cargo-zigbuild
+      # cargo-zigbuild is BAKED INTO the arc-runner image (RUNNER-IMAGE.md) —
+      # the whole point of the nix runner image is that the toolchain is present,
+      # so skip the install there. taiki-e/install-action@v2 ALSO errors under the
+      # nix runner (".NET: Second path fragment must not be a drive or UNC name"),
+      # so skipping it both uses the baked tool AND dodges that action bug. Falls
+      # back to installing only on a runner that lacks it (lean / GitHub-hosted).
+      - name: cargo-zigbuild present?
+        id: czb
+        shell: bash
+        run: command -v cargo-zigbuild >/dev/null 2>&1 && echo "present=true" >> "$GITHUB_OUTPUT" || echo "present=false" >> "$GITHUB_OUTPUT"
+
+      - name: install cargo-zigbuild (fallback when not baked)
+        if: steps.czb.outputs.present != 'true'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-zigbuild
