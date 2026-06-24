@@ -143,6 +143,12 @@ jobs:
         env:
           BUILD_CORES: ${{ inputs.buildCores }}
           MAX_JOBS: ${{ inputs.maxJobs }}
+          # Some self-hosted runners (the nix-built arc-runner image) carry a
+          # baked nix with NO flakes config that shadows the Determinate-installed
+          # one on PATH → `nix build` errors "experimental Nix feature
+          # 'nix-command' is disabled". NIX_CONFIG is honored by ANY nix
+          # regardless of which wins the PATH, so enable nix-command + flakes here.
+          NIX_CONFIG: "experimental-features = nix-command flakes"
         run: |
           # Optional parallelism caps for memory-constrained runners: a high
           # nproc compile (e.g. ruby-3.4.9 from source) can spike peak RAM past a
