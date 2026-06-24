@@ -99,56 +99,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The minimal ghcr.io/actions/actions-runner image (the rio self-hosted
-      # pool) is leaner than GitHub-hosted runners — it lacks `xz`, which
-      # `tar xJ` needs to extract zig's .tar.xz (setup-zig fails otherwise).
-      # Install it. zig is the linker, so no gcc/build-essential is needed.
-      - name: Runner prerequisites
+      # ── NIX-NATIVE ──────────────────────────────────────────────────────
+      # Every tool below is BAKED into the arc-runner image (fenix rust + the
+      # apple-darwin std, zig, cargo-zigbuild, gh). We invoke them DIRECTLY,
+      # never via setup-zig / taiki-e/install-action / darwin-zig-build /
+      # gh-release-create — those download non-nix FHS binaries a pure-nix
+      # runner image can't execve. The runner image IS the toolchain, so there
+      # is nothing to install per-build and no FHS-compat shim is needed.
+      #   runner: rio (arc-runner image). On a non-baked runner (ubuntu-latest)
+      #   you'd reinstate the setup steps — but the rio path is the destination.
+      - name: Cross-compile → apple-darwin (universal, baked toolchain)
         shell: bash
+        env:
+          PKG: ${{ inputs.package }}
+          BIN: ${{ inputs.binary-name }}
+          TARGET: ${{ inputs.target }}
+          SUFFIX: ${{ inputs.suffix }}
+          FEATURES: ${{ inputs.features }}
+          NO_DEFAULT: ${{ inputs.no-default-features }}
         run: |
-          if ! command -v xz >/dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq xz-utils
-          fi
-
-      - name: Rust toolchain (apple-darwin targets)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: zig
-        uses: mlugg/setup-zig@v1
-        with:
-          # Pin a real release — with no build.zig in a Rust project, setup-zig's
-          # version auto-resolution 404'd ("Unable to locate executable file: zig").
-          # 0.13.0 is a stable release cargo-zigbuild links cleanly against.
-          version: 0.13.0
-
-      # cargo-zigbuild is BAKED INTO the arc-runner image (RUNNER-IMAGE.md) —
-      # the whole point of the nix runner image is that the toolchain is present,
-      # so skip the install there. taiki-e/install-action@v2 ALSO errors under the
-      # nix runner (".NET: Second path fragment must not be a drive or UNC name"),
-      # so skipping it both uses the baked tool AND dodges that action bug. Falls
-      # back to installing only on a runner that lacks it (lean / GitHub-hosted).
-      - name: cargo-zigbuild present?
-        id: czb
-        shell: bash
-        run: command -v cargo-zigbuild >/dev/null 2>&1 && echo "present=true" >> "$GITHUB_OUTPUT" || echo "present=false" >> "$GITHUB_OUTPUT"
-
-      - name: install cargo-zigbuild (fallback when not baked)
-        if: steps.czb.outputs.present != 'true'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
-
-      - name: Cross-compile → apple-darwin (universal)
-        uses: pleme-io/actions/darwin-zig-build@main
-        with:
-          binary-name: ${{ inputs.binary-name }}
-          package: ${{ inputs.package }}
-          suffix: ${{ inputs.suffix }}
-          target: ${{ inputs.target }}
-          features: ${{ inputs.features }}
-          no-default-features: ${{ inputs.no-default-features }}
+          args=(zigbuild --release --target "$TARGET" -p "$PKG")
+          [ -n "$FEATURES" ] && args+=(--features "$FEATURES")
+          [ "$NO_DEFAULT" = "true" ] && args+=(--no-default-features)
+          cargo "${args[@]}"
+          mkdir -p dist
+          cp "target/$TARGET/release/$BIN" "dist/$BIN-$SUFFIX"
+          ( cd dist && sha256sum "$BIN-$SUFFIX" > "$BIN-$SUFFIX.sha256" )
 
       - name: Autobump tags
         id: tags
@@ -157,20 +133,25 @@ jobs:
           short="$(git rev-parse --short=7 HEAD)"
           echo "exact=${{ inputs.suffix }}-r${{ github.run_number }}-${short}" >> "$GITHUB_OUTPUT"
           echo "latest=${{ inputs.suffix }}-latest" >> "$GITHUB_OUTPUT"
-          echo "assets=dist/${{ inputs.binary-name }}-${{ inputs.suffix }} dist/${{ inputs.binary-name }}-${{ inputs.suffix }}.sha256" >> "$GITHUB_OUTPUT"
 
-      - name: Private release — exact immutable tag (deploy source)
-        uses: pleme-io/actions/gh-release-create@main
-        with:
-          tag: ${{ steps.tags.outputs.exact }}
-          assets: ${{ steps.tags.outputs.assets }}
-          prerelease: ${{ inputs.prerelease }}
-          if-exists: skip
-
-      - name: Private release — moving latest pointer (never a deploy source)
-        uses: pleme-io/actions/gh-release-create@main
-        with:
-          tag: ${{ steps.tags.outputs.latest }}
-          assets: ${{ steps.tags.outputs.assets }}
-          prerelease: ${{ inputs.prerelease }}
-          if-exists: update
+      - name: Private release (baked gh CLI — exact immutable + moving latest)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT || github.token }}
+          BIN: ${{ inputs.binary-name }}
+          SUFFIX: ${{ inputs.suffix }}
+          EXACT: ${{ steps.tags.outputs.exact }}
+          LATEST: ${{ steps.tags.outputs.latest }}
+          PRE: ${{ inputs.prerelease }}
+        run: |
+          assets=( "dist/$BIN-$SUFFIX" "dist/$BIN-$SUFFIX.sha256" )
+          pre=(); [ "$PRE" = "true" ] && pre=(--prerelease)
+          # exact = immutable deploy source — create once, skip if it exists.
+          if ! gh release view "$EXACT" >/dev/null 2>&1; then
+            gh release create "$EXACT" "${assets[@]}" "${pre[@]}" \
+              --title "$EXACT" --notes "Autobump build $EXACT (private)."
+          fi
+          # latest = moving pointer — recreate so it always points at this build.
+          gh release delete "$LATEST" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "$LATEST" "${assets[@]}" "${pre[@]}" \
+            --title "$LATEST" --notes "Latest autobump pointer -> $EXACT."
