@@ -1,7 +1,15 @@
-# kata.users — typed fleet user registry -> NixOS users module
-# (generalization of the nix repo's lib/fleet-users.nix, whose factory
-# hard-coded the drzzln/luis/automation registry; here the registry is
-# the argument and the machinery is the vocabulary).
+# kata.users — the typed pleme-io user-management surface.
+#
+# ONE typed declaration per person → everything the fleet needs to make
+# them a member: a NixOS account (fleet-wide OR scoped to named nodes), the
+# ssh identity (inbound authorized keys + the per-user `<name>@fleet`
+# outbound key + its SOPS private-key path), the SOPS age recipient, and the
+# git identity — plus an `onboarding` descriptor the tooling (seibi) reads
+# to drive key generation + secret registration.
+#
+# Generalization of the nix repo's lib/fleet-users.nix (whose hard-coded
+# drzzln/luis/automation registry + per-node mkInteractiveUser factory + ssh
+# + sops wiring are all subsumed here as one argument-driven engine).
 #
 # Exports (pure { lib }):
 #
@@ -19,29 +27,52 @@
 #                       docker libvirtd kvm dialout video audio;
 #                       automation: wheel);
 #         home        ? kind-default (/home/<name> | /var/lib/<name>);
-#         keys        ? [ ] (authorized ssh public keys);
-#         identitySecret ? null | { sopsPath :: str } — per-user ssh
-#                       identity: emits sops.secrets.<sopsPath> landing at
-#                       <home>/.ssh/id_ed25519 (owner/mode set) + a
-#                       tmpfiles rule pre-creating <home>/.ssh;
+#         keys        ? [ ] (authorized inbound ssh public keys);
+#         identitySecret ? null | { sopsPath :: str } — the per-user ssh
+#                       identity PRIVATE half: emits sops.secrets.<sopsPath>
+#                       landing at <home>/.ssh/id_ed25519 + a tmpfiles rule;
+#         # ── the user-management surface (all optional) ──
+#         nodes       ? null | listOf str — WHERE the account is materialized.
+#                       null = fleet-wide (the ops accounts: every node bakes
+#                       `module`). [list] = scoped: only the named nodes
+#                       materialize it, via `mkUserModule`/`scopedModuleForNode`.
+#         fleetKey    ? null | str — this user's `<name>@fleet` PUBLIC key
+#                       (the outbound identity pubkey; pairs with identitySecret).
+#                       Pure metadata here (the authorized-keys plumbing reads it).
+#         git         ? null | { name, email } — git identity (for HM consumers).
+#         ageRecipient? null | str — this user's SOPS age PUBLIC recipient,
+#                       for .sops.yaml membership. null = not provisioned yet.
 #       };
 #     groups ? { } (attrsOf int — standalone groups, e.g. media = 980);
-#     shell  ? null — drv applied to every interactive user (mkForce, the
-#              fleet-shell-wins rule from fleet-users.nix) ; automation
-#              users always get pkgs.bashInteractive;
-#     uidMigration ? true — emit the idempotent chown-on-UID-drift
-#              activation script (generated from the registry; the one
-#              sanctioned bash, compiled from typed data);
+#     shell  ? null — drv applied to every interactive user (mkForce);
+#     uidMigration ? true — emit the idempotent chown-on-UID-drift activation
+#              script in `module` (the one sanctioned generated bash). Scoped
+#              per-node accounts (mkUserModule) NEVER emit it — a freshly
+#              created account has no prior UID to migrate.
 #   } -> {
 #     uids / gids   — pure attrsets (registry projections);
-#     module        — NixOS module declaring every account at canonical
-#                     UIDs (mkDefault everywhere except shell), automation
-#                     sshd Match hardening blocks, identity secrets +
-#                     tmpfiles, uid-migration activation script;
-#     registry      — { interactive = [names]; automation = [names]; };
-#     invariants    — throw-free suite: uid uniqueness, gid uniqueness
-#                     (vs groups too), interactive uid >= 1000,
-#                     automation uid < 1000;
+#     module        — NixOS module materializing the FLEET-WIDE accounts
+#                     (nodes == null) at canonical UIDs + identity secrets +
+#                     automation hardening + uid-migration. Bake into every
+#                     node (what fleet-base imports today). Backward-compatible:
+#                     a registry with no `nodes` field => every user is here.
+#     mkUserModule name      — a NixOS module materializing ONE account fully
+#                     (account + group + identity secret + tmpfiles, NO uid
+#                     migration). The per-node factory a node imports for each
+#                     scoped user it hosts (was lib/fleet-users.mkInteractiveUser).
+#     scopedModuleForNode n  — mkMerge of mkUserModule for every scoped user
+#                     whose `nodes` includes n. Convenience for a node.
+#     usersForNode n         — [names] the node materializes (scoped ∋ n).
+#     registry      — { interactive, automation, fleetWide, scoped } name lists;
+#     onboarding    — attrsOf the per-user onboarding descriptor (kind, uid,
+#                     nodes, fleetKey, ageRecipient, identitySecret, git, and
+#                     `needs` = which artifacts still have to be generated):
+#                       needs.sshIdentity (identitySecret set but no fleetKey)
+#                       needs.ageRecipient (interactive + ageRecipient == null);
+#     invariants    — throw-free suite (uid/gid uniqueness incl. groups,
+#                     interactive uid >= 1000, automation uid < 1000, scoped
+#                     users have a non-empty node list, fleetKeys + ageRecipients
+#                     unique where set);
 #   }
 { lib }:
 let
@@ -94,12 +125,24 @@ let
             home = spec.home or (if kind == "interactive" then "/home/${name}" else "/var/lib/${name}");
             keys = spec.keys or [ ];
             identitySecret = spec.identitySecret or null;
+            # ── user-management surface ──
+            nodes = spec.nodes or null;
+            fleetKey = spec.fleetKey or null;
+            git = spec.git or null;
+            ageRecipient = spec.ageRecipient or null;
           }
       ) users;
 
       names = builtins.attrNames norm;
       interactive = builtins.filter (n: norm.${n}.kind == "interactive") names;
       automation = builtins.filter (n: norm.${n}.kind == "automation") names;
+
+      # WHERE: null nodes => fleet-wide (baked into every node via `module`);
+      # a node list => scoped (materialized only on those nodes).
+      fleetWide = builtins.filter (n: norm.${n}.nodes == null) names;
+      scoped = builtins.filter (n: norm.${n}.nodes != null) names;
+      usersForNode =
+        node: builtins.filter (n: norm.${n}.nodes != null && builtins.elem node norm.${n}.nodes) names;
 
       uids = lib.mapAttrs (_: u: u.uid) norm;
       gids = lib.mapAttrs (_: u: u.gid) norm // groups;
@@ -141,9 +184,10 @@ let
           };
         };
 
-      identityUsers = builtins.filter (n: norm.${n}.identitySecret != null) names;
+      identityNamesIn = ns: builtins.filter (n: norm.${n}.identitySecret != null) ns;
+      automationNamesIn = ns: builtins.filter (n: norm.${n}.kind == "automation") ns;
 
-      sshdHardening = lib.concatMapStrings (n: ''
+      sshdHardeningFor = ns: lib.concatMapStrings (n: ''
         Match User ${n}
           PermitTTY no
           AllowTcpForwarding no
@@ -151,21 +195,31 @@ let
           X11Forwarding no
           AllowStreamLocalForwarding no
           PermitUserRC no
-      '') automation;
+      '') (automationNamesIn ns);
 
-      migrateScript = lib.concatMapStrings (n: ''
+      migrateScriptFor = ns: lib.concatMapStrings (n: ''
         migrate_home ${n} ${toString norm.${n}.uid} ${toString norm.${n}.gid} ${norm.${n}.home}
-      '') names;
+      '') ns;
 
-      module =
+      # ONE module builder over an arbitrary name set. `module`, `mkUserModule`,
+      # and `scopedModuleForNode` are all this with different (names, flags).
+      mkModuleFor =
+        {
+          moduleNames,
+          includeGroups ? false,
+          withMigration ? false,
+          migrateName ? "kataUsersUidMigrate",
+        }:
         { lib, pkgs, ... }:
+        let
+          ids = identityNamesIn moduleNames;
+          autos = automationNamesIn moduleNames;
+        in
         {
           config = lib.mkMerge (
-            map (mkUser pkgs) names
+            map (mkUser pkgs) moduleNames
             ++ [
               {
-                users.groups = lib.mapAttrs (_: gid: { gid = lib.mkDefault gid; }) groups;
-
                 sops.secrets = lib.listToAttrs (
                   map (
                     n:
@@ -175,50 +229,105 @@ let
                       mode = "0600";
                       path = "${norm.${n}.home}/.ssh/id_ed25519";
                     }
-                  ) identityUsers
+                  ) ids
                 );
 
-                systemd.tmpfiles.rules = map (n: "d ${norm.${n}.home}/.ssh 0700 ${n} ${n} -") identityUsers;
+                systemd.tmpfiles.rules = map (n: "d ${norm.${n}.home}/.ssh 0700 ${n} ${n} -") ids;
               }
-              (lib.mkIf (automation != [ ]) {
-                services.openssh.extraConfig = lib.mkAfter sshdHardening;
-              })
-              (lib.mkIf uidMigration {
-                # Idempotent chown-on-UID-drift migration, compiled from the
-                # registry (the one sanctioned bash — generated, not authored).
-                system.activationScripts.kataUsersUidMigrate = {
-                  text = ''
-                    migrate_home() {
-                      local user="$1" uid="$2" gid="$3" home="$4"
-                      if [ -d "$home" ]; then
-                        local cur_uid
-                        cur_uid=$(stat -c '%u' "$home" 2>/dev/null || echo "")
-                        if [ -n "$cur_uid" ] && [ "$cur_uid" != "$uid" ]; then
-                          echo "kata-users: chown $home $cur_uid -> $uid:$gid"
-                          chown -R "$uid:$gid" "$home"
-                        fi
-                      fi
-                    }
-                  ''
-                  + migrateScript;
-                  deps = [ "users" ];
-                };
+            ]
+            ++ lib.optional includeGroups {
+              users.groups = lib.mapAttrs (_: gid: { gid = lib.mkDefault gid; }) groups;
+            }
+            ++ [
+              (lib.mkIf (autos != [ ]) {
+                services.openssh.extraConfig = lib.mkAfter (sshdHardeningFor moduleNames);
               })
             ]
+            ++ lib.optional withMigration {
+              # Idempotent chown-on-UID-drift migration, compiled from the
+              # registry (the one sanctioned bash — generated, not authored).
+              system.activationScripts.${migrateName} = {
+                text = ''
+                  migrate_home() {
+                    local user="$1" uid="$2" gid="$3" home="$4"
+                    if [ -d "$home" ]; then
+                      local cur_uid
+                      cur_uid=$(stat -c '%u' "$home" 2>/dev/null || echo "")
+                      if [ -n "$cur_uid" ] && [ "$cur_uid" != "$uid" ]; then
+                        echo "kata-users: chown $home $cur_uid -> $uid:$gid"
+                        chown -R "$uid:$gid" "$home"
+                      fi
+                    fi
+                  }
+                ''
+                + migrateScriptFor moduleNames;
+                deps = [ "users" ];
+              };
+            }
           );
         };
 
+      # FLEET-WIDE accounts — every node bakes this (fleet-base). Backward-
+      # compatible: with no `nodes` field anywhere, fleetWide == every user.
+      module = mkModuleFor {
+        moduleNames = fleetWide;
+        includeGroups = true;
+        withMigration = uidMigration;
+        migrateName = "kataUsersUidMigrate";
+      };
+
+      # SCOPED accounts — the per-node factory (was lib/fleet-users
+      # mkInteractiveUser). One user, NO uid-migration bash (a fresh account
+      # never needs it — NO SHELL for new onboarding).
+      mkUserModule = name: mkModuleFor { moduleNames = [ name ]; includeGroups = false; };
+      scopedModuleForNode = node: mkModuleFor { moduleNames = usersForNode node; includeGroups = false; };
+
+      # The onboarding descriptor — what the tooling (seibi) needs to know to
+      # bring a person online: their identity coordinates + what still has to
+      # be generated/registered.
+      onboarding = lib.mapAttrs (
+        name: u: {
+          inherit (u)
+            kind
+            uid
+            nodes
+            fleetKey
+            ageRecipient
+            identitySecret
+            git
+            ;
+          sopsPath = if u.identitySecret != null then u.identitySecret.sopsPath else null;
+          needs = {
+            # ssh identity declared (sopsPath) but the public half not captured yet
+            sshIdentity = u.identitySecret != null && u.fleetKey == null;
+            # an interactive operator who isn't a .sops.yaml party yet
+            ageRecipient = u.kind == "interactive" && u.ageRecipient == null;
+          };
+        }
+      ) norm;
+
       allGids = builtins.attrValues gids;
       allUids = builtins.attrValues uids;
+      setFleetKeys = builtins.filter (k: k != null) (map (n: norm.${n}.fleetKey) names);
+      setRecipients = builtins.filter (r: r != null) (map (n: norm.${n}.ageRecipient) names);
     in
     builtins.seq _guard (builtins.seq (builtins.deepSeq (lib.mapAttrs (_: u: u.kind) norm) true) {
       inherit
         uids
         gids
         module
+        mkUserModule
+        scopedModuleForNode
+        usersForNode
+        onboarding
         ;
       registry = {
-        inherit interactive automation;
+        inherit
+          interactive
+          automation
+          fleetWide
+          scoped
+          ;
       };
       invariants = {
         uids-unique = {
@@ -236,6 +345,18 @@ let
         automation-uids-in-system-range = {
           expr = builtins.filter (n: norm.${n}.uid >= 1000) automation;
           expected = [ ];
+        };
+        scoped-users-have-nonempty-nodes = {
+          expr = builtins.filter (n: norm.${n}.nodes != null && norm.${n}.nodes == [ ]) names;
+          expected = [ ];
+        };
+        fleet-keys-unique = {
+          expr = builtins.length setFleetKeys == builtins.length (lib.unique setFleetKeys);
+          expected = true;
+        };
+        age-recipients-unique = {
+          expr = builtins.length setRecipients == builtins.length (lib.unique setRecipients);
+          expected = true;
         };
       };
     });

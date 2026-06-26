@@ -50,8 +50,8 @@
     tier = "kernel";
     maturity = "Working";
     since = "2026-06-12";
-    description = "Typed fleet user registry -> NixOS users module: interactive/automation kinds, canonical UIDs, authorized keys, per-user ssh identity secrets, automation sshd hardening, idempotent UID-drift migration.";
-    subsumes = "nix repo lib/fleet-users.nix (the factory generalized — its hard-coded drzzln/luis/automation registry becomes the argument).";
+    description = "The typed pleme-io user-management surface: one declaration per person -> a NixOS account (fleet-wide `module` OR per-node `mkUserModule`/`scopedModuleForNode` scoping via `nodes`), interactive/automation kinds, canonical UIDs, inbound authorized keys + the per-user `<name>@fleet` outbound key (`fleetKey`) + its SOPS private-key path (`identitySecret`), the SOPS age recipient (`ageRecipient`), the git identity (`git`), automation sshd hardening, idempotent UID-drift migration (fleet-wide only), and an `onboarding` descriptor the tooling reads to drive key generation + secret registration.";
+    subsumes = "nix repo lib/fleet-users.nix in full — its hard-coded drzzln/luis/automation registry, the per-node mkInteractiveUser factory, and the scattered ssh/sops/git/scoping wiring all become this one argument-driven engine.";
     dependsOn = [ ];
     exports = [ "mkUsers" ];
   };
