@@ -82,13 +82,7 @@ jobs:
           set -euo pipefail
           host="${REGISTRY#oci://}"
           host="${host%%/*}"
-          # Pin the login helm to v3. helm 4.2.0's `registry login` 403s against
-          # ghcr, and the weekly nixpkgs floated the ambient `nixpkgs#kubernetes-helm`
-          # from 3.20.2 to 4.2.0 on 2026-06-28, breaking every publish. The login
-          # writes a credential the push/mirror steps (forge's pinned helm) read,
-          # so it must succeed; nixos-24.11 ships helm 3. The push side stays on
-          # forge's helm 4 (login is the only broken verb).
-          echo "$TOKEN" | nix shell github:NixOS/nixpkgs/nixos-24.11#kubernetes-helm --command \
+          echo "$TOKEN" | nix shell nixpkgs#kubernetes-helm --command \
             helm registry login "$host" --username "${{ github.actor }}" --password-stdin
 
       # Hermetic supply chain (the law): mirror every third-party subchart this
