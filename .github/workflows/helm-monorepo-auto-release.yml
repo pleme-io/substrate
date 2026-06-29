@@ -78,20 +78,18 @@ jobs:
         env:
           REGISTRY: ${{ inputs.registry }}
           TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
-          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
           host="${REGISTRY#oci://}"
           host="${host%%/*}"
-          # Write the OCI auth config directly instead of `helm registry login`.
-          # helm 4.2.0's `registry login` 403s against ghcr; the weekly nixpkgs
-          # floated the ambient helm 3->4 on 2026-06-28 and broke every publish.
-          # The push/mirror steps use forge's pinned helm and read this file, so
-          # auth no longer depends on the floating ambient helm version.
-          mkdir -p "$HOME/.config/helm/registry"
-          auth=$(printf '%s:%s' "$ACTOR" "$TOKEN" | base64 | tr -d '\n')
-          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$host" "$auth" \
-            > "$HOME/.config/helm/registry/config.json"
+          # Pin the login helm to v3. helm 4.2.0's `registry login` 403s against
+          # ghcr, and the weekly nixpkgs floated the ambient `nixpkgs#kubernetes-helm`
+          # from 3.20.2 to 4.2.0 on 2026-06-28, breaking every publish. The login
+          # writes a credential the push/mirror steps (forge's pinned helm) read,
+          # so it must succeed; nixos-24.11 ships helm 3. The push side stays on
+          # forge's helm 4 (login is the only broken verb).
+          echo "$TOKEN" | nix shell github:NixOS/nixpkgs/nixos-24.11#kubernetes-helm --command \
+            helm registry login "$host" --username "${{ github.actor }}" --password-stdin
 
       # Hermetic supply chain (the law): mirror every third-party subchart this
       # monorepo depends on into the pleme-io OCI registry FIRST, so the release
