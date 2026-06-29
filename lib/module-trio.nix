@@ -114,6 +114,14 @@
 #                     Both extraHmConfig and extraHmConfigFn run if both set.
 #   extraNixosConfig  cfg → config attrset, merged into NixOS module (default: _: {}).
 #   extraDarwinConfig cfg → config attrset, merged into Darwin module (default: _: {}).
+#   extraNixosConfigFn { cfg, pkgs, lib, config } → config (default: null).
+#                     pkgs-aware peer of extraNixosConfig — receives
+#                     pkgs/lib/config so a flake can render its shikumi YAML
+#                     (or install packages / reference helpers) from the NixOS
+#                     module, not just the HM one. Merged after (and alongside)
+#                     extraNixosConfig; both run if both are set.
+#   extraDarwinConfigFn { cfg, pkgs, lib, config } → config (default: null).
+#                     Same as extraNixosConfigFn for the Darwin module.
 #
 #   extraPackages     list of pkgs.<attr> names to install alongside the
 #                     primary package when <hmNamespace>.<name>.enable is
@@ -252,6 +260,12 @@ in
       extraHmConfigFn    = spec.extraHmConfigFn    or (_: {});
       extraNixosConfig   = spec.extraNixosConfig   or (_: {});
       extraDarwinConfig  = spec.extraDarwinConfig  or (_: {});
+      # pkgs-aware peers of extraNixosConfig/extraDarwinConfig — null by
+      # default so existing consumers are byte-identical. When set, called
+      # as `fn { cfg, pkgs, lib, config }` and merged after the positional
+      # extraNixosConfig/extraDarwinConfig result (mirrors extraHmConfigFn).
+      extraNixosConfigFn  = spec.extraNixosConfigFn  or null;
+      extraDarwinConfigFn = spec.extraDarwinConfigFn or null;
 
       extraPackages      = spec.extraPackages      or [];
 
@@ -744,6 +758,8 @@ in
             }))
 
             (extraNixosConfig cfg)
+            (lib.optionalAttrs (extraNixosConfigFn != null)
+              (extraNixosConfigFn { inherit cfg pkgs lib config; }))
           ]);
         };
 
@@ -767,6 +783,8 @@ in
             }))
 
             (extraDarwinConfig cfg)
+            (lib.optionalAttrs (extraDarwinConfigFn != null)
+              (extraDarwinConfigFn { inherit cfg pkgs lib config; }))
           ]);
         };
     };
