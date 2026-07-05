@@ -52,6 +52,18 @@ on:
         type: string
         required: false
         default: "true"
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the org-scoped rio-private ARC pool (avoids billed
+      # hosted minutes; org runner groups refuse public repos anyway), public
+      # repos → ubuntu-latest. Schedule-triggered callers (the drip tick) may
+      # lack github.event.repository and fall open to hosted (documented edge).
+      # Do NOT put an expression in this default — workflow_call input
+      # defaults are static; the fallback lives in each job's runs-on.
+      runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → rio-private, public → ubuntu-latest)."
+        type: string
+        required: false
+        default: ""
     secrets:
       CRATES_API_TOKEN:
         required: true
@@ -80,7 +92,7 @@ concurrency:
 jobs:
   bump:
     name: Bump workspace + tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops)
     # and on the scheduled drip tick (a capacity-ride must never bump/tag).
     if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
@@ -115,7 +127,7 @@ jobs:
   ship:
     name: Ship workspace to registry
     needs: bump
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     if: needs.bump.outputs.bumped == 'true'
     steps:
       # Re-checkout to pick up the bumped Cargo.toml from main.
@@ -143,7 +155,7 @@ jobs:
   # seconds once the bootstrap converges, so it's safe to leave armed.
   drip:
     name: Drip-publish remaining capacity
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     # Fires on the consumer's */15 schedule (auto-drain) AND on a manual
     # workflow_dispatch (operator-forced "publish what's missing now" — the
     # resume hand-off for a backlog that a cancelled/deferred ship stranded,

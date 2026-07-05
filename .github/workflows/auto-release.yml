@@ -34,6 +34,17 @@ on:
         type: string
         required: false
         default: patch
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the org-scoped rio-private ARC pool (avoids billed
+      # hosted minutes; org runner groups refuse public repos anyway), public
+      # repos → ubuntu-latest. Schedule-triggered callers may lack
+      # github.event.repository and fall open to hosted (documented edge).
+      # Passed through verbatim to every per-language reusable below.
+      runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → rio-private, public → ubuntu-latest)."
+        type: string
+        required: false
+        default: ""
     # No `secrets:` block — `secrets: inherit` from the consumer
     # passes everything down; inner `uses:` calls also use `inherit`.
 
@@ -52,7 +63,7 @@ concurrency:
 jobs:
   detect:
     name: Detect repo type
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     outputs:
       repo-type: ${{ steps.detect.outputs.repo-type }}
       manifest-path: ${{ steps.detect.outputs.manifest-path }}
@@ -68,6 +79,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   rust-single-crate:
@@ -77,6 +89,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   go:
@@ -88,6 +101,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/go-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   npm:
@@ -97,6 +111,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/npm-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   python:
@@ -106,6 +121,7 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/python-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   helm:
@@ -115,13 +131,14 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/helm-auto-release.yml@main
     with:
       bump-type: ${{ inputs.bump-type }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
 
   unsupported:
     name: 'unsupported repo type'
     needs: detect
     if: needs.detect.outputs.repo-type == 'unknown'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     steps:
       - name: Fail with diagnostic
         run: |

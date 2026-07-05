@@ -29,6 +29,18 @@ on:
         type: string
         required: false
         default: "package.json package-lock.json"
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the org-scoped rio-private ARC pool (avoids billed
+      # hosted minutes; org runner groups refuse public repos anyway), public
+      # repos → ubuntu-latest. Schedule-triggered callers may lack
+      # github.event.repository and fall open to hosted (documented edge).
+      # Do NOT put an expression in this default — workflow_call input
+      # defaults are static; the fallback lives in each job's runs-on.
+      runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → rio-private, public → ubuntu-latest)."
+        type: string
+        required: false
+        default: ""
     secrets:
       NPM_TOKEN:
         required: true
@@ -40,7 +52,7 @@ permissions:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     if: github.actor != 'github-actions[bot]'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
@@ -72,7 +84,7 @@ jobs:
 
   ship:
     needs: bump
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
     if: needs.bump.outputs.bumped == 'true'
     steps:
       - uses: actions/checkout@v4
