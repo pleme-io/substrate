@@ -1,0 +1,243 @@
+# Reusable workflow: the reference CAMELOT BUILD, composed PURELY from the
+# super-cache-ci action vocabulary (theory/SUPER-CACHE-CI.md). One job whose
+# steps are the typed verbs of the default CI-authoring language for the
+# sui-service stack; a camelot build is a THREADING of these verbs, not a
+# monolith (★★ CLOSED-LOOP MASS-SYNTHESIS rule 2 — small verbs, no orchestrator).
+#
+#   breathe-runner   → assert breathable spot / camelot-taint posture, arm drain
+#   sui-service-up    → resolve + export the sui daemon endpoint + backend tiers
+#   gen-build-spec    → typed *.build-spec.json + GEN-TYPED-SPEC-CONTRACT stale gate
+#   super-cache-restore → warm path: probe the tiered super-cache
+#   super-cache-build   → THE CORE: build via the sui service (skips derive on hit)
+#   super-cache-save    → write-if-absent persist to the durable tiers (no lock)
+#   nix-image         → multi-arch nix OCI tarball (dockerTools, NO Dockerfile)
+#   ghcr-publish      → AUTOBUMP exact tag <arch>-r<run>-<sha> to private ghcr
+#   zot-pull-scan     → the faucet gate: pull + Trivy-scan before the trusted zone
+#   tameshi-attest    → signed BLAKE3 build receipt
+#
+# ── Consumer footprint (the whole thing — a 5-line shim) ────────────────────
+#   # .github/workflows/build.yml   (e.g. an akeyless-nix-images microservice)
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     build:
+#       uses: pleme-io/substrate/.github/workflows/super-cache-ci-build.yml@main
+#       with: { svc: akeyless-auth, arch: amd64 }
+#       secrets: inherit
+#
+# ── TIER-HONEST (theory/SUPER-CACHE-CI.md §X ledger; never round up) ─────────
+# The verbs pinned @main resolve today (the suite lives on pleme-io/actions
+# main); they promote to @v1 when AUTO-RELEASE cuts the suite into the v1 tag
+# (refs/tags/v1 currently lags the suite — pin @main until then).
+#   • gen-build-spec lang=cargo is a REAL `gen build .` + stale gate (row 9);
+#     npm/pip/gomod = LiveTODO (row 10).
+#   • super-cache-{restore,build,save} live tiered Redis/Pg path = LiveTODO
+#     behind sui's SHIPPED Store/StorageBackend traits (rows 4/5/6); the
+#     now-path is the local object tier + an honest miss/no-op, and
+#     super-cache-build reports built=false/reason=derive-livetodo until a
+#     sui-graph build CLI ships (rows 1/9) — NEVER a faked green.
+#   • never-touch-disk is a COMPUTED predicate (postgres∧redis∧tmpfs), false
+#     until M1 config selects them (row 7). Read steps.sui.outputs.never-touch-disk.
+#   • breathe-runner live CAMELOT_* signals + retirada drain = LiveTODO (rows
+#     11/12); on a hosted-runner dry-run pass enforce-posture=false.
+#   • The live end-to-end (a real derive through a stood-up sui service on the
+#     camelot in-cluster ARC runner) is the pipeline's named LiveTODO — this
+#     workflow renders + threads + gates today; a stood-up sui-service is the gate.
+#
+# ── NOT build steps (named, out of this job) ────────────────────────────────
+#   • super-cache-report (feature §V.12/§IV co-opt loop) = design-stage (row 13):
+#     the telemetry beat → PangeaDashboard + Viggy (defpromessa) so lapidar
+#     auto-tunes the MemoryBand. Wired once the promessa+lapidar controller ships.
+#   • crunkrun-stream = the infra declaration that STANDS UP this job's runner
+#     (100%-spot, minRunners:0, multi-arch). A one-time Stream render/apply, not
+#     a per-build step. See the `super-cache-ci` crunkrun Stream (row 11).
+
+name: super-cache-ci-build
+
+on:
+  workflow_call:
+    inputs:
+      svc:
+        description: "Service name — the ghcr image path suffix ghcr.io/pleme-io/<svc>."
+        type: string
+        required: true
+      arch:
+        description: "Target arch for the tag prefix + the single-arch build (amd64 | arm64)."
+        type: string
+        default: "amd64"
+      runner:
+        description: >-
+          JSON array of runner labels. Default is the camelot in-cluster spot
+          runner. For a hosted-runner dry-run pass '[\"ubuntu-latest\"]' AND
+          enforce-posture=false.
+        type: string
+        default: '["self-hosted", "camelot", "amd64"]'
+      sui-mode:
+        description: "connect | ephemeral — sui-service-up backend profile. connect = the never-touch-disk destination (Pg/Redis/tmpfs)."
+        type: string
+        default: "connect"
+      lang:
+        description: "gen-build-spec language (auto | cargo | npm | pip | gomod)."
+        type: string
+        default: "auto"
+      image-attr:
+        description: "nix-image flake output attr base (per-arch => <image-attr>-<arch>)."
+        type: string
+        default: "dockerImage"
+      registry:
+        description: "OCI registry host for the AUTOBUMP publish + the faucet pull."
+        type: string
+        default: "ghcr.io"
+      fail-on-severity:
+        description: "zot-pull-scan faucet gate: lowest severity that REJECTS (LOW|MEDIUM|HIGH|CRITICAL|none)."
+        type: string
+        default: "HIGH"
+      enforce-posture:
+        description: "breathe-runner: fail the job on an unmet spot/taint posture (false = advisory, for a hosted dry-run)."
+        type: boolean
+        default: true
+      require-build:
+        description: "super-cache-build: a derive with no live sui build path is a hard failure (true) instead of an honest built=false LiveTODO (false)."
+        type: boolean
+        default: false
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  super-cache-build:
+    name: super-cache-ci build (${{ inputs.svc }} · ${{ inputs.arch }})
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1 — assert the breathable spot / camelot-taint posture; arm the
+      #     retirada spot-reclaim drain->checkpoint hook (LiveTODO: rows 11/12).
+      - id: breathe
+        uses: pleme-io/actions/breathe-runner@main
+        with:
+          require-spot: true
+          require-camelot-taint: true
+          drain-handler: true
+          enforce: ${{ inputs.enforce-posture }}
+
+      # 2 — resolve + export the sui service endpoint + selected backend tiers.
+      #     mode=connect targets the never-touch-disk destination (Pg/Redis/tmpfs);
+      #     up/never-touch-disk are computed + honest (LiveTODO: rows 4/5/7).
+      - id: sui
+        uses: pleme-io/actions/sui-service-up@main
+        with:
+          mode: ${{ inputs.sui-mode }}
+
+      # 3 — typed build-spec + the GEN-TYPED-SPEC-CONTRACT stale gate. cargo is
+      #     a real `gen build .` (row 9); other langs = honest LiveTODO (row 10).
+      - id: spec
+        uses: pleme-io/actions/gen-build-spec@main
+        with:
+          lang: ${{ inputs.lang }}
+          ci-stale-check: true
+
+      # 4 — warm path: probe the tiered super-cache for this build's outputs.
+      - id: restore
+        uses: pleme-io/actions/super-cache-restore@main
+        with:
+          endpoint: ${{ steps.sui.outputs.endpoint }}
+          spec-path: ${{ steps.spec.outputs.spec-path }}
+
+      # 5 — THE CORE: build the derivation via the sui service, keyed by the
+      #     spec. Skips the derive on a restore cache hit; honest built=false
+      #     until a sui-graph build CLI ships (require-build gates fail-loud).
+      - id: build
+        uses: pleme-io/actions/super-cache-build@main
+        with:
+          endpoint: ${{ steps.sui.outputs.endpoint }}
+          spec-path: ${{ steps.spec.outputs.spec-path }}
+          key: ${{ steps.restore.outputs.key }}
+          cache-hit: ${{ steps.restore.outputs.cache-hit }}
+          restored-outputs: ${{ steps.restore.outputs.outputs }}
+          sandbox: ${{ steps.sui.outputs.sandbox }}
+          store-backend: ${{ steps.sui.outputs.store-backend }}
+          cache-backend: ${{ steps.sui.outputs.cache-backend }}
+          require-build: ${{ inputs.require-build }}
+
+      # 6 — write-if-absent persist to the durable tiers (no lock). No-op on a
+      #     cache-hit or the derive LiveTODO (gated on built==true).
+      - id: save
+        if: ${{ steps.build.outputs.built == 'true' }}
+        uses: pleme-io/actions/super-cache-save@main
+        with:
+          endpoint: ${{ steps.sui.outputs.endpoint }}
+          key: ${{ steps.restore.outputs.key }}
+          outputs: ${{ steps.build.outputs.outputs }}
+
+      # 7 — multi-arch nix OCI tarball via dockerTools (NO Dockerfile). Routes
+      #     through the sui super-cache when the endpoint is set (LiveTODO).
+      - id: image
+        uses: pleme-io/actions/nix-image@main
+        with:
+          image-attr: ${{ inputs.image-attr }}
+          arches: ${{ inputs.arch }}
+          endpoint: ${{ steps.sui.outputs.endpoint }}
+
+      # Registry auth is a pre-condition for the private ghcr push + faucet pull
+      # (ghcr-publish / zot-pull-scan wrap skopeo, which reads ~/.docker/config).
+      - name: Registry login
+        env:
+          HOST: ${{ inputs.registry }}
+          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+        run: echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
+
+      # 8 — AUTOBUMP: push the exact sortable tag <arch>-r<run>-<sha> to private
+      #     ghcr (+ the moving <arch>-latest human pointer, never a deploy source).
+      - id: publish
+        uses: pleme-io/actions/ghcr-publish@main
+        with:
+          repo: ${{ inputs.registry }}/pleme-io/${{ inputs.svc }}
+          arch: ${{ inputs.arch }}
+          run-number: ${{ github.run_number }}
+          sha: ${{ github.sha }}
+          tarball: ${{ steps.image.outputs.tarball-amd64 }}
+
+      # 9 — the faucet gate: pull the published image + Trivy-scan the PULLED
+      #     bytes; admit into the trusted zone ONLY on a clear severity gate.
+      #     (Canonically ghcr is mirrored → zot first; scanning the published
+      #     ref here is a real gate. The ghcr→zot mirror step is a LiveTODO.)
+      - id: scan
+        uses: pleme-io/actions/zot-pull-scan@main
+        with:
+          ref: ${{ steps.publish.outputs.ref }}
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+
+      # 10 — signed BLAKE3 build receipt (real b3sum; Ed25519 sign + kensa
+      #      OutcomeChain append are LiveTODO). The pipeline's provenance.
+      - id: attest
+        uses: pleme-io/actions/tameshi-attest@main
+        with:
+          subject: ${{ inputs.svc }}
+          spec-hash: ${{ steps.spec.outputs.spec-hash }}
+          output-hashes: ${{ steps.build.outputs.output-hashes }}
+          cache-hit: ${{ steps.restore.outputs.cache-hit }}
+          hit-tier: ${{ steps.restore.outputs.hit-tier }}
+          eval-ms: ${{ steps.build.outputs.eval-ms }}
+          build-ms: ${{ steps.build.outputs.build-ms }}
+          image-digests: ${{ steps.publish.outputs.ref }}
+
+      # 11 — super-cache-report (design-stage, row 13): telemetry beat →
+      #      PangeaDashboard + Viggy (defpromessa) so lapidar auto-tunes the
+      #      MemoryBand (the akeyless co-opt loop). Wired once the promessa +
+      #      lapidar controller ships — a named LiveTODO, not an inline fake.
+      #  - id: report
+      #    uses: pleme-io/actions/super-cache-report@main
+      #    with:
+      #      cache-hit: ${{ steps.restore.outputs.cache-hit }}
+      #      hit-tier: ${{ steps.restore.outputs.hit-tier }}
+      #      eval-ms: ${{ steps.build.outputs.eval-ms }}
+      #      build-ms: ${{ steps.build.outputs.build-ms }}
