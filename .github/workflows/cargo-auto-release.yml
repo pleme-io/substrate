@@ -103,7 +103,13 @@ jobs:
   ship:
     needs: bump
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
-    if: needs.bump.outputs.bumped == 'true'
+    # privacy posture 2026-07-05: private repos bump+tag only — no public
+    # registry publish; see pangea-architectures PRIVACY-WAVES.md. Publishing
+    # a new version from a private repo leaks code to crates.io and undoes
+    # yanks. Same caller-visibility expression family as the runner routing
+    # above (in a workflow_call the github context is the CALLER's run).
+    # Nothing depends on this job, so a visibility-skip fails nothing downstream.
+    if: needs.bump.outputs.bumped == 'true' && !github.event.repository.private
     steps:
       - uses: actions/checkout@v4
         with:
