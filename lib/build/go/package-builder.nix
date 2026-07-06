@@ -32,6 +32,23 @@ let
   quirkApply = import ../gomod/quirk-apply.nix { inherit lib; };
   mkStdTreeFor = import ./std-tree.nix { inherit pkgs lib; };
 
+  # ── ferrite#check resolution (M-ferrite) ────────────────────────────────────
+  # The ferrite compile-time memory-safety analyzer, resolved from the committed
+  # ferrite-pin.json via `builtins.getFlake` (mirrors gen-pin.json's self-heal).
+  # This IFD-time getFlake against the locked rev does NOT grow any lock. A caller
+  # may inject `ferriteCheck` directly (e.g. tests, or a fleet that pins ferrite
+  # in its own flake) — the pin is the fallback single source of truth.
+  resolveFerriteCheck = ferriteCheck:
+    if ferriteCheck != null then ferriteCheck
+    else
+      let
+        ferritePin = builtins.fromJSON (builtins.readFile ./ferrite-pin.json);
+        ferriteFlake = builtins.getFlake "github:pleme-io/ferrite/${ferritePin.rev}";
+        sys = pkgs.stdenv.hostPlatform.system;
+      in
+      ferriteFlake.packages.${sys}.check
+        or ferriteFlake.packages.${sys}.default;
+
   # Nix store names allow only [a-zA-Z0-9+._?=-]; a node key
   # ("<import-path>#<goos>-<goarch>[+tag,tag]") carries '/', '#', ',', ':', and
   # spaces. Flatten every disallowed char to '-' so the derivation name is valid.
@@ -86,7 +103,11 @@ let
     else null;
 
   # ── The real Environment (side-effecting backend) ───────────────────────────
-  realBackend = { workspaceSrc, tuple, hostPkgs }: {
+  realBackend = { workspaceSrc, tuple, hostPkgs, ferriteCheck ? null }:
+    let
+      resolvedFerrite = resolveFerriteCheck ferriteCheck;
+    in
+    {
     inherit sanitize;
 
     mkStdTree = mkStdTreeFor;
@@ -199,6 +220,122 @@ let
           willLink = isMain;
         };
       };
+
+    # One ferrite proof derivation per buildable package (M-ferrite). Runs the
+    # ferrite compile-time memory-safety analyzer over THIS package's go_files
+    # and writes a per-package PoMS JSON to `$out/poms/`. src is the ONE
+    # workspace tree; `cd relativePath` selects the package (Go-I3) — the same
+    # hermetic env as the compile node (CGO_ENABLED=0, GOPROXY=off). Because the
+    # graph keys this node's identity to the compile node's `source_hash`
+    # (Go-I8), its derivation is a pure function of the same package source, so
+    # an unchanged package's proof is a store hit — the memory-safety proof is
+    # not recomputed. `edges` carry the direct-dep source_hashes purely for the
+    # audit `plan`; the proof itself runs against the vendored source tree.
+    #
+    # LiveTODO (honest, inline): the shipped ferrite-check has no per-package
+    # PoMS emission flag yet — that is surface (f0) (ferrite/poms-emit), which
+    # lands on ferrite main via PR. Until the ferrite-pin.json rev is bumped to
+    # the poms-emit rev, `ferriteFlagAvailable` is false: this derivation runs
+    # `ferrite-check <pkg>` (the analyzer, exit 0 on a clean pass) and records a
+    # `pending-poms-emit` marker instead of a real PoMS. The graph WIRING +
+    # cache-key alignment is proven at eval regardless; the realize path emits a
+    # true PoMS only once f0 ships. Never round this up to "emits a PoMS today".
+    mkFerriteNode =
+      { key
+      , importPath
+      , kind
+      , relativePath
+      , goFiles
+      , sourceHash
+      , edges
+      , goVersion
+      }:
+      let
+        # Whether the resolved ferrite-check exposes the -ferrite.poms-dir flag
+        # (surface f0). Detected by a passthru marker on the ferrite package; a
+        # ferrite build predating f0 lacks it, so we fall back to a proof-only
+        # run + a pending marker rather than passing an unknown flag.
+        ferriteFlagAvailable =
+          resolvedFerrite.passthru.pomsEmit or false;
+
+        # The pre-f0 honest pending marker, emitted through the typed JSON
+        # serializer (builtins.toJSON → pkgs.writeText — TYPED EMISSION surface
+        # #3, never a heredoc of hand-composed JSON). Copied into the PoMS dir
+        # when the pinned ferrite predates the -ferrite.poms-dir flag.
+        pendingMarker = pkgs.writeText "ferrite-poms-pending-${sanitize key}.json"
+          (builtins.toJSON {
+            schema = "pleme-io.ferrite.poms/pending";
+            status = "pending-f0";
+            import_path = importPath;
+            source_hash = sourceHash;
+            note = "ferrite-check ran clean but the pinned ferrite predates the -ferrite.poms-dir emission flag (surface f0). Bump ferrite-pin.json to the poms-emit rev for a real PoMS.";
+          });
+
+        drv = pkgs.stdenv.mkDerivation {
+          name = "ferrite-poms-${sanitize key}";
+          src = workspaceSrc;
+          dontConfigure = true;
+          nativeBuildInputs = [ pkgs.go resolvedFerrite ];
+
+          # The proof is keyed to the compile node's incremental boundary: the
+          # source_hash is a passthru + an env var so the derivation hash tracks
+          # the same content address the compile node uses (Go-I8). Editing the
+          # package's go_files moves both node hashes together; nothing else.
+          FERRITE_SOURCE_HASH = sourceHash;
+
+          buildPhase = ''
+            runHook preBuild
+
+            export HOME="$TMPDIR"
+            export GOCACHE="$TMPDIR/gocache"
+            export GOOS="${tuple.goos}"
+            export GOARCH="${tuple.goarch}"
+            export CGO_ENABLED=0
+            export GOFLAGS=-mod=vendor
+            export GOPROXY=off
+
+            cd ${lib.escapeShellArg relativePath}
+            mkdir -p "$TMPDIR/poms"
+
+            ${if ferriteFlagAvailable then ''
+              # f0-capable ferrite: emit a real per-package PoMS.
+              ferrite-check -ferrite.poms-dir="$TMPDIR/poms" ./
+            '' else ''
+              # Pre-f0 interim: run the analyzer (exit 0 on a clean pass) and
+              # record an honest pending marker — NOT a real PoMS. Tier-honest:
+              # the proof leaf is not emitted until ferrite/poms-emit ships. The
+              # marker itself is the typed-JSON `pendingMarker` store path.
+              ferrite-check ./
+              cp ${pendingMarker} "$TMPDIR/poms/pending-poms-emit.json"
+            ''}
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/poms"
+            cp -r "$TMPDIR/poms/." "$out/poms/"
+            runHook postInstall
+          '';
+
+          passthru = {
+            inherit importPath key kind sourceHash;
+            pomsEmit = ferriteFlagAvailable;
+          };
+        };
+      in
+      {
+        inherit key importPath kind sourceHash drv;
+        poms = "${drv}/poms";
+        plan = {
+          inherit importPath kind relativePath goFiles sourceHash;
+          # The direct-dep source_hashes this proof node depends on (audit only;
+          # the derivation input is the vendored source, not these hashes).
+          edgeSourceHashes = map (e: e.sourceHash) edges;
+          pomsEmit = ferriteFlagAvailable;
+        };
+      };
   };
 
   # ── Renderer dispatch ───────────────────────────────────────────────────────
@@ -207,6 +344,9 @@ let
     , spec ? loadBuildSpec { inherit src; }
     , tuple ? resolveTuple spec
     , hostPkgs ? pkgs.buildPackages
+      # Optional caller-injected ferrite#check; else resolved from ferrite-pin.json
+      # at IFD (M-ferrite). Threaded to the real backend's mkFerriteNode.
+    , ferriteCheck ? null
     }:
     let
       renderer = spec.renderer or "coarse";
@@ -222,18 +362,26 @@ let
     else if renderer == "incremental" then
       let
         _ = goLangAssert spec;
-        backend = realBackend { workspaceSrc = src; inherit tuple hostPkgs; };
+        backend = realBackend { workspaceSrc = src; inherit tuple hostPkgs ferriteCheck; };
         g = graph.mkGraph { inherit spec tuple backend; };
       in
       builtins.seq _ {
         renderer = "incremental";
-        inherit (g) nodes root members stdTree;
+        inherit (g) nodes ferriteNodes root members stdTree;
         # The linked root binary + a symlinkJoin of every main (the many-mains
         # monorepo shape: logan/gator/auth/… each a member).
         rootBin = g.root.drv;
         allMains = pkgs.symlinkJoin {
           name = "go-all-mains";
           paths = map (m: m.drv) g.members;
+        };
+        # The whole per-package memory-safety proof surface: one PoMS dir per
+        # buildable package, joined into one tree. Each is a content-addressed
+        # derivation output the sui TieredBackend store dedups exactly like the
+        # compile `.a` archives — the attest leg (surface c) reads this.
+        allPoms = pkgs.symlinkJoin {
+          name = "go-all-poms";
+          paths = map (n: n.drv) (builtins.attrValues g.ferriteNodes);
         };
       }
     else throw "package-builder(go): unknown renderer '${renderer}' (expected coarse | incremental).";

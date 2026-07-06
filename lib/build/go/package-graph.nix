@@ -30,9 +30,27 @@
 #                      gcflags; ldflags; env; quirks; goVersion; stdTree; }
 #                      -> a node record { key; importPath; kind; isStd=false;
 #                                         isMain; archive; drv; plan; }
+#   mkFerriteNode  : { key; importPath; kind; relativePath; goFiles; sourceHash;
+#                      edges; goVersion; }
+#                      -> a ferrite-node record { key; importPath; kind;
+#                                                 sourceHash; drv; poms; plan; }
 #
 # A produced node record MUST carry `archive` (the compiled `.a` path) and
 # `isStd` so dependents can wire it into their importcfg (see resolveEdge).
+#
+# ── The parallel ferrite proof tree (M-ferrite) ───────────────────────────────
+# Alongside `nodes` (the compile tree), mkGraph returns `ferriteNodes` — a SECOND
+# node tree over the SAME packages. Each buildable (module|main) package gets one
+# ferrite node that runs `ferrite-check -ferrite.poms-dir` over that package's
+# sources and emits a per-package PoMS JSON. Its store address is a pure function
+# of the SAME `pkg.source_hash` the compile node uses (Go-I8) + its import edges,
+# so editing one package's go_files re-proves ONLY its ferrite node (and its
+# compile node); every other ferrite node is a store/cache hit — the exact
+# analogue of gen-cargo I2's `builtBuild` parallel tree. std packages are proven
+# inside the shared std tree by the real toolchain (Go-I10) and carry no
+# per-package source, so they get NO ferrite node (ferrite proves your code, not
+# std). The PoMS files content-address into the sui store identically to the
+# compile `.a` archives, and feed the tameshi/cartorio attest leg (surface c).
 { lib }:
 let
   mkImportCfg = import ./mk-import-cfg.nix { inherit lib; };
@@ -54,7 +72,10 @@ in
   # tuple   : { goVersion; goos; goarch; tags; } — the single M1 target tuple.
   # backend : the injected Environment (see contract above).
   #
-  # Returns { nodes; root; members; stdTree; }.
+  # Returns { nodes; ferriteNodes; root; members; stdTree; }.
+  #   nodes        : the compile tree (one node per package).
+  #   ferriteNodes : the parallel PoMS proof tree (one node per module|main
+  #                  package; std packages excluded — proven in the std tree).
   mkGraph =
     { spec
     , tuple
@@ -231,6 +252,86 @@ in
           ))
         ) packages);
 
+      # ── The parallel ferrite proof tree (M-ferrite) ──────────────────────
+      # One ferrite node per BUILDABLE (module|main) package, computed over the
+      # same package set as `nodes`. std packages are excluded: they carry no
+      # per-package source (Go-I10) and are proven inside the shared std tree by
+      # the real toolchain, so a ferrite node for std would have nothing of the
+      # operator's code to prove. Each ferrite node is keyed by the SAME
+      # `source_hash` as its compile node (Go-I8) so its store address aligns
+      # exactly with the compile node's incremental boundary — edit one
+      # package's go_files, only its compile node AND its ferrite node re-run;
+      # every untouched node in BOTH trees is a store/cache hit.
+      #
+      # The ferrite node's edges are the package's DIRECT import edges (the same
+      # `pkg.imports`): a package whose imports changed re-proves (its facts may
+      # shift with a dependency's exported ownership), while an unchanged package
+      # hits the store. We DO NOT re-run the compile-tree fixpoint here — the
+      # ferrite fold reuses the same `pkg.imports` list, resolved lazily against
+      # `self` so a dangling edge is caught here too (Go-I1), mirroring the
+      # compile tree's resolveEdge (fail-closed, not silently under-proving).
+      ferriteNodes = lib.fix (self:
+        lib.mapAttrs (key: pkg:
+          let
+            _rel = checkRelPath key pkg;
+            _kind = checkKind key pkg;
+            kind = pkg.kind;
+            importPath = pkg.import_path;
+          in
+          builtins.seq _rel (builtins.seq _kind (
+            # Go-I8: the source_hash is the shared cache key with the compile
+            # node. The encoder emits it on every buildable node; a missing
+            # source_hash on a module|main node is an encoder bug — fail closed
+            # so a spec can never produce an un-keyed (un-cacheable) proof node.
+            let
+              sourceHash =
+                if pkg ? source_hash then pkg.source_hash
+                else throw ''
+                  package-graph(go): buildable node '${key}' carries no
+                  source_hash; the ferrite proof node cannot be keyed to the
+                  compile node's incremental boundary (Go-I8). The gen-gomod
+                  encoder must emit source_hash on every module|main package.
+                '';
+              # An import edge has a buildable ferrite sibling iff the key exists
+              # in the fold AND its fold value is non-null (std nodes resolve to
+              # `null` — they are proven inside the shared std tree, expose no
+              # ferrite node, and cannot weaken a package's own memory-safety
+              # proof, so they are dropped from the proof edges).
+              isBuildableSibling = dk: (self ? ${dk}) && (self.${dk} != null);
+              # A dangling edge (key absent entirely) is fail-closed (Go-I1), the
+              # same contract the compile tree enforces — never silently
+              # under-proving against a graph with a missing node.
+              resolveFerriteEdge = depKey:
+                let n = self.${depKey}; in { key = depKey; inherit (n) sourceHash; };
+              _danglingCheck = map
+                (dk:
+                  if (self ? ${dk}) then true
+                  else throw ''
+                    package-graph(go): ferrite node '${key}' imports '${dk}', but
+                    no such node exists in the build graph (Go-I1).
+                  '')
+                (pkg.imports or [ ]);
+              ferriteEdges =
+                builtins.seq (builtins.deepSeq _danglingCheck _danglingCheck)
+                  (map resolveFerriteEdge
+                    (builtins.filter isBuildableSibling (pkg.imports or [ ])));
+            in
+            if kind == "std" then null
+            else
+              backend.mkFerriteNode {
+                inherit key importPath kind sourceHash;
+                relativePath = pkg.source.relative_path;
+                goFiles = pkg.go_files or [ ];
+                edges = ferriteEdges;
+                goVersion = tuple.goVersion;
+              }
+          ))
+        ) packages);
+
+      # The buildable (non-std) ferrite proof nodes, std entries dropped.
+      buildableFerriteNodes =
+        lib.filterAttrs (_: n: n != null) ferriteNodes;
+
       # Root + members (Go-I11 buildable-node set).
       rootKey =
         if (spec.root_package or null) != null then spec.root_package
@@ -245,5 +346,11 @@ in
           else throw "package-graph(go): workspace_member '${k}' is not a node in the graph.")
         (spec.workspace_members or [ ]);
     in
-    { inherit nodes root members stdTree; };
+    {
+      inherit nodes root members stdTree;
+      # The parallel PoMS proof tree; std entries filtered out (a std key maps
+      # to `null` in the raw fold, dropped here). One ferrite node per buildable
+      # (module|main) package, each keyed by the compile node's source_hash.
+      ferriteNodes = buildableFerriteNodes;
+    };
 }

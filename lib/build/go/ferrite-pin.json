@@ -1,0 +1,4 @@
+{
+  "rev": "11e42098a33f302a97ebd503c2bceb923a8bafd3",
+  "comment": "pleme-io/ferrite#check — the Go compile-time memory-safety analyzer. Resolved at IFD via builtins.getFlake against this locked rev (mirrors gen-pin.json). The PoMS emission path (ferrite/poms-emit, surface f0) lands on ferrite main via PR; bump this rev once it does. Until then the ferrite node's derivation runs the shipped ferrite-check (no per-package PoMS emission flag yet) — the graph wiring + cache-key alignment is proven at eval; the realize path is gated on the f0 rev bump. LiveTODO: point at the poms-emit rev when merged."
+}
