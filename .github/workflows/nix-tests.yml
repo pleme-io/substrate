@@ -16,6 +16,7 @@ on:
     paths:
       - 'lib/build/estante/**'
       - 'lib/build/rust/**'
+      - 'lib/build/go/**'
       - '.github/workflows/nix-tests.yml'
   pull_request:
     branches:
@@ -23,6 +24,7 @@ on:
     paths:
       - 'lib/build/estante/**'
       - 'lib/build/rust/**'
+      - 'lib/build/go/**'
       - '.github/workflows/nix-tests.yml'
   workflow_dispatch:
 
@@ -61,3 +63,16 @@ jobs:
 
       - name: quirk-apply-test.nix
         run: nix-instantiate --eval --strict lib/build/rust/quirk-apply-test.nix
+
+  go-package-graph:
+    name: go — gen-gomod M1 per-package interpreter eval tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: package-graph-test.nix
+        run: nix-instantiate --eval --strict lib/build/go/tests/package-graph-test.nix
