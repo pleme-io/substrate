@@ -232,14 +232,20 @@ let
     # not recomputed. `edges` carry the direct-dep source_hashes purely for the
     # audit `plan`; the proof itself runs against the vendored source tree.
     #
-    # LiveTODO (honest, inline): the shipped ferrite-check has no per-package
-    # PoMS emission flag yet — that is surface (f0) (ferrite/poms-emit), which
-    # lands on ferrite main via PR. Until the ferrite-pin.json rev is bumped to
-    # the poms-emit rev, `ferriteFlagAvailable` is false: this derivation runs
-    # `ferrite-check <pkg>` (the analyzer, exit 0 on a clean pass) and records a
-    # `pending-poms-emit` marker instead of a real PoMS. The graph WIRING +
-    # cache-key alignment is proven at eval regardless; the realize path emits a
-    # true PoMS only once f0 ships. Never round this up to "emits a PoMS today".
+    # LiveTODO (honest, inline): surface f0 (ferrite/poms-emit) is BUILT — the
+    # `-ferrite.poms-dir` flag + deterministic per-package emission + the
+    # `passthru.pomsEmit = true` marker all land on the ferrite `feat/poms-emit`
+    # branch. The remaining step is purely the PIN BUMP: ferrite-pin.json still
+    # points at the pre-f0 rev, so `ferriteFlagAvailable` is false at eval and
+    # this derivation takes the interim path (`ferrite-check <pkg>` — analyzer
+    # only, exit 0 on a clean pass — plus the typed-JSON `pending-poms-emit`
+    # marker). The instant the pin rev is bumped to the merged f0 commit,
+    # `resolvedFerrite.passthru.pomsEmit` flips true and the real-emit branch
+    # below runs `ferrite-check -ferrite.poms-dir` for a genuine PoMS — no other
+    # change here. The graph WIRING + cache-key alignment + the real-emit branch
+    # are proven at eval regardless (tests/package-graph-test.nix). Tier-honest:
+    # until the pin bump, this node records a marker, NOT a PoMS — never round
+    # "pending-f0 marker" up to "emits a PoMS today".
     mkFerriteNode =
       { key
       , importPath
@@ -252,9 +258,11 @@ let
       }:
       let
         # Whether the resolved ferrite-check exposes the -ferrite.poms-dir flag
-        # (surface f0). Detected by a passthru marker on the ferrite package; a
-        # ferrite build predating f0 lacks it, so we fall back to a proof-only
-        # run + a pending marker rather than passing an unknown flag.
+        # (surface f0). The SOLE signal is `passthru.pomsEmit` on the ferrite
+        # `check`/`default` package (set true by the f0 build). A ferrite build
+        # predating f0 lacks the marker → false → the interim proof-only run +
+        # pending marker (never pass an unknown flag to an old binary). Flipping
+        # ferrite-pin.json.rev to the merged f0 commit is what turns this true.
         ferriteFlagAvailable =
           resolvedFerrite.passthru.pomsEmit or false;
 
@@ -294,12 +302,35 @@ let
             export GOFLAGS=-mod=vendor
             export GOPROXY=off
 
+            # f0's emitted PoMS is a pure function of source ONLY when its
+            # timestamp is not a wall clock. The f0 emitter zeroes the timestamp
+            # unless SOURCE_DATE_EPOCH is set, then formats that fixed instant.
+            # Nix stdenv already exports SOURCE_DATE_EPOCH=1 for reproducibility;
+            # pin it explicitly here so the emitted bytes are a documented
+            # constant regardless of any future stdenv default change — keeping
+            # the PoMS document byte-stable per store path (the attest leg binds
+            # its BLAKE3 to these bytes).
+            export SOURCE_DATE_EPOCH="''${SOURCE_DATE_EPOCH:-1}"
+
             cd ${lib.escapeShellArg relativePath}
             mkdir -p "$TMPDIR/poms"
 
             ${if ferriteFlagAvailable then ''
-              # f0-capable ferrite: emit a real per-package PoMS.
+              # f0-capable ferrite: emit a real per-package PoMS. On a clean
+              # pass ferrite-check writes one <sanitized-import-path>.poms.json
+              # into the dir and exits 0; a violation exits non-zero and writes
+              # NO PoMS (unsafe code has no proof) — this derivation then fails
+              # closed, which is correct.
               ferrite-check -ferrite.poms-dir="$TMPDIR/poms" ./
+
+              # Fail closed on a silent no-write: a clean pass MUST have left a
+              # real per-package PoMS. If none landed, refuse to install an empty
+              # proof dir that allPoms would union as "proven with nothing".
+              if ! ls "$TMPDIR"/poms/*.poms.json >/dev/null 2>&1; then
+                echo "ferrite-poms: clean pass emitted no *.poms.json for ${importPath}" >&2
+                echo "  (f0 -ferrite.poms-dir contract: a clean package writes exactly one file)" >&2
+                exit 1
+              fi
             '' else ''
               # Pre-f0 interim: run the analyzer (exit 0 on a clean pass) and
               # record an honest pending marker — NOT a real PoMS. Tier-honest:
@@ -391,4 +422,10 @@ in
   inherit mkProject loadBuildSpec resolveTuple sanitize;
   # Expose the pure graph builder for advanced/composed use.
   inherit (graph) mkGraph m1Kinds;
+  # The real (side-effecting) Environment — exposed as a testability seam
+  # (TESTING-SUBSTRATE §IX: the injectable backend IS the seam). Lets an
+  # eval-time test inject a mock ferriteCheck (with/without passthru.pomsEmit)
+  # and assert the REALIZED ferrite node shape (real -ferrite.poms-dir emit vs
+  # the pending marker) without an IFD getFlake or a `nix build`.
+  inherit realBackend;
 }
