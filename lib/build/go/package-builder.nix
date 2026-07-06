@@ -162,6 +162,14 @@ let
         goarch = env.GOARCH or tuple.goarch;
         langMinor = lib.versions.majorMinor goVersion;
 
+        # Go-I11 link contract: the linker's runtime entry `runtime.main_main·f`
+        # resolves the symbol `main.main`, so a `package main` node MUST be
+        # compiled with `-p main` (what `go build` itself does) — not `-p
+        # <import-path>`, which would emit `<import-path>.main` and fail the link
+        # with "function main is undeclared in the main package". Library nodes
+        # keep their real import path (dependents' importcfg reference them by it).
+        compilePkgPath = if isMain then "main" else importPath;
+
         drv = pkgs.stdenv.mkDerivation ({
           name = "gopkg-${sanitize key}";
           src = workspaceSrc;
@@ -180,7 +188,7 @@ let
             cd ${lib.escapeShellArg relativePath}
 
             go tool compile \
-              -p ${lib.escapeShellArg importPath} \
+              -p ${lib.escapeShellArg compilePkgPath} \
               -importcfg ${importcfg} \
               ${lib.optionalString (embedcfg != null) "-embedcfg ${embedcfg}"} \
               -complete \
