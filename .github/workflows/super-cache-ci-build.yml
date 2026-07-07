@@ -251,6 +251,18 @@ jobs:
           output-format: cyclonedx-json
           output-file: sbom.cyclonedx.json
 
+      # L-cve/vex (SOURCE axis) — RA-5/SI-2. Trivy fs-scan of the checked-out
+      #   source tree. Complements the zot-pull-scan IMAGE axis below (each
+      #   finds CVEs the other misses — source lockfiles vs OS/distro layers).
+      #   osv-scanner as the 2nd offline lockfile source + OpenVEX exploitability
+      #   suppression (cve ⊖ vex) are the destination refinements.
+      - id: trivy-src
+        if: ${{ inputs.security-layers }}
+        uses: pleme-io/actions/trivy-fs-scan@main
+        with:
+          workdir: "."
+          severity: "HIGH,CRITICAL"
+
       # L-sign — SI-7/CM-14/SR-11. cosign sign the AUTOBUMP image (keyless
       #   Fulcio+Rekor by default; cofre/ESO/HSM key at IL5). Digest-bound.
       - id: cosign
