@@ -1,0 +1,168 @@
+# Reusable workflow: the ACROSS-IMAGES super-cache-ci build — build ALL of a
+# flake's (service × arch) image cells CONCURRENTLY on the camelot spot builder
+# pool (theory/SUPER-CACHE-CI.md; the max-parallel default). This is the
+# across-images level of the two-level max-parallel contract; the per-cell verb
+# `super-cache-ci-build.yml` owns the within-derivation level (nix --max-jobs/
+# --cores auto-tuned to the box, via pleme-io/actions/nix-image).
+#
+# Wall-clock ≈ (shared-closure-built-once, tiered-cache-hit for every later cell)
+#            + slowest-single-service
+# — NOT the sum of the services. The tiered super-cache (Redis L1 → Postgres L2 →
+# object L3, BLAKE3 content-addressed) dedups the shared Go/nixpkgs closure across
+# every cell: the FIRST cell that touches a shared derivation builds it; every
+# concurrent sibling that needs the same content-hash gets a cache HIT. So the
+# fan does not multiply the shared work — it only adds the per-service delta.
+#
+# TWO JOBS (the GHA dynamic-matrix idiom — a computed matrix cannot be a `uses:`
+# strategy in one job, so DISCOVER emits it and BUILD fans over it):
+#   1. discover — enumerate the flake's dockerImage:<arch>:<svc> attrs via the
+#      build-matrix action → the {service × arch} matrix JSON.
+#   2. build    — strategy.matrix: fromJSON(discover.matrix); one job per cell,
+#      each `uses:` super-cache-ci-build.yml. max-parallel UNCAPPED by default
+#      (fan every cell at once; the scale-to-zero spot pool absorbs the burst).
+#
+# ── Consumer footprint (the whole thing — a 5-line shim) ────────────────────
+#   # .github/workflows/build.yml   (e.g. akeyless-nix-images — all 9 services)
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     build-all:
+#       uses: pleme-io/substrate/.github/workflows/super-cache-ci-build-matrix.yml@main
+#       with: { arches: "amd64", image-base: "dockerImage" }
+#       secrets: inherit
+#
+# ── TIER-HONEST (theory/SUPER-CACHE-CI.md §X ledger; never round up) ─────────
+# * The fan is a REAL GHA matrix over the flake's real attrs (build-matrix is
+#   SHIPPABLE-NOW — honest per-service arch discovery, never a hardcoded pair).
+# * "wall-clock ≈ slowest-service, not the sum" is the DESIGN result of the
+#   tiered super-cache deduping the shared closure — TRUE ONCE the live tiered
+#   Redis/Pg backend ships (super-cache-{restore,build,save} rows 4/5/6 are
+#   LiveTODO). Until then every cell builds independently (the fan STILL runs
+#   concurrently — so wall-clock is already slowest-service on wall-clock, but
+#   the shared closure is rebuilt per cell rather than reused). The concurrency
+#   is shipped; the cross-cell dedup is the LiveTODO the cache-backend closes.
+# * matrix-max-parallel: 0 = uncapped. A positive value caps concurrent cells
+#   (only when a spot-quota genuinely bounds the burst — a C4 ceiling, not a
+#   default). The scale-to-zero 100%-spot pool is sized to absorb the full fan.
+
+name: super-cache-ci-build-matrix
+
+on:
+  workflow_call:
+    inputs:
+      flake-ref:
+        description: "Flake ref to enumerate + build from."
+        type: string
+        default: "."
+      image-base:
+        description: "Image attr base — only <base>:<arch>:<svc> attrs become cells (default dockerImage)."
+        type: string
+        default: "dockerImage"
+      arches:
+        description: "Space/comma arch allowlist (empty = all the flake exposes). For a NATIVE build, one arch per native runner."
+        type: string
+        default: "amd64"
+      services:
+        description: "Space/comma service allowlist (empty = every service the flake exposes)."
+        type: string
+        default: ""
+      exclude:
+        description: "Space/comma <arch>:<svc> or bare <svc> exclusions."
+        type: string
+        default: ""
+      eval-system:
+        description: "packages.<system> to enumerate the colon-triple attrs under (default x86_64-linux)."
+        type: string
+        default: "x86_64-linux"
+      matrix-max-parallel:
+        description: "Cap on concurrent build cells. 0 = UNCAPPED (fan every cell; the scale-to-zero spot pool absorbs the burst). Positive only when a spot quota bounds it."
+        type: number
+        default: 0
+      runner:
+        description: "JSON array of runner labels for each build cell. Default = the camelot in-cluster spot builder."
+        type: string
+        default: '["self-hosted", "camelot", "amd64"]'
+      sui-mode:
+        description: "connect | ephemeral — the sui-service-up backend profile per cell."
+        type: string
+        default: "connect"
+      lang:
+        description: "gen-build-spec language (auto | cargo | npm | pip | gomod)."
+        type: string
+        default: "auto"
+      registry:
+        description: "OCI registry host for the AUTOBUMP publish + faucet pull."
+        type: string
+        default: "ghcr.io"
+      fail-on-severity:
+        description: "zot-pull-scan faucet gate: lowest severity that REJECTS."
+        type: string
+        default: "HIGH"
+      enforce-posture:
+        description: "breathe-runner: fail a cell on an unmet spot/taint posture (false = advisory dry-run)."
+        type: boolean
+        default: true
+      require-build:
+        description: "super-cache-build: a derive with no live sui build path is a hard failure (true) instead of an honest built=false LiveTODO."
+        type: boolean
+        default: false
+    secrets:
+      GHCR_TOKEN:
+        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # 1 — DISCOVER: enumerate the flake's (service × arch) image cells. The
+  #     build-matrix action emits GHA matrix JSON: {"include":[{image,arch,...}]}.
+  #     require-nonempty=true ⇒ a surprise-empty flake is a loud failure, never a
+  #     zero-cell fan a downstream job silently skips.
+  discover:
+    name: discover image cells
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - id: matrix
+        uses: pleme-io/actions/build-matrix@main
+        with:
+          flake-ref: ${{ inputs.flake-ref }}
+          eval-system: ${{ inputs.eval-system }}
+          image-base: ${{ inputs.image-base }}
+          services: ${{ inputs.services }}
+          arches: ${{ inputs.arches }}
+          exclude: ${{ inputs.exclude }}
+          require-nonempty: "true"
+
+  # 2 — BUILD: fan the per-cell super-cache-ci build over EVERY (service × arch)
+  #     cell CONCURRENTLY. fail-fast:false so one service's regression does not
+  #     cancel the sibling cells (the full diagnostic surfaces in one run).
+  #     max-parallel UNCAPPED by default — the 100%-spot scale-to-zero builder
+  #     pool absorbs the burst (0→N in seconds); a positive cap is only for a
+  #     genuine spot quota.
+  build:
+    name: build ${{ matrix.image }} · ${{ matrix.arch }}
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.matrix-max-parallel > 0 && inputs.matrix-max-parallel || 256 }}
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    uses: pleme-io/substrate/.github/workflows/super-cache-ci-build.yml@main
+    with:
+      svc: ${{ matrix.image }}
+      arch: ${{ matrix.arch }}
+      runner: ${{ inputs.runner }}
+      sui-mode: ${{ inputs.sui-mode }}
+      lang: ${{ inputs.lang }}
+      image-attr: ${{ inputs.image-base }}
+      registry: ${{ inputs.registry }}
+      fail-on-severity: ${{ inputs.fail-on-severity }}
+      enforce-posture: ${{ inputs.enforce-posture }}
+      require-build: ${{ inputs.require-build }}
+    secrets: inherit
