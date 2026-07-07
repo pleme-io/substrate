@@ -100,11 +100,33 @@ let
       meta.mainProgram = serviceName;
       # Skip buildGoModule's strict pre-check; use raw `go install` with
       # GOFLAGS=-mod=vendor (already exported by buildGoModule).
+      #
+      # ADAPTIVE CORE-PARTITION (super-cache-ci) — HONOR nix --cores.
+      # The raw `go install` MUST pass `-p $NIX_BUILD_CORES` explicitly:
+      # buildGoModule's setup hook sets its OWN `GOFLAGS=-mod=vendor`
+      # (clobbering any inherited `-p`), and Go otherwise defaults build
+      # action-parallelism to GOMAXPROCS = the HOST cpu count — so nix
+      # `--cores N` is INERT for this raw invocation. When N images build
+      # concurrently (nix `--max-jobs N`) each unbounded `go install` fans
+      # out to ALL host cores ⇒ N× over-subscription (MEASURED: 9 concurrent
+      # akeyless Go compiles on a 96-vCPU node peaked at load ~310 = 3.1×,
+      # unchanged by nix `--cores` alone, because this line ignored it).
+      # `-p` bounds parallel build actions; GOMAXPROCS bounds the compiler's
+      # own goroutines — both to NIX_BUILD_CORES so the nix-computed partition
+      # (max-jobs N × cores V/N ≤ V) is actually realized. 0 = Go's default
+      # (nix passes 0 for --cores 0, i.e. "all cores" — the lone-build case).
       buildPhase = ''
         runHook preBuild
+        _nbc="''${NIX_BUILD_CORES:-0}"
+        _pflag=""
+        if [ "$_nbc" -gt 0 ] 2>/dev/null; then
+          _pflag="-p $_nbc"
+          export GOMAXPROCS="$_nbc"
+          echo "go build parallelism bounded to NIX_BUILD_CORES=$_nbc (-p + GOMAXPROCS)"
+        fi
         for pkg in $subPackages; do
           echo "Building subPackage ./$pkg"
-          go install -ldflags="$ldflags" ./$pkg
+          go install $_pflag -ldflags="$ldflags" ./$pkg
         done
         runHook postBuild
       '';
