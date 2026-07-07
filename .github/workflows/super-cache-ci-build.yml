@@ -12,7 +12,11 @@
 #   super-cache-save    → write-if-absent persist to the durable tiers (no lock)
 #   nix-image         → multi-arch nix OCI tarball (dockerTools, NO Dockerfile)
 #   ghcr-publish      → AUTOBUMP exact tag <arch>-r<run>-<sha> to private ghcr
-#   zot-pull-scan     → the faucet gate: pull + Trivy-scan before the trusted zone
+#   sbom-generate     → L-sbom: syft SBOM (CycloneDX) — CM-8 inventory
+#   cosign-sign       → L-sign: cosign the image (keyless Fulcio+Rekor) — SI-7
+#   slsa-attest       → L-provenance: SLSA in-toto provenance — SR-3/4 (Rev5)
+#   provenance-attest → L-transparency: cosign sign-blob + Rekor over the SBOM
+#   zot-pull-scan     → L-cve/vex: the faucet gate — pull + Trivy-scan — RA-5
 #   tameshi-attest    → signed BLAKE3 build receipt
 #
 # ── Consumer footprint (the whole thing — a 5-line shim) ────────────────────
@@ -99,6 +103,21 @@ on:
         description: "super-cache-build: a derive with no live sui build path is a hard failure (true) instead of an honest built=false LiveTODO (false)."
         type: boolean
         default: false
+      security-layers:
+        description: >-
+          Run the per-derivation security layers (L-sbom / L-sign / L-provenance
+          / L-transparency) as live steps. The engines are the industry
+          standards (syft / Sigstore cosign+rekor / SLSA-in-toto) turned on
+          over the AUTOBUMP artifact. See theory/SUPER-CACHE-CI-SECURITY.md.
+        type: boolean
+        default: true
+      cosign-key-ref:
+        description: >-
+          cosign key reference for L-sign (file/KMS/k8s:// from cofre/ESO).
+          Empty = keyless Fulcio+Rekor (requires id-token: write). IL5 uses a
+          HSM-backed key OR DoD-PKI keyless.
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -107,6 +126,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write   # keyless cosign/Fulcio OIDC for the L-sign + L-transparency layers
 
 jobs:
   super-cache-build:
@@ -116,6 +136,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write   # keyless cosign/Fulcio OIDC (L-sign + L-transparency)
     steps:
       - uses: actions/checkout@v4
 
@@ -206,10 +227,62 @@ jobs:
           sha: ${{ github.sha }}
           tarball: ${{ steps.image.outputs.tarball-amd64 }}
 
+      # ── PER-DERIVATION SECURITY LAYERS (theory/SUPER-CACHE-CI-SECURITY.md) ──
+      # OSS-first, TURN-ON (the verbs are authored; these are their first live
+      # callers). Each verdict is content-addressed → build-once-reuse (PDC
+      # clause 4: the cache key IS the attestation address). The enjulho
+      # consumer surface that CONSUMES these verdicts is shipped-typed in
+      # pleme-lib compliance.supplychain.* + security.perDerivation.* — this
+      # pipeline PRODUCES them. Gated on inputs.security-layers.
+      #
+      # TIER-HONEST: these run wherever the job runs; the live end-to-end (a
+      # real derive through a stood-up sui service on the camelot in-cluster
+      # ARC runner) is the pipeline's existing named LiveTODO. The steps
+      # thread + execute the standard tools today; a digest-output from
+      # ghcr-publish (so L-sign binds a @sha256: without a tag→digest resolve)
+      # + the verdict store keyed by ContentHash (§4.4) are the refinements.
+
+      # L-sbom — CM-8 inventory. syft SBOM (CycloneDX). closure-driven sbomnix
+      #   is the destination refinement (reads the Nix closure, dedups per hash).
+      - id: sbom
+        if: ${{ inputs.security-layers }}
+        uses: pleme-io/actions/sbom-generate@main
+        with:
+          output-format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+
+      # L-sign — SI-7/CM-14/SR-11. cosign sign the AUTOBUMP image (keyless
+      #   Fulcio+Rekor by default; cofre/ESO/HSM key at IL5). Digest-bound.
+      - id: cosign
+        if: ${{ inputs.security-layers }}
+        uses: pleme-io/actions/cosign-sign@main
+        with:
+          image-ref: ${{ steps.publish.outputs.ref }}
+          key-ref: ${{ inputs.cosign-key-ref }}
+
+      # L-provenance/vsa — SR-3/4, SA-10 (SR is new in 800-53 Rev 5). SLSA
+      #   in-toto provenance over the built artifact; the maturity metric.
+      - id: slsa
+        if: ${{ inputs.security-layers }}
+        uses: pleme-io/actions/slsa-attest@main
+        with:
+          artifact-path: ${{ steps.image.outputs.tarball-amd64 }}
+
+      # L-transparency — AU-2/AU-12. cosign sign-blob (keyless) + Rekor over
+      #   the SBOM → a public transparency record. The offline air-gap variant
+      #   (cartorio inclusion proof at IL6, where Rekor is unreachable) is the
+      #   genuine pleme-io void — a named follow-on, not this online path.
+      - id: transparency
+        if: ${{ inputs.security-layers && steps.sbom.outputs.sbom-path != '' }}
+        uses: pleme-io/actions/provenance-attest@main
+        with:
+          artifact-path: ${{ steps.sbom.outputs.sbom-path }}
+
       # 9 — the faucet gate: pull the published image + Trivy-scan the PULLED
       #     bytes; admit into the trusted zone ONLY on a clear severity gate.
       #     (Canonically ghcr is mirrored → zot first; scanning the published
       #     ref here is a real gate. The ghcr→zot mirror step is a LiveTODO.)
+      #     L-cve/vex of the per-derivation stack — already live.
       - id: scan
         uses: pleme-io/actions/zot-pull-scan@main
         with:
