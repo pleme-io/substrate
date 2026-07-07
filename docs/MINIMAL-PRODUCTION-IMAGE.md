@@ -53,6 +53,7 @@ Strict non-binary closure of a static service = **{ the binary, ca-bundle }**.
 | `lib/build/go/service-flake.nix` | `minimal` | **`true`** | the production Go-service flake — minimal by default |
 | `lib/build/go/service-flake.nix` | `goTags` | `[timetzdata netgo osusergo]` | static Go build tags (applied only when `minimal`) |
 | `lib/build/go/docker.nix::mkGoServiceImage` | `minimal` | **`true`** | one-call helper — minimal by default |
+| all three (`docker.nix`, `service-flake.nix`) | `withCacert` | **`true`** | keep the CA-cert bundle (outbound TLS needs it; a 0-code-CVE data pkg). `false` → true-scratch (binary only, ZERO non-binary closure) for a no-outbound-TLS service. `SSL_CERT_FILE` is emitted only when the bundle ships. The strip target is tini+glibc, never cacert. |
 
 ¹ `mkGoDockerImage` is the raw builder and stays back-compat `false`; the
 **production** entry points (`service-flake.nix`, `mkGoServiceImage`) default it
@@ -62,7 +63,7 @@ Strict non-binary closure of a static service = **{ the binary, ca-bundle }**.
 
 | Mode | Base contents | Ships a shell? | glibc from base? |
 |---|---|---|---|
-| `minimal: true` | `cacert` | no | no |
+| `minimal: true` | `cacert` (or nothing if `withCacert = false`) | no | no |
 | `distroless: true` (+`tini`) | `cacert` (+ `tini`) | no | via tini (~32.6 MB) |
 | neither (fat/debug) | `cacert` + `busybox` | **yes** | no |
 
