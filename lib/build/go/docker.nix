@@ -50,6 +50,14 @@
   #                   (~32.6 MB / 4 OS pkgs incl. glibc). `minimal: true`
   #                   drops it. Keep only for genuinely multi-process
   #                   containers that must reap zombies.
+  #   withCacert    — include the CA-cert bundle (default true). A service
+  #                   that makes outbound TLS NEEDS it, so it is kept by
+  #                   default (and cacert is a 0-code-CVE, itself-only data
+  #                   package — dropping it wins nothing on the CVE axis,
+  #                   only ~0.65 MB). A pure-compute service with NO outbound
+  #                   TLS may set `withCacert = false` for a true-scratch,
+  #                   binary-only image (ZERO non-binary closure). Assess
+  #                   per-service; the strip target is tini+glibc, NOT cacert.
   mkGoDockerImage = pkgs: {
     name,
     binary,
@@ -66,6 +74,9 @@
     # ─── Phase 2 hardening knobs ───────────────────────────────────
     distroless ? false,
     tini ? true,
+    # Keep the CA-cert bundle (default true; needed for outbound TLS).
+    # Set false ONLY for a service with no outbound TLS → true-scratch.
+    withCacert ? true,
     labels ? {},
     description ? null,
     fleetSourceUrl ? null,
@@ -87,6 +98,7 @@
       (check.bool "minimal" minimal)
       (check.bool "distroless" distroless)
       (check.bool "tini" tini)
+      (check.bool "withCacert" withCacert)
     ];
 
     mainPort = ports.http or ports.api or (lib.head (lib.attrValues ports));
@@ -101,19 +113,21 @@
     defaultEntrypoint = [ "${binary}/bin/${name}" ];
 
     # Base contents — the MINIMAL-PRODUCTION-IMAGE base-selection ladder.
-    #   minimal    → scratch (cacert only; no tini ⇒ no glibc, no shell).
+    #   minimal    → scratch (cacert iff withCacert; no tini ⇒ no glibc, no shell).
     #                Overrides distroless/tini — the strict production stack.
     #   distroless → cacert (+ tini iff `tini`); no busybox.
     #   (neither)  → cacert + busybox (the fat/debug base).
-    # The binary's OWN runtime closure is added by buildLayeredImage on top
-    # of this base, so a dynamic (CGO) binary still gets its libc via its
-    # closure while a static one ships nothing but the cert bundle.
+    # `withCacert` threads through every branch: a no-outbound-TLS service can
+    # ship a true-scratch (binary-only) image. The binary's OWN runtime closure
+    # is added by buildLayeredImage on top of this base, so a dynamic (CGO)
+    # binary still gets its libc via its closure while a static one ships
+    # nothing but the cert bundle (or nothing at all when withCacert = false).
     baseContents =
       if minimal
-      then distrolessHelper.mkDistrolessBase pkgs { withTini = false; withCacert = true; }
+      then distrolessHelper.mkDistrolessBase pkgs { withTini = false; inherit withCacert; }
       else if distroless
-      then distrolessHelper.mkDistrolessBase pkgs { withTini = tini; withCacert = true; }
-      else [ cacert busybox ];
+      then distrolessHelper.mkDistrolessBase pkgs { withTini = tini; inherit withCacert; }
+      else (lib.optionals withCacert [ cacert ]) ++ [ busybox ];
 
     # OCI annotations auto-injected for every image. Operators can
     # override + extend via `labels`.
@@ -140,8 +154,9 @@
     config = {
       Entrypoint = if entrypoint != null then entrypoint else defaultEntrypoint;
       ExposedPorts = exposedPorts;
-      Env = [
-        sslEnv
+      # SSL_CERT_FILE is set only when the cert bundle actually ships — a
+      # dangling pointer at an absent store path would be a lie.
+      Env = (lib.optional withCacert sslEnv) ++ [
         "GIT_SHA=nix-build"
         # USER/HOME defaults for distroless+numeric-uid images. Go's
         # `os/user.Current()` (and several libraries that chain through
@@ -177,6 +192,9 @@
     buildInputs ? [],
     ldflags ? [],
     minimal ? true,
+    # Keep the CA-cert bundle (default true; needed for outbound TLS). Set
+    # false only for a no-outbound-TLS service → true-scratch (binary only).
+    withCacert ? true,
     # Static-friendly Go build tags: embed zoneinfo (timetzdata), use the
     # pure-Go net + os/user resolvers (netgo/osusergo) so the binary drops
     # its /etc/{protocols,services,mime.types,passwd} references. Only
@@ -193,6 +211,6 @@
     };
   in
   (pkgs.callPackage ./go-docker.nix {}).mkGoDockerImage pkgs {
-    inherit name binary tag architecture ports env minimal;
+    inherit name binary tag architecture ports env minimal withCacert;
   };
 }

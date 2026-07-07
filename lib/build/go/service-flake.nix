@@ -31,6 +31,11 @@
 #   goTags     = [ ... ]     — static-friendly Go build tags (only applied
 #                             when minimal); default embeds zoneinfo + uses
 #                             the pure-Go net/os-user resolvers.
+#   withCacert = true        — keep the CA-cert bundle (DEFAULT; outbound TLS
+#                             needs it, and cacert is a 0-code-CVE data pkg).
+#                             false → true-scratch (binary only) for a service
+#                             that makes no outbound TLS. The strip target is
+#                             tini+glibc, never cacert.
 #
 # Hardening knobs are opt-in:
 #   distroless = true       — cacert + tini base, no busybox/shell
@@ -65,6 +70,9 @@
   # ── MINIMAL-PRODUCTION-IMAGE (default-on for production) ────────────
   minimal ? true,
   goTags ? [ "timetzdata" "netgo" "osusergo" ],
+  # Keep the CA-cert bundle (default true; needed for outbound TLS). Set
+  # false only for a no-outbound-TLS service → true-scratch (binary only).
+  withCacert ? true,
   # ── Phase 2 hardening (opt-in) ─────────────────────────────────────
   distroless ? false,
   tini ? true,
@@ -174,7 +182,7 @@ let
     image = goDocker.mkGoDockerImage pkgs {
       name = serviceName;
       inherit binary ports env user workDir entrypoint
-              minimal distroless tini labels description fleetSourceUrl;
+              minimal withCacert distroless tini labels description fleetSourceUrl;
       tag = "${arch}-latest";  # release-time pipeline rewrites
       architecture = arch;
     };
