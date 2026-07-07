@@ -160,13 +160,26 @@
         };
 
         # Aggregate-before-assert eval-test derivations for the vocabulary.
-        checks = eachSystem (system: {
+        checks = eachSystem (system: let
+          pkgs = import nixpkgs { inherit system; };
+        in {
           iroha =
-            (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck
-            (import nixpkgs { inherit system; });
+            (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck pkgs;
           kata =
-            (import ./lib/kata { lib = nixpkgs.lib; }).tests.asCheck
-            (import nixpkgs { inherit system; });
+            (import ./lib/kata { lib = nixpkgs.lib; }).tests.asCheck pkgs;
+
+          # MINIMAL-PRODUCTION-IMAGE — pure base-selection forcing-function
+          # (no shell / no init / no libc in the minimal base). Runs on every
+          # system incl. darwin.
+          go-minimal-image =
+            (import ./lib/build/go/tests/minimal-image-test.nix { inherit pkgs; }).asCheck pkgs;
+        }
+        # The end-to-end build+RUN gate: build the smoke fixture as a minimal
+        # scratch-base image and serve /health=200. Linux-only (execs a linux
+        # binary + binds a socket); built by super-cache-ci / CI.
+        // nixpkgs.lib.optionalAttrs (nixpkgs.lib.hasSuffix "linux" system) {
+          go-minimal-image-serves =
+            import ./lib/build/go/tests/minimal-image-serve-test.nix { inherit pkgs; };
         });
 
         # Devenv modules for consumer repos
@@ -220,6 +233,9 @@
         goServiceFlakeBuilder = ./lib/build/go/service-flake.nix;
         goToolImageFlakeBuilder = ./lib/build/go/tool-image-flake.nix;
         goActionReleaseFlakeBuilder = ./lib/build/go/action-release-flake.nix;
+        # MINIMAL-PRODUCTION-IMAGE conformance-check generator — run any
+        # built Go image through the strict-stack forcing-function.
+        goMinimalImageCheckBuilder = ./lib/build/go/minimal-image-check.nix;
 
         # Borealis pattern-registry §4f gap-fills (highest leverage, Nix).
         # goPrivateModuleBuilder — hermetic buildGoModule for PRIVATE org Go

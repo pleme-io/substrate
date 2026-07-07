@@ -23,6 +23,19 @@
 {
   # Build a layered Docker image from a Go binary.
   #
+  # MINIMAL-PRODUCTION-IMAGE knob (default-on for production; see
+  # docs/MINIMAL-PRODUCTION-IMAGE.md):
+  #   minimal       — the strict production posture. Forces the `scratch`
+  #                   base (cacert ONLY): no shell, no coreutils, no
+  #                   package-manager, NO init (tini), and hence no glibc
+  #                   subtree pulled by tini. A statically-linked
+  #                   (CGO_ENABLED=0) Go binary is self-contained; its own
+  #                   runtime closure supplies whatever it truly needs, so
+  #                   the shipped non-binary closure collapses to the cert
+  #                   bundle (~0.65 MB) and the OS-CVE surface to 1 data
+  #                   package. When true it OVERRIDES `distroless`/`tini`.
+  #                   Self-declares via the `com.pleme.image.minimal` label.
+  #
   # FedRAMP-High knobs (Phase 2 hardening, 2026-05):
   #   distroless    — drop busybox; use cacert (+ tini) only. Smaller
   #                   attack surface, no shell, no coreutils.
@@ -30,9 +43,13 @@
   #                   default OCI annotation set from mkStandardLabels.
   #   created       — ISO timestamp for OCI `created` annotation.
   #                   Default 1970-01-01T00:00:01Z (reproducibility).
-  #   tini          — when distroless=true, include tini as PID 1
-  #                   (Go programs typically handle signals themselves,
-  #                    but tini is cheap insurance against zombie procs).
+  #   tini          — when distroless=true (and NOT minimal), include tini
+  #                   as PID 1. Go programs handle their own signals, so
+  #                   tini is rarely needed — and it is NOT free: tini is
+  #                   dynamically linked and drags the whole glibc subtree
+  #                   (~32.6 MB / 4 OS pkgs incl. glibc). `minimal: true`
+  #                   drops it. Keep only for genuinely multi-process
+  #                   containers that must reap zombies.
   mkGoDockerImage = pkgs: {
     name,
     binary,
@@ -44,6 +61,8 @@
     workDir ? "/app",
     entrypoint ? null,
     extraContents ? [],
+    # ─── MINIMAL-PRODUCTION-IMAGE (default-on for production) ───────
+    minimal ? false,
     # ─── Phase 2 hardening knobs ───────────────────────────────────
     distroless ? false,
     tini ? true,
@@ -65,6 +84,9 @@
       (check.str "user" user)
       (check.str "workDir" workDir)
       (check.list "extraContents" extraContents)
+      (check.bool "minimal" minimal)
+      (check.bool "distroless" distroless)
+      (check.bool "tini" tini)
     ];
 
     mainPort = ports.http or ports.api or (lib.head (lib.attrValues ports));
@@ -78,9 +100,18 @@
 
     defaultEntrypoint = [ "${binary}/bin/${name}" ];
 
-    # Base contents — distroless drops busybox.
+    # Base contents — the MINIMAL-PRODUCTION-IMAGE base-selection ladder.
+    #   minimal    → scratch (cacert only; no tini ⇒ no glibc, no shell).
+    #                Overrides distroless/tini — the strict production stack.
+    #   distroless → cacert (+ tini iff `tini`); no busybox.
+    #   (neither)  → cacert + busybox (the fat/debug base).
+    # The binary's OWN runtime closure is added by buildLayeredImage on top
+    # of this base, so a dynamic (CGO) binary still gets its libc via its
+    # closure while a static one ships nothing but the cert bundle.
     baseContents =
-      if distroless
+      if minimal
+      then distrolessHelper.mkDistrolessBase pkgs { withTini = false; withCacert = true; }
+      else if distroless
       then distrolessHelper.mkDistrolessBase pkgs { withTini = tini; withCacert = true; }
       else [ cacert busybox ];
 
@@ -97,6 +128,10 @@
                  "org.opencontainers.image.documentation" = "${fleetSourceUrl}#readme"; }
           else {})
       // { "org.opencontainers.image.created" = created; }
+      # Self-declare the posture so the shipped artifact answers "is this a
+      # MINIMAL-PRODUCTION-IMAGE?" without unpacking it — the CVE-gate /
+      # admission surface can key off it.
+      // { "com.pleme.image.minimal" = if minimal then "true" else "false"; }
       // labels;
   in
   dockerTools.buildLayeredImage {
@@ -124,6 +159,11 @@
   };
 
   # Build a multi-stage Go binary + Docker image in one call.
+  #
+  # MINIMAL-PRODUCTION-IMAGE: `minimal` defaults ON. The binary is built
+  # CGO_ENABLED=0 (static) with the static-friendly Go build tags, and the
+  # image ships the scratch base. Set `minimal = false` for a fat/debug
+  # image with a shell.
   mkGoServiceImage = pkgs: {
     name,
     src,
@@ -136,16 +176,23 @@
     env ? [],
     buildInputs ? [],
     ldflags ? [],
+    minimal ? true,
+    # Static-friendly Go build tags: embed zoneinfo (timetzdata), use the
+    # pure-Go net + os/user resolvers (netgo/osusergo) so the binary drops
+    # its /etc/{protocols,services,mime.types,passwd} references. Only
+    # applied when `minimal`; set [] to opt out.
+    goTags ? [ "timetzdata" "netgo" "osusergo" ],
   }: let
+    tags = if minimal then goTags else [];
     binary = pkgs.buildGoModule {
       pname = name;
-      inherit version src vendorHash subPackages ldflags;
+      inherit version src vendorHash subPackages ldflags tags;
       inherit buildInputs;
-      CGO_ENABLED = 0;
+      env = { CGO_ENABLED = "0"; };
       meta.mainProgram = name;
     };
   in
   (pkgs.callPackage ./go-docker.nix {}).mkGoDockerImage pkgs {
-    inherit name binary tag architecture ports env;
+    inherit name binary tag architecture ports env minimal;
   };
 }

@@ -20,8 +20,22 @@
 #       ports       = { http = 8080; metrics = 9090; };
 #     };
 #
+# MINIMAL-PRODUCTION-IMAGE (default-on; docs/MINIMAL-PRODUCTION-IMAGE.md):
+#   minimal    = true       — DEFAULT. Strict production stack: scratch
+#                             base (cacert only, no shell/coreutils/pkg-mgr,
+#                             NO tini ⇒ no glibc subtree), CGO_ENABLED=0
+#                             static binary built with the static Go tags
+#                             (timetzdata,netgo,osusergo). This IS what
+#                             ships and what the build tests build+run.
+#                             Set false for a fat/debug image with a shell.
+#   goTags     = [ ... ]     — static-friendly Go build tags (only applied
+#                             when minimal); default embeds zoneinfo + uses
+#                             the pure-Go net/os-user resolvers.
+#
 # Hardening knobs are opt-in:
 #   distroless = true       — cacert + tini base, no busybox/shell
+#                             (superseded by `minimal`; kept for the rare
+#                              multi-process container that wants tini)
 #   sign       = true       — cosign keyless sign after push
 #   sbom       = true       — emit SBOM attestation alongside image
 #   cveGate    = { ... }    — trivy/grype gate pre-push
@@ -48,6 +62,9 @@
   workDir ? "/app",
   entrypoint ? null,
   buildInputs ? [],
+  # ── MINIMAL-PRODUCTION-IMAGE (default-on for production) ────────────
+  minimal ? true,
+  goTags ? [ "timetzdata" "netgo" "osusergo" ],
   # ── Phase 2 hardening (opt-in) ─────────────────────────────────────
   distroless ? false,
   tini ? true,
@@ -71,6 +88,15 @@ let
   mkPerSystem = system: let
     pkgs = import nixpkgs { inherit system; };
     arch = archForSystem.${system};
+
+    # MINIMAL-PRODUCTION-IMAGE — the static-friendly Go build tags are
+    # applied only in the minimal posture. `netgo`/`osusergo` drop the
+    # /etc/{protocols,services,passwd} references; `timetzdata` embeds the
+    # zoneinfo — so the static binary needs no OS data packages and the
+    # scratch base ships nothing but the cert bundle.
+    effectiveTags = if minimal then goTags else [];
+    goTagsArg = nixpkgs.lib.optionalString (effectiveTags != [])
+      ''-tags "${nixpkgs.lib.concatStringsSep "," effectiveTags}"'';
 
     goDocker = import ./docker.nix;
     imageReleaseLib = import ../../service/image-release.nix {
@@ -126,7 +152,7 @@ let
         fi
         for pkg in $subPackages; do
           echo "Building subPackage ./$pkg"
-          go install $_pflag -ldflags="$ldflags" ./$pkg
+          go install $_pflag ${goTagsArg} -ldflags="$ldflags" ./$pkg
         done
         runHook postBuild
       '';
@@ -143,16 +169,17 @@ let
       '';
     };
 
-    # The OCI image for THIS system's arch.
+    # The OCI image for THIS system's arch. `minimal` overrides
+    # distroless/tini in docker.nix — the scratch base is what ships.
     image = goDocker.mkGoDockerImage pkgs {
       name = serviceName;
       inherit binary ports env user workDir entrypoint
-              distroless tini labels description fleetSourceUrl;
+              minimal distroless tini labels description fleetSourceUrl;
       tag = "${arch}-latest";  # release-time pipeline rewrites
       architecture = arch;
     };
   in {
-    inherit binary image arch pkgs;
+    inherit binary image arch pkgs minimal;
 
     # Release app — invokes forge image-release with both arch images.
     releaseApp = imageReleaseLib.mkImageReleaseApp {
