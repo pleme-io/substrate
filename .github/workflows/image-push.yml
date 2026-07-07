@@ -89,6 +89,10 @@ on:
         description: "Path to a netrc file (present on the runner) authenticating to extraSubstituters. For a token-gated attic cache, mount the read token as a netrc and point here. Empty = anonymous."
         type: string
         default: ""
+      requireSigs:
+        description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters — e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -133,6 +137,7 @@ jobs:
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.netrcFile && format('netrc-file = {0}', inputs.netrcFile) || '' }}
+            ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
       # `nix build` writes ./result as a symlink into /nix/store/...
       # The oci-image-push Docker action doesn't have /nix/store mounted,
