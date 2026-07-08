@@ -365,6 +365,25 @@ in rec {
   rustSpecInvariants = import ./build/rust/spec-invariants.nix;
 
   # ============================================================================
+  # EFRAME / EGUI GUI-APP BUILD KIT (from build/rust/eframe.nix)
+  # ============================================================================
+  # The reusable native-dependency surface for a Rust GUI app on eframe/egui
+  # (winit + wgpu/glow): X11 + wayland + vulkan + GL + fontconfig on Linux,
+  # apple-sdk (via util/darwin.nix) on macOS. Substrate carried ZERO egui/wgpu
+  # handling before this — every GUI Rust app now shares one helper instead of
+  # hand-listing the window-system libs (and getting the nixpkgs attr names
+  # wrong; e.g. `xcbutil` is only a deprecated alias for `libxcb-util`).
+  #
+  #   eframe = substrate.lib.${system}.eframe;   # pkgs-bound
+  #   packages.default  = eframe.mkPackage  { pname = "myapp"; src = ./.; };
+  #   devShells.default = eframe.mkDevShell { extraPackages = [ pkgs.just ]; };
+  #
+  # Standalone path (external repos):
+  #   import "${substrate}/lib/build/rust/eframe.nix" { inherit pkgs; }
+  eframe = import ./build/rust/eframe.nix { inherit pkgs; };
+  eframeBuilder = ./build/rust/eframe.nix;
+
+  # ============================================================================
   # CRATE2NIX SERVICE APPS (from crate2nix-apps.nix)
   # ============================================================================
   inherit (crate2nixAppsModule) mkCrate2nixServiceApps mkImagePushApp;

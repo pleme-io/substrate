@@ -524,6 +524,7 @@ These are imported directly from substrate (not via `lib.${system}`):
 | `rust-service-flake.nix` | `build/rust/service-flake.nix` | Dockerized microservice |
 | `rust-library.nix` | `build/rust/library.nix` | crates.io library (check + test) |
 | `leptos-build-flake.nix` | `build/rust/leptos-build-flake.nix` | Zero-boilerplate Leptos PWA flake |
+| `eframe.nix` | `build/rust/eframe.nix` | eframe/egui GUI-app native-dep surface + `mkDevShell` + `mkPackage` (X11/wayland/vulkan/GL on Linux, apple-sdk on macOS) |
 
 ##### rust-action-release Pattern
 
