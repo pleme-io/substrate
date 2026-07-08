@@ -516,6 +516,26 @@ in rec {
   goToolBuilder = ./build/go/tool.nix;
 
   # ============================================================================
+  # NPM TOOL BUILDER (standalone import path)
+  # ============================================================================
+  # The npm sibling of goToolBuilder above — reusable pattern for building
+  # npm-packaged CLI tools from EXTERNAL upstream source (e.g. a third-party
+  # npm package fetched via pkgs.fetchFromGitHub), not pleme-io's own
+  # TypeScript (see typescriptLibraryBuilder / mkTypescriptToolAuto for that).
+  # Wraps buildNpmPackage with an eval-time engines.node assertion and typed
+  # NpmQuirk dispatch (npm-install-flag / skip-postinstall / pin-nodejs /
+  # override-registry / substitute-source — see build/npm/quirk-apply.nix).
+  #
+  # Usage:
+  #   npmToolBuilder = import "${substrate}/lib/build/npm/tool.nix";
+  #   myTool = npmToolBuilder.mkNpmTool pkgs {
+  #     pname = "my-tool"; version = "1.0.0";
+  #     src = pkgs.fetchFromGitHub { owner = "..."; repo = "..."; rev = "..."; hash = "sha256-..."; };
+  #     npmDepsHash = "sha256-...";
+  #   };
+  npmToolBuilder = ./build/npm/tool.nix;
+
+  # ============================================================================
   # GO PRIVATE-MODULE BUILDER (standalone import path) — registry §4f highest
   # ============================================================================
   # Hermetic buildGoModule for repos that import PRIVATE org Go deps. Closes
