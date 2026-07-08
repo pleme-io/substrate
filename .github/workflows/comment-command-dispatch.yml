@@ -1,0 +1,112 @@
+name: comment-command-dispatch
+
+# The typed knock: composes aldrava-dispatch (pleme-io/actions +
+# github.com/pleme-io/aldrava) behind a cheap comment-prefix pre-filter, so
+# a PR comment that isn't even a slash command never spins a runner.
+#
+# Consumer — the simple single-command case (.github/workflows/comment-commands.yml):
+#   on:
+#     issue_comment: { types: [created] }
+#   jobs:
+#     dispatch:
+#       uses: pleme-io/substrate/.github/workflows/comment-command-dispatch.yml@main
+#       with:
+#         command: test
+#         target-label: ci/run-tests
+#       secrets: inherit
+#
+# For more than one registered command, or a workflow-dispatch /
+# repository-dispatch target with custom inputs, author a
+# `(defcommentcommand ...)` catalog (see pleme-io/aldrava's specs/example.lisp)
+# at `.github/aldrava.lisp` and pass `catalog-path` instead of
+# `command`/`target-*` — every other input is then ignored.
+#
+# The downstream pipeline this dispatches to (gated on
+# `pull_request: [labeled]` for a label target) normalizes its own trigger
+# context with `pleme-io/actions/aldrava-resolve@main` as its first step, so
+# it behaves the same whether it was re-triggered by the relabel, a direct
+# workflow_dispatch, or a schedule.
+
+on:
+  workflow_call:
+    inputs:
+      catalog-path:
+        type: string
+        required: false
+        default: ""
+      command:
+        type: string
+        required: false
+        default: ""
+      trigger:
+        type: string
+        required: false
+        default: ""
+      min-permission:
+        type: string
+        required: false
+        default: "write"
+      trust-pr-author:
+        type: string
+        required: false
+        default: "true"
+      allowlist:
+        type: string
+        required: false
+        default: ""
+      target-label:
+        type: string
+        required: false
+        default: ""
+      target-workflow:
+        type: string
+        required: false
+        default: ""
+      target-workflow-ref:
+        type: string
+        required: false
+        default: ""
+      target-repository-dispatch-event:
+        type: string
+        required: false
+        default: ""
+      target-repository-dispatch-repo:
+        type: string
+        required: false
+        default: ""
+    outputs:
+      dispatched:
+        value: ${{ jobs.dispatch.outputs.dispatched }}
+      outcome:
+        value: ${{ jobs.dispatch.outputs.outcome }}
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: write
+
+jobs:
+  dispatch:
+    # Cheap YAML-level pre-filter: a comment that isn't even a slash
+    # command on a pull request never reaches aldrava-dispatch.
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-latest
+    outputs:
+      dispatched: ${{ steps.knock.outputs.dispatched }}
+      outcome: ${{ steps.knock.outputs.outcome }}
+    steps:
+      - id: knock
+        uses: pleme-io/actions/aldrava-dispatch@main
+        with:
+          catalog-path: ${{ inputs.catalog-path }}
+          command: ${{ inputs.command }}
+          trigger: ${{ inputs.trigger }}
+          min-permission: ${{ inputs.min-permission }}
+          trust-pr-author: ${{ inputs.trust-pr-author }}
+          allowlist: ${{ inputs.allowlist }}
+          target-label: ${{ inputs.target-label }}
+          target-workflow: ${{ inputs.target-workflow }}
+          target-workflow-ref: ${{ inputs.target-workflow-ref }}
+          target-repository-dispatch-event: ${{ inputs.target-repository-dispatch-event }}
+          target-repository-dispatch-repo: ${{ inputs.target-repository-dispatch-repo }}
