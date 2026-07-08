@@ -494,6 +494,7 @@ See [docs/testing.md](docs/testing.md) for the three-layer test pyramid.
 | `mkCrate2nixServiceApps` | `build/rust/crate2nix-apps.nix` | Full service app set |
 | `mkGoTool` | `build/go/tool.nix` | Go CLI tool builder |
 | `mkNpmTool` | `build/npm/tool.nix` | npm CLI tool builder (external upstream source, e.g. fetchFromGitHub) |
+| `mkPnpmTool` | `build/npm/pnpm-tool.nix` | pnpm CLI tool builder (pnpm-lock.yaml sources; wraps nixpkgs' native pnpm.fetchDeps + configHook) |
 | `mkGoMonorepoSource` | `build/go/monorepo.nix` | Shared monorepo source |
 | `mkGoMonorepoBinary` | `build/go/monorepo-binary.nix` | Binary from monorepo |
 | `mkViteBuild` | `build/web/build.nix` | Vite/React builds |

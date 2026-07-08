@@ -90,30 +90,13 @@
     quirkAttrs = quirkApply.applyQuirks quirks {};
 
     # package.json's engines.node is the tool's own compatibility contract
-    # (e.g. OpenWiki declares ">=20"). Assert the pinned `nodejs` satisfies it
-    # at EVAL time instead of failing deep inside `npm install` with a cryptic
-    # EBADENGINE, mirroring mkGoTool's goVersionAssert. A range syntax the
-    # naive leading-integer parse can't handle skips the assertion rather
-    # than false-failing on it.
+    # (e.g. OpenWiki declares ">=20"). Shared with mkPnpmTool
+    # (../npm/pnpm-tool.nix) — see node-engine-assert.nix for why this is
+    # an eval-time throw rather than a runtime EBADENGINE.
+    nodeEngineAssert = (import ../shared/node-engine-assert.nix { inherit lib; }).assertNodeEngine;
     engineNodeAssert =
       if !engineAssert then null
-      else
-        let
-          pkgJsonPath = "${src}/package.json";
-          read = builtins.tryEval (builtins.fromJSON (builtins.readFile pkgJsonPath));
-          req = if read.success then (read.value.engines.node or null) else null;
-          nodeMajor = lib.versions.major nodejs.version;
-          reqMajor =
-            if req == null then null
-            else
-              let m = builtins.match "[^0-9]*([0-9]+).*" req;
-              in if m == null then null else lib.head m;
-        in
-        if reqMajor != null && builtins.compareVersions reqMajor nodeMajor > 0
-        then throw ("substrate.mkNpmTool: ${pname}'s package.json requires node "
-          + "${req} but the pinned nodejs is ${nodejs.version}. Pass a newer "
-          + "`nodejs` (e.g. pkgs.nodejs_22).")
-        else null;
+      else nodeEngineAssert { caller = "mkNpmTool"; inherit pname src nodejs; };
 
   in builtins.seq engineNodeAssert (pkgs.buildNpmPackage ({
     inherit pname version src npmDepsHash doCheck npmFlags dontNpmBuild nodejs;

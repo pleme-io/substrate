@@ -536,6 +536,26 @@ in rec {
   npmToolBuilder = ./build/npm/tool.nix;
 
   # ============================================================================
+  # PNPM TOOL BUILDER (standalone import path)
+  # ============================================================================
+  # The pnpm sibling of npmToolBuilder above — for upstream CLIs locked
+  # with pnpm-lock.yaml (buildNpmPackage only understands
+  # package-lock.json). Wraps nixpkgs' native pnpm.fetchDeps +
+  # pnpm.configHook (the pnpm-native "fetch once, install --offline"
+  # hermetic shape) — no reimplemented fetcher, no npm/pnpm CLI needed
+  # at final-derivation build time.
+  #
+  # Usage:
+  #   pnpmToolBuilder = import "${substrate}/lib/build/npm/pnpm-tool.nix";
+  #   myTool = pnpmToolBuilder.mkPnpmTool pkgs {
+  #     pname = "my-tool"; version = "1.0.0";
+  #     src = pkgs.fetchFromGitHub { owner = "..."; repo = "..."; rev = "..."; hash = "sha256-..."; };
+  #     pnpmDepsHash = "sha256-...";
+  #     binEntry = "dist/cli.js";
+  #   };
+  pnpmToolBuilder = ./build/npm/pnpm-tool.nix;
+
+  # ============================================================================
   # GO PRIVATE-MODULE BUILDER (standalone import path) — registry §4f highest
   # ============================================================================
   # Hermetic buildGoModule for repos that import PRIVATE org Go deps. Closes
