@@ -86,6 +86,12 @@
   sbomFormat ? "spdx-json",
   cveGate ? null,
   fipsBuild ? false,
+  # Optional Go toolchain override by nixpkgs attr name (e.g. "go_1_26").
+  # null keeps the channel-default `go`. buildGoModule runs with
+  # GOTOOLCHAIN=local, so a service whose go.mod declares a newer `go`
+  # directive than the channel default must pin the matching toolchain
+  # here or the hermetic build fails on the directive.
+  goVersion ? null,
 }:
 let
   archForSystem = {
@@ -96,6 +102,12 @@ let
   mkPerSystem = system: let
     pkgs = import nixpkgs { inherit system; };
     arch = archForSystem.${system};
+
+    # Toolchain selection: channel-default `go` unless the consumer pins a
+    # specific nixpkgs attr (e.g. "go_1_26") to match its go.mod directive.
+    goBuild = if goVersion == null
+      then pkgs.buildGoModule
+      else pkgs.buildGoModule.override { go = pkgs.${goVersion}; };
 
     # MINIMAL-PRODUCTION-IMAGE — the static-friendly Go build tags are
     # applied only in the minimal posture. `netgo`/`osusergo` drop the
@@ -125,7 +137,7 @@ let
     # which we've verified works on the same source. Output is collected
     # from `$GOPATH/bin/<GOOS>_<GOARCH>/` (cross-compile) or `$GOPATH/bin/`
     # (host build).
-    binary = pkgs.buildGoModule {
+    binary = goBuild {
       pname = serviceName;
       inherit version src vendorHash subPackages ldflags buildInputs;
       env = { CGO_ENABLED = "0"; }
