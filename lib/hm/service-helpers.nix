@@ -125,6 +125,15 @@ with lib;
   #     args = ["-index" indexDir "-listen" ":${port}"];
   #     logDir = "${homeDir}/Library/Logs";
   #   }
+  # `nice` / `lowPriorityIO` / `maxOpenFiles` are opt-in caps (all default to
+  # unset/off, so every existing consumer is unaffected) — the generalized
+  # "keeps a low profile, capped consumption at any given time" primitive.
+  # `maxOpenFiles` sets both Soft and Hard NumberOfFiles: an OS-enforced
+  # ceiling on how many file descriptors THIS process can hold, so a single
+  # background indexing daemon can never contend the whole system's fd table
+  # (the class of failure that stopped a `nix run .#rebuild` and correlated
+  # with unrelated app crashes on 2026-07-10 — traced to launchd agents with
+  # no resource ceiling at all, not a bug in any one daemon's own logic).
   mkLaunchdService = {
     name,
     label,
@@ -135,6 +144,9 @@ with lib;
     keepAlive ? true,
     runAtLoad ? true,
     processType ? "Adaptive",
+    nice ? null,
+    lowPriorityIO ? false,
+    maxOpenFiles ? null,
   }: {
     launchd.agents.${name} = {
       enable = true;
@@ -148,6 +160,13 @@ with lib;
         StandardErrorPath = "${logDir}/${name}.err";
       } // optionalAttrs (env != {}) {
         EnvironmentVariables = env;
+      } // optionalAttrs (nice != null) {
+        Nice = nice;
+      } // optionalAttrs lowPriorityIO {
+        LowPriorityIO = true;
+      } // optionalAttrs (maxOpenFiles != null) {
+        SoftResourceLimits.NumberOfFiles = maxOpenFiles;
+        HardResourceLimits.NumberOfFiles = maxOpenFiles;
       };
     };
   };
