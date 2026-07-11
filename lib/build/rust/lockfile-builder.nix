@@ -398,46 +398,67 @@ let
     # at workspace root would also be picked up.
     #
     # **Workspace-root orphan = an `src/` directory at the workspace
-    # root that no member crate claims as its own.** A member claims
+    # root that a GIVEN crate does not itself claim.** A member claims
     # the root when its `source.relative_path` is `""` or `"."` —
     # that's cargo's convention for a root crate co-located with the
-    # workspace. If no member claims the root, then workspace-root
-    # `src/` is provably unowned and safe to filter out.
+    # workspace.
     #
-    # The filter is applied ONCE here at the workspaceSrc level — pure
-    # Nix `lib.cleanSourceWith` — so every path-source member sees a
-    # tree where the orphan isn't present at all. No bash, no per-crate
-    # preBuild, no fragile string predicates. Decided once at the
-    # source-derivation level; every consumer of `mkSrcOf` for a path
-    # member transparently sees the filtered tree.
-    hasRootCrate =
-      let
-        checkOne = key:
-          let c = spec.crates.${key} or null; in
-            c != null
-            && c.source.kind == "path"
-            && (c.source.relative_path == ""
-                || c.source.relative_path == ".");
-      in
-        lib.any checkOne (spec.workspace_members or []);
+    # CORRECTED (task #91, escuta-breathe-bridge): filtering used to be
+    # an ALL-OR-NOTHING decision for the whole tree — `hasRootCrate`
+    # asked only "does ANY member claim the root?" and, if so, skipped
+    # filtering for EVERY crate (root src/ stays visible tree-wide).
+    # That's correct for the crate that legitimately IS the root (it
+    # needs its own `src/lib.rs`/`src/main.rs` to exist), but wrong for
+    # every OTHER path-source member built against the SAME shared
+    # `src = workspaceSrc` tree: nixpkgs' `build-crate.nix` has an
+    # unconditional fallback —
+    #
+    #   if   [[ -e "$LIB_PATH" ]] then build_lib "$LIB_PATH"
+    #   elif [[ -e src/lib.rs  ]] then build_lib src/lib.rs
+    #
+    # — that fires on the literal `src/lib.rs` file regardless of
+    # whatever `libPath` substrate passes (a nonexistent-by-design
+    # synthesized path does not suppress it). For a workspace shaped
+    # "real root package + bin-only sibling member" (escuta at the
+    # root + escuta-breathe-bridge as a member — as opposed to
+    # tatara's "orphan-only" shape, where NO crate claims the root),
+    # `hasRootCrate` was true, filtering was skipped tree-wide, and
+    # every non-root member's build silently picked up the ROOT
+    # crate's real `src/lib.rs` and compiled it under the MEMBER's
+    # crate name — a wrong-source-file build (E0432/E0433-style
+    # cascade, or worse, an `E0277` deep inside the wrong file that
+    # reads like a real bug in the root crate).
+    #
+    # The fix makes the decision PER CRATE instead of tree-wide: the
+    # crate that legitimately claims the root sees the real `src/`;
+    # every other path-source member sees a tree with the root's
+    # `src/` filtered out, so nixpkgs' fallback correctly finds
+    # nothing and falls through to `crateBin` only. Pure Nix
+    # `lib.cleanSourceWith`, decided once per crate at the
+    # source-derivation level — no bash, no per-crate preBuild.
+    crateClaimsRoot = crate:
+      (crate.source.kind or null) == "path"
+      && ((crate.source.relative_path or "") == ""
+          || (crate.source.relative_path or "") == ".");
 
-    filteredWorkspaceSrc =
-      if hasRootCrate then src
-      else
-        let
-          srcStr = toString src;
-        in
-          lib.cleanSourceWith {
-            inherit src;
-            name = "workspace-src-no-root-orphan";
-            filter = path: type:
-              let
-                rel = lib.removePrefix (srcStr + "/") (toString path);
-                isWorkspaceRootSrcDir = type == "directory" && rel == "src";
-                isUnderWorkspaceRootSrc = lib.hasPrefix "src/" rel;
-              in
-                !(isWorkspaceRootSrcDir || isUnderWorkspaceRootSrc);
-          };
+    rootOrphanFilteredSrc =
+      let
+        srcStr = toString src;
+      in
+        lib.cleanSourceWith {
+          inherit src;
+          name = "workspace-src-no-root-orphan";
+          filter = path: type:
+            let
+              rel = lib.removePrefix (srcStr + "/") (toString path);
+              isWorkspaceRootSrcDir = type == "directory" && rel == "src";
+              isUnderWorkspaceRootSrc = lib.hasPrefix "src/" rel;
+            in
+              !(isWorkspaceRootSrcDir || isUnderWorkspaceRootSrc);
+        };
+
+    filteredWorkspaceSrcFor = crate:
+      if crateClaimsRoot crate then src else rootOrphanFilteredSrc;
     # If regen wasn't possible (gen unavailable) but the committed spec
     # had violations, surface a traced warning so the operator knows
     # the build is running on synthesized fallbacks instead of a true
@@ -609,19 +630,46 @@ let
     #
     # Synthesis is the interpreter side of the contract: when a
     # path-source member with a non-trivial relative_path arrives
-    # WITHOUT lib_target AND WITHOUT binaries, assume the conventional
-    # `src/lib.rs` + `rustcCrateName` and let `prefixForMember` glue the
-    # relative_path on. The fleet self-heals against stale specs without
-    # every consumer needing to push a regen.
+    # WITHOUT lib_target, assume the conventional `src/lib.rs` +
+    # `rustcCrateName` and let `prefixForMember` glue the relative_path
+    # on. The fleet self-heals against stale specs without every
+    # consumer needing to push a regen.
+    #
+    # CORRECTED (task #91, escuta-breathe-bridge): the condition used to
+    # also require `binaries == []`, so it only fired for members with
+    # NO declared targets at all — contradicting this very function's
+    # OWN downstream consumer (`applySynthLibTarget`'s doc-comment
+    # below), which explicitly describes handling "the spec carries
+    # `binaries` but no `lib_target` (a bin-only workspace member)".
+    # With the old `binaries == []` guard, that exact case (an
+    # ACCURATELY-reported bin-only member — gen-cargo correctly emits
+    # `binaries: [...]`, `lib_target: null`) fell through with NO
+    # libPath synthesized at all. nixpkgs' `buildRustCrate` then applied
+    # ITS OWN default (`libPath = "src/lib.rs"`, unprefixed, evaluated
+    # against `src = workspaceSrc` i.e. the WORKSPACE ROOT) — which, for
+    # any workspace laid out as "root package + path-dependency member"
+    # (the root Cargo.toml carries a REAL `[package]` with its own
+    # `src/lib.rs`, e.g. escuta at the root + escuta-breathe-bridge as a
+    # member — as opposed to a virtual `[workspace]`-only root), silently
+    # resolved to the ROOT package's real `src/lib.rs` and compiled it
+    # under the MEMBER's crate name (`--crate-name escuta_breathe_bridge
+    # src/lib.rs --crate-type lib`) — a wrong-source-file build that
+    # fails downstream on whatever feature-gated code the root crate
+    # exposes. Dropping the `binaries == []` clause routes this case
+    # through the SAME synthesis + `prefixForMember` glue as the
+    # original I1 fix: `libPath` becomes `<relative_path>/src/lib.rs`,
+    # which for a genuine bin-only member does NOT exist, so
+    # buildRustCrate's existence check skips the lib build entirely and
+    # only the (correctly relative_path-prefixed) `crateBin` gets built —
+    # exactly what `applySynthLibTarget`'s comment always promised.
     synthLibTarget = crate:
       let
         srcKind = crate.source.kind or null;
         rel = crate.source.relative_path or "";
         hasMember = srcKind == "path" && rel != "" && rel != ".";
-        hasNoTargets = (crate.lib_target or null) == null
-          && ((crate.binaries or []) == []);
+        hasNoLibTarget = (crate.lib_target or null) == null;
       in
-        if hasMember && hasNoTargets
+        if hasMember && hasNoLibTarget
         then { libName = rustcCrateName crate; libPath = "src/lib.rs"; }
         else {};
 
@@ -827,7 +875,7 @@ let
           let r = specArgs.crateRenames or null;
           in if r == null then { } else r;
         baseArgs = specArgs // {
-          src = (mkSrcOf hostPkgs) filteredWorkspaceSrc crate;
+          src = (mkSrcOf hostPkgs) (filteredWorkspaceSrcFor crate) crate;
           dependencies = map depFor deps.runtime;
           buildDependencies = map buildDepFor deps.build;
           features = featuresFor;
