@@ -103,12 +103,31 @@ let
           '';
 
         # ── Workspace members: declaration-order paths → name/version ──
+        #
+        # cargo's `workspace_members` semantics (which gen's full-spec path
+        # reads verbatim from `cargo metadata`) INCLUDE the workspace-root
+        # package whenever a `[package]` table is co-located with the
+        # `[workspace]` table — even when `"."` is NOT listed in
+        # `[workspace].members`. sui is the canonical case: a workspace-root
+        # crate `sui` plus a `members = [ "sui-eval", ... ]` array that lists
+        # only the sub-crates. Reconstructing members from ONLY the explicit
+        # `members` array drops that root package -> `packageName = "sui"`
+        # can't be resolved by tool-release. Mirror cargo/gen here: prepend
+        # `"."` when a root `[package]` exists and isn't already a member.
+        hasRootPackage = toml ? package;
         wsMembers = (toml.workspace or { }).members or [ ];
-        # Single-crate repos have a `[package]` but no `[workspace].members`:
-        # the sole package at "." IS both the root crate and the only member.
-        memberPaths =
+        explicitMemberPaths =
           if wsMembers == [ ] then [ "." ]
           else lib.concatMap (expandMember src) wsMembers;
+        # A root `[package]` is member "." (cargo convention). Only add it
+        # when the explicit list didn't already claim the root (avoids a dup
+        # if a member spells its path as "." or "").
+        rootAlreadyMember =
+          builtins.elem "." explicitMemberPaths || builtins.elem "" explicitMemberPaths;
+        memberPaths =
+          if hasRootPackage && !rootAlreadyMember
+          then [ "." ] ++ explicitMemberPaths
+          else explicitMemberPaths;
         memberTomlPath = p: if p == "." then src + "/Cargo.toml" else src + "/${p}/Cargo.toml";
         memberInfo = map
           (p: { path = p; name = (fromTOML (readFile (memberTomlPath p))).package.name; })
