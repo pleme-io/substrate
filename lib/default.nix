@@ -1991,13 +1991,17 @@ in rec {
   # Path 2: `hardenedBases.{distroless-static,distroless-glibc,wolfi}`
   # are ready-to-use base images; `mkVendorRewrap` pulls an upstream
   # image, extracts a binary, and repackages on a hardened base for
-  # publication to ghcr.io/pleme-io/*.
+  # publication to ghcr.io/pleme-io/*. `mkPackageImage` is the sibling
+  # for a full nixpkgs derivation (not a single extracted binary) — the
+  # right shape for a runtime like RabbitMQ's Erlang/OTP, not a static Go
+  # tool.
   hardenedBases = ociHardenedModule.bases;
   inherit (ociHardenedModule)
     mkDistrolessStaticBase
     mkDistrolessGlibcBase
     mkWolfiBase
     mkVendorRewrap
+    mkPackageImage
     nonrootUid
     nonrootGid;
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;

@@ -204,6 +204,59 @@ let
     };
   };
 
+  # ═══════════════════════════════════════════════════════════════════
+  # Package image — the sibling `mkVendorRewrap` doesn't cover
+  # ═══════════════════════════════════════════════════════════════════
+
+  # `mkVendorRewrap` extracts ONE binary from an upstream image — the right
+  # shape for a statically-linked Go tool, the wrong shape for a full
+  # runtime (Erlang/OTP + plugins, a JVM app, anything with more than one
+  # file that matters). `mkPackageImage` instead takes an nixpkgs
+  # DERIVATION directly — built from source by Nix, never extracted from
+  # someone else's binary — and repackages its full closure on a hardened
+  # base, preserving whatever entrypoint/port/volume/env CONTRACT the
+  # upstream vendor image it replaces exposed (so it drops in as a
+  # same-interface substitute). The "exact version" case (pin a version
+  # nixpkgs' current default doesn't ship) is the CALLER's job via
+  # `package.overrideAttrs`, not this function's — mkPackageImage only
+  # cares that it received a buildable derivation.
+  mkPackageImage = {
+    service,                 # logical name (labels only)
+    base,                    # output of mk*Base
+    package,                 # the nixpkgs derivation to package
+    publishName,
+    publishTag,
+    entrypoint,               # list, e.g. [ "${package}/sbin/rabbitmq-server" ]
+    cmd ? [],
+    env ? [],
+    exposedPorts ? {},        # e.g. { "5672/tcp" = {}; }
+    volumes ? {},             # e.g. { "/var/lib/rabbitmq" = {}; }
+    workdir ? "/",
+    user ? "${toString nonrootUid}:${toString nonrootGid}",
+    extraContents ? [],
+  }: dockerTools.buildLayeredImage {
+    name = publishName;
+    tag = publishTag;
+    fromImage = base;
+    contents = [ package ] ++ extraContents;
+    config = {
+      Entrypoint = entrypoint;
+      Cmd = cmd;
+      User = user;
+      WorkingDir = workdir;
+      Env = env;
+      ExposedPorts = exposedPorts;
+      Volumes = volumes;
+      Labels = {
+        "org.opencontainers.image.source" = "https://github.com/pleme-io";
+        "org.opencontainers.image.vendor" = "pleme-io";
+        "io.pleme.rebuild.package" = package.pname or service;
+        "io.pleme.rebuild.version" = package.version or "unknown";
+        "io.pleme.rebuild.service" = service;
+      };
+    };
+  };
+
 in {
   # Base image families — consumed via `bases.distroless-glibc` etc.
   bases = {
@@ -215,8 +268,11 @@ in {
   # Per-variant builders so consumers can override (e.g. add `extra` pkgs).
   inherit mkDistrolessStaticBase mkDistrolessGlibcBase mkWolfiBase;
 
-  # Vendor rewrap — Path 2 entry point.
+  # Vendor rewrap — Path 2 entry point (extract-one-binary shape).
   inherit mkVendorRewrap;
+
+  # Package image — Path 2 sibling (from-source-derivation shape).
+  inherit mkPackageImage;
 
   # Convention: reuse these UIDs across all pleme-io vendor images.
   inherit nonrootUid nonrootGid;
