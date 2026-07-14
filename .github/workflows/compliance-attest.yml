@@ -9,8 +9,15 @@ name: compliance-attest
 on:
   workflow_call:
     inputs:
-      artifact-path:   { type: string, required: true }
-      image-ref:       { type: string, required: false, default: "" }
+      artifact-path:    { type: string, required: true }
+      image-ref:        { type: string, required: false, default: "" }
+      # Default HIGH preserves every existing consumer's behavior.
+      # A hardened-image pipeline passes "UNKNOWN" for a genuine
+      # zero-tolerance gate (every severity, fixed or not).
+      fail-on-severity: { type: string, required: false, default: "HIGH" }
+      # Path (relative to the consumer's checkout) to a .trivyignore-format
+      # file of named, tracked exceptions. Empty = none.
+      ignore-file:      { type: string, required: false, default: "" }
     secrets: {}
 
 permissions:
@@ -52,10 +59,12 @@ jobs:
     needs: sign
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: pleme-io/actions/image-scan@main
         with:
           image-ref: ${{ inputs.image-ref }}
-          fail-on-severity: HIGH
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          ignore-file: ${{ inputs.ignore-file }}
 
   verify-and-attest:
     needs: [slsa, scan]
