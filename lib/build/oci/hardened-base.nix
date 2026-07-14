@@ -234,11 +234,23 @@ let
     workdir ? "/",
     user ? "${toString nonrootUid}:${toString nonrootGid}",
     extraContents ? [],
+    # Writable-at-runtime paths (e.g. a data/log dir under `volumes`)
+    # that must be owned by the non-root `user` this image runs as —
+    # `extraContents`' own `runCommand` output is root-owned by
+    # default, and a non-root container can't chown its own volume at
+    # startup with no shell/coreutils on a hardened base. Threaded to
+    # `buildLayeredImage`'s `fakeRootCommands` (fakeroot, no real
+    # privilege needed in the Nix sandbox) so ownership is baked into
+    # the image layer itself. e.g. [ "/var/lib/mysql" "/var/lib/rabbitmq" ].
+    writablePaths ? [],
   }: dockerTools.buildLayeredImage {
     name = publishName;
     tag = publishTag;
     fromImage = base;
     contents = [ package ] ++ extraContents;
+    fakeRootCommands = lib.concatMapStringsSep "\n"
+      (p: "chown -R ${user} ${p}") writablePaths;
+    enableFakechroot = writablePaths != [];
     config = {
       Entrypoint = entrypoint;
       Cmd = cmd;
