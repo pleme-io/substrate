@@ -73,20 +73,40 @@ let
   # Base image builders
   # ═══════════════════════════════════════════════════════════════════
 
+  # Every base builder attaches its own `contents` list as a passthru
+  # attribute (`base.contents`) — this is the load-bearing seam that lets
+  # `mkPackageImage`/`mkVendorRewrap` below compute a CORRECT closure SBOM.
+  # Reason: a `dockerTools.buildLayeredImage` OUTPUT is a gzip-compressed
+  # tarball, and Nix's own reference-scanner (which populates what
+  # `nix path-info -r` / `nix-store -q --references` can see) works by
+  # finding literal store-path hash substrings inside an output's BYTES —
+  # substrings that gzip compression destroys. So `nix path-info -r` on
+  # the FINAL image tarball sees almost nothing, even though the image is
+  # built from a rich closure. Passing the pre-compression `contents`
+  # list straight to `pkgs.closureInfo` sidesteps the bug entirely
+  # (closureInfo emits its own store-paths as an UNCOMPRESSED text file,
+  # so ITS references ARE scanned correctly) — but that only works if
+  # each layer of composition (base -> package image) carries its real
+  # contents forward, hence this passthru chain. Confirmed live 2026-07-14
+  # against camelot/hardened-images' rabbitmq image: a naive
+  # `nix path-info -r` on the shipped `rabbitmq.tar.gz` returned exactly
+  # ONE component (itself); this fix is what a correct SBOM needs.
+
   # distroless-static: TLS roots + nonroot user. No libc. For statically
   # linked binaries.
   mkDistrolessStaticBase = {
     name ? "pleme-io-distroless-static",
     tag ? "latest",
     extra ? [],
-  }: dockerTools.buildLayeredImage {
-    inherit name tag;
+  }: let
     contents = commonContents ++ extra;
+  in (dockerTools.buildLayeredImage {
+    inherit name tag contents;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
     };
-  };
+  }) // { inherit contents; };
 
   # distroless-glibc: distroless-static + glibc for dynamically linked
   # binaries. Still no shell.
@@ -94,11 +114,10 @@ let
     name ? "pleme-io-distroless-glibc",
     tag ? "latest",
     extra ? [],
-  }: dockerTools.buildLayeredImage {
-    inherit name tag;
-    contents = commonContents ++ [
-      pkgs.glibc
-    ] ++ extra;
+  }: let
+    contents = commonContents ++ [ pkgs.glibc ] ++ extra;
+  in (dockerTools.buildLayeredImage {
+    inherit name tag contents;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
@@ -106,7 +125,7 @@ let
         "LD_LIBRARY_PATH=${pkgs.glibc}/lib"
       ];
     };
-  };
+  }) // { inherit contents; };
 
   # wolfi shim: in the pleme-io variant we use nixpkgs' apk-compatible
   # glibc + busybox-nonroot to get a closer analog of Chainguard wolfi
@@ -117,12 +136,10 @@ let
     name ? "pleme-io-wolfi-shim",
     tag ? "latest",
     extra ? [],
-  }: dockerTools.buildLayeredImage {
-    inherit name tag;
-    contents = commonContents ++ [
-      pkgs.glibc
-      pkgs.busybox
-    ] ++ extra;
+  }: let
+    contents = commonContents ++ [ pkgs.glibc pkgs.busybox ] ++ extra;
+  in (dockerTools.buildLayeredImage {
+    inherit name tag contents;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
@@ -131,7 +148,7 @@ let
         "PATH=/bin:/usr/bin"
       ];
     };
-  };
+  }) // { inherit contents; };
 
   # ═══════════════════════════════════════════════════════════════════
   # Vendor rewrap
@@ -184,11 +201,12 @@ let
     '';
 
     entrypointBin = "/bin/${baseNameOf binaryPath}";
-  in dockerTools.buildLayeredImage {
+    imageContents = [ extractedBinary ] ++ extraContents;
+  in (dockerTools.buildLayeredImage {
     name = publishName;
     tag = publishTag;
     fromImage = base;
-    contents = [ extractedBinary ] ++ extraContents;
+    contents = imageContents;
     config = {
       Entrypoint = [ entrypointBin ];
       User = "${toString nonrootUid}:${toString nonrootGid}";
@@ -202,6 +220,14 @@ let
         "io.pleme.rewrap.service" = service;
       };
     };
+  }) // {
+    # See the passthru-chain comment above `mkDistrolessStaticBase` — the
+    # extracted upstream binary is opaque (pulled bytes, not a Nix
+    # derivation with a package closure of its own), so this closure
+    # covers the HARDENED BASE's real Nix packages only. That's still a
+    # strict improvement over the image tarball's own (near-empty,
+    # compression-blinded) references.
+    closureInfo = pkgs.closureInfo { rootPaths = (base.contents or []) ++ imageContents; };
   };
 
   # ═══════════════════════════════════════════════════════════════════
@@ -243,11 +269,13 @@ let
     # privilege needed in the Nix sandbox) so ownership is baked into
     # the image layer itself. e.g. [ "/var/lib/mysql" "/var/lib/rabbitmq" ].
     writablePaths ? [],
-  }: dockerTools.buildLayeredImage {
+  }: let
+    imageContents = [ package ] ++ extraContents;
+  in (dockerTools.buildLayeredImage {
     name = publishName;
     tag = publishTag;
     fromImage = base;
-    contents = [ package ] ++ extraContents;
+    contents = imageContents;
     fakeRootCommands = lib.concatMapStringsSep "\n"
       (p: "chown -R ${user} ${p}") writablePaths;
     enableFakechroot = writablePaths != [];
@@ -267,6 +295,13 @@ let
         "io.pleme.rebuild.service" = service;
       };
     };
+  }) // {
+    # See the passthru-chain comment above `mkDistrolessStaticBase` — the
+    # compression-blind-spot fix. `base.contents` carries the hardened
+    # base's own real Nix packages forward so the closure covers the
+    # WHOLE shipped image (base + package + extraContents), not just
+    # the package layer.
+    closureInfo = pkgs.closureInfo { rootPaths = (base.contents or []) ++ imageContents; };
   };
 
 in {
