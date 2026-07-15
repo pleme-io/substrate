@@ -268,6 +268,21 @@ let
     # `buildLayeredImage`'s `fakeRootCommands` (fakeroot, no real
     # privilege needed in the Nix sandbox) so ownership is baked into
     # the image layer itself. e.g. [ "/var/lib/mysql" "/var/lib/rabbitmq" ].
+    #
+    # Also chmods u+rwX here, not just chown -- confirmed live 2026-07-15
+    # (camelot/hardened-images mysql, 3 straight failed attempts): ANY
+    # `chmod` run *inside* a derivation that populates `extraContents`
+    # (e.g. a `runCommand` pre-baking a data directory) is undone the
+    # moment that derivation's output is registered in the Nix store --
+    # Nix strips write bits from every store path as part of its own
+    # store-immutability guarantee, REGARDLESS of what the build script
+    # itself set on `$out`. A derivation-level `chmod -R u+rwX $out/...`
+    # is therefore a no-op by the time this function runs: the file is
+    # back to read-only long before `fakeRootCommands` ever sees it. This
+    # `fakeRootCommands` step is the correct (and only) place a chmod can
+    # land, because it runs as part of fakeroot-assisted TAR ASSEMBLY,
+    # not as a real store-path mutation -- the same reason `chown` here
+    # already works while an in-derivation chown never would.
     writablePaths ? [],
   }: let
     imageContents = [ package ] ++ extraContents;
@@ -277,7 +292,7 @@ let
     fromImage = base;
     contents = imageContents;
     fakeRootCommands = lib.concatMapStringsSep "\n"
-      (p: "chown -R ${user} ${p}") writablePaths;
+      (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths;
     enableFakechroot = writablePaths != [];
     config = {
       Entrypoint = entrypoint;
