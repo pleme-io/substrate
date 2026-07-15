@@ -57,10 +57,26 @@ let
 
   # Minimal /tmp directory so consumers that write temp files don't blow
   # up on read-only root (tmpfs typically mounted at runtime).
+  #
+  # The in-derivation `chmod 1777 $out/tmp` above is cosmetic only -- Nix
+  # strips write bits from every store path once it's registered, so by
+  # the time this reaches a base image it's back to whatever `mkdir`'s
+  # own default mode was. Confirmed live 2026-07-15 (camelot/hardened-
+  # images mysql, nix9): mysqld's InnoDB failed with "Can't create/write
+  # to file '/tmp/ibGUvuwd' (OS errno 13 - Permission denied)" -- the
+  # SAME store-immutability class of bug as ibdata1's original mode
+  # problem, just never exercised by rabbitmq/eventBridge's own
+  # boot-checks. Each base builder below re-chmods /tmp via its own
+  # fakeRootCommands (fakeroot-assisted tar assembly, the only place a
+  # chmod actually lands -- see mkPackageImage's writablePaths comment
+  # for the full explanation of why). Mode 1777 (not tied to any one
+  # `user`) because /tmp must be writable by whichever uid the consuming
+  # image happens to run as.
   tmpStub = pkgs.runCommand "pleme-io-tmp-stub" {} ''
     mkdir -p $out/tmp
     chmod 1777 $out/tmp
   '';
+  mkTmpWritableFakeRootCommands = "chmod -R 1777 /tmp";
 
   commonContents = [
     cacert
@@ -102,6 +118,8 @@ let
     contents = commonContents ++ extra;
   in (dockerTools.buildLayeredImage {
     inherit name tag contents;
+    fakeRootCommands = mkTmpWritableFakeRootCommands;
+    enableFakechroot = true;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
@@ -118,6 +136,8 @@ let
     contents = commonContents ++ [ pkgs.glibc ] ++ extra;
   in (dockerTools.buildLayeredImage {
     inherit name tag contents;
+    fakeRootCommands = mkTmpWritableFakeRootCommands;
+    enableFakechroot = true;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
@@ -140,6 +160,8 @@ let
     contents = commonContents ++ [ pkgs.glibc pkgs.busybox ] ++ extra;
   in (dockerTools.buildLayeredImage {
     inherit name tag contents;
+    fakeRootCommands = mkTmpWritableFakeRootCommands;
+    enableFakechroot = true;
     config = {
       User = "${toString nonrootUid}:${toString nonrootGid}";
       WorkingDir = "/";
