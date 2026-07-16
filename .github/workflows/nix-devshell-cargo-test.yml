@@ -1,0 +1,64 @@
+# Reusable workflow: run `cargo test` inside a named nix devShell, on a
+# real Linux runner, instead of a bare-toolchain job that happens to work
+# because the runner's ambient system libraries (Ruby, OpenSSL, libclang,
+# whatever the crate embeds) are accidentally compatible.
+#
+# Use this whenever a crate's tests depend on something a nix devShell
+# already provides hermetically (an embedded interpreter via FFI, a
+# specific native library version, a pinned toolchain) — the alternative
+# is a `dtolnay/rust-toolchain@stable` + bare `cargo test` job that passes
+# today only because `ubuntu-latest`'s own ambient environment happens to
+# satisfy the requirement, with no pin and no guarantee it keeps doing so.
+#
+# First consumer: pangea-operator, whose embedded-Ruby (magnus/rb-sys)
+# link requirement was, until this workflow, satisfied only by luck
+# against ubuntu-latest's system Ruby — no local devShell equivalent
+# worked on darwin either, since `.#ruby-eval`'s bindgen args assume a
+# glibc `.dev` output that only a Linux nixpkgs stdenv provides. This
+# workflow runs that same devShell on the one environment it's actually
+# built for (a Linux nix daemon), closing the gap between "works by
+# accident in CI" and "works because it's pinned."
+#
+# Consumer (.github/workflows/ci.yml):
+#
+#   jobs:
+#     cargo-test:
+#       uses: pleme-io/substrate/.github/workflows/nix-devshell-cargo-test.yml@main
+#       with:
+#         devshell: ruby-eval
+#       secrets: inherit
+
+name: nix-devshell-cargo-test
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+      devshell:
+        description: "Flake devShell output name (e.g. `.#ruby-eval`)"
+        type: string
+        required: true
+      test-args:
+        description: "Args appended to `cargo test` inside the devShell"
+        type: string
+        default: "--workspace --no-fail-fast"
+
+jobs:
+  cargo-test:
+    name: cargo test (nix devShell ${{ inputs.devshell }})
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Enable magic nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: cargo test (inside .#${{ inputs.devshell }})
+        run: nix develop ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.test-args }}
