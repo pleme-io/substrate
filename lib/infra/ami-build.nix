@@ -147,6 +147,35 @@ in rec {
   nixosRebuildSwitchStep =
     ''if [ -n "$ATTIC_URL" ]; then echo "Using Attic cache: $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN $NIX_BUILD_OPTS; fi'';
 
+  # ── Shared app wrapper ───────────────────────────────────────────
+  #
+  # Every `nix run` app below shares one shape: export PATH, then run a
+  # script. GC-root protection for the long-running (~15-30min) pipeline
+  # apps — the real fix for a live 2026-07-16 incident where a Packer
+  # template's store path was collected mid-run — lives in **pure Rust**,
+  # not here: `ami-forge`'s own `GcRootGuard` (pipeline.rs/multi_layer.rs)
+  # holds an explicit `nix-store --add-root` for every template/config
+  # path it's given, for its own process's full lifetime, via Drop. This
+  # keeps the Nix layer as pure declaration + YAML config (the shikumi
+  # pattern already documented above) and the orchestration/lifecycle
+  # logic — including its safety mechanisms — in the typed Rust binary
+  # that actually owns the pipeline. Full analysis: theory/AMI-FORGE.md.
+  mkAmiApp = {
+    name,
+    script,
+    forgePackage,
+    awsProfile ? null,
+    extraBinaries ? [],
+  }: {
+    type = "app";
+    program = toString (pkgs.writeShellScript name ''
+      set -euo pipefail
+      export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
+      ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
+      ${script}
+    '');
+  };
+
   # ── Cluster Test Config ──────────────────────────────────────
   # Generates a YAML config file (JSON is valid YAML) describing the
   # multi-node cluster topology for ami-forge cluster-test.
@@ -539,34 +568,28 @@ in rec {
         cache_name = atticCacheName;
       }; })));
 
-    mkApp = name: script: {
-      type = "app";
-      program = toString (pkgs.writeShellScript name ''
-        set -euo pipefail
-        export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
-        ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
-        ${script}
-      '');
+    app = name: script: mkAmiApp {
+      inherit name script forgePackage awsProfile extraBinaries;
     };
 
   in {
-    # Build AMI: build → test → promote (ONE pipeline, always tested)
-    # All orchestration logic in Rust (ami-forge pipeline-run).
-    # Config is a Nix-generated YAML file (shikumi pattern).
-    ami-build = mkApp "ami-build" ''
-      exec ami-forge pipeline-run --config "${pipelineConfig}"
+    # Build AMI: build → test → promote (ONE pipeline, always tested).
+    # All orchestration logic — including the GC-root guard — lives in
+    # ami-forge's Rust (pipeline-run); this is a plain declarative call.
+    ami-build = app "ami-build" ''
+      ami-forge pipeline-run --config "${pipelineConfig}"
     '';
 
-    # Test existing AMI from SSM (re-run tests without rebuilding)
-    ami-test = mkApp "ami-test" ''
+    # Test existing AMI from SSM (re-run tests without rebuilding) — routed
+    # through ami-forge's own `test-ami` subcommand (not raw packer calls)
+    # so the SAME GC-root guard protects this path too.
+    ami-test = app "ami-test" ''
       AMI_ID=$(aws ssm get-parameter --name "${ssmParameter}" --region "${region}" --query 'Parameter.Value' --output text)
-      echo "Testing AMI: $AMI_ID"
-      packer init "${testTemplate}"
-      packer build -var "source_ami=$AMI_ID" "${testTemplate}"
+      ami-forge test-ami --template "${testTemplate}" --source-ami "$AMI_ID" --region "${region}"
     '';
 
-    # Show AMI status
-    ami-status = mkApp "ami-status" ''
+    # Show AMI status.
+    ami-status = app "ami-status" ''
       ami-forge status --ssm "${ssmParameter}" --region "${region}"
     '';
   };
@@ -609,21 +632,18 @@ in rec {
       };
     })));
 
-    mkApp = name: script: {
-      type = "app";
-      program = toString (pkgs.writeShellScript name ''
-        set -euo pipefail
-        export PATH="${pkgs.lib.makeBinPath ([ forgePackage unfreePkgs.packer pkgs.awscli2 ] ++ extraBinaries)}:$PATH"
-        ${pkgs.lib.optionalString (awsProfile != null) ''export AWS_PROFILE="${awsProfile}"''}
-        ${script}
-      '');
+    app = name: script: mkAmiApp {
+      inherit name script forgePackage awsProfile extraBinaries;
     };
   in {
-    ami-build = mkApp "ami-build-layered" ''
-      exec ami-forge multi-layer-run --config "${pipelineConfig}"
+    # GC-root guard for every layer/test-layer template + the config
+    # itself lives in ami-forge's `multi-layer-run` (GcRootGuard) — see
+    # mkAmiApp's own comment.
+    ami-build = app "ami-build-layered" ''
+      ami-forge multi-layer-run --config "${pipelineConfig}"
     '';
 
-    ami-status = mkApp "ami-status-layered" ''
+    ami-status = app "ami-status-layered" ''
       echo "Layer status:"
       ${builtins.concatStringsSep "\n" (map (l: ''
         echo -n "  ${l.name}: "
