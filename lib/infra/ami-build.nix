@@ -129,6 +129,24 @@ in rec {
         else pkgs.lib.max 1 (spec.vcpu / maxJobs);
     in "--option max-jobs ${toString maxJobs} --option cores ${toString cores}";
 
+  # The FIRST `nixos-rebuild switch` every mkBuildTemplate provisioner runs
+  # is unavoidably raw shell, not a `kindling ami-build` call — `kindling`
+  # itself is one of the packages THIS rebuild installs, so it doesn't
+  # exist on the box's PATH yet (the chicken-and-egg every consumer's own
+  # `--skip-rebuild` flag on its SECOND `kindling ami-build` step already
+  # assumes). What was genuinely a "solve once" violation is that six
+  # kindling-profiles call sites each hand-typed their own copy of this
+  # ~230-character Attic-conditional string — one had drifted to
+  # hand-append `--option max-jobs 1 --option cores 1`, the other five
+  # didn't, an inconsistency nixBuildOptsFor's $NIX_BUILD_OPTS (env var,
+  # already exported by mkBuildTemplate/mkLayerTemplate below) now makes
+  # structurally impossible to drift on. Callers interpolate this ONE
+  # string instead of retyping the conditional; $FLAKE_REF/$GITHUB_TOKEN/
+  # $ATTIC_URL/$NIX_BUILD_OPTS all come from the provisioner's own
+  # environment_vars.
+  nixosRebuildSwitchStep =
+    ''if [ -n "$ATTIC_URL" ]; then echo "Using Attic cache: $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN $NIX_BUILD_OPTS; fi'';
+
   # ── Cluster Test Config ──────────────────────────────────────
   # Generates a YAML config file (JSON is valid YAML) describing the
   # multi-node cluster topology for ami-forge cluster-test.
@@ -454,6 +472,10 @@ in rec {
             environment_vars = [
               "GITHUB_TOKEN=\${var.github_token}"
               "ATTIC_URL=\${var.attic_url}"
+              # See mkBuildTemplate's identical field — same nixosRebuildSwitchStep
+              # is usable here for any layer whose provisionerScript runs its own
+              # `nixos-rebuild switch`.
+              "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType; }}"
             ] ++ extraEnvironmentVars;
             # See mkBuildTemplate's identical field for why: a caller-supplied
             # provisionerScript that runs `nixos-rebuild switch` can
