@@ -96,7 +96,18 @@ jobs:
       # (The released `pleme-io/actions/helm-mirror` action is the same `forge
       # helm mirror` for standalone use; here we invoke the consumer's pinned
       # forge directly via its `.#mirror` flake app.)
+      #
+      # `continue-on-error` here + the trailing "Fail if mirroring failed" step
+      # below is deliberate: forge's `mirror` already runs every dependency to
+      # completion and only bails at the end (aggregated, listing every
+      # failure) — but a single stuck dependency (e.g. a brand-new GHCR package
+      # name hitting a one-time `403 write_package` permission gap) must not
+      # skip the "Publish all bumped charts" step that follows. Without this,
+      # ONE upstream mirror failure would silently abort publishing every
+      # already-bumped chart in the batch, not just the one that's stuck.
       - name: Mirror upstream subcharts
+        id: mirror
+        continue-on-error: true
         env:
           REGISTRY: ${{ inputs.registry }}
         run: nix run ".#mirror" -- "$REGISTRY"
@@ -108,3 +119,13 @@ jobs:
         run: |
           set -euo pipefail
           nix run ".#${RELEASE_APP}" -- "$REGISTRY"
+
+      # Surface the mirror failure as a job failure — AFTER publish already ran
+      # — so the gap stays visible (someone must grant the one-time GHCR
+      # package-creation permission for the new package) without having
+      # blocked the charts that were ready to ship.
+      - name: Fail the job if any upstream mirror failed
+        if: steps.mirror.outcome == 'failure'
+        run: |
+          echo "::error::Mirror step failed for one or more upstream subcharts (see 'Mirror upstream subcharts' log above). Charts that were ready still published in the step above. If a failure is '403 write_package' on a brand-new package name, it needs a one-time manual GHCR package-creation permission grant — this is not something the workflow can self-heal."
+          exit 1
