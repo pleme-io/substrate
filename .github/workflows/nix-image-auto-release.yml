@@ -32,6 +32,10 @@ on:
       runner:
         type: string
         default: "ubuntu-24.04"
+      working-directory:
+        description: "Directory containing the flake.nix that exposes release-app (default: repo root). Set for a monorepo tool that isn't at the repo root, e.g. a nested tools/<name>/flake.nix."
+        type: string
+        default: "."
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -49,6 +53,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
       - uses: actions/checkout@v4
 
