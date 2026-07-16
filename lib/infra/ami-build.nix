@@ -214,6 +214,17 @@ in rec {
                 "FLAKE_REF=\${var.flake_ref}"
                 "ATTIC_URL=\${var.attic_url}"
               ] ++ extraEnvironmentVars;
+              # `nixos-rebuild switch` (the standard first step of
+              # fullProvisioner/provisionerScript for every mkBuildTemplate
+              # consumer) can legitimately restart networking/sshd when the
+              # activation touches those units, dropping Packer's SSH
+              # session mid-script. Without this, that expected disconnect
+              # surfaces as a hard build failure ("Script disconnected
+              # unexpectedly") instead of Packer reconnecting and
+              # continuing — confirmed live (portao-camelot-ami-build,
+              # 2026-07-16, failed after 27m of real provisioning work at
+              # exactly this point).
+              expect_disconnect = true;
             };
           }];
         post-processor.manifest = {
@@ -363,6 +374,10 @@ in rec {
               "GITHUB_TOKEN=\${var.github_token}"
               "ATTIC_URL=\${var.attic_url}"
             ] ++ extraEnvironmentVars;
+            # See mkBuildTemplate's identical field for why: a caller-supplied
+            # provisionerScript that runs `nixos-rebuild switch` can
+            # legitimately disconnect Packer's SSH session mid-activation.
+            expect_disconnect = true;
           };
         }];
       } // (if !skipCreateAmi then {
