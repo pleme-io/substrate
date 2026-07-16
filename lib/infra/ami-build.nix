@@ -69,6 +69,66 @@ in rec {
   # for the underlying yaml files + helper.
   hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
 
+  # ── Nix build parallelism, sized to the builder instance ─────
+  #
+  # Every mkBuildTemplate provisioner runs `nixos-rebuild switch` on a
+  # box that may have no reachable substituter (rio's Attic cache is
+  # Tailscale MagicDNS-only — confirmed unreachable from a Camelot-VPC
+  # builder via a live SSM probe, 2026-07-16), meaning a fully-cold
+  # from-source build of the whole flake closure is a real, expected
+  # path, not an edge case. nix's own default (max-jobs=auto == nproc,
+  # cores=0 == unlimited per job) lets every core start its own
+  # concurrent derivation build — fine for small closures, but for a
+  # closure with dozens of heavy Rust crates (several large AWS SDK
+  # crates, async-graphql, tatara-lisp, the project's own binaries) it
+  # blows past available RAM and the box disconnects mid-build (the
+  # portao-camelot-ami-build incident this table exists to prevent a
+  # repeat of: 16-way-parallel on a 32GB c7i.4xlarge, 27 minutes in,
+  # SSH dropped). The fix already landed once by hand as a hardcoded
+  # `--option max-jobs 1 --option cores 1` in kindling-profiles — the
+  # exact fleet-known-good pangea-operator CI value for a MUCH smaller
+  # runner. That's safe everywhere but leaves most of a bigger box's
+  # real capacity idle. This table auto-sizes instead: known-safe on a
+  # box we've never measured, and not needlessly serial on one we have
+  # real headroom on.
+  #
+  # perJobRamGb is a heuristic, not a measured ceiling — pangea-
+  # operator's own postmortem (release.yml) found even 2 CONCURRENT
+  # native compiles OOM'd a smaller runner, well under what a naive
+  # "assume 2GB/job" division would predict was safe. Defaulting to
+  # 4GB/job here is deliberately conservative given that lesson; pass
+  # a lower value only once a specific crate graph's real peak RSS has
+  # actually been measured (`/usr/bin/time -v` around a cold build),
+  # not by guessing tighter.
+  amiBuilderInstanceSpecs = {
+    "t3.small"    = { vcpu = 2;  ramGb = 2;  };
+    "t3.medium"   = { vcpu = 2;  ramGb = 4;  };
+    "t3.large"    = { vcpu = 2;  ramGb = 8;  };
+    "t3.xlarge"   = { vcpu = 4;  ramGb = 16; };
+    "c7i.xlarge"  = { vcpu = 4;  ramGb = 8;  };
+    "c7i.2xlarge" = { vcpu = 8;  ramGb = 16; };
+    "c7i.4xlarge" = { vcpu = 16; ramGb = 32; };
+    "c7i.8xlarge" = { vcpu = 32; ramGb = 64; };
+  };
+
+  # Returns the literal `--option max-jobs N --option cores M` string
+  # to interpolate into a `nixos-rebuild switch` invocation, sized to
+  # `instanceType`. Unknown instance types fall back to the
+  # fleet-proven pangea-operator floor (max-jobs=1, cores=1) rather
+  # than guessing — an unrecognized type is exactly the case where
+  # this table has no evidence to size from, so it defers to the
+  # known-safe value instead of extrapolating.
+  nixBuildOptsFor = { instanceType, perJobRamGb ? 4 }:
+    let
+      spec = amiBuilderInstanceSpecs.${instanceType} or null;
+      maxJobs =
+        if spec == null then 1
+        else pkgs.lib.max 1 (pkgs.lib.min spec.vcpu (spec.ramGb / perJobRamGb));
+      cores =
+        if spec == null then 1
+        else pkgs.lib.max 1 (spec.vcpu / maxJobs);
+    in "--option max-jobs ${toString maxJobs} --option cores ${toString cores}";
+
   # ── Cluster Test Config ──────────────────────────────────────
   # Generates a YAML config file (JSON is valid YAML) describing the
   # multi-node cluster topology for ami-forge cluster-test.
@@ -213,17 +273,38 @@ in rec {
                 "GITHUB_TOKEN=\${var.github_token}"
                 "FLAKE_REF=\${var.flake_ref}"
                 "ATTIC_URL=\${var.attic_url}"
+                # Auto-sized nix build parallelism for THIS template's
+                # instanceType — see nixBuildOptsFor above. Every
+                # provisionerScript should interpolate $NIX_BUILD_OPTS
+                # into its `nixos-rebuild switch` invocation instead of
+                # a hand-typed --option max-jobs/--option cores literal,
+                # so the safe value tracks the instance the template
+                # actually declares rather than drifting per-consumer.
+                "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType; }}"
               ] ++ extraEnvironmentVars;
               # `nixos-rebuild switch` (the standard first step of
               # fullProvisioner/provisionerScript for every mkBuildTemplate
-              # consumer) can legitimately restart networking/sshd when the
+              # consumer) CAN legitimately restart networking/sshd when the
               # activation touches those units, dropping Packer's SSH
-              # session mid-script. Without this, that expected disconnect
-              # surfaces as a hard build failure ("Script disconnected
-              # unexpectedly") instead of Packer reconnecting and
-              # continuing — confirmed live (portao-camelot-ami-build,
-              # 2026-07-16, failed after 27m of real provisioning work at
-              # exactly this point).
+              # session mid-script — kept as defensive hardening for that
+              # case. Correction (2026-07-16, same day): the original
+              # comment here cited the portao-camelot-ami-build 27-minute
+              # disconnect as "confirmed live" evidence for THIS failure
+              # mode, but a direct read of that build's own log shows the
+              # disconnect landed mid-way through `nixos-rebuild switch`'s
+              # BUILD phase (compiling rust_pleme-kindling-0.3.0.drv, one
+              # of the last derivations in the graph) — well before any
+              # activation step runs, so no networking/sshd restart could
+              # have occurred yet. That incident's real cause was nix's
+              # unconstrained max-jobs=auto running ~16 heavy Rust crate
+              # builds concurrently on the c7i.4xlarge builder with no
+              # substituter cache reachable (rio's Attic is Tailscale-only,
+              # unreachable from that VPC), OOM-adjacent resource
+              # exhaustion — fixed via nixBuildOptsFor below (auto-sized
+              # max-jobs/cores), not by this setting. Leaving
+              # expect_disconnect=true in place regardless — it is still
+              # sound defensive coverage for a genuine, separate failure
+              # mode, just not what actually happened here.
               expect_disconnect = true;
             };
           }];
