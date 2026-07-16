@@ -61,6 +61,36 @@ let
     };
   };
 
+  # ── FinOps tagging standard (theory/CAMELOT.md §IV.D) ─────────────
+  #
+  # The six-key mandatory FinOps tag set every Camelot-owned AWS
+  # resource carries — born from a real orphaned EC2 instance (zero
+  # tags, only identifiable via a live SSM shell probe). This file
+  # already hand-writes `Name` and `ManagedBy` at every `tags`/
+  # `run_tags` call site below (and the `ami-forge:purpose` /
+  # `ami-forge:ttl-hours` pair, already read back programmatically by
+  # ami-forge's own reaper — kept as-is, never replaced); this helper
+  # adds exactly the keys that were missing: `Owner`, `Purpose`,
+  # `Environment`, `Ephemeral` (+ `TtlHours` when ephemeral). Mirrors
+  # pangea-architectures' `Pangea::Architectures::FinopsTags.build` —
+  # same six-key standard, same "Name is resource-specific, not
+  # produced here" exclusion — so both AWS-resource-creation paths
+  # (Pangea-Ruby, Packer/Nix) converge on one tag shape.
+  mkFinopsTags = {
+    owner ? "platform",
+    purpose,
+    managedBy ? "pangea",
+    environment ? "camelot-dev",
+    ephemeral ? false,
+    ttlHours ? null,
+  }: {
+    Owner = owner;
+    Purpose = purpose;
+    ManagedBy = managedBy;
+    Environment = environment;
+    Ephemeral = if ephemeral then "true" else "false";
+  } // (if ephemeral && ttlHours != null then { TtlHours = toString ttlHours; } else {});
+
 in rec {
 
   # ── Hardening profile bundle ────────────────────────────────
@@ -144,8 +174,20 @@ in rec {
   # string instead of retyping the conditional; $FLAKE_REF/$GITHUB_TOKEN/
   # $ATTIC_URL/$NIX_BUILD_OPTS all come from the provisioner's own
   # environment_vars.
+  # $GITHUB_TOKEN is frequently EMPTY (unset locally, or the operator's
+  # token is broken/expired — a real 2026-07-16 incident: every one of
+  # three live GitHub credentials independently failed with an
+  # authenticated-only fault, while the same fetches worked instantly
+  # unauthenticated, because kindling-profiles/blackmatter are both
+  # PUBLIC repos). Passing `--option access-tokens github.com=` with an
+  # empty value still emits a populated (if blank) Authorization header —
+  # NOT the same as omitting the flag — and that's enough to route the
+  # request through GitHub's authenticated-request path even when no
+  # credential is actually needed or working. Emit the flag only when a
+  # non-empty token is present so a public-repo fetch never depends on
+  # having a working token at all.
   nixosRebuildSwitchStep =
-    ''if [ -n "$ATTIC_URL" ]; then echo "Using Attic cache: $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF --option access-tokens github.com=$GITHUB_TOKEN $NIX_BUILD_OPTS; fi'';
+    ''ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using Attic cache: $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
 
   # ── Shared app wrapper ───────────────────────────────────────────
   #
@@ -231,6 +273,12 @@ in rec {
     extraVariables ? {},
     extraTags ? {},
     extraEnvironmentVars ? [],
+    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # mkFinopsTags above. Sensible defaults; override per call site
+    # when the resource has a real owner/purpose/environment.
+    owner ? "platform",
+    purpose ? "NixOS base AMI build for ${amiName}",
+    environment ? "camelot-dev",
     # List of profile names to apply via `kindling harden` after the
     # main provisionerScript. Accepts the same stack keys as the
     # hardening-profiles bundle: "base", "hardened", "ami-full",
@@ -301,13 +349,13 @@ in rec {
           ManagedBy = "pangea";
           BuildTimestamp = "{{timestamp}}";
           SourceFlake = "\${var.flake_ref}";
-        } // extraTags;
+        } // mkFinopsTags { inherit owner purpose environment; ephemeral = false; } // extraTags;
         run_tags = {
           Name = "ami-forge-builder";
           ManagedBy = "pangea";
           "ami-forge:purpose" = "ami-build";
           "ami-forge:ttl-hours" = "4";
-        };
+        } // mkFinopsTags { inherit owner purpose environment; ephemeral = true; ttlHours = 4; };
       };
 
       build = [{
@@ -384,6 +432,11 @@ in rec {
     ] else [
       "kindling ami-test"
     ]),
+    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # mkFinopsTags above.
+    owner ? "platform",
+    purpose ? "AMI validation test instance",
+    environment ? "camelot-dev",
   }: let
     template = {
       variable = {
@@ -404,7 +457,7 @@ in rec {
           ManagedBy = "pangea";
           "ami-forge:purpose" = "ami-test";
           "ami-forge:ttl-hours" = "2";
-        };
+        } // mkFinopsTags { inherit owner purpose environment; ephemeral = true; ttlHours = 2; };
       } // (if testUserData != null then {
         user_data = testUserData;
       } else {});
@@ -439,6 +492,11 @@ in rec {
     extraEnvironmentVars ? [],
     extraTags ? {},
     skipCreateAmi ? false,
+    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # mkFinopsTags above.
+    owner ? "platform",
+    purpose ? "NixOS layered AMI build for ${amiName}",
+    environment ? "camelot-dev",
   }: let
     template = {
       variable = {
@@ -484,13 +542,13 @@ in rec {
           Name = "\${var.ami_name}";
           ManagedBy = "pangea";
           BuildTimestamp = "{{timestamp}}";
-        } // extraTags;
+        } // mkFinopsTags { inherit owner purpose environment; ephemeral = false; } // extraTags;
         run_tags = {
           Name = "ami-forge-layer-builder";
           ManagedBy = "pangea";
           "ami-forge:purpose" = "layer-build";
           "ami-forge:ttl-hours" = "4";
-        };
+        } // mkFinopsTags { inherit owner purpose environment; ephemeral = true; ttlHours = 4; };
       };
 
       build = [({
