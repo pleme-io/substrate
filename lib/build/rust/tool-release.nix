@@ -409,7 +409,12 @@ in {
     pkgs = hostPkgs;
     devenv = null;
     tools = devTools ++ [ hostPkgs.rust-analyzer ];
-    extraPackages = [ crate2nix ];
+    # No crate2nix in the gen-path devShell: this pipeline builds via gen +
+    # lockfile-builder, not crate2nix, so `crate2nix` is vestigial here — and forcing
+    # `crate2nix.packages.${system}.default` (tool-release-flake.nix) breaks `nix
+    # develop` when the input doesn't resolve a per-system package. Developers use the
+    # `gen` verbs; the crate2nix-backed `regenerate-cargo-nix` app keeps its own ref.
+    extraPackages = [ ];
     inherit buildInputs;
   };
 
