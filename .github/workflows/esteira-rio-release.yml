@@ -9,7 +9,7 @@ name: esteira-rio-release
 # gha-runner-scale-set on rio's k3s (pleme-io/k8s clusters/rio/infrastructure/arc/)
 # with the host /nix store + nix-daemon socket hostPath-mounted into the runner
 # pod. A repo opts into this lane via the pangea-github catalog
-# (actions_enabled: true) + membership in the rio-private-lane runner group.
+# (actions_enabled: true) + membership in the camelot-builder-pleme-lane runner group.
 
 on:
   workflow_call:

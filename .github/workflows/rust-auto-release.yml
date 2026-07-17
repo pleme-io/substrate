@@ -53,14 +53,14 @@ on:
         required: false
         default: "true"
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped rio-private ARC pool (avoids billed
+      # private repos → the org-scoped camelot-builder-pleme ARC pool (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
       # repos → ubuntu-latest. Schedule-triggered callers (the drip tick) may
       # lack github.event.repository and fall open to hosted (documented edge).
       # Do NOT put an expression in this default — workflow_call input
       # defaults are static; the fallback lives in each job's runs-on.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → rio-private, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme, public → ubuntu-latest)."
         type: string
         required: false
         default: ""
@@ -92,7 +92,7 @@ concurrency:
 jobs:
   bump:
     name: Bump workspace + tag
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops)
     # and on the scheduled drip tick (a capacity-ride must never bump/tag).
     if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
@@ -127,7 +127,7 @@ jobs:
   ship:
     name: Ship workspace to registry
     needs: bump
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     # privacy posture 2026-07-05: private repos bump+tag only — no public
     # registry publish; see pangea-architectures PRIVACY-WAVES.md. Publishing
     # a new version from a private repo leaks code to crates.io and undoes
@@ -161,7 +161,7 @@ jobs:
   # seconds once the bootstrap converges, so it's safe to leave armed.
   drip:
     name: Drip-publish remaining capacity
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'rio-private' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     # Fires on the consumer's */15 schedule (auto-drain) AND on a manual
     # workflow_dispatch (operator-forced "publish what's missing now" — the
     # resume hand-off for a backlog that a cancelled/deferred ship stranded,
