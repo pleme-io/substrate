@@ -46,9 +46,9 @@ on:
         type: string
         default: "release"
       runner:
-        description: "Runner label."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN. Use a BOT_PAT only if cross-namespace OCI push needs broader scope than GITHUB_TOKEN grants."
@@ -61,7 +61,16 @@ permissions:
 jobs:
   publish:
     name: Publish all bumped charts
-    runs-on: ${{ inputs.runner }}
+    # Runner routing: empty input routes by CALLER repo visibility — private
+    # repos → camelot-builder-pleme (pleme-io-org ARC pool, avoids billed
+    # hosted minutes), public repos → ubuntu-24.04 (unmetered). Keyed off
+    # github.event.repository.private (the caller's event payload) rather
+    # than an org-level Actions variable: pleme-io is on the GitHub Free org
+    # plan, which does not share org vars/secrets into private repos'
+    # workflow-evaluation context, so a vars.*-based fallback silently
+    # resolves empty there. Same idiom as rust-auto-release.yml/
+    # python-auto-release.yml.
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-24.04') }}
     # Never re-trigger on the bot's own pushes (defensive; this workflow does not
     # itself push commits, but a consumer might add a bump step later).
     if: github.actor != 'github-actions[bot]'

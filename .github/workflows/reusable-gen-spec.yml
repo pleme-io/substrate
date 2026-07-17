@@ -37,6 +37,16 @@ on:
         description: "gen flake ref to run (pin for reproducibility)."
         type: string
         default: "github:pleme-io/gen"
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
+      # off github.event.repository.private (the caller's event payload),
+      # never an org-level Actions variable — pleme-io's GitHub Free org
+      # plan doesn't share org vars/secrets into private repos' workflow
+      # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
+      runner:
+        type: string
+        default: ""
 
 concurrency:
   group: gen-spec-${{ github.ref }}
@@ -47,7 +57,7 @@ permissions:
 
 jobs:
   gen-spec:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
         with:

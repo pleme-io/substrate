@@ -27,13 +27,24 @@ on:
         required: false
         type: string
         default: .
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
+      # off github.event.repository.private (the caller's event payload),
+      # never an org-level Actions variable — pleme-io's GitHub Free org
+      # plan doesn't share org vars/secrets into private repos' workflow
+      # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
+      runner:
+        required: false
+        type: string
+        default: ""
     # No secrets stanza — publish uses OIDC. An empty `secrets:` with only
     # a comment parses as `secrets: null` and breaks workflow-file
     # validation for callers.
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     permissions:
       id-token: write
       contents: read

@@ -31,6 +31,17 @@ on:
         type: string
         required: false
         default: "true"
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
+      # off github.event.repository.private (the caller's event payload),
+      # never an org-level Actions variable — pleme-io's GitHub Free org
+      # plan doesn't share org vars/secrets into private repos' workflow
+      # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
+      runner:
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -38,7 +49,7 @@ permissions:
 jobs:
   audit:
     name: 'dependency vulnerabilities'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/security-audit@main
@@ -47,7 +58,7 @@ jobs:
 
   sbom:
     name: 'SBOM generation'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - id: sbom
@@ -62,7 +73,7 @@ jobs:
 
   license-headers:
     name: 'SPDX header sweep'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     if: inputs.check-license-headers == 'true'
     steps:
       - uses: actions/checkout@v4

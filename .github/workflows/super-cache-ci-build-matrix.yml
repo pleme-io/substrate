@@ -105,6 +105,10 @@ on:
         description: "super-cache-build: a derive with no live sui build path is a hard failure (true) instead of an honest built=false LiveTODO."
         type: boolean
         default: false
+      discover-runner:
+        description: "Runner label for the lightweight `discover` job specifically (distinct from `runner`, which is the JSON array of labels for the build-matrix cells). Empty = route by CALLER repo visibility — private repos → camelot-builder-pleme, public repos → ubuntu-latest — via github.event.repository.private, never an org-level Actions variable (pleme-io's GitHub Free org plan doesn't share org vars/secrets into private repos' workflow context)."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -121,7 +125,7 @@ jobs:
   #     zero-cell fan a downstream job silently skips.
   discover:
     name: discover image cells
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.discover-runner != '' && inputs.discover-runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}

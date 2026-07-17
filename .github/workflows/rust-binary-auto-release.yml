@@ -92,6 +92,18 @@ on:
         required: false
         default: false
         description: "Pass --no-default-features. Consumed by the sibling release-binaries.yml shim."
+      # Runner routing: empty default routes by CALLER repo visibility —
+      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
+      # off github.event.repository.private (the caller's event payload),
+      # never an org-level Actions variable — pleme-io's GitHub Free org
+      # plan doesn't share org vars/secrets into private repos' workflow
+      # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
+      runner:
+        type: string
+        required: false
+        default: ""
+        description: "Explicit runner label override; empty = route by caller repo visibility."
     secrets:
       BOT_PAT:
         required: false
@@ -108,7 +120,7 @@ concurrency:
 
 jobs:
   bump:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
     if: github.actor != 'github-actions[bot]'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
