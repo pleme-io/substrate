@@ -61,6 +61,18 @@ on:
         description: "Path (relative to the repo root) to a .trivyignore-format file of named, tracked exceptions for the scan-before-push gate -- each entry must carry its own justification, never a blanket severity loosening. Empty (default) = no exceptions."
         type: string
         default: ""
+      boot-check-cmd:
+        description: "Correctness gate, run AFTER the CVE scan and BEFORE the push (a CVE-clean image that crashes at boot is worse than useless -- theory/CAMELOT.md's own hardened-images incident, 2026-07-17: mysql+rabbitmq both passed 0-CVE scans and neither could boot). Health command exec'd inside the started container via pleme-io/actions/container-boot-check (e.g. 'mysqladmin ping --silent', 'rabbitmq-diagnostics -q ping'). Empty (default) = no boot-check -- every existing caller keeps its current behavior unchanged; opt in per consumer, same shape as scan-before-push."
+        type: string
+        default: ""
+      boot-check-image-ref:
+        description: "Local tag to docker-load the scanned tarball as before boot-testing it (e.g. 'rabbitmq:3.13.7-nix3'). Required when boot-check-cmd is set."
+        type: string
+        default: ""
+      boot-check-env:
+        description: "Newline-separated KEY=VALUE pairs passed to the boot-check container (e.g. MYSQL_ROOT_PASSWORD=... for a dev-only smoke boot)."
+        type: string
+        default: ""
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -121,6 +133,24 @@ jobs:
           fail-on-severity: ${{ inputs.scan-fail-on-severity }}
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
+
+      # Correctness gate, after the CVE scan and before anything ships --
+      # matching akeylesslabs/akeyless-main-repo's own camelot-hardened-images.yml
+      # pattern exactly (that pipeline already learned this lesson: a
+      # CVE-clean image that crashes at boot is worse than useless). docker
+      # load, not a registry pull -- the same local tarball the scan step
+      # above just cleared, never touched a registry yet.
+      - name: Load image into Docker for boot-check
+        if: inputs.boot-check-cmd != ''
+        run: docker load -i result
+
+      - name: Correctness gate (boot-check — a 0-CVE image that can't boot is not shippable)
+        if: inputs.boot-check-cmd != ''
+        uses: pleme-io/actions/container-boot-check@main
+        with:
+          image: ${{ inputs.boot-check-image-ref }}
+          health-cmd: ${{ inputs.boot-check-cmd }}
+          env: ${{ inputs.boot-check-env }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
