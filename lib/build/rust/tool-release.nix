@@ -395,10 +395,19 @@ in {
     unwrapped = nativeBinary;
   };
 
+  # Non-interactive-safe devShell. A bare `substrate.rust.<shape> { src = ./.; }`
+  # consumer has no `rust-overlay` flake input and no PWD under non-interactive
+  # `nix develop` — both of which the devenv path hard-requires
+  # (languages.rust.channel = "stable" resolves a consumer rust-overlay input;
+  # devenv.root = getEnv "PWD" asserts non-empty). Pass devenv = null so
+  # mkRustDevShell takes its plain-fenix `pkgs.mkShell` branch: the fenix toolchain
+  # (cargo/rustc/clippy/rustfmt) + rust-analyzer + crate2nix + the darwin frameworks
+  # (incl apple-sdk.privateFrameworksHook via mkDarwinBuildInputs), zero consumer
+  # wiring. One call site — fixes every substrate.rust.{tool,workspace,library,
+  # service,binary} shape at once; the devenv branch stays for direct consumers.
   devShells.default = (import ../shared/devshell.nix { pkgs = hostPkgs; }).mkRustDevShell {
     pkgs = hostPkgs;
-    inherit devenv nixpkgs;
-    devenvModule = ../../devenv/rust-tool.nix;
+    devenv = null;
     tools = devTools ++ [ hostPkgs.rust-analyzer ];
     extraPackages = [ crate2nix ];
     inherit buildInputs;
