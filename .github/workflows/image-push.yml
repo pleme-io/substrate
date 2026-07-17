@@ -94,8 +94,11 @@ on:
         type: string
         default: ""
     secrets:
+      BOT_PAT:
+        description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
+        required: false
       GHCR_TOKEN:
-        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
         required: false
 
 jobs:
@@ -168,12 +171,18 @@ jobs:
           nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths $FLAGS
           cp -L result image.tar.gz
 
+      # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
+      # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
+      # which the skopeo push below reads via REGISTRY_AUTH_FILE).
       - name: Login to registry
-        uses: docker/login-action@v3
+        uses: pleme-io/actions/registry-login@main
         with:
           registry: ${{ inputs.registry }}
+          client: docker
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
+          bot-pat: ${{ secrets.BOT_PAT }}
+          ghcr-token: ${{ secrets.GHCR_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Direct host-nix skopeo push. Originally went through
       # pleme-io/actions/oci-image-push@v1, but that's itself a Docker
@@ -186,9 +195,12 @@ jobs:
           IMAGE:    ${{ inputs.imageName || github.repository }}
           TAG:      ${{ inputs.tag }}
           ADDITIONAL_TAGS: ${{ inputs.additionalTags }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
         run: |
           set -euo pipefail
+          # skopeo authenticates via the ~/.docker/config.json that the
+          # registry-login step (client: docker) wrote — REGISTRY_AUTH_FILE
+          # points nixpkgs skopeo at it, so no explicit --dest-creds is needed.
+          export REGISTRY_AUTH_FILE="$HOME/.docker/config.json"
           # The ubuntu runner ships a v1 /etc/containers/registries.conf,
           # which nixpkgs skopeo rejects ("registries.conf must be in v2
           # format but is in v1"). Point skopeo at a minimal v2 config —
@@ -204,7 +216,6 @@ jobs:
             local target="${REGISTRY}/${IMAGE}:${t}"
             nix shell nixpkgs#skopeo --command \
               skopeo --insecure-policy copy \
-                --dest-creds "${{ github.actor }}:${GHCR_TOKEN}" \
                 "docker-archive:./image.tar.gz" \
                 "docker://${target}"
           }

@@ -62,8 +62,11 @@ on:
         type: string
         default: ""
     secrets:
+      BOT_PAT:
+        description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
+        required: false
       GHCR_TOKEN:
-        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
+        description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
         required: false
 
 permissions:
@@ -119,13 +122,18 @@ jobs:
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
 
+      # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
+      # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
+      # the standard keychain forge image-release's skopeo/regctl push reads).
       - name: Registry login
-        env:
-          HOST: ${{ inputs.registry-host }}
-          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
-        # forge image-release pushes via skopeo/regctl, which read the standard
-        # Docker keychain (~/.docker/config.json).
-        run: echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
+        uses: pleme-io/actions/registry-login@main
+        with:
+          registry: ${{ inputs.registry-host }}
+          client: docker
+          username: ${{ github.actor }}
+          bot-pat: ${{ secrets.BOT_PAT }}
+          ghcr-token: ${{ secrets.GHCR_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: skopeo registries.conf (runner ships v1; nixpkgs skopeo needs v2)
         # The ubuntu runner's /etc/containers/registries.conf is v1; the nixpkgs
