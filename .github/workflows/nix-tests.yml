@@ -64,6 +64,9 @@ jobs:
       - name: quirk-apply-test.nix
         run: nix-instantiate --eval --strict lib/build/rust/quirk-apply-test.nix
 
+      - name: darwin-test.nix (mkDarwinBuildInputs private-frameworks hook)
+        run: nix-instantiate --eval --strict lib/util/darwin-test.nix
+
   go-package-graph:
     name: go — gen-gomod M1 per-package interpreter eval tests
     runs-on: ubuntu-latest
