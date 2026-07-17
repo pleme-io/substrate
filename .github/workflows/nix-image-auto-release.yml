@@ -57,6 +57,10 @@ on:
         description: "Skip vulns without an available fix in the scan-before-push gate. Never loosen this as a substitute for a named, tracked .trivyignore exception."
         type: string
         default: "false"
+      scan-ignore-file:
+        description: "Path (relative to the repo root) to a .trivyignore-format file of named, tracked exceptions for the scan-before-push gate -- each entry must carry its own justification, never a blanket severity loosening. Empty (default) = no exceptions."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -113,6 +117,7 @@ jobs:
           local-archive: result
           fail-on-severity: ${{ inputs.scan-fail-on-severity }}
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
+          ignore-file: ${{ inputs.scan-ignore-file }}
 
       - name: Registry login
         env:
