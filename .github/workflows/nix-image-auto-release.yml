@@ -37,6 +37,26 @@ on:
         description: "Directory containing the flake.nix that exposes release-app (default: repo root). Set for a monorepo tool that isn't at the repo root, e.g. a nested tools/<name>/flake.nix."
         type: string
         default: "."
+      scan-before-push:
+        description: "Zero-tolerance CVE gate (theory/SECURITY-LAYER.md §8's 'build-time pre-publish CVE gate'): build image-attr locally, scan the LOCAL tarball with pleme-io/actions/image-scan (trivy --input, no registry round-trip -- the image has never been pushed anywhere at this point), and only run release-app (the push) if the scan is clean. False (default) preserves every existing caller's exact atomic build+push behavior unchanged -- opt in per consumer."
+        type: boolean
+        default: false
+      image-attr:
+        description: "Flake package attribute for the raw image derivation (e.g. 'rabbitmqImage'). Required when scan-before-push is true -- this is what gets built+scanned before release-app pushes it."
+        type: string
+        default: ""
+      scan-image-ref:
+        description: "Human-readable image ref (e.g. ghcr.io/pleme-io/rabbitmq:3.13.7-nix0) used ONLY as the scan's log/output label when scan-before-push is true -- nothing is pulled from it."
+        type: string
+        default: ""
+      scan-fail-on-severity:
+        description: "Lowest severity that fails the scan-before-push gate: UNKNOWN | LOW | MEDIUM | HIGH | CRITICAL | none. UNKNOWN = zero-tolerance (every severity gates)."
+        type: string
+        default: "UNKNOWN"
+      scan-ignore-unfixed:
+        description: "Skip vulns without an available fix in the scan-before-push gate. Never loosen this as a substitute for a named, tracked .trivyignore exception."
+        type: string
+        default: "false"
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -72,6 +92,28 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
+      # scan-before-push mode: build the raw image derivation LOCALLY first
+      # (no push) so the CVE gate below scans it before it has ever touched
+      # a registry. Skipped entirely in the default (false) mode, which
+      # preserves every existing caller's exact atomic build+push step.
+      - name: Build image locally (scan-before-push gate)
+        if: inputs.scan-before-push
+        env:
+          IMAGE_ATTR: ${{ inputs.image-attr }}
+        run: nix build ".#${IMAGE_ATTR}" --print-build-logs
+
+      # A failing scan stops the job HERE (GitHub Actions' default: a job
+      # stops at its first failing step) -- the push step below is
+      # structurally unreachable on red, never merely advisory.
+      - name: Zero-tolerance CVE gate (pre-publish — scans the LOCAL tarball, never a pushed image)
+        if: inputs.scan-before-push
+        uses: pleme-io/actions/image-scan@main
+        with:
+          image-ref: ${{ inputs.scan-image-ref }}
+          local-archive: result
+          fail-on-severity: ${{ inputs.scan-fail-on-severity }}
+          ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
+
       - name: Registry login
         env:
           HOST: ${{ inputs.registry-host }}
@@ -90,6 +132,9 @@ jobs:
           printf 'unqualified-search-registries = []\n' > "$conf"
           echo "CONTAINERS_REGISTRIES_CONF=$conf" >> "$GITHUB_ENV"
 
+      # In scan-before-push mode the image derivation is already realized
+      # from the build step above, so this is a fast no-rebuild push (a
+      # cache-hit resolve + the mkPushApp skopeo copy), not a second build.
       - name: Build + push image (idempotent — <arch>-<sha> + <arch>-latest tags)
         env:
           RELEASE_APP: ${{ inputs.release-app }}
