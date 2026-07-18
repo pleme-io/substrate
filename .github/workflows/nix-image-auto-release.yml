@@ -73,6 +73,18 @@ on:
         description: "Newline-separated KEY=VALUE pairs passed to the boot-check container (e.g. MYSQL_ROOT_PASSWORD=... for a dev-only smoke boot)."
         type: string
         default: ""
+      vulnix-scan:
+        description: "Nix-closure CVE gate (vulnix, NVD-backed) -- complements scan-before-push's trivy gate, which structurally cannot see Nix-built images at all for whole classes of package: trivy's os-pkg scanner needs a dpkg/rpm/apk status DB (none exists in a Nix closure), and its language scanners only cover ecosystems with an embedded-buildinfo or lockfile scanner (Go, Rust) -- C/C++ and Erlang/OTP fall through both nets entirely. vulnix instead reads the package's own Nix derivation pname/version metadata against the NVD feed. Runs the consumer flake's own 'vulnix-scan:<name>' app (a nixpkgs-sourced vulnix, never an imperative install) against the package's runtime closure -- never the OCI image. False (default) preserves every existing caller unchanged; opt in per consumer, same shape as scan-before-push. A whitelist (vulnix's native TOML mechanism, the closure-scan sibling of a .trivyignore file) is a per-image Nix value in the consumer's own flake, not a workflow input here -- see pleme-io/hardened-images for the reference shape."
+        type: boolean
+        default: false
+      vulnix-scan-app:
+        description: "Flake app that runs the vulnix closure scan (e.g. 'vulnix-scan:mysql'). Required when vulnix-scan is true."
+        type: string
+        default: ""
+      vulnix-scan-advisory-only:
+        description: "Report vulnix findings without failing the job -- for a package whose closure has never been scanned before and has no committed whitelist baseline yet (a real, honest gap: an unscanned package's first run WILL surface findings nobody has triaged, and a hard gate on an untriaged baseline is indistinguishable from a broken pipeline). Flip to false (the default) once a real CI run's findings have seeded a committed vulnix whitelist for this package."
+        type: boolean
+        default: false
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -161,6 +173,37 @@ jobs:
           fail-on-severity: ${{ inputs.scan-fail-on-severity }}
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
+
+      # vulnix's own NVD feed corpus is ~300MB and vulnix itself only
+      # re-fetches a year's archive when NVD reports it changed (confirmed
+      # live: a warm-cache re-scan against an unchanged corpus dropped from
+      # ~60s to ~2.5s) -- restoring the most recent prior cache via
+      # restore-keys (the key itself never matches exactly, so a fresh
+      # cache is always saved after this job) makes every run after the
+      # first a small incremental fetch instead of the full corpus, under
+      # vulnix's own default cache dir so the generated vulnix-scan:<name>
+      # app needs no CI-specific path override.
+      - name: Restore vulnix NVD feed cache
+        if: inputs.vulnix-scan
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vulnix
+          key: vulnix-nvd-${{ github.run_id }}
+          restore-keys: |
+            vulnix-nvd-
+
+      # Nix-closure CVE gate (vulnix) -- sibling to the trivy gate above,
+      # covering the ecosystems it structurally cannot (see the vulnix-scan
+      # input's own description). Scans the PACKAGE's closure, not the OCI
+      # image -- no image build or docker-archive dependency, can run
+      # independently of scan-before-push/boot-check. A failing scan (any
+      # non-whitelisted finding) stops the job here, same as the trivy gate.
+      - name: Nix-closure CVE gate (vulnix -- covers what the trivy gate above structurally cannot)
+        if: inputs.vulnix-scan
+        continue-on-error: ${{ inputs.vulnix-scan-advisory-only }}
+        env:
+          VULNIX_SCAN_APP: ${{ inputs.vulnix-scan-app }}
+        run: nix run ".#${VULNIX_SCAN_APP}"
 
       # Correctness gate, after the CVE scan and before anything ships --
       # matching akeylesslabs/akeyless-main-repo's own camelot-hardened-images.yml
