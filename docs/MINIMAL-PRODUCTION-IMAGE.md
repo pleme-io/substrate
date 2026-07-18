@@ -1,5 +1,11 @@
 # MINIMAL-PRODUCTION-IMAGE — the strict-stack default for every OCI image
 
+> **Sibling doc:** this covers the **static, scratch-base** case (a
+> `CGO_ENABLED=0` Go binary needing no libc at all). For dynamically-linked
+> binaries, full packages (RabbitMQ-class), and vendor-image rewraps, see
+> [`HARDENED-BASE-IMAGES.md`](./HARDENED-BASE-IMAGES.md) — `oci/hardened-base.nix`'s
+> `mkPackageImage`/`mkVendorRewrap` over `bases.distroless-glibc`/`wolfi`.
+
 **Rule.** Every production OCI image the substrate builds defaults to the
 **strictest runtime closure the binary allows** — no OS base, no shell, no
 coreutils, no package-manager, no init, and no OS libc a static binary does not
