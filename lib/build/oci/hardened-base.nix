@@ -76,7 +76,39 @@ let
     mkdir -p $out/tmp
     chmod 1777 $out/tmp
   '';
-  mkTmpWritableFakeRootCommands = "chmod -R 1777 /tmp";
+
+  # /etc/passwd and /etc/group arrive via `contents` (nonrootPasswd/
+  # nonrootGroup above), which `dockerTools.buildLayeredImage` merges
+  # through `symlinkJoin` -- so in the pre-tar customisation layer they
+  # are SYMLINKS into /nix/store, not real files. nixpkgs' own tar step
+  # uses `--hard-dereference` (hard LINKS only) with no `-h`/
+  # `--dereference` flag, so those symlinks are stored in the final
+  # layer tar VERBATIM, pointing at an absolute /nix/store/<hash>/...
+  # path. Confirmed 2026-07-18 via direct nixpkgs/pkgs/build-support/
+  # docker/default.nix read (the customisationLayer + tar-assembly
+  # code), prompted by a real pre-hardened-base.nix comment (attic-
+  # server-image's OLD hand-rolled image) stating plainly: "containerd
+  # 2.x rejects Nix symlinks that point into /nix/store/ as 'path
+  # escapes from parent'" on its target ("ro") platform. Whether THIS
+  # specific target platform hits that exact containerd check is not
+  # yet empirically deploy-verified (no reachable builder this pass),
+  # but the symlink-into-/nix/store SHAPE itself is proven, not
+  # speculative -- and every hardened-base.nix consumer inherits it via
+  # commonContents, not just attic-server. Realized as REAL files here
+  # (same fakeRootCommands mechanism already fixing /tmp's mode above --
+  # the only place in this pipeline a mutation actually lands, since Nix
+  # strips write bits from every registered store path) so no consumer
+  # has to work around this individually.
+  mkTmpWritableFakeRootCommands = ''
+    chmod -R 1777 /tmp
+    for f in /etc/passwd /etc/group; do
+      if [ -L "$f" ]; then
+        real=$(readlink -f "$f")
+        rm -f "$f"
+        cp "$real" "$f"
+      fi
+    done
+  '';
 
   commonContents = [
     cacert
