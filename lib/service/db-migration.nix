@@ -37,6 +37,15 @@
     # `[cacert busybox]`: same shell (busybox) for the script, same glibc
     # liquibase's JVM needs to run, plus TLS roots + (new) a real nonroot
     # user this image never set before (previously implicit root).
+    #
+    # Below builds on `hardened.mkPackageImage` directly rather than a hand
+    # `dockerTools.buildLayeredImage { fromImage = base; ... }` call --
+    # this file carries no custom OCI labels (nothing under a `Labels` key
+    # to merge), so the conversion is purely mechanical: `mkPackageImage`'s
+    # own `io.pleme.rebuild.*`/`org.opencontainers.image.*` defaults now
+    # apply where the direct call added none. See `dbPackage`'s own comment
+    # below for the one real shape mismatch this call had to route around
+    # (the entrypoint script can't be `package`).
     hardened = import ../build/oci/hardened-base.nix { inherit pkgs; };
   in {
     name,
@@ -88,22 +97,32 @@
              else if type == "sql" then sqlRunner
              else throw "Unsupported migration type: ${type}. Use 'liquibase' or 'sql'.";
 
-    imageContents = with pkgs; (if type == "liquibase" then [ liquibase ] else []);
+    # `hardened.mkPackageImage`'s `package` param is mandatory and gets
+    # folded into `contents` via `buildLayeredImage`'s own
+    # symlinkJoin/lndir merge -- which requires a DIRECTORY-shaped
+    # derivation (`lndir` errors "Not a directory" against a raw file,
+    # confirmed empirically 2026-07-18 against a `writeShellScript`
+    # output). `runner` itself can therefore never BE that `package` --
+    # exactly as before, it's referenced ONLY via `entrypoint` (Nix's own
+    # textual reference-scan of the image config JSON is what pulls a
+    # referenced derivation's closure into the image; `contents` is a
+    # separate, directory-merge-only concern). `dbPackage` below is the
+    # type's REAL extra runtime content instead: liquibase's JVM + jars
+    # for the liquibase type, nothing for the sql type. `pkgs.emptyDirectory`
+    # (a real nixpkgs primitive -- an immutable, content-addressed empty
+    # directory) stands in for "nothing" so the mandatory `package` param
+    # is satisfiable without smuggling anything extra into the sql image.
+    dbPackage = if type == "liquibase" then pkgs.liquibase else pkgs.emptyDirectory;
 
-    dockerImage = pkgs.dockerTools.buildLayeredImage {
-      name = "migrate-${name}";
-      tag = "latest";
-      fromImage = hardened.bases.wolfi;
-      contents = imageContents;
-      config = {
-        Entrypoint = [ runner ];
-        Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
-        User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
-      };
-    } // {
-      closureInfo = pkgs.closureInfo {
-        rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
-      };
+    dockerImage = hardened.mkPackageImage {
+      service = name;
+      base = hardened.bases.wolfi;
+      package = dbPackage;
+      publishName = "migrate-${name}";
+      publishTag = "latest";
+      entrypoint = [ runner ];
+      env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+      user = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
     };
   in {
     package = runner;
