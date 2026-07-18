@@ -1,8 +1,13 @@
 name: publish-flakehub
 
+# FLAGGED OFF 2026-07-18 — FlakeHub publishing disabled. This failed on every
+# push: (1) the sparse-checkout below grabs only flake.nix + flake.lock, so
+# `nix flake show` can't resolve the lib/ tree the flake references ("path does
+# not exist"), and (2) a FlakeHub 401 ("User is not authorized for this
+# resource"). Manual-only for now; re-enable the `push` trigger + fix the
+# sparse-checkout + auth to restore.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   publish:

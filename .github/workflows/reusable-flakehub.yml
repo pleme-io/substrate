@@ -44,6 +44,12 @@ on:
 
 jobs:
   publish:
+    # FLAGGED OFF 2026-07-18 — FlakeHub publishing disabled fleet-wide. Every
+    # caller of this reusable (irodori/ishou/tatara-lisp/zuihitsu/…) now no-ops
+    # (skipped → green) instead of failing on the FlakeHub 401 ("User is not
+    # authorized for this resource") + the `nix flake show` eval errors. Re-enable
+    # by removing this `if:` line once FlakeHub auth is sorted.
+    if: false
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     permissions:
       id-token: write
