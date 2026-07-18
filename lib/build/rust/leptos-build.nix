@@ -38,6 +38,22 @@ let
   # `dockerTools.buildLayeredImage` calls. `wolfi` (cacert + nonroot
   # passwd/group stub + glibc + busybox) is a strict superset of the old
   # ad-hoc `[cacert busybox]`/`[cacert curl busybox]`, a pure hardening win.
+  #
+  # Re-checked 2026-07-18 against `mkPackageImage`'s `labels ? {}` addition
+  # (oci/hardened-base.nix, commit af5c98e): neither builder below declares
+  # any custom `Labels` -- this file was never blocked by the labels gap --
+  # so that addition changes nothing here. The two real blockers stand:
+  # `dockerHelpers.mkWebUserSetup` fully replaces /etc/passwd + /etc/group
+  # (stamping a named "web" 101:101 user `User = "web"` resolves against),
+  # while `mkPackageImage`'s `fakeRootCommands` is hardcoded to a
+  # chown+chmod template driven only by `writablePaths` -- no knob to stamp
+  # a custom user file; and `extraCommands` (tmp-dir creation here, plus
+  # static-bundle copy + generated `hanabi.yaml` in
+  # `mkLeptosDockerImageWithHanabi` below) has no equivalent parameter on
+  # `mkPackageImage` at all. Converting either builder would mean either a
+  # real behavior change (e.g. swapping `User = "web"` for a bare numeric
+  # UID) or extending `mkPackageImage`'s own signature -- both out of scope
+  # for a mechanical simplification, so both builders stay direct calls.
   hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 
   # WASM target toolchain for CSR bundle
