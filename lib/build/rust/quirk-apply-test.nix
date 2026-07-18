@@ -40,6 +40,27 @@ let
     [ "--cfg" "supports_64bit_atomics" ]
     forceCfgFromEmpty.extraRustcOpts;
 
+  # ── Test 2b: TWO ForceCfg quirks on one crate both survive ───────
+  # Regression for the wgpu-hal incident (nix run .#rebuild,
+  # 2026-07-17): wgpu-hal/wgpu-core/wgpu/wgpu-types are each
+  # registered with BOTH `supports_64bit_atomics` AND
+  # `supports_ptr_atomics` ForceCfg quirks. The shared fold used to
+  # apply each quirk against the pristine base attrs instead of the
+  # running accumulator, so the second ForceCfg silently clobbered
+  # the first's `--cfg` instead of appending to it — wgpu-hal built
+  # with only `supports_ptr_atomics` set, took the portable-atomic
+  # fallback arm, and failed E0432 (unresolved `portable_atomic`).
+  twoForceCfg = q.applyQuirks
+    [
+      { kind = "force-cfg"; cfg = "supports_64bit_atomics"; }
+      { kind = "force-cfg"; cfg = "supports_ptr_atomics"; }
+    ]
+    { extraRustcOpts = [ "--existing-opt" ]; };
+  test2b = assertEq
+    "two ForceCfg quirks on one crate both accumulate, neither clobbers the other"
+    [ "--existing-opt" "--cfg" "supports_64bit_atomics" "--cfg" "supports_ptr_atomics" ]
+    twoForceCfg.extraRustcOpts;
+
   # ── Test 3: FoldNormalIntoBuild without externCrate ──────────────
   foldNoExtern = q.applyQuirks
     [ { kind = "fold-normal-into-build"; extern_crate = null; } ]
@@ -98,7 +119,7 @@ let
     false
     unknownTry.success;
 
-  results = [ test1 test2 test3 test3b test4 test5 test5b test6 test7 ];
+  results = [ test1 test2 test2b test3 test3b test4 test5 test5b test6 test7 ];
   n = builtins.length results;
 in
   # Forces every check (each is `true` or throws) → fails closed.

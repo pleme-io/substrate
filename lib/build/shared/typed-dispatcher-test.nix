@@ -78,6 +78,25 @@ let
     "helpers receive the full variant (kind + payload)"
     { kind = "capture"; payload = "hi"; }
     (d7.applyVariants [ { kind = "capture"; payload = "hi"; } ] {}).captured;
+
+  # ── Test 8: two same-kind variants ACCUMULATE onto one key ──────
+  # Regression for the wgpu-hal incident (nix run .#rebuild,
+  # 2026-07-17): two ForceCfg-shaped quirks both append onto
+  # `extraRustcOpts`. Each must see the PRIOR variant's contribution,
+  # not the pristine base attrs — otherwise the second overwrites the
+  # first instead of accumulating.
+  d8 = mk {
+    "add-flag" = variant: attrs: {
+      flags = (attrs.flags or []) ++ [ variant.flag ];
+    };
+  };
+  test8 = assertEq
+    "two same-kind variants accumulate onto the same key, neither clobbers the other"
+    { flags = [ "-g" "-O3" "-O2" ]; }
+    (d8.applyVariants [
+      { kind = "add-flag"; flag = "-O3"; }
+      { kind = "add-flag"; flag = "-O2"; }
+    ] { flags = [ "-g" ]; });
 in [
-  test1 test2 test3 test4 test5 test6 test7
+  test1 test2 test3 test4 test5 test6 test7 test8
 ]
