@@ -24,12 +24,38 @@ let
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs; };
   # Hardened by default (Pillar 8 / oci/hardened-base.nix). Both image
   # builders below keep a direct `dockerTools.buildLayeredImage` call
-  # rather than calling `hardened.mkPackageImage` -- each has its OWN
-  # custom Labels set (`io.kenshi.*` test-runner markers; the full
-  # `mkStandardLabels` OCI v1.1 annotation set for the FedRAMP-High image
-  # pack) that `mkPackageImage` has no merge/override knob for, so a
-  # literal call would silently drop labels real consumers key off of.
-  # `fromImage` still gets us the shared hardened base.
+  # rather than calling `hardened.mkPackageImage`. The custom-Labels gap
+  # (io.kenshi.* test-runner markers; the full `mkStandardLabels` set) is
+  # now closed -- `mkPackageImage` takes a `labels` param merged over its
+  # own defaults -- but TWO other real gaps remain, re-verified 2026-07-18:
+  #
+  #   1. `architecture` -- both builders below take an explicit
+  #      `architecture` arg (used to select the musl Rust target triple
+  #      AND, unconditionally, threaded straight into `buildLayeredImage`'s
+  #      own `architecture` field) so the emitted OCI image config's
+  #      architecture is a GUARANTEE of the call, not an assumption.
+  #      `mkPackageImage` has no `architecture` param at all -- its inner
+  #      `buildLayeredImage` call falls back to nixpkgs' own
+  #      `defaultArchitecture` (`go.GOARCH` of whichever `pkgs` this file
+  #      was instantiated with). In the one real call path today
+  #      (`lib/build/rust/service.nix`'s `mkDockerImage`, which re-imports
+  #      nixpkgs per target arch before calling in here) that happens to
+  #      coincide with the explicit value -- but converting would silently
+  #      swap a load-bearing correctness guarantee for an implicit
+  #      assumption about caller-supplied `pkgs`, in the exact bug class
+  #      (image-manifest arch metadata mismatching the binary inside) that
+  #      already shipped a real "exec format error" incident fleet-wide
+  #      (hanabi, 2026-06-14). Not worth the risk for a "mechanical"
+  #      simplification.
+  #   2. `extraCommands` -- `mkCrate2nixTestImage` only. It relocates the
+  #      crate2nix test binaries into a fixed `/app/bin` path via
+  #      `buildLayeredImage`'s `extraCommands` hook so its generic
+  #      `run-tests` script can iterate a stable path regardless of the
+  #      underlying Nix store path. `mkPackageImage` exposes no equivalent
+  #      hook (only `fakeRootCommands`, built internally from
+  #      `writablePaths`, with no consumer-supplied override).
+  #
+  # `fromImage` still gets us the shared hardened base either way.
   hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 
   # Common dispatch: when `useLockfileBuilder = true`, skip the
