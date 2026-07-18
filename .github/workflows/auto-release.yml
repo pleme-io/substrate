@@ -35,13 +35,13 @@ on:
         required: false
         default: patch
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped camelot-builder-pleme ARC pool (avoids billed
+      # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
       # repos → ubuntu-latest. Schedule-triggered callers may lack
       # github.event.repository and fall open to hosted (documented edge).
       # Passed through verbatim to every per-language reusable below.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest)."
         type: string
         required: false
         default: ""
@@ -63,7 +63,7 @@ concurrency:
 jobs:
   detect:
     name: Detect repo type
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     outputs:
       repo-type: ${{ steps.detect.outputs.repo-type }}
       manifest-path: ${{ steps.detect.outputs.manifest-path }}
@@ -138,7 +138,7 @@ jobs:
     name: 'unsupported repo type'
     needs: detect
     if: needs.detect.outputs.repo-type == 'unknown'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - name: Fail with diagnostic
         run: |

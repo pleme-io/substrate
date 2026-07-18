@@ -74,14 +74,14 @@ on:
         required: false
         default: "20"
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped camelot-builder-pleme ARC pool (avoids billed
+      # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
       # repos → ubuntu-latest. Schedule-triggered callers may lack
       # github.event.repository and fall open to hosted (documented edge).
       # Do NOT put an expression in this default — workflow_call input
       # defaults are static; the fallback lives in each job's runs-on.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest)."
         type: string
         required: false
         default: ""
@@ -105,7 +105,7 @@ jobs:
   # go.sum tidy check, clean tree. No tagging side effects here.
   validate:
     name: 'go · Drafted→Validated (ValidationGate)'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops).
     if: github.actor != 'github-actions[bot]'
     defaults:
@@ -153,7 +153,7 @@ jobs:
   tag:
     name: 'go · Validated→Tagged→Proxied (TagGate + relver)'
     needs: validate
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     outputs:
       tag: ${{ steps.relver.outputs.tag }}
       created: ${{ steps.relver.outputs.created }}
@@ -193,7 +193,7 @@ jobs:
   proxy-confirm:
     name: 'go · Proxied→Verified (NO-UPLOAD confirm + VerifyGate)'
     needs: tag
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     # Only when a fresh tag was actually created (changed source + push).
     if: needs.tag.outputs.created == 'true' && needs.tag.outputs.skip != 'true'
     defaults:

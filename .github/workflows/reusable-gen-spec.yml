@@ -38,7 +38,7 @@ on:
         type: string
         default: "github:pleme-io/gen"
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
       # off github.event.repository.private (the caller's event payload),
       # never an org-level Actions variable — pleme-io's GitHub Free org
@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   gen-spec:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
         with:

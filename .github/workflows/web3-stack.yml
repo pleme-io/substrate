@@ -8,7 +8,7 @@ on:
       tool:      { type: string, required: false, default: "hardhat" }   # hardhat | foundry | anchor
       network:   { type: string, required: false, default: "sepolia" }
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
       # off github.event.repository.private (the caller's event payload),
       # never an org-level Actions variable — pleme-io's GitHub Free org
@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - if: inputs.tool == 'foundry'
@@ -32,7 +32,7 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - if: inputs.tool == 'hardhat'
@@ -47,7 +47,7 @@ jobs:
     # `secrets` is unavailable in job-level `if:` (github/inputs/needs/
     # vars only) — gate the STEP on a job-env copy instead.
     if: always()
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:

@@ -30,7 +30,7 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
         type: string
         default: ""
       working-directory:
@@ -89,7 +89,7 @@ jobs:
   publish:
     name: Build + push Nix image
     # Runner routing: empty input routes by CALLER repo visibility — private
-    # repos → camelot-builder-pleme (pleme-io-org ARC pool, avoids billed
+    # repos → camelot-builder-pleme-eks (pleme-io-org ARC pool, avoids billed
     # hosted minutes), public repos → ubuntu-24.04 (unmetered). Keyed off
     # github.event.repository.private (the caller's event payload) rather
     # than an org-level Actions variable: pleme-io is on the GitHub Free org
@@ -97,7 +97,7 @@ jobs:
     # workflow-evaluation context, so a vars.*-based fallback silently
     # resolves empty there. Same idiom as helm-monorepo-auto-release.yml/
     # rust-auto-release.yml/python-auto-release.yml.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-24.04') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04') }}
     if: github.actor != 'github-actions[bot]'
     permissions:
       contents: read

@@ -28,7 +28,7 @@ on:
         type: string
         default: .
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
       # off github.event.repository.private (the caller's event payload),
       # never an org-level Actions variable — pleme-io's GitHub Free org
@@ -44,7 +44,7 @@ on:
 
 jobs:
   publish:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     permissions:
       id-token: write
       contents: read

@@ -47,7 +47,7 @@ on:
         required: false
         default: "true"
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme ARC pool
+      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
       # off github.event.repository.private (the caller's event payload),
       # never an org-level Actions variable — pleme-io's GitHub Free org
@@ -73,7 +73,7 @@ permissions:
 jobs:
   detect:
     name: Detect repo type
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     outputs:
       repo-type: ${{ steps.detect.outputs.repo-type }}
     steps:
@@ -88,7 +88,7 @@ jobs:
       inputs.run-rust-gate == 'true' &&
       (needs.detect.outputs.repo-type == 'rust-workspace' ||
        needs.detect.outputs.repo-type == 'rust-single-crate')
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/rust-gate@main
@@ -97,7 +97,7 @@ jobs:
     name: 'npm · fmt + lint + test'
     needs: detect
     if: inputs.run-npm-gate == 'true' && needs.detect.outputs.repo-type == 'npm'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/npm-gate@main
@@ -106,7 +106,7 @@ jobs:
     name: 'python · fmt + lint + test'
     needs: detect
     if: inputs.run-python-gate == 'true' && needs.detect.outputs.repo-type == 'python'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/python-gate@main
@@ -115,7 +115,7 @@ jobs:
     name: 'universal · tlisp-lint'
     needs: detect
     if: inputs.run-tlisp-lint == 'true'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/tlisp-lint@main
@@ -126,7 +126,7 @@ jobs:
     name: 'universal · action-shell-lint (★★ NO-SHELL)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'github-action'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/action-shell-lint@main
