@@ -47,7 +47,10 @@ use std::process::{Command, ExitCode};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use oci_client::client::{ClientConfig, ClientProtocol, Config as OciBlobConfig, ImageLayer};
+use oci_client::client::{
+    Certificate, CertificateEncoding, ClientConfig, ClientProtocol, Config as OciBlobConfig,
+    ImageLayer,
+};
 use oci_client::manifest::OciImageManifest;
 use oci_client::secrets::RegistryAuth;
 use oci_client::{Client, Reference};
@@ -99,6 +102,7 @@ enum PushError {
     SkopeoSpawn { tag: String, source: std::io::Error },
     SkopeoFailed { tag: String, code: Option<i32> },
     WriteRegistriesConf(std::io::Error),
+    ReadCaCert { path: String, source: std::io::Error },
 }
 
 impl fmt::Display for PushError {
@@ -162,6 +166,9 @@ impl fmt::Display for PushError {
             PushError::WriteRegistriesConf(e) => {
                 write!(f, "oci-push: could not write registries.conf: {e}")
             }
+            PushError::ReadCaCert { path, source } => {
+                write!(f, "oci-push: cannot read CA cert {path}: {source}")
+            }
         }
     }
 }
@@ -197,6 +204,19 @@ struct PushSpec {
     tarball: String,
     dest_user: String,
     dest_pass: String,
+    /// Force plain HTTP regardless of `protocol_for`'s hostname heuristic.
+    /// A deliberate escape hatch, not the default — a registry that
+    /// genuinely has no TLS. Prefer `ca_cert` (real transport encryption
+    /// with a pinned, verified server identity) whenever the registry
+    /// serves HTTPS at all, even self-signed.
+    insecure: bool,
+    /// PEM-encoded CA/leaf certificate to trust IN ADDITION TO the system
+    /// root store — for a self-signed registry cert (e.g. an in-cluster
+    /// Zot with no cert-manager), this pins verification to that SPECIFIC
+    /// certificate. Never disables verification outright (no
+    /// accept_invalid_certificates escape hatch is exposed here) — a
+    /// registry with an untrusted cert and no pin fails closed.
+    ca_cert: Option<String>,
 }
 
 impl PushSpec {
@@ -335,8 +355,27 @@ impl PushBackend for NativeBackend {
             .build()
             .map_err(PushError::Runtime)?;
         let auth = RegistryAuth::Basic(spec.dest_user.clone(), spec.dest_pass.clone());
+        let extra_root_certificates = match &spec.ca_cert {
+            Some(path) => {
+                let pem = fs::read(path).map_err(|source| PushError::ReadCaCert {
+                    path: path.clone(),
+                    source,
+                })?;
+                vec![Certificate {
+                    encoding: CertificateEncoding::Pem,
+                    data: pem,
+                }]
+            }
+            None => Vec::new(),
+        };
+        let protocol = if spec.insecure {
+            ClientProtocol::Http
+        } else {
+            protocol_for(&spec.registry)
+        };
         let client = Client::new(ClientConfig {
-            protocol: protocol_for(&spec.registry),
+            protocol,
+            extra_root_certificates,
             ..Default::default()
         });
 
@@ -613,6 +652,8 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut dest_pass: Option<String> = None;
     let mut additional: Vec<String> = Vec::new();
     let mut backend: Option<Backend> = None;
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -623,6 +664,11 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             "--dest-user" => dest_user = Some(next_value(&mut it, "dest-user")?),
             "--dest-pass" => dest_pass = Some(next_value(&mut it, "dest-pass")?),
             "--backend" => backend = Some(Backend::parse(&next_value(&mut it, "backend")?)?),
+            // Bare flag, no value — a registry with genuinely no TLS at all.
+            // Prefer --dest-ca-cert over this whenever the registry serves
+            // HTTPS with a self-signed/private cert.
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
             "--additional-tags" => {
                 additional = next_value(&mut it, "additional-tags")?
                     .split_whitespace()
@@ -677,6 +723,8 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         dest_pass: dest_pass
             .or_else(|| env_input("INPUT_DEST_PASS"))
             .ok_or(PushError::MissingArg("dest-pass"))?,
+        insecure: insecure || env_input("INPUT_INSECURE").as_deref() == Some("true"),
+        ca_cert: ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT")),
     };
     let backend: Box<dyn PushBackend> = match backend {
         Backend::Native => Box::new(NativeBackend {
@@ -1096,6 +1144,8 @@ mod tests {
             tarball: String::new(),
             dest_user: String::new(),
             dest_pass: String::new(),
+            insecure: false,
+            ca_cert: None,
         };
         assert_eq!(spec.reference("v1"), "ghcr.io/pleme-io/foo:v1");
     }
