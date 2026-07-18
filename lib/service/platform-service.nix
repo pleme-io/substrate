@@ -18,13 +18,14 @@
 
 let
   # Hardened by default (Pillar 8 / oci/hardened-base.nix). `mkDockerImage`
-  # below has its own `extraLabels` passthrough that callers use for custom
-  # OCI labels -- `hardened.mkPackageImage` bakes in its own fixed Labels
-  # set with no merge/override knob, so calling it directly would silently
-  # drop any caller-supplied `extraLabels`. Building on `fromImage` instead
-  # keeps the exact existing Labels contract while still gaining the
-  # hardened base (TLS roots + nonroot passwd/group stub + a real nonroot
-  # user -- this image previously ran as root, since no `User` was ever set).
+  # below builds on `hardened.mkPackageImage` directly. Previously this
+  # called `dockerTools.buildLayeredImage { fromImage = base; ... }` by
+  # hand because `mkPackageImage` had no way to merge caller-supplied OCI
+  # labels over its own fixed default set -- that gap is closed (2026-07-18:
+  # `mkPackageImage`/`mkVendorRewrap` both grew a `labels ? {}` param, merged
+  # OVER the builder's own `io.pleme.rebuild.*`/`org.opencontainers.image.*`
+  # defaults, caller key wins), so this file's own `extraLabels` passthrough
+  # now threads straight through as that `labels` param.
   hardened = import ../build/oci/hardened-base.nix { inherit pkgs; };
 in rec {
   # Build a Rust binary from Cargo.nix using crate2nix
@@ -39,7 +40,9 @@ in rec {
       in project.rootCrate.build
     else null;
 
-  # Create a Docker image from a built binary using dockerTools.buildLayeredImage
+  # Create a Docker image from a built binary via hardened.mkPackageImage
+  # (distroless-glibc base; see the top-of-file comment for why this is no
+  # longer a direct dockerTools.buildLayeredImage call).
   mkDockerImage = {
     name,
     binary,
@@ -50,34 +53,31 @@ in rec {
     env ? [],
     description ? "",
     extraLabels ? {},
-  }: let
-    imageContents = [ binary ];
-  in pkgs.dockerTools.buildLayeredImage {
-    name = registry;
-    inherit tag;
-    fromImage = hardened.bases.distroless-glibc;
-    contents = imageContents;
-    config = {
-      Entrypoint = [ "${binary}/bin/${name}" ];
-      Env = [
-        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
-      ] ++ env;
-      ExposedPorts = builtins.listToAttrs (
-        builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
-          (pkgs.lib.unique (builtins.attrValues ports))
-      );
-      User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
-      Labels = {
-        "org.opencontainers.image.title" = name;
-        "org.opencontainers.image.description" = description;
-        "org.opencontainers.image.source" = "https://github.com/${githubOrg}";
-        "org.opencontainers.image.vendor" = githubOrg;
-      } // extraLabels;
-    };
-  } // {
-    closureInfo = pkgs.closureInfo {
-      rootPaths = (hardened.bases.distroless-glibc.contents or []) ++ imageContents;
-    };
+  }: hardened.mkPackageImage {
+    service = name;
+    base = hardened.bases.distroless-glibc;
+    package = binary;
+    publishName = registry;
+    publishTag = tag;
+    entrypoint = [ "${binary}/bin/${name}" ];
+    env = [
+      "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+    ] ++ env;
+    exposedPorts = builtins.listToAttrs (
+      builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
+        (pkgs.lib.unique (builtins.attrValues ports))
+    );
+    # user defaults to hardened's nonrootUid:nonrootGid (matches the exact
+    # value this file used to hardcode by hand); workdir/cmd/volumes/
+    # writablePaths all default to the same no-op shape the old bare
+    # buildLayeredImage call had (no WorkingDir/Cmd/Volumes keys, no
+    # fakeRootCommands/enableFakechroot).
+    labels = {
+      "org.opencontainers.image.title" = name;
+      "org.opencontainers.image.description" = description;
+      "org.opencontainers.image.source" = "https://github.com/${githubOrg}";
+      "org.opencontainers.image.vendor" = githubOrg;
+    } // extraLabels;
   };
 
   # Create a push app using forge push command
