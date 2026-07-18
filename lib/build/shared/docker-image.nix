@@ -22,6 +22,20 @@
 let
   inherit (pkgs) lib dockerTools cacert busybox;
   dockerHelpers = import ../../util/docker-helpers.nix;
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). `wolfi` is the
+  # right base for this file specifically: unlike the Rust CLI-tool builder
+  # (tool-image.nix, distroless-glibc, no shell), this "universal" builder
+  # exposes `extraCommands`/`fakeRootCommands` escape hatches to consumers
+  # (mkWebDockerImage below genuinely needs both, to merge a built static
+  # bundle into a fixed directory and to stamp a custom passwd/group) and
+  # has always shipped `busybox` unconditionally -- dropping the runtime
+  # shell out from under an existing consumer would be a silent behavior
+  # change we can't verify against every out-of-repo caller. `wolfi`
+  # (cacert + nonroot passwd/group stub + glibc + busybox) is a strict
+  # superset of the old ad-hoc `[cacert busybox]` base, so this is a pure
+  # hardening win (TLS roots + a real nonroot user convention) with zero
+  # loss of the shell surface the escape hatches rely on.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 in rec {
   # ── Universal Docker Image Builder ────────────────────────────────
   # Builds a layered OCI image from a binary package. This is the
@@ -36,7 +50,7 @@ in rec {
     architecture ? "amd64",
     ports ? {},
     env ? [],
-    user ? "65534:65534",
+    user ? "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}",
     entrypoint ? null,
     extraContents ? [],
     workDir ? "/app",
@@ -58,9 +72,14 @@ in rec {
       "GIT_SHA=nix-build"
     ] ++ env;
 
+    # cacert + busybox now come from `fromImage` (hardened.bases.wolfi);
+    # the caller's own `binary` + `extraContents` are the only new layers.
+    imageContents = [ binary ] ++ extraContents;
+
     imageArgs = {
       inherit name tag architecture;
-      contents = [ binary cacert busybox ] ++ extraContents;
+      fromImage = hardened.bases.wolfi;
+      contents = imageContents;
       config = {
         Entrypoint = resolvedEntrypoint;
         ExposedPorts = exposedPorts;
@@ -70,7 +89,15 @@ in rec {
       } // (if labels != {} then { Labels = labels; } else {});
     } // (if extraCommands != "" then { inherit extraCommands; } else {})
       // (if fakeRootCommands != null then { inherit fakeRootCommands; } else {});
-  in dockerTools.buildLayeredImage imageArgs;
+  in (dockerTools.buildLayeredImage imageArgs) // {
+    # SBOM-correctness passthru -- see oci/hardened-base.nix's own
+    # mkPackageImage comment: buildLayeredImage's gzip'd tarball defeats
+    # Nix's reference scanner, so a real closure list needs computing
+    # separately from the pre-compression contents.
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
+    };
+  };
 
   # ── Web Application Docker Image ─────────────────────────────────
   # Specialized builder for web apps served by a static file server
@@ -91,9 +118,22 @@ in rec {
     exposedPorts = lib.mapAttrs' (_: port:
       lib.nameValuePair "${toString port}/tcp" {}
     ) ports;
+
+    # Hanabi-serves-a-static-bundle pattern: `extraCommands` merges the
+    # built app + optional runtime env.js into one fixed `/app/static`
+    # directory, and `fakeRootCommands` stamps a custom "web" (101) user --
+    # neither has an equivalent in oci/hardened-base.nix's `mkPackageImage`
+    # (package-plus-extraContents, no directory-merge primitive, no custom
+    # named-user support), so this stays a direct `buildLayeredImage` call.
+    # What DOES convert cleanly: the base. `wolfi` is a strict superset of
+    # the old ad-hoc `[cacert curl busybox]` (adds the nonroot passwd/group
+    # stub, which `fakeRootCommands` below immediately overwrites with the
+    # "web" convention anyway) -- pure hardening win, zero behavior change.
+    imageContents = [ webServer pkgs.curl ];
   in dockerTools.buildLayeredImage {
     inherit name tag architecture;
-    contents = [ webServer cacert pkgs.curl busybox ];
+    fromImage = hardened.bases.wolfi;
+    contents = imageContents;
     fakeRootCommands = dockerHelpers.mkWebUserSetup;
     extraCommands = ''
       mkdir -p app/static
@@ -112,6 +152,10 @@ in rec {
       WorkingDir = "/app/static";
       User = user;
     };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
+    };
   };
 
   # ── Service Docker Image with Migrations ──────────────────────────
@@ -128,7 +172,7 @@ in rec {
     labels ? {},
   }: mkTypedDockerImage {
     inherit name binary tag architecture ports env extraContents labels;
-    user = "65534:65534";
+    user = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
     extraCommands = if migrationsPath != null then ''
       mkdir -p app/migrations
       if [ -d "${migrationsPath}" ]; then

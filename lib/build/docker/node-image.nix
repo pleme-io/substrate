@@ -14,9 +14,10 @@
 #   - same params: name, binary→builtApp, tag, architecture, ports, env, user,
 #     workDir, entrypoint, extraContents, distroless, tini, labels, description,
 #     fleetSourceUrl, created
-#   - same hardening: non-root uid (65534:65534), SSL cert bundle, distroless
-#     drops busybox, tini as PID 1, OCI v1.1 reserved annotations via the shared
-#     `mkStandardLabels`, reproducible `created` epoch.
+#   - same hardening: non-root uid (65532:65532, oci/hardened-base.nix's
+#     "nonroot" convention), SSL cert bundle, distroless drops busybox, tini as
+#     PID 1, OCI v1.1 reserved annotations via the shared `mkStandardLabels`,
+#     reproducible `created` epoch.
 #   - difference: a Node service runs `node <entry.js>`, so the image carries
 #     the `nodejs` interpreter + the built app dir (the result of
 #     `buildNpmPackage` / `pnpm2nix` / similar), instead of a single static
@@ -48,7 +49,27 @@
   #   labels     — operator labels merged over the default OCI annotation set.
   #   created    — ISO timestamp for the OCI `created` annotation (default the
   #                reproducible 1970 epoch).
-  mkNodeDockerImage = pkgs: {
+  mkNodeDockerImage = pkgs: let
+    # nonrootUid/nonrootGid only -- NOT importing hardened-base.nix's own
+    # base-image builders (mkPackageImage/hardenedBases). A Node service
+    # is TWO derivations at their own store paths (the `nodejs` interpreter
+    # + `builtApp`), never merged into one directory, so mkPackageImage's
+    # `package`+`extraContents` shape would technically fit -- but this
+    # file's OWN `distrolessHelper.mkDistrolessBase` (go/distroless.nix)
+    # exists for a documented reason: it does NOT add a separate `glibc`
+    # package the way `hardened.bases.distroless-glibc` does, relying
+    # instead on `nodejs`'s own closure to pull glibc transitively (nodejs
+    # is always dynamically linked, unlike a CGO_ENABLED=0 Go binary), and
+    # it carries a `tini`-inclusion knob hardened-base.nix's bases don't
+    # expose at all (Node does NOT reap zombies by default, so tini is
+    # more load-bearing here than for a Go/Rust binary). Forcing this onto
+    # `hardened.bases.distroless-glibc` would double-ship glibc for no
+    # gain and lose the tini knob -- a real, evidence-checked reason to
+    # keep the base-selection ladder separate (same call go/docker.nix
+    # made for its own scratch-base logic earlier this pass). Only the
+    # uid *convention* + the SBOM-correctness passthru are shared.
+    hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
+  in {
     name,
     builtApp,
     entry,
@@ -56,7 +77,12 @@
     architecture ? "amd64",
     ports ? { http = 8080; health = 8081; },
     env ? [],
-    user ? "65534:65534",
+    # Matches substrate/lib/build/oci/hardened-base.nix's `nonrootUid`/
+    # `nonrootGid` (both 65532, the distroless/Chainguard "nonroot"
+    # convention that file explicitly models itself on) -- NOT 65534 (the
+    # older "nobody" uid this default had independently drifted to, same
+    # fix already applied to go/docker.nix + tool-image.nix this pass).
+    user ? "${toString hardenedBase.nonrootUid}:${toString hardenedBase.nonrootGid}",
     workDir ? "/app",
     entrypoint ? null,
     extraContents ? [],
@@ -115,10 +141,11 @@
           else {})
       // { "org.opencontainers.image.created" = created; }
       // labels;
+    imageContents = [ builtApp ] ++ baseContents ++ extraContents;
   in
-  dockerTools.buildLayeredImage {
+  (dockerTools.buildLayeredImage {
     inherit name tag architecture created;
-    contents = [ builtApp ] ++ baseContents ++ extraContents;
+    contents = imageContents;
     config = {
       Entrypoint = if entrypoint != null then entrypoint else defaultEntrypoint;
       ExposedPorts = exposedPorts;
@@ -136,6 +163,13 @@
       User = user;
       Labels = standardLabels;
     };
+  }) // {
+    # SBOM-correctness passthru, matching hardened-base.nix's mkPackageImage/
+    # go/docker.nix's mkGoDockerImage: a gzip-compressed buildLayeredImage
+    # tarball's own Nix-registered references are near-empty, so a real
+    # SBOM/attestation step needs this uncompressed closure list computed
+    # separately.
+    closureInfo = pkgs.closureInfo { rootPaths = imageContents; };
   };
 
   # Build a Node service from npm sources + image in one call (mirror of

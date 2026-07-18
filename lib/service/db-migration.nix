@@ -27,7 +27,18 @@
 #   - app: nix run app for manual execution
 #   - dockerImage: init container image for K8s
 {
-  mkDbMigration = pkgs: {
+  mkDbMigration = pkgs: let
+    # Hardened by default (Pillar 8 / oci/hardened-base.nix). Both migration
+    # types run through a `writeShellScript`-produced entrypoint -- the
+    # runner IS a shell script (shebang + `for`/pipe logic), so a shell is
+    # mandatory at RUNTIME regardless of type, ruling out a shell-less
+    # distroless base outright. `wolfi` (cacert + nonroot passwd/group stub
+    # + glibc + busybox) is a drop-in superset of the old ad-hoc
+    # `[cacert busybox]`: same shell (busybox) for the script, same glibc
+    # liquibase's JVM needs to run, plus TLS roots + (new) a real nonroot
+    # user this image never set before (previously implicit root).
+    hardened = import ../build/oci/hardened-base.nix { inherit pkgs; };
+  in {
     name,
     type ? "liquibase",
     changelogFile ? null,
@@ -77,14 +88,21 @@
              else if type == "sql" then sqlRunner
              else throw "Unsupported migration type: ${type}. Use 'liquibase' or 'sql'.";
 
+    imageContents = with pkgs; (if type == "liquibase" then [ liquibase ] else []);
+
     dockerImage = pkgs.dockerTools.buildLayeredImage {
       name = "migrate-${name}";
       tag = "latest";
-      contents = with pkgs; [ cacert busybox ] ++
-        (if type == "liquibase" then [ liquibase ] else []);
+      fromImage = hardened.bases.wolfi;
+      contents = imageContents;
       config = {
         Entrypoint = [ runner ];
         Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+        User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
+      };
+    } // {
+      closureInfo = pkgs.closureInfo {
+        rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
       };
     };
   in {

@@ -3,7 +3,17 @@
 # Uses Hanabi - shared Rust BFF web server (Axum) instead of nginx
 { pkgs, defaultAtticToken, defaultGhcrToken, forgeCmd }:
 
-{
+let
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). This is the
+  # same Hanabi-serves-a-static-bundle pattern as
+  # shared/docker-image.nix's `mkWebDockerImage` -- `extraCommands` merges
+  # the built app into a fixed `/app/static` dir + `fakeRootCommands`
+  # stamps a custom "web" user, neither expressible via `mkPackageImage`,
+  # so this stays a direct `buildLayeredImage` call. `wolfi` (cacert +
+  # nonroot passwd/group stub + glibc + busybox) is a strict superset of
+  # the old ad-hoc `[cacert curl busybox]`, a pure hardening win.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
+in {
   # Generate Docker images for Node.js/web applications
   # Parameters:
   #   appName: Application name (e.g., "myapp-web")
@@ -19,17 +29,15 @@
     architecture ? "amd64",
     tag ? "latest",
     envConfigPath ? null,
-  }:
+  }: let
+    imageContents = with pkgs; [ webServer curl ];
+  in
     pkgs.dockerTools.buildLayeredImage {
       name = appName;
       inherit tag architecture;
 
-      contents = with pkgs; [
-        webServer
-        cacert
-        curl
-        busybox
-      ];
+      fromImage = hardened.bases.wolfi;
+      contents = imageContents;
 
       fakeRootCommands = (import ../../util/docker-helpers.nix).mkWebUserSetup;
 
@@ -70,6 +78,10 @@
           description =
             "${appName} — pleme-io substrate-built Node.js web app (Hanabi BFF)";
         };
+      };
+    } // {
+      closureInfo = pkgs.closureInfo {
+        rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
       };
     };
 

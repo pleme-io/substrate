@@ -30,6 +30,15 @@
 let
   versions = import ../../util/versions.nix;
   dockerHelpers = import ../../util/docker-helpers.nix;
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). Both Docker
+  # image builders below need a runtime shell (`fakeRootCommands` stamps a
+  # custom "web" user; `extraCommands` merges a static bundle into a fixed
+  # directory, sometimes alongside a generated hanabi.yaml) -- no
+  # equivalent in `mkPackageImage`, so they stay direct
+  # `dockerTools.buildLayeredImage` calls. `wolfi` (cacert + nonroot
+  # passwd/group stub + glibc + busybox) is a strict superset of the old
+  # ad-hoc `[cacert busybox]`/`[cacert curl busybox]`, a pure hardening win.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 
   # WASM target toolchain for CSR bundle
   wasmToolchain = fenix.combine [
@@ -281,15 +290,14 @@ in {
     healthPort ? 3001,
     extraContents ? [],
     extraEnv ? [],
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    imageContents = [ leptosBuild.combined ] ++ extraContents;
+  in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
     maxLayers = versions.docker.maxLayers;
 
-    contents = [
-      leptosBuild.combined
-      pkgs.cacert
-      pkgs.busybox
-    ] ++ extraContents;
+    fromImage = hardened.bases.wolfi;
+    contents = imageContents;
 
     fakeRootCommands = dockerHelpers.mkWebUserSetup;
 
@@ -312,6 +320,10 @@ in {
       WorkingDir = "/";
       User = "web";
     };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
+    };
   };
 
   # ==========================================================================
@@ -325,16 +337,14 @@ in {
     webServer,      # Hanabi binary from crate2nix build
     tag ? "latest",
     architecture ? "amd64",
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    imageContents = [ webServer pkgs.curl ];
+  in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
     maxLayers = versions.docker.maxLayers;
 
-    contents = [
-      webServer
-      pkgs.cacert
-      pkgs.curl
-      pkgs.busybox
-    ];
+    fromImage = hardened.bases.wolfi;
+    contents = imageContents;
 
     fakeRootCommands = dockerHelpers.mkWebUserSetup;
 
@@ -390,6 +400,10 @@ EOF
       ];
       WorkingDir = "/app/static";
       User = "web";
+    };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
     };
   };
 

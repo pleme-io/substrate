@@ -22,6 +22,15 @@
 let
   check = import ../../types/assertions.nix;
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs; };
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). Both image
+  # builders below keep a direct `dockerTools.buildLayeredImage` call
+  # rather than calling `hardened.mkPackageImage` -- each has its OWN
+  # custom Labels set (`io.kenshi.*` test-runner markers; the full
+  # `mkStandardLabels` OCI v1.1 annotation set for the FedRAMP-High image
+  # pack) that `mkPackageImage` has no merge/override knob for, so a
+  # literal call would silently drop labels real consumers key off of.
+  # `fromImage` still gets us the shared hardened base.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 
   # Common dispatch: when `useLockfileBuilder = true`, skip the
   # generated-Cargo.nix import and call lockfile-builder.mkProject
@@ -242,15 +251,16 @@ in {
       fi
     '';
 
+    # `testRunnerBin` is itself a shell script (`writeShellScript`), so a
+    # shell must be present at RUNTIME regardless of base -- `wolfi` (cacert
+    # + nonroot passwd/group stub + glibc + busybox) is a strict superset of
+    # the old ad-hoc `[cacert busybox]`, a pure hardening win.
+    imageContents = [ serviceBuild ];
   in pkgs.dockerTools.buildLayeredImage {
     name = "${serviceName}-service-test";
     inherit tag architecture;
-    contents = with pkgs; [
-      cacert
-      busybox
-      # Include the built service - test binaries are in the same derivation
-      serviceBuild
-    ];
+    fromImage = hardened.bases.wolfi;
+    contents = imageContents;
     extraCommands = ''
       mkdir -p app/bin
       # Copy the main binary and any test binaries from the crate2nix build
@@ -267,11 +277,16 @@ in {
         "RUST_BACKTRACE=1"
       ];
       WorkingDir = "/app";
+      User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
       Labels = {
         "io.kenshi.test-image" = "true";
         "io.kenshi.service" = serviceName;
         "io.kenshi.test-type" = "crate2nix";
       };
+    };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
     };
   };
 
@@ -433,10 +448,16 @@ in {
       inherit serviceName tag;
       description = "${serviceName} — pleme-io substrate-built Rust service";
     };
+    # Hardened by default: `distroless-glibc` (TLS roots + nonroot
+    # passwd/group stub + glibc) drop-in-replaces the old ad-hoc `cacert`
+    # -- this builder never shipped busybox/a shell (the entrypoint is
+    # always a compiled Rust binary), so there is no shell surface to lose.
+    imageContents = [ serviceBinary ] ++ extras;
   in pkgs.dockerTools.buildLayeredImage {
     name = resolvedImageName;
     inherit tag architecture;
-    contents = with pkgs; [cacert serviceBinary] ++ extras;
+    fromImage = hardened.bases.distroless-glibc;
+    contents = imageContents;
     config = let dockerHelpers = import ../../util/docker-helpers.nix; in {
       Entrypoint = ["${serviceBinary}/bin/${resolvedBinaryName}"];
       ExposedPorts = builtins.listToAttrs (
@@ -455,8 +476,12 @@ in {
         ++ pkgs.lib.optional (extras != []) "PATH=${pkgs.lib.makeBinPath ([serviceBinary] ++ extras)}"
         ++ extraEnv;
       WorkingDir = "/app";
-      User = "65534:65534";
+      User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
       Labels = standardLabels;
+    };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.distroless-glibc.contents or []) ++ imageContents;
     };
   };
 }
