@@ -58,14 +58,35 @@
   #                   TLS may set `withCacert = false` for a true-scratch,
   #                   binary-only image (ZERO non-binary closure). Assess
   #                   per-service; the strip target is tini+glibc, NOT cacert.
-  mkGoDockerImage = pkgs: {
+  mkGoDockerImage = pkgs: let
+    # nonrootUid/nonrootGid only -- NOT importing hardened-base.nix's own
+    # base-image builders (mkPackageImage/hardenedBases). Those assume a
+    # dynamically-linked binary + a passwd/group file; a static
+    # (CGO_ENABLED=0) Go binary's scratch base has neither, so this file's
+    # own distrolessHelper.mkDistrolessBase stays the right builder for this
+    # path -- only the uid *convention* is shared, not the base-selection
+    # logic itself (a real, evidence-checked refactor-audit finding, not
+    # unexamined duplication). Computed here (not in the inner let-block
+    # below) so it's in scope for the `user ?` default value, which Nix
+    # evaluates against the function-argument pattern's own enclosing
+    # scope, not the inner body's `let`.
+    hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
+  in {
     name,
     binary,
     tag ? "latest",
     architecture ? "amd64",
     ports ? { http = 8080; health = 8081; },
     env ? [],
-    user ? "65534:65534",
+    # Matches substrate/lib/build/oci/hardened-base.nix's `nonrootUid`/
+    # `nonrootGid` (both 65532, the distroless/Chainguard "nonroot"
+    # convention that file explicitly models itself on) -- NOT 65534 (the
+    # older "nobody" uid this default silently diverged to). No fleet
+    # consumer relies on the old default (grepped pleme-io + akeylesslabs;
+    # the one real consumer, akeyless-nix-images, already overrides this
+    # explicitly to 10001:10001), so this is a safe convention fix, not a
+    # breaking change in practice.
+    user ? "${toString hardenedBase.nonrootUid}:${toString hardenedBase.nonrootGid}",
     workDir ? "/app",
     entrypoint ? null,
     extraContents ? [],
@@ -147,10 +168,11 @@
       # admission surface can key off it.
       // { "com.pleme.image.minimal" = if minimal then "true" else "false"; }
       // labels;
+    imageContents = [ binary ] ++ baseContents ++ extraContents;
   in
-  dockerTools.buildLayeredImage {
+  (dockerTools.buildLayeredImage {
     inherit name tag architecture created;
-    contents = [ binary ] ++ baseContents ++ extraContents;
+    contents = imageContents;
     config = {
       Entrypoint = if entrypoint != null then entrypoint else defaultEntrypoint;
       ExposedPorts = exposedPorts;
@@ -171,6 +193,15 @@
       User = user;
       Labels = standardLabels;
     };
+  }) // {
+    # SBOM-correctness passthru, matching hardened-base.nix's mkPackageImage/
+    # mkVendorRewrap: a gzip-compressed buildLayeredImage tarball's own
+    # Nix-registered references are near-empty (the reference scanner needs
+    # plain store-path hash substrings in an output's bytes; compression
+    # destroys them), so a real SBOM/attestation step needs this
+    # uncompressed closure list computed separately, not derived from the
+    # image tarball itself.
+    closureInfo = pkgs.closureInfo { rootPaths = imageContents; };
   };
 
   # Build a multi-stage Go binary + Docker image in one call.
