@@ -58,6 +58,12 @@
     inherit system;
     overlays = hostOverlays;
   };
+  # nonrootUid/nonrootGid only, computed here (not the inner function body's
+  # `let`) so it's in scope for the `user ?` argument-pattern default below --
+  # Nix evaluates that default against this enclosing scope, not the inner
+  # body. Matches oci/hardened-base.nix's own "nonroot" convention (65532),
+  # NOT 65534 ("nobody") this default had silently drifted to.
+  hardenedBase = import ../oci/hardened-base.nix { pkgs = hostPkgs; };
 in {
   toolName,
   src,
@@ -127,6 +133,13 @@ let
   mkImage = arch: let
     targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
     targetPkgs = import nixpkgs { system = targetSystem; };
+    # Hardened by default (Pillar 8 / oci/hardened-base.nix): distroless-glibc
+    # -- no shell, TLS roots + nonroot /etc/passwd|group stub, nonroot user --
+    # in place of a hand-rolled `cacert + binary` layer with no passwd entry
+    # for its own uid. Same substrate every other pleme-io image now builds
+    # against (breathe/go-docker.nix); this is the shared Rust CLI-tool
+    # builder, so fixing it here purifies every current + future consumer.
+    hardened = import ../oci/hardened-base.nix { pkgs = targetPkgs; };
 
     project = mkProjectFor targetPkgs [];
 
@@ -135,20 +148,19 @@ let
       else project.rootCrate.build;
 
     extras = extraContents targetPkgs;
-  in targetPkgs.dockerTools.buildLayeredImage {
-    name = toolName;
-    inherit tag;
-    architecture = arch;
-    contents = [ targetPkgs.cacert binary ] ++ extras;
-    config = {
-      Entrypoint = [ "${binary}/bin/${toolName}" ];
-      Env = [
-        (dockerHelpers.mkSslEnv targetPkgs)
-        "RUST_LOG=info"
-      ] ++ env;
-      WorkingDir = "/";
-      User = user;
-    };
+  in hardened.mkPackageImage {
+    service = toolName;
+    base = hardened.bases.distroless-glibc;
+    package = binary;
+    publishName = toolName;
+    publishTag = tag;
+    entrypoint = [ "${binary}/bin/${toolName}" ];
+    inherit user;
+    extraContents = extras;
+    env = [
+      (dockerHelpers.mkSslEnv targetPkgs)
+      "RUST_LOG=info"
+    ] ++ env;
   };
 
   images = {}
