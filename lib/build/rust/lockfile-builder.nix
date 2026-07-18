@@ -928,7 +928,22 @@ let
         # base args; the consumer's own override (overrideFor) wins on
         # collision.
         quirkAttrs = quirkApply.applyQuirks (crate.quirks or []) argsPrefixed;
-        args = argsPrefixed // quirkAttrs;
+        # NativeBuildInputs-kind quirks emit nixpkgs attribute-name
+        # STRINGS, not derivations (quirk-apply.nix is deliberately
+        # pkgs-free — see its header). Resolve names to real
+        # derivations here via `hostPkgs` (NOT `pkgs`/`pkgs.buildPackages`
+        # directly — `hostPkgs` is this file's existing build-platform
+        # pkgs binding, already used for `mkSrcOf hostPkgs` above, and
+        # native build TOOLS must run on the build machine, not the
+        # target). Assumes no other source ever seeds
+        # `argsPrefixed.nativeBuildInputs` with real derivations — true
+        # today (no spec field, no override does), so the quirk fold's
+        # accumulated list is string-only end to end.
+        args = argsPrefixed // quirkAttrs // (
+          lib.optionalAttrs (quirkAttrs ? nativeBuildInputs) {
+            nativeBuildInputs = map (n: hostPkgs.${n}) quirkAttrs.nativeBuildInputs;
+          }
+        );
         # ── propagatedBuildInputs gap-fill ──────────────────────────
         # nixpkgs' buildRustCrate (pkgs/build-support/rust/build-rust-crate/default.nix)
         # reads `crate.buildInputs` + `crate.nativeBuildInputs` but

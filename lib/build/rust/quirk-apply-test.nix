@@ -119,7 +119,25 @@ let
     false
     unknownTry.success;
 
-  results = [ test1 test2 test2b test3 test3b test4 test5 test5b test6 test7 ];
+  # ── Test 8: NativeBuildInputs ─────────────────────────────────────
+  # Regression for the protobuf-src incident (nix run .#rebuild,
+  # 2026-07-17): protobuf-src's build.rs shells out to `cmake`, which
+  # isn't in the default buildRustCrate sandbox. quirk-apply.nix is
+  # deliberately pkgs-free (see its header), so this emits nixpkgs
+  # attribute-name STRINGS — lockfile-builder.nix resolves them to
+  # real derivations via `hostPkgs.${name}` once `pkgs` is in scope.
+  nativeBuildInputsQuirk = { kind = "native-build-inputs"; packages = [ "cmake" ]; };
+  nativeBuildInputsOut = q.applyQuirks [ nativeBuildInputsQuirk ] { nativeBuildInputs = [ "existing-tool" ]; };
+  test8 = assertEq
+    "NativeBuildInputs appends package name strings to nativeBuildInputs"
+    [ "existing-tool" "cmake" ]
+    nativeBuildInputsOut.nativeBuildInputs;
+  test8b = assertEq
+    "NativeBuildInputs works with no existing nativeBuildInputs"
+    [ "cmake" ]
+    (q.applyQuirks [ nativeBuildInputsQuirk ] {}).nativeBuildInputs;
+
+  results = [ test1 test2 test2b test3 test3b test4 test5 test5b test6 test7 test8 test8b ];
   n = builtins.length results;
 in
   # Forces every check (each is `true` or throws) → fails closed.

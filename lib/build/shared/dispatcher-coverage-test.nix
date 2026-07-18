@@ -43,11 +43,15 @@ let
 
   # Build a minimal probe variant for a given kind + field list.
   # Each field gets a placeholder string so the helpers arm can
-  # dereference whatever it expects.
+  # dereference whatever it expects. Field names known to be
+  # list-typed in the real Rust struct (e.g. `Vec<String>`) get `[]`
+  # instead — the probe has no type information, only the field
+  # name, so this is a small allowlist. `packages` is
+  # `CrateQuirk::NativeBuildInputs.packages: Vec<String>`.
   probeFor = kind: fields:
     builtins.listToAttrs (
       [{ name = "kind"; value = kind; }] ++
-      (map (f: { name = f; value = if f == "fields" then [] else "probe"; }) fields)
+      (map (f: { name = f; value = if f == "fields" || f == "packages" then [] else "probe"; }) fields)
     );
 
   # Per-ecosystem coverage: every reflected variant kind must not

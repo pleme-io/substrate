@@ -70,7 +70,7 @@
   },
   {
     "ecosystem": "cargo",
-    "variant_count": 3,
+    "variant_count": 4,
     "variants": [
       {
         "kind": "force-cfg",
@@ -90,6 +90,12 @@
           "file",
           "from",
           "to"
+        ]
+      },
+      {
+        "kind": "native-build-inputs",
+        "fields": [
+          "packages"
         ]
       }
     ]

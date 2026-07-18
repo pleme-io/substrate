@@ -4,13 +4,22 @@
 #
 # Source of truth for WHICH crates need WHICH quirks lives in
 # `pleme-io/gen/crates/gen-cargo/src/quirks.rs::REGISTRY` (Rust).
-# This file owns the rust-side apply layer — three class-helper
+# This file owns the rust-side apply layer — four class-helper
 # functions, one per `CrateQuirk` variant. The dispatch + fold
 # combinator is shared across every ecosystem via
 # `../shared/mk-quirk-applier.nix`.
 #
 # Adding a new quirk class is one new variant in Rust + one new
 # helpers entry here.
+#
+# Deliberately pkgs-free: this file takes only `lib`, same as every
+# other ecosystem's quirk-apply.nix, so the shared cross-ecosystem
+# `dispatcher-coverage-test.nix` probe (which loads every
+# quirk-apply.nix with `{ inherit lib; }` only) can exercise every
+# helpers arm uniformly. `NativeBuildInputs` therefore emits nixpkgs
+# attribute-name STRINGS, not resolved derivations — lockfile-builder.nix
+# (which has `pkgs` in scope) resolves them via `pkgs.${name}` at the
+# point it assembles the final buildRustCrate args.
 #
 # Returns: `{ applyQuirks }`. Consumed by lockfile-builder.nix in the
 # `built` mapAttrs step.
@@ -51,6 +60,16 @@ let
       fi
     '';
   };
+
+  # CLASS-HELPER: accumulate extra nativeBuildInputs package NAMES
+  # (not derivations — see the pkgs-free note above). Used for crates
+  # whose build.rs shells out to a native toolchain binary the default
+  # buildRustCrate sandbox doesn't provide (e.g. protobuf-src's
+  # cmake-driven vendored protobuf build). See
+  # `gen-cargo::quirks::CrateQuirk::NativeBuildInputs`.
+  nativeBuildInputsApply = packages: attrs: {
+    nativeBuildInputs = (attrs.nativeBuildInputs or []) ++ packages;
+  };
 in
 import ../shared/mk-quirk-applier.nix {
   inherit lib;
@@ -61,5 +80,6 @@ import ../shared/mk-quirk-applier.nix {
     "substitute-source" = quirk: substituteSourceApply {
       inherit (quirk) file from to;
     };
+    "native-build-inputs" = quirk: nativeBuildInputsApply quirk.packages;
   };
 }
