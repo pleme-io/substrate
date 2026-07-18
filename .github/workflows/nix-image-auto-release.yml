@@ -30,7 +30,7 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's `default:` input to pleme-io/actions/runner-resolve, evaluated in its own job because runs-on: cannot read a same-job step output."
         type: string
         default: ""
       working-directory:
@@ -86,18 +86,36 @@ permissions:
   packages: write
 
 jobs:
+  # Runner routing lives in its own job: GitHub Actions' `runs-on:` can only
+  # reference github/needs/strategy/matrix/vars/inputs contexts — never a
+  # same-job step output — so the resolution has to happen in a job of its
+  # own and every consumer job depends on it via needs.resolve.outputs.runner.
+  # pleme-io/actions/runner-resolve applies typed precedence (override >
+  # repo-committed .github/runner.yml > this job's `default`). `default` here
+  # is the same private→camelot-builder-pleme-eks / public→ubuntu-24.04 split
+  # as before, keyed off github.event.repository.private (the caller's event
+  # payload) rather than an org-level Actions variable: pleme-io is on the
+  # GitHub Free org plan, which does not share org vars/secrets into private
+  # repos' workflow-evaluation context, so a vars.*-based fallback silently
+  # resolves empty there. Same idiom as helm-monorepo-auto-release.yml/
+  # rust-auto-release.yml/python-auto-release.yml.
+  resolve:
+    name: Resolve runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - name: Resolve runner
+        id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          default: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+          override: ${{ inputs.runner }}
+
   publish:
     name: Build + push Nix image
-    # Runner routing: empty input routes by CALLER repo visibility — private
-    # repos → camelot-builder-pleme-eks (pleme-io-org ARC pool, avoids billed
-    # hosted minutes), public repos → ubuntu-24.04 (unmetered). Keyed off
-    # github.event.repository.private (the caller's event payload) rather
-    # than an org-level Actions variable: pleme-io is on the GitHub Free org
-    # plan, which does not share org vars/secrets into private repos'
-    # workflow-evaluation context, so a vars.*-based fallback silently
-    # resolves empty there. Same idiom as helm-monorepo-auto-release.yml/
-    # rust-auto-release.yml/python-auto-release.yml.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04') }}
+    needs: resolve
+    runs-on: ${{ needs.resolve.outputs.runner }}
     if: github.actor != 'github-actions[bot]'
     permissions:
       contents: read
