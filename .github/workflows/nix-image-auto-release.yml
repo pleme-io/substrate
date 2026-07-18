@@ -101,7 +101,17 @@ jobs:
   # rust-auto-release.yml/python-auto-release.yml.
   resolve:
     name: Resolve runner
-    runs-on: ubuntu-latest
+    # The resolve job itself needs somewhere to run before it can tell
+    # `publish` where to run -- github.event.repository.private is directly
+    # readable in runs-on: (no step-output dependency, unlike inputs.runner's
+    # own default further down), so route THIS job the same private/public
+    # way instead of hardcoding ubuntu-latest. Found live 2026-07-17: with
+    # pleme-io's GitHub org billing/spending-limit blocked, every private
+    # repo's resolve job (and therefore every downstream release-* job) was
+    # failing before it ever reached the self-hosted pool this whole routing
+    # exists to reach -- the routing job was itself the one still paying for
+    # GitHub-hosted minutes.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
