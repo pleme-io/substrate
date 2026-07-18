@@ -43,6 +43,29 @@ in rec {
   # builders.
   #
   # Parameters follow the DockerImageSpec type from types/deploy-spec.nix.
+  #
+  # NOT converted to `hardened.mkPackageImage` (checked 2026-07-18, the
+  # same pass that added `mkPackageImage`'s `labels` param -- that param
+  # alone isn't the blocker here, this function's `labels ? {}` is
+  # already a plain caller-merge, not an `mkStandardLabels` set). Three
+  # of THIS function's own params have no equivalent on `mkPackageImage`:
+  #   - `architecture` -- `mkPackageImage`'s inner `buildLayeredImage`
+  #     call never sets `architecture` at all, so routing through it
+  #     would silently drop arch pinning for the fleet's dual-arch
+  #     builds (`dockerImage-amd64`/`dockerImage-arm64`, per ★★
+  #     AUTO-RELEASE/AUTOBUMP).
+  #   - `extraCommands` / `fakeRootCommands` -- free-form shell escape
+  #     hatches. `mkPackageImage`'s `fakeRootCommands` is auto-derived
+  #     ONLY from a `writablePaths` chown+chmod loop; it can't express
+  #     an arbitrary caller script. `mkServiceDockerImage` below is a
+  #     real, in-file consumer of `extraCommands` (copies
+  #     `migrationsPath` into `/app/migrations`) -- the same class of
+  #     content-merge work already documented as inexpressible on
+  #     `mkWebDockerImage` further down this file.
+  # Converting would silently drop parameters this function's public
+  # contract promises callers, so it stays a direct `buildLayeredImage`
+  # call -- only the `fromImage` base was hardened (wolfi; see the
+  # file-header comment above).
   mkTypedDockerImage = {
     name,
     binary,
@@ -160,6 +183,9 @@ in rec {
 
   # ── Service Docker Image with Migrations ──────────────────────────
   # For Rust/Go services that include SQL migrations alongside the binary.
+  # Delegates to `mkTypedDockerImage` above (incl. its documented reason
+  # for staying a direct `buildLayeredImage` call) -- `migrationsPath` is
+  # the concrete `extraCommands` consumer named there.
   mkServiceDockerImage = {
     name,
     binary,
