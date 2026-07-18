@@ -86,12 +86,16 @@ evaluator; sui-in-memory is the optimization target.
   seam; compiles against `oci-client 0.13`. Docker-archive parse (outer-gzip
   detect, `manifest.json[0]`, config, layers) + per-layer gzip + `oci-client`
   push; multi-tag.
-- **Phase 1 — wire + prove (load-bearing, next).** Build via substrate's
-  crate2nix path (mirror wasm-platform's `oci-client` build); expose
-  `packages.<system>.oci-push` (→ `doca`); **test native against a real
-  ghcr push of a Nix docker-archive** before flipping the live pipeline;
-  then replace the bash in `image-push.yml` with `nix run …#doca push …`.
-  Keep skopeo fallback wired until native is proven in the fleet.
+- **Phase 1 — wire + prove. DONE.** Built via `lib/build/oci-push.nix`,
+  exposed as `packages.<system>.oci-push`; proven against a real ghcr push +
+  inspect of a Nix docker-archive by `doca-selftest.yml` (manual
+  `workflow_dispatch`, green); `image-push.yml`'s host-nix skopeo shell-out
+  is now `nix run github:pleme-io/substrate#oci-push -- push --backend
+  native …`, mirroring `doca-selftest.yml`'s proven invocation exactly. A
+  `/twin-reasoning` pass (2026-07-17) decisively chose finishing this crate
+  over building a separate `hakobi` crate for the same scope — see
+  `theory/HAKOBI.md`'s Decision section. Skopeo fallback (`--backend
+  skopeo`) stays wired as an escape hatch, not removed.
 - **Phase 2 — operations. DONE (core).** Subcommand CLI: `push` (native +
   skopeo) · `transfer` (registry→registry, native oci-client pull+push, reuses
   gzipped blobs) · `inspect` (pull_manifest → render + digest) · `pull` (typed

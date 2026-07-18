@@ -15,8 +15,8 @@
 #
 # Strategy:
 #   1. nix build .#<imageAttr>     -> produces a Docker image tarball at ./result
-#   2. forge push ... (if forge is on PATH or buildable from .#forge)
-#      otherwise falls back to skopeo copy docker-archive: -> docker://
+#   2. nix run github:pleme-io/substrate#oci-push -- push ...
+#      (doca's native backend, pure-Rust oci-client, docker-archive -> registry)
 #
 # The flake must expose `packages.<system>.<imageAttr>` producing a Docker
 # image tarball (e.g. via pkgs.dockerTools.buildLayeredImage).
@@ -143,10 +143,9 @@ jobs:
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
       # `nix build` writes ./result as a symlink into /nix/store/...
-      # The oci-image-push Docker action doesn't have /nix/store mounted,
-      # so the symlink dereferences to nothing inside the container.
       # Materialize the actual tarball into the workspace (a real file
-      # under /github/workspace) before handing off.
+      # under /github/workspace, not a store symlink) before handing off —
+      # doca's native backend (below) reads the tarball by plain path.
       - name: Build image with Nix
         env:
           BUILD_CORES: ${{ inputs.buildCores }}
@@ -173,7 +172,7 @@ jobs:
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
-      # which the skopeo push below reads via REGISTRY_AUTH_FILE).
+      # which the doca push step below reads the resolved token back out of).
       - name: Login to registry
         uses: pleme-io/actions/registry-login@main
         with:
@@ -184,43 +183,53 @@ jobs:
           ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Direct host-nix skopeo push. Originally went through
-      # pleme-io/actions/oci-image-push@v1, but that's itself a Docker
-      # action whose base image (tatara-script) is published by THIS
-      # workflow — a bootstrap cycle. Host-nix skopeo breaks the
-      # cycle and stays a single-purpose, self-contained step.
-      - name: Push image (host nix skopeo)
+      # Push with doca's NATIVE backend (`substrate/tools/oci-push`, pure-Rust
+      # oci-client — the typed replacement for the host-nix skopeo shell-out
+      # this step used to be). Originally went through
+      # pleme-io/actions/oci-image-push@v1, then host-nix skopeo (a Docker
+      # action whose base image is published by THIS workflow is a bootstrap
+      # cycle skopeo broke). doca avoids the same cycle a different way: it
+      # is fetched + built straight from the substrate flake via
+      # `nix run github:pleme-io/substrate#oci-push`, never a pre-built OCI
+      # image, so there's nothing here for this workflow to have to publish
+      # first. Proven working end-to-end (real ghcr.io push + inspect) by
+      # `substrate/.github/workflows/doca-selftest.yml`; this step mirrors
+      # that exact invocation.
+      - name: Push image (doca native backend)
         env:
           REGISTRY: ${{ inputs.registry }}
           IMAGE:    ${{ inputs.imageName || github.repository }}
           TAG:      ${{ inputs.tag }}
           ADDITIONAL_TAGS: ${{ inputs.additionalTags }}
+          # Some self-hosted runners carry a baked nix with no flakes config
+          # (see the "Install Nix" step's own NIX_CONFIG note above) —
+          # `nix run` needs the same feature gate `nix build` does.
+          NIX_CONFIG: "experimental-features = nix-command flakes"
         run: |
           set -euo pipefail
-          # skopeo authenticates via the ~/.docker/config.json that the
-          # registry-login step (client: docker) wrote — REGISTRY_AUTH_FILE
-          # points nixpkgs skopeo at it, so no explicit --dest-creds is needed.
-          export REGISTRY_AUTH_FILE="$HOME/.docker/config.json"
-          # The ubuntu runner ships a v1 /etc/containers/registries.conf,
-          # which nixpkgs skopeo rejects ("registries.conf must be in v2
-          # format but is in v1"). Point skopeo at a minimal v2 config —
-          # we only ever push fully-qualified docker:// refs, so no
-          # unqualified search registries are needed.
-          export CONTAINERS_REGISTRIES_CONF="${RUNNER_TEMP:-/tmp}/registries.conf"
-          printf 'unqualified-search-registries = []\n' > "$CONTAINERS_REGISTRIES_CONF"
-          # Push primary tag, then each additionalTag, all as copies
-          # of the same content-addressed image (skopeo copy is cheap
-          # — server-side mount when blobs already exist).
-          push_one() {
-            local t="$1"
-            local target="${REGISTRY}/${IMAGE}:${t}"
-            nix shell nixpkgs#skopeo --command \
-              skopeo --insecure-policy copy \
-                "docker-archive:./image.tar.gz" \
-                "docker://${target}"
-          }
-          push_one "$TAG"
-          # shellcheck disable=SC2086 — splitting on whitespace is intended
-          for extra in $ADDITIONAL_TAGS; do
-            push_one "$extra"
-          done
+          # The registry-login step above already resolved the ONE typed
+          # credential precedence (BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN, owned
+          # by registry-login/run.tlisp) and docker-login'd it into
+          # ~/.docker/config.json. doca's native backend takes an explicit
+          # --dest-pass (it doesn't read a docker config file), so read the
+          # already-resolved token back out of that file instead of
+          # re-deriving the precedence here as a second `||` chain.
+          auth_b64=$(jq -r --arg h "$REGISTRY" '.auths[$h].auth // empty' "$HOME/.docker/config.json")
+          if [ -z "$auth_b64" ]; then
+            echo "::error::no docker credential found for '${REGISTRY}' in ~/.docker/config.json (the registry-login step above should have written one)"
+            exit 1
+          fi
+          dest_pass="$(printf '%s' "$auth_b64" | base64 -d | cut -d: -f2-)"
+          echo "::add-mask::$dest_pass"
+          # Primary tag + every additionalTag in one call — oci-push pushes
+          # all requested tags against one parsed/gzipped archive (blobs are
+          # HEAD-deduped by oci-client, so repeat tags are cheap).
+          nix run github:pleme-io/substrate#oci-push -- push \
+            --backend native \
+            --registry "$REGISTRY" \
+            --image "$IMAGE" \
+            --tag "$TAG" \
+            --additional-tags "$ADDITIONAL_TAGS" \
+            --tarball ./image.tar.gz \
+            --dest-user "${{ github.actor }}" \
+            --dest-pass "$dest_pass"
