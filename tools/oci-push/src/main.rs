@@ -63,8 +63,10 @@ const MT_LAYER_GZIP: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
 const MT_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
 
 /// HTTP for local registries (localhost / loopback, with or without a port),
-/// HTTPS otherwise. A local test rig or in-cluster zot speaks plain HTTP;
-/// public registries (ghcr.io) speak HTTPS.
+/// HTTPS otherwise. A local test rig speaks plain HTTP; public registries
+/// (ghcr.io) and a properly-TLS'd in-cluster registry speak HTTPS -- see
+/// `--dest-ca-cert` for pinning a self-signed in-cluster cert rather than
+/// falling back to `--insecure` (plain HTTP).
 fn protocol_for(registry: &str) -> ClientProtocol {
     let host = registry.split('/').next().unwrap_or(registry);
     let bare = host.split(':').next().unwrap_or(host);
@@ -73,6 +75,42 @@ fn protocol_for(registry: &str) -> ClientProtocol {
     } else {
         ClientProtocol::Https
     }
+}
+
+/// Shared client-config builder for every subcommand that talks to a
+/// registry: `insecure` forces plain HTTP (an explicit escape hatch, never
+/// the default); `ca_cert_path` pins a specific PEM certificate as an
+/// EXTRA trusted root (real verification against a known cert, never a
+/// blanket "accept any certificate" toggle -- that option is deliberately
+/// not exposed here).
+fn client_config_for(
+    registry: &str,
+    insecure: bool,
+    ca_cert_path: &Option<String>,
+) -> Result<ClientConfig, PushError> {
+    let extra_root_certificates = match ca_cert_path {
+        Some(path) => {
+            let pem = fs::read(path).map_err(|source| PushError::ReadCaCert {
+                path: path.clone(),
+                source,
+            })?;
+            vec![Certificate {
+                encoding: CertificateEncoding::Pem,
+                data: pem,
+            }]
+        }
+        None => Vec::new(),
+    };
+    let protocol = if insecure {
+        ClientProtocol::Http
+    } else {
+        protocol_for(registry)
+    };
+    Ok(ClientConfig {
+        protocol,
+        extra_root_certificates,
+        ..Default::default()
+    })
 }
 
 /// Typed failure modes. The `Display` impl is the single render surface.
@@ -355,29 +393,11 @@ impl PushBackend for NativeBackend {
             .build()
             .map_err(PushError::Runtime)?;
         let auth = RegistryAuth::Basic(spec.dest_user.clone(), spec.dest_pass.clone());
-        let extra_root_certificates = match &spec.ca_cert {
-            Some(path) => {
-                let pem = fs::read(path).map_err(|source| PushError::ReadCaCert {
-                    path: path.clone(),
-                    source,
-                })?;
-                vec![Certificate {
-                    encoding: CertificateEncoding::Pem,
-                    data: pem,
-                }]
-            }
-            None => Vec::new(),
-        };
-        let protocol = if spec.insecure {
-            ClientProtocol::Http
-        } else {
-            protocol_for(&spec.registry)
-        };
-        let client = Client::new(ClientConfig {
-            protocol,
-            extra_root_certificates,
-            ..Default::default()
-        });
+        let client = Client::new(client_config_for(
+            &spec.registry,
+            spec.insecure,
+            &spec.ca_cert,
+        )?);
 
         rt.block_on(async {
             for tag in &spec.tags {
@@ -822,12 +842,16 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut reference: Option<String> = None;
     let mut user: Option<String> = None;
     let mut pass: Option<String> = None;
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--ref" => reference = Some(next_value(&mut it, "ref")?),
             "--user" => user = Some(next_value(&mut it, "user")?),
             "--pass" => pass = Some(next_value(&mut it, "pass")?),
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -841,13 +865,12 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         user.or_else(|| env_input("INPUT_USER")),
         pass.or_else(|| env_input("INPUT_PASS")),
     );
-    let proto = protocol_for(r.registry());
+    let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
+    let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
+    let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
 
     runtime()?.block_on(async {
-        let client = Client::new(ClientConfig {
-            protocol: proto,
-            ..Default::default()
-        });
+        let client = Client::new(cfg);
         let (manifest, digest) = client
             .pull_manifest(&r, &auth)
             .await
