@@ -50,6 +50,19 @@
 }: let
   versions = import ../../util/versions.nix;
   dockerHelpers = import ../../util/docker-helpers.nix;
+  # nonrootUid/nonrootGid only -- NOT swapping `cacert` for one of
+  # hardened-base.nix's own bases here. `wasmtime` is dynamically linked
+  # (its own closure already pulls glibc transitively, same as any other
+  # non-static Rust binary), and this image's guest components run with
+  # `--wasi inherit-network`/`inherit-env` for HTTP services -- a live,
+  # unverified question (not chased down in this pass) whether a WASI
+  # guest's own network/DNS codepath depends on host NSS config
+  # (nsswitch.conf) that no hardened-base.nix base ships either way, so a
+  # base swap here isn't a clear win the way it was for the plain-Rust-
+  # binary crate2nix-builders.nix path. Only the uid convention +
+  # SBOM-correctness passthru are shared (same partial-alignment call
+  # go/docker.nix's own base-selection made earlier this pass).
+  hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
 
   wasmtime = pkgs.wasmtime;
 
@@ -158,15 +171,17 @@ EOF
   # ============================================================================
   # Layered image: wasmtime + cacert (heavy, cached) and .wasm module (light).
   # Architecture is always for the native host (wasmtime is the native binary).
-  dockerImage = pkgs.dockerTools.buildLayeredImage {
+  imageContents = [
+    wasmtime
+    pkgs.cacert
+    wasmModule
+  ] ++ extraContents;
+
+  dockerImage = (pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
     maxLayers = versions.docker.maxLayers;
 
-    contents = [
-      wasmtime
-      pkgs.cacert
-      wasmModule
-    ] ++ extraContents;
+    contents = imageContents;
 
     config = {
       Entrypoint =
@@ -192,12 +207,21 @@ EOF
         "RUST_LOG=info"
       ] ++ pkgs.lib.optional (serviceKind == "http") "PORT=${toString port}";
       WorkingDir = "/";
-      User = "65534:65534";
+      # Matches oci/hardened-base.nix's `nonrootUid`/`nonrootGid` (65532,
+      # the distroless/Chainguard "nonroot" convention) instead of 65534
+      # ("nobody") -- same fleet-wide convention fix already applied to
+      # go/docker.nix + tool-image.nix this pass.
+      User = "${toString hardenedBase.nonrootUid}:${toString hardenedBase.nonrootGid}";
     } // pkgs.lib.optionalAttrs (serviceKind == "http") {
       # Expose the listening port at image-config level so K8s probes
       # and `docker run -P` map naturally.
       ExposedPorts = { "${toString port}/tcp" = {}; };
     };
+  }) // {
+    # SBOM-correctness passthru -- see oci/hardened-base.nix's own
+    # mkPackageImage comment for why this needs computing separately from
+    # the (gzip-compressed, reference-scanner-blind) image tarball.
+    closureInfo = pkgs.closureInfo { rootPaths = imageContents; };
   };
 
   # ============================================================================

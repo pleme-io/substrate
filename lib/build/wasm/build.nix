@@ -10,6 +10,11 @@ let
     fenix.latest.rustc
     fenix.targets.wasm32-unknown-unknown.latest.rust-std
   ];
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). Only
+  # `mkWasmDockerImageWithHanabi` (the Hanabi-serves-a-static-bundle
+  # pattern) converts -- `mkWasmDockerImage` (nginx-based) is a
+  # documented exception, see the comment at its call site below.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 in {
   # Build Yew/WASM applications with pure Nix
   mkWasmBuild = {
@@ -122,6 +127,19 @@ EOF
   };
 
   # Build Docker image for serving WASM application
+  #
+  # DOCUMENTED EXCEPTION (not converted to oci/hardened-base.nix): this is
+  # a full nginx runtime -- worker processes, a generated nginx.conf, and
+  # writable var/log/nginx + var/cache/nginx + run dirs for the pidfile --
+  # none of which any hardened-base.nix base was designed to host (they
+  # assume a single package/binary + optional extraContents, not an nginx
+  # master/worker tree with its own config/log/cache filesystem layout).
+  # This module's own doc comment already marks nginx "legacy" in favor of
+  # `mkWasmDockerImageWithHanabi` below (which DOES convert), so hardening
+  # effort is better spent finishing that migration than propping up this
+  # path. If nginx-based WASM serving is still needed after that, a
+  # dedicated `hardened.bases.nginx`-shaped variant would be the right
+  # follow-up -- not invented here.
   mkWasmDockerImage = {
     name,
     wasmApp,
@@ -252,15 +270,18 @@ EOF
       (check.str "tag" tag)
       (check.architecture "architecture" architecture)
     ];
+    # Same Hanabi-serves-a-static-bundle pattern as shared/docker-image.nix's
+    # mkWebDockerImage / leptos-build.nix's mkLeptosDockerImageWithHanabi --
+    # `extraCommands`+`fakeRootCommands` do real content-merge + custom-user
+    # work `mkPackageImage` can't express, so this stays a direct
+    # `buildLayeredImage` call; `wolfi` is a strict superset of the old
+    # ad-hoc `[cacert curl busybox]`.
+    imageContents = with pkgs; [ webServer curl ];
   in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
 
-    contents = with pkgs; [
-      webServer
-      cacert
-      curl
-      busybox
-    ];
+    fromImage = hardened.bases.wolfi;
+    contents = imageContents;
 
     fakeRootCommands = (import ../../util/docker-helpers.nix).mkWebUserSetup;
 
@@ -315,11 +336,22 @@ EOF
         "8080/tcp" = {};
       };
       Env = [
-        (import ../../util/docker-helpers.nix).mkSslEnv pkgs
+        # Parens force the function application -- inside a Nix list
+        # literal each element parses at `expr_select` precedence, so
+        # without them this was TWO separate list elements (the unapplied
+        # function value + `pkgs`), not one string; found while converting
+        # this function's base to the hardened primitive (pre-existing,
+        # unrelated to the base swap -- `web/docker.nix`'s mkNodeDockerImage
+        # already carries the same fix, with an identical comment).
+        ((import ../../util/docker-helpers.nix).mkSslEnv pkgs)
         "HANABI_CONFIG=/app/config/hanabi.yaml"
       ];
       WorkingDir = "/app/static";
       User = "web";
+    };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.wolfi.contents or []) ++ imageContents;
     };
   };
 

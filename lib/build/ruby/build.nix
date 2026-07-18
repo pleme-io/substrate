@@ -11,7 +11,15 @@
 
 let
   inherit (pkgs) writeShellScript bundler bundix;
-
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). `distroless-glibc`
+  # (not `wolfi`) is the right base here: Ruby/bundler-driven apps commonly
+  # shell out via Open3/system() expecting REAL GNU coreutils, and adding
+  # `pkgs.coreutils` on top of `wolfi`'s busybox would collide on the same
+  # `/bin/*` paths (busybox's multi-call symlinks vs coreutils' own
+  # binaries). `distroless-glibc` (cacert + nonroot passwd/group stub +
+  # glibc, no busybox) is a clean drop-in for the old ad-hoc `[cacert]`,
+  # leaving `coreutils` as the sole shell-tool provider, unchanged.
+  hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 in rec {
   # ============================================================================
   # RUBY DOCKER IMAGE BUILDER
@@ -46,16 +54,17 @@ in rec {
       (check.list "env" env)
       (check.list "extraContents" extraContents)
     ];
-  in pkgs.dockerTools.buildLayeredImage {
-    inherit name tag;
-
-    contents = [
+    imageContents = [
       rubyPackage
       rubyEnv
       ruby
-      pkgs.cacert
       pkgs.coreutils
     ] ++ extraContents;
+  in pkgs.dockerTools.buildLayeredImage {
+    inherit name tag;
+
+    fromImage = hardened.bases.distroless-glibc;
+    contents = imageContents;
 
     config = let dockerHelpers = import ../../util/docker-helpers.nix; in {
       Cmd = if cmd != null then cmd else [ "${rubyPackage}/bin/${baseNameOf name}" ];
@@ -65,13 +74,27 @@ in rec {
         "DRY_TYPES_WARNINGS=false"
       ] ++ env;
       ExposedPorts = exposedPorts;
+      # This image previously had no `User` at all (implicit root), even
+      # though `mkAppUserSetup` below already stamps a matching "app"
+      # (1000:1000) passwd/group entry — wiring the two together is a
+      # bonus hardening fix, not a base-selection change.
+      User = "1000:1000";
     };
 
+    # `mkAppUserSetup` overwrites the hardened base's own nonroot(65532)
+    # passwd/group stub with this file's established "app" (1000) user
+    # convention — kept as-is (not touching the ruby app-user identity),
+    # `mkdir tmp; chmod 1777 tmp` is now redundant with the base's own
+    # `/tmp` stub but harmless.
     extraCommands = let dockerHelpers = import ../../util/docker-helpers.nix; in ''
       mkdir -p tmp
       chmod 1777 tmp
       ${dockerHelpers.mkAppUserSetup}
     '';
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.distroless-glibc.contents or []) ++ imageContents;
+    };
   };
 
   # ============================================================================

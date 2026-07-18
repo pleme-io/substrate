@@ -16,7 +16,17 @@
 #   }
 { pkgs, crate2nix, forgeCmd, defaultGhcrToken }:
 
-rec {
+let
+  # Hardened by default (Pillar 8 / oci/hardened-base.nix). `mkDockerImage`
+  # below has its own `extraLabels` passthrough that callers use for custom
+  # OCI labels -- `hardened.mkPackageImage` bakes in its own fixed Labels
+  # set with no merge/override knob, so calling it directly would silently
+  # drop any caller-supplied `extraLabels`. Building on `fromImage` instead
+  # keeps the exact existing Labels contract while still gaining the
+  # hardened base (TLS roots + nonroot passwd/group stub + a real nonroot
+  # user -- this image previously ran as root, since no `User` was ever set).
+  hardened = import ../build/oci/hardened-base.nix { inherit pkgs; };
+in rec {
   # Build a Rust binary from Cargo.nix using crate2nix
   # Returns null if Cargo.nix doesn't exist
   buildFromCargoNix = { name, cargoNix, crateOverrides ? {} }:
@@ -40,10 +50,13 @@ rec {
     env ? [],
     description ? "",
     extraLabels ? {},
-  }: pkgs.dockerTools.buildLayeredImage {
+  }: let
+    imageContents = [ binary ];
+  in pkgs.dockerTools.buildLayeredImage {
     name = registry;
     inherit tag;
-    contents = [ binary pkgs.cacert ];
+    fromImage = hardened.bases.distroless-glibc;
+    contents = imageContents;
     config = {
       Entrypoint = [ "${binary}/bin/${name}" ];
       Env = [
@@ -53,12 +66,17 @@ rec {
         builtins.map (p: { name = "${toString p}/tcp"; value = {}; })
           (pkgs.lib.unique (builtins.attrValues ports))
       );
+      User = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
       Labels = {
         "org.opencontainers.image.title" = name;
         "org.opencontainers.image.description" = description;
         "org.opencontainers.image.source" = "https://github.com/${githubOrg}";
         "org.opencontainers.image.vendor" = githubOrg;
       } // extraLabels;
+    };
+  } // {
+    closureInfo = pkgs.closureInfo {
+      rootPaths = (hardened.bases.distroless-glibc.contents or []) ++ imageContents;
     };
   };
 
