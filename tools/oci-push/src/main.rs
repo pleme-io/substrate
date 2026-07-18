@@ -141,6 +141,11 @@ enum PushError {
     SkopeoFailed { tag: String, code: Option<i32> },
     WriteRegistriesConf(std::io::Error),
     ReadCaCert { path: String, source: std::io::Error },
+    Chmod { path: String, source: std::io::Error },
+    ReadDir { path: String, source: std::io::Error },
+    ResolveSymlink { path: String, source: std::io::Error },
+    RemoveSymlink { path: String, source: std::io::Error },
+    CopyReal { path: String, source: std::io::Error },
 }
 
 impl fmt::Display for PushError {
@@ -154,11 +159,11 @@ impl fmt::Display for PushError {
             }
             PushError::NoSubcommand => write!(
                 f,
-                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | tag | delete)"
+                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | tag | delete | config-show | harden-rootfs)"
             ),
             PushError::UnknownSubcommand(s) => write!(
                 f,
-                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | tag | delete)"
+                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | tag | delete | config-show | harden-rootfs)"
             ),
             PushError::Json(e) => write!(f, "oci-push: JSON error: {e}"),
             PushError::ConfigParse(e) => write!(f, "oci-push: config parse error: {e}"),
@@ -206,6 +211,21 @@ impl fmt::Display for PushError {
             }
             PushError::ReadCaCert { path, source } => {
                 write!(f, "oci-push: cannot read CA cert {path}: {source}")
+            }
+            PushError::Chmod { path, source } => {
+                write!(f, "oci-push: chmod {path} failed: {source}")
+            }
+            PushError::ReadDir { path, source } => {
+                write!(f, "oci-push: cannot read directory {path}: {source}")
+            }
+            PushError::ResolveSymlink { path, source } => {
+                write!(f, "oci-push: cannot resolve symlink {path}: {source}")
+            }
+            PushError::RemoveSymlink { path, source } => {
+                write!(f, "oci-push: cannot remove symlink {path}: {source}")
+            }
+            PushError::CopyReal { path, source } => {
+                write!(f, "oci-push: cannot materialize {path} as a real file: {source}")
             }
         }
     }
@@ -1022,6 +1042,103 @@ fn cmd_config_show<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushErro
     Ok(())
 }
 
+/// `harden-rootfs [--root <path>]` — make a Nix-assembled rootfs directory
+/// safe for OCI layer packaging. Two fixes, both build-time-only concerns
+/// with nowhere else typed to live:
+///
+/// 1. `<root>/tmp` is chmod'd world-writable + sticky (1777), recursively.
+///    Nix strips write bits from every registered store path, so a `chmod`
+///    baked into a derivation is a no-op by the time it reaches an image —
+///    this must run at tar-assembly time (`dockerTools.buildLayeredImage`'s
+///    `fakeRootCommands`, the one place in that pipeline a mutation
+///    actually lands).
+/// 2. Any symlinked `<root>/etc/passwd` or `<root>/etc/group` is replaced
+///    with a real file carrying the same content. `dockerTools`' `contents`
+///    merge goes through `symlinkJoin`, so files contributed that way land
+///    as absolute symlinks into `/nix/store/<hash>/...` — some container
+///    runtimes (confirmed: containerd 2.x) reject a layer whose
+///    `/etc/passwd` escapes into `/nix/store` this way.
+///
+/// This replaces what was previously an inline shell loop in
+/// `oci/hardened-base.nix`'s own `fakeRootCommands` string — ported here
+/// per the fleet's NO-SHELL rule (a `for`/`if`/`readlink` loop is real
+/// logic, not 3-line glue) so it's typed, testable, and shared by every
+/// consumer of that file rather than re-embedded per base variant.
+///
+/// `--root` defaults to `.` — `fakeRootCommands` runs with the assembled
+/// rootfs already as CWD.
+fn cmd_harden_rootfs<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut root = PathBuf::from(".");
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--root" => root = PathBuf::from(it.next().ok_or(PushError::MissingValue("root"))?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+
+    let tmp = root.join("tmp");
+    if tmp.exists() {
+        chmod_recursive(&tmp, 0o1777)?;
+    }
+
+    for rel in ["etc/passwd", "etc/group"] {
+        materialize_if_symlink(&root.join(rel))?;
+    }
+
+    Ok(())
+}
+
+/// `chmod -R <mode>` — Rust has no built-in recursive chmod; walk it by hand.
+fn chmod_recursive(path: &Path, mode: u32) -> Result<(), PushError> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|source| {
+        PushError::Chmod { path: path.display().to_string(), source }
+    })?;
+    if path.is_dir() {
+        let entries = fs::read_dir(path).map_err(|source| PushError::ReadDir {
+            path: path.display().to_string(),
+            source,
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| PushError::ReadDir {
+                path: path.display().to_string(),
+                source,
+            })?;
+            chmod_recursive(&entry.path(), mode)?;
+        }
+    }
+    Ok(())
+}
+
+/// If `path` is a symlink, resolve it (`readlink -f` semantics) and replace
+/// it with a real copy of the target's bytes + mode — `fs::copy` preserves
+/// the source's permission bits, matching `cp`'s default behavior. A
+/// missing path or a real (non-symlink) file is left untouched — honest
+/// no-op, not an error, since both are valid starting states depending on
+/// which base variant supplied the file.
+fn materialize_if_symlink(path: &Path) -> Result<(), PushError> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(_) => return Ok(()),
+    };
+    if !meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    let real = fs::canonicalize(path).map_err(|source| PushError::ResolveSymlink {
+        path: path.display().to_string(),
+        source,
+    })?;
+    fs::remove_file(path).map_err(|source| PushError::RemoveSymlink {
+        path: path.display().to_string(),
+        source,
+    })?;
+    fs::copy(&real, path).map_err(|source| PushError::CopyReal {
+        path: path.display().to_string(),
+        source,
+    })?;
+    Ok(())
+}
+
 fn run() -> Result<(), PushError> {
     let mut args = env::args();
     let _prog = args.next();
@@ -1034,6 +1151,7 @@ fn run() -> Result<(), PushError> {
         Some("tag") => cmd_tag(args),
         Some("delete") => cmd_delete(args),
         Some("config-show") => cmd_config_show(args),
+        Some("harden-rootfs") => cmd_harden_rootfs(args),
         // Back-compat: a leading flag means the legacy flat `push` form.
         Some(flag) if flag.starts_with("--") => {
             let rest = std::iter::once(flag.to_string()).chain(args);
@@ -1171,5 +1289,108 @@ mod tests {
             ca_cert: None,
         };
         assert_eq!(spec.reference("v1"), "ghcr.io/pleme-io/foo:v1");
+    }
+
+    /// Unique scratch dir per test -- Rust's default test runner runs tests
+    /// in parallel, so a shared fixed path would race across threads.
+    fn scratch_dir(name: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut dir_name = String::from("oci-push-test-");
+        dir_name.push_str(name);
+        dir_name.push('-');
+        dir_name.push_str(&std::process::id().to_string());
+        dir_name.push('-');
+        dir_name.push_str(&n.to_string());
+        let path = std::env::temp_dir().join(dir_name);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn chmod_recursive_sets_mode_on_dir_and_children() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch_dir("chmod");
+        let sub = root.join("sub");
+        fs::create_dir(&sub).unwrap();
+        let file = sub.join("f");
+        fs::write(&file, b"x").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+
+        chmod_recursive(&root, 0o1777).unwrap();
+
+        for p in [&root, &sub, &file] {
+            let mode = fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+            assert_eq!(mode, 0o1777, "{p:?} should be 1777");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn materialize_if_symlink_replaces_symlink_with_real_copy() {
+        use std::os::unix::fs::symlink;
+        let root = scratch_dir("materialize-symlink");
+        let real = root.join("real-passwd");
+        fs::write(&real, b"root:x:0:0::/root:/bin/sh\n").unwrap();
+        let link = root.join("passwd");
+        symlink(&real, &link).unwrap();
+
+        materialize_if_symlink(&link).unwrap();
+
+        let meta = fs::symlink_metadata(&link).unwrap();
+        assert!(!meta.file_type().is_symlink(), "should no longer be a symlink");
+        assert_eq!(fs::read(&link).unwrap(), b"root:x:0:0::/root:/bin/sh\n");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn materialize_if_symlink_is_a_noop_for_a_real_file() {
+        let root = scratch_dir("materialize-real");
+        let file = root.join("passwd");
+        fs::write(&file, b"real content").unwrap();
+
+        materialize_if_symlink(&file).unwrap();
+
+        assert_eq!(fs::read(&file).unwrap(), b"real content");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn materialize_if_symlink_is_a_noop_for_a_missing_path() {
+        let root = scratch_dir("materialize-missing");
+        let missing = root.join("does-not-exist");
+        assert!(materialize_if_symlink(&missing).is_ok());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn harden_rootfs_end_to_end() {
+        use std::os::unix::fs::symlink;
+        let root = scratch_dir("harden-rootfs-e2e");
+        fs::create_dir_all(root.join("etc")).unwrap();
+        fs::create_dir_all(root.join("tmp")).unwrap();
+        let real_passwd = root.join("real-passwd");
+        fs::write(&real_passwd, b"nonroot:x:65532:65532::/home/nonroot:/sbin/nologin\n").unwrap();
+        symlink(&real_passwd, root.join("etc/passwd")).unwrap();
+        let real_group = root.join("real-group");
+        fs::write(&real_group, b"nonroot:x:65532:\n").unwrap();
+        symlink(&real_group, root.join("etc/group")).unwrap();
+
+        cmd_harden_rootfs(vec!["--root".to_string(), root.display().to_string()].into_iter())
+            .unwrap();
+
+        assert!(!fs::symlink_metadata(root.join("etc/passwd"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::symlink_metadata(root.join("etc/group"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        use std::os::unix::fs::PermissionsExt;
+        let tmp_mode = fs::metadata(root.join("tmp")).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(tmp_mode, 0o1777);
+        fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -38,6 +38,13 @@
 let
   inherit (pkgs) lib dockerTools cacert;
 
+  # doca (oci-push)'s `harden-rootfs` subcommand -- see its own doc comment
+  # (tools/oci-push/src/main.rs) for the full story. Used below instead of
+  # the inline shell this file used to carry directly: a `for`/`if`/
+  # `readlink` loop is real logic, not the 3-line glue the fleet's NO-SHELL
+  # rule permits inline.
+  doca = import ../oci-push.nix { inherit pkgs; };
+
   # Non-root UID matching distroless convention.
   nonrootUid = 65532;
   nonrootGid = 65532;
@@ -94,21 +101,12 @@ let
   # yet empirically deploy-verified (no reachable builder this pass),
   # but the symlink-into-/nix/store SHAPE itself is proven, not
   # speculative -- and every hardened-base.nix consumer inherits it via
-  # commonContents, not just attic-server. Realized as REAL files here
-  # (same fakeRootCommands mechanism already fixing /tmp's mode above --
-  # the only place in this pipeline a mutation actually lands, since Nix
-  # strips write bits from every registered store path) so no consumer
-  # has to work around this individually.
-  mkTmpWritableFakeRootCommands = ''
-    chmod -R 1777 /tmp
-    for f in /etc/passwd /etc/group; do
-      if [ -L "$f" ]; then
-        real=$(readlink -f "$f")
-        rm -f "$f"
-        cp "$real" "$f"
-      fi
-    done
-  '';
+  # commonContents, not just attic-server. Realized as REAL files via
+  # `doca harden-rootfs` below (same fakeRootCommands mechanism already
+  # fixing /tmp's mode -- the only place in this pipeline a mutation
+  # actually lands, since Nix strips write bits from every registered
+  # store path) so no consumer has to work around this individually.
+  mkTmpWritableFakeRootCommands = "${doca}/bin/oci-push harden-rootfs --root .";
 
   commonContents = [
     cacert
