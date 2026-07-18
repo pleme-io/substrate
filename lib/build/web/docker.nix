@@ -12,6 +12,23 @@ let
   # so this stays a direct `buildLayeredImage` call. `wolfi` (cacert +
   # nonroot passwd/group stub + glibc + busybox) is a strict superset of
   # the old ad-hoc `[cacert curl busybox]`, a pure hardening win.
+  #
+  # Re-checked 2026-07-18 against mkPackageImage's `labels ? {}` addition
+  # (oci/hardened-base.nix): that param closes the Labels-merge gap other
+  # converted builders hit, but it does NOT reach this file's actual
+  # blockers, which are orthogonal to labels --
+  #   - `mkPackageImage`'s `fakeRootCommands` is hardcoded to
+  #     `chown -R … && chmod -R u+rwX …` over caller-given `writablePaths`;
+  #     there is no knob to inject the raw `mkWebUserSetup` fragment that
+  #     writes NEW `/etc/passwd`/`/etc/group` entries for the "web" user.
+  #     Without that entry, `config.User = "web"` (below) can't resolve at
+  #     runtime -- `hardened.bases.wolfi` only ships root/nobody/nonroot.
+  #   - `mkPackageImage` has no `extraCommands` parameter at all, so the
+  #     `mkdir -p app/static; cp -r ${builtApp}/* app/static/; …` merge
+  #     (plus the optional `envConfigPath` copy) has nowhere to attach.
+  # Converting this call would therefore either drop the "web" user/static
+  # bundle behavior or require extending `mkPackageImage`'s signature
+  # (out of scope here) -- so it stays direct, per design.
   hardened = import ../oci/hardened-base.nix { inherit pkgs; };
 in {
   # Generate Docker images for Node.js/web applications
