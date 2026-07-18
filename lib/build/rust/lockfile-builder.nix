@@ -599,7 +599,23 @@ let
     # the triples they protect.
     overrideFor = triple: overrideCompose.composeOverrideMaps {
       base = defaultCrateOverrides;
-      winner = plemeCrateOverridesFor triple;
+      # The always-applied fleet winner (fires even when a caller passes its own
+      # `defaultCrateOverrides`, which the workspace/library path does), PLUS the
+      # pkgs-ful crate quirks that `plemeCrateOverridesFor` (pure/pkgs-free)
+      # cannot express. `protobuf-src`'s build.rs vendors + builds protobuf via
+      # the `cmake` crate, which execs the `cmake` binary — absent from the
+      # workspace crate-build's native inputs (the SERVICE path's
+      # `[pkg-config cmake perl]` had it), so the build panicked `is \`cmake\`
+      # not installed?` (os error 2) → exit 101. Add cmake for this crate here,
+      # in the always-applied winner, so every consumer of substrate.rust.*
+      # (vigy, …) gets it. Foundational crate requirement, not a repo accident
+      # (GEN-TYPED-SPEC-CONTRACT: refine the build at the precise point). Appends
+      # so any existing native inputs are preserved.
+      winner = (plemeCrateOverridesFor triple) // {
+        protobuf-src = attrs: {
+          nativeBuildInputs = (attrs.nativeBuildInputs or [ ]) ++ [ pkgs.cmake ];
+        };
+      };
     };
 
     # gen ≥ 3e9fbc6 emits `build_rust_crate_args` pre-shaped for
