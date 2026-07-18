@@ -276,6 +276,23 @@ EOF
     # work `mkPackageImage` can't express, so this stays a direct
     # `buildLayeredImage` call; `wolfi` is a strict superset of the old
     # ad-hoc `[cacert curl busybox]`.
+    #
+    # Re-checked 2026-07-18 after `mkPackageImage`/`mkVendorRewrap` gained a
+    # `labels` param (oci/hardened-base.nix): doesn't change the verdict --
+    # this builder sets no custom `Labels` at all, so the labels gap was
+    # never what blocked it. The real blockers are unchanged: (1)
+    # `mkWebUserSetup` bakes a bespoke "web" 101:101 user via its own
+    # /etc/passwd+/etc/group writes -- `mkPackageImage`'s `fakeRootCommands`
+    # is auto-derived from `writablePaths` (chown/chmod only, no arbitrary
+    # commands), and its `user` param expects a uid already present in the
+    # base's own passwd/group; swapping to the hardened base's built-in
+    # nonroot 65532:65532 would change the image's runtime UID -- a
+    # behavior change, not a mechanical one. (2) `extraCommands` copies
+    # `wasmApp`'s tree into `app/static` and synthesizes
+    # `app/config/hanabi.yaml` inline -- `mkPackageImage` has no equivalent
+    # (`contents`/`extraContents` only splice whole store paths at the
+    # image root, they can't merge a directory's contents into a subpath or
+    # write a generated file).
     imageContents = with pkgs; [ webServer curl ];
   in pkgs.dockerTools.buildLayeredImage {
     inherit name tag architecture;
