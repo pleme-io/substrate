@@ -226,6 +226,9 @@ let
     publishTag,                    # e.g. "4.47.0-nix0"
     extraContents ? [],
     env ? [],
+    # Merged OVER the default io.pleme.rewrap.*/org.opencontainers.image.*
+    # set below -- see mkPackageImage's own `labels` doc comment.
+    labels ? {},
   }: let
     # Pull upstream. `imageDigest` identifies the remote manifest; `sha256`
     # is the local tarball hash. Caller pins both.
@@ -272,7 +275,7 @@ let
         "io.pleme.rewrap.upstream" = upstream;
         "io.pleme.rewrap.upstream.digest" = upstreamDigest;
         "io.pleme.rewrap.service" = service;
-      };
+      } // labels;
     };
   }) // {
     # See the passthru-chain comment above `mkDistrolessStaticBase` — the
@@ -338,6 +341,15 @@ let
     # not as a real store-path mutation -- the same reason `chown` here
     # already works while an in-derivation chown never would.
     writablePaths ? [],
+    # Merged OVER the default io.pleme.rebuild.*/org.opencontainers.image.*
+    # set below -- a caller-supplied key of the same name wins. Added
+    # 2026-07-18: without this, any consumer with real custom labels
+    # (Kenshi's io.kenshi.* markers, a full mkStandardLabels set, an
+    # extraLabels passthrough) couldn't call mkPackageImage literally
+    # without silently losing them -- confirmed live, several fleet
+    # consumers stayed on a direct buildLayeredImage call for exactly
+    # this reason during the 2026-07-18 hardening pass.
+    labels ? {},
   }: let
     imageContents = [ package ] ++ extraContents;
   in (dockerTools.buildLayeredImage {
@@ -362,7 +374,7 @@ let
         "io.pleme.rebuild.package" = package.pname or service;
         "io.pleme.rebuild.version" = package.version or "unknown";
         "io.pleme.rebuild.service" = service;
-      };
+      } // labels;
     };
   }) // {
     # See the passthru-chain comment above `mkDistrolessStaticBase` — the
