@@ -406,6 +406,54 @@ in
       source = "generated:demo.yaml";
     };
   };
+  render-unset-nullOr-island-absent-not-null = {
+    # The silent whole-config-fallback class: an unset nullOr island
+    # (default null) — and any authored explicit null — must be ABSENT
+    # from the rendered value, never `null`. Shikumi extraction
+    # (figment + serde) is atomic: one explicit null on a non-Option
+    # Rust field fails the WHOLE extraction and the app silently falls
+    # back to full prescribed defaults (proven live via tobira's
+    # `accent_color: null`). The non-null sibling must survive.
+    expr =
+      let
+        s = mkOptionSurface {
+          name = "nully";
+          description = "d";
+          settings.fields = {
+            accent = {
+              type = "nullOrStr";
+              default = null;
+            };
+            width = {
+              type = "int";
+              default = 560;
+            };
+          };
+        };
+        cfg =
+          (lib.evalModules {
+            modules = [
+              { _module.args.pkgs = stubPkgs; }
+              s.module
+              { programs.nully.settings.authoredNull = null; }
+            ];
+          }).config.programs.nully;
+        r = s.render {
+          inherit cfg;
+          pkgs = stubPkgs;
+        };
+      in
+      {
+        hasAccent = r.value ? accent;
+        hasAuthoredNull = r.value ? authoredNull;
+        width = r.value.width;
+      };
+    expected = {
+      hasAccent = false;
+      hasAuthoredNull = false;
+      width = 560;
+    };
+  };
   render-full-pipeline-from-eval = {
     expr =
       let

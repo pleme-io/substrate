@@ -191,6 +191,7 @@ let
   hmHelpers     = import ./hm/service-helpers.nix         { inherit lib; };
   nixosHelpers  = import ./hm/nixos-service-helpers.nix   { inherit lib; };
   darwinHelpers = import ./hm/darwin-service-helpers.nix  { inherit lib; };
+  irohaCore     = import ./iroha/core.nix                 { inherit lib; };
 
   inherit (lib) mkOption mkEnableOption mkIf mkMerge optionalAttrs types literalExpression;
 in
@@ -678,7 +679,19 @@ in
             (mkIf (withShikumiConfig && shikumiCfg != null
                    && (!shikumiGateOnEnable || (cfg.enable or false))) {
               home.file.${shikumiConfigPath} = {
-                source = yamlFormat.generate "${name}.yaml" shikumiCfg;
+                # pruneNulls: an unset nullOr option must be ABSENT from
+                # the rendered YAML, never `null`. Shikumi config
+                # extraction (figment + serde) is ATOMIC — serde(default)
+                # fills only MISSING fields, and one explicit `null` on a
+                # non-Option field fails the ENTIRE extraction; the app
+                # then silently falls back to full prescribed defaults
+                # with only a warn log (proven live: tobira ran on
+                # default config for weeks because unset nullOr color
+                # options rendered as `accent_color: null`). pruneNulls
+                # also descends into lists (attrsets inside lists), which
+                # lib.filterAttrsRecursive alone would miss.
+                source = yamlFormat.generate "${name}.yaml"
+                  (irohaCore.pruneNulls shikumiCfg);
               };
             })
 

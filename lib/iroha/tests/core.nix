@@ -1,7 +1,7 @@
 # Tests — iroha.core (bands, classes, tag, field types).
 { lib, iroha }:
 let
-  inherit (iroha) prio at bandOf classes tag fieldType mkField;
+  inherit (iroha) prio at bandOf classes tag fieldType mkField pruneNulls;
 
   # A module tagged for homeManager must be REJECTED by a nixos-class eval.
   hmTagged = tag classes.homeManager {
@@ -163,5 +163,76 @@ in
         description = "d";
       }).default;
     expected = 9;
+  };
+
+  # ── pruneNulls ──────────────────────────────────────────────────────
+  # The silent whole-config-fallback class: an unset nullOr option must
+  # be ABSENT from the rendered settings, never `null` — one explicit
+  # null on a non-Option Rust field fails the whole serde extraction.
+  pruneNulls-drops-null-leaf-keeps-sibling = {
+    expr = pruneNulls {
+      appearance = {
+        accent_color = null;
+        width = 560;
+      };
+    };
+    expected = {
+      appearance = {
+        width = 560;
+      };
+    };
+  };
+  pruneNulls-descends-nested-attrsets = {
+    expr = pruneNulls {
+      a.b.c = null;
+      a.b.d = 1;
+      top = null;
+    };
+    expected = {
+      a.b.d = 1;
+    };
+  };
+  pruneNulls-cleans-attrsets-inside-lists = {
+    # lib.filterAttrsRecursive does NOT descend into list elements —
+    # pruneNulls must.
+    expr = pruneNulls {
+      servers = [
+        {
+          host = "a";
+          token = null;
+        }
+        {
+          host = "b";
+        }
+      ];
+    };
+    expected = {
+      servers = [
+        { host = "a"; }
+        { host = "b"; }
+      ];
+    };
+  };
+  pruneNulls-preserves-null-list-elements = {
+    # A null list ELEMENT is positional authored data (an unset option
+    # never produces one) — dropping it would silently reshape the list.
+    expr = pruneNulls { xs = [ 1 null 2 ]; };
+    expected = { xs = [ 1 null 2 ]; };
+  };
+  pruneNulls-scalars-and-empty-untouched = {
+    expr = {
+      s = pruneNulls "str";
+      i = pruneNulls 3;
+      b = pruneNulls false;
+      e = pruneNulls { };
+      allNull = pruneNulls { a = null; };
+    };
+    expected = {
+      s = "str";
+      i = 3;
+      b = false;
+      e = { };
+      allNull = { };
+    };
   };
 }

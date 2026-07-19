@@ -56,7 +56,11 @@
 #                     (for lazy=false surfaces cfg.package is never null, so the same
 #                     expression works);
 #     render       :: { cfg, pkgs, ... } -> null | { relPath, envVar, value, source }
-#                     value  = recursiveUpdate defaults cfg.settings (defaults lose);
+#                     value  = core.pruneNulls (recursiveUpdate defaults cfg.settings)
+#                     (defaults lose; null-valued attrs are DROPPED — an
+#                     unset nullOr island must be absent from the rendered
+#                     file, never `null`: one explicit null on a non-Option
+#                     Rust field fails the whole serde extraction);
 #                     source = (pkgs.formats.<format> { }).generate (baseNameOf relPath) value;
 #                     null when settings == null;
 #   }
@@ -213,7 +217,13 @@ let
           null
         else
           let
-            value = lib.recursiveUpdate settingsSpec.defaults cfg.settings;
+            # pruneNulls: unset nullOr islands (and any authored nulls)
+            # must be ABSENT from the rendered file, never `null` — shikumi
+            # config extraction (figment + serde) is atomic, so a single
+            # explicit null on a non-Option field fails the WHOLE
+            # extraction and the app silently falls back to full
+            # prescribed defaults. See iroha/core.nix pruneNulls.
+            value = core.pruneNulls (lib.recursiveUpdate settingsSpec.defaults cfg.settings);
           in
           {
             inherit (settingsSpec) relPath envVar;

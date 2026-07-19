@@ -36,6 +36,12 @@
 #   mkField     — fieldSpec -> mkOption.
 #   mkFields    — attrsOf fieldSpec -> attrsOf mkOption.
 #
+#   pruneNulls  — recursively drop null-valued attrs from a settings value
+#                 before it is rendered to YAML/JSON/TOML. Unset nullOr
+#                 options must be ABSENT from the rendered file, never
+#                 `null` (see the serde-atomicity rationale at the
+#                 definition).
+#
 # fieldSpec = {
 #   type :: "int"|"str"|"bool"|"float"|"path"|"port"
 #         | "nullOrStr"|"nullOrInt"|"nullOrBool"|"nullOrPath"|"nullOrFloat"
@@ -167,6 +173,36 @@ let
     );
 
   mkFields = lib.mapAttrs (_: mkField);
+
+  # pruneNulls — recursively drop null-valued attributes from a settings
+  # value before rendering it to YAML/JSON/TOML.
+  #
+  # Why (the serde-atomicity rationale): shikumi config extraction
+  # (figment + serde) is ATOMIC. `#[serde(default)]` fills only MISSING
+  # fields — but an explicit `null` on a non-Option field is a type error
+  # that fails the ENTIRE config extraction, and consumers then silently
+  # fall back to full prescribed defaults with only a warn log. Proven
+  # live: tobira ran on default config for weeks (its configured
+  # ctrl+space hotkey reverted to cmd+space) because unset nullOr HM
+  # color options rendered as `accent_color: null`. An unset nullOr
+  # option must therefore be ABSENT from the rendered file, never `null`.
+  #
+  # Semantics:
+  #   * attrset — null-valued attrs dropped, remaining values recursed.
+  #   * list    — elements recursed (an attrset INSIDE a list is cleaned
+  #               too — lib.filterAttrsRecursive would miss these). Null
+  #               ELEMENTS are preserved: an unset option never produces
+  #               a null list element, and dropping one would silently
+  #               reshape positional authored data.
+  #   * scalar  — unchanged.
+  pruneNulls =
+    v:
+    if builtins.isAttrs v then
+      lib.mapAttrs (_: pruneNulls) (lib.filterAttrs (_: x: x != null) v)
+    else if builtins.isList v then
+      map pruneNulls v
+    else
+      v;
 in
 {
   inherit
@@ -178,5 +214,6 @@ in
     fieldType
     mkField
     mkFields
+    pruneNulls
     ;
 }

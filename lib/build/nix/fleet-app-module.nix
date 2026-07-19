@@ -82,6 +82,7 @@
 
 let
   yamlGen = pkgsArg: pkgsArg.formats.yaml { };
+  irohaCore = import ../../iroha/core.nix { inherit lib; };
 
   # The HM module — the load-bearing one. Most fleet apps need only
   # this; NixOS + Darwin wrappers re-export via home-manager.sharedModules.
@@ -92,7 +93,12 @@ let
       # The rendered YAML payload — extraSettings IS the full
       # override surface (operators describe what they want, the
       # app loader merges with its own tier-resolved baseline).
-      yamlPayload = cfg.extraSettings;
+      # pruneNulls: null-valued attrs must be ABSENT from the rendered
+      # YAML, never `null` — shikumi extraction (figment + serde) is
+      # atomic, so one explicit null on a non-Option field fails the
+      # WHOLE extraction and the app silently falls back to prescribed
+      # defaults. See iroha/core.nix pruneNulls.
+      yamlPayload = irohaCore.pruneNulls cfg.extraSettings;
     in
     {
       options.programs.${name} = {

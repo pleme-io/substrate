@@ -28,7 +28,7 @@
     description = "L0 vocabulary: named priority bands, _class tagging, field-type dictionary.";
     subsumes = "module-trio.nix resolveFieldType; the unstated profiles-use-mkDefault convention (now the named role band).";
     dependsOn = [ ];
-    exports = [ "prio" "at" "bandOf" "classes" "tag" "fieldType" "mkField" "mkFields" ];
+    exports = [ "prio" "at" "bandOf" "classes" "tag" "fieldType" "mkField" "mkFields" "pruneNulls" ];
   };
 
   checks = {
