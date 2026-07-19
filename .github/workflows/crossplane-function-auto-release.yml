@@ -48,8 +48,21 @@ on:
         type: string
         default: "ghcr.io"
       runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04) -- same self-routing idiom as nix-image-auto-release.yml's own resolve job. Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's runs-on."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
+      extraSubstituters:
+        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml/nix-image-auto-release.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: pitr-tools' function-release.yml, its sole consumer, had no cache knob at all despite self-routing onto camelot-builder-pleme-eks). Empty (default) = no extra cache, zero blast radius for existing consumers."
+        type: string
+        default: ""
+      extraTrustedPublicKeys:
+        description: "Trusted public key(s) for extraSubstituters (space-separated, 'name:base64' form). Required when extraSubstituters is set and require-sigs isn't relaxed, else Nix refuses the unsigned/untrusted cache."
+        type: string
+        default: ""
+      requireSigs:
+        description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters -- e.g. sui serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
+        type: string
+        default: ""
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
@@ -60,9 +73,34 @@ permissions:
   packages: write
 
 jobs:
+  # Runner routing lives in its own job -- same reason + same shape as
+  # nix-image-auto-release.yml's own `resolve` job: `runs-on:` can only
+  # read github/needs/strategy/matrix/vars/inputs contexts, and
+  # github.event.repository.private (the caller's event payload) is the
+  # ONLY reliable signal on pleme-io's GitHub Free org plan, which does
+  # NOT share org-level vars/secrets into private repos' workflow-
+  # evaluation context (confirmed live: pitr-tools/function-release.yml,
+  # the sole consumer, is PRIVATE and was passing `vars.CAMELOT_IMAGE_RUNNER
+  # || 'ubuntu-24.04'` -- the org var silently resolved empty, so every run
+  # billed GitHub-hosted ubuntu-24.04 minutes instead of ever reaching the
+  # self-hosted camelot pool this default exists to route to).
+  resolve:
+    name: Resolve runner
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - name: Resolve runner
+        id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          default: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+          override: ${{ inputs.runner }}
+
   publish:
     name: Build + embed runtime image + push Function xpkg
-    runs-on: ${{ inputs.runner }}
+    needs: resolve
+    runs-on: ${{ needs.resolve.outputs.runner }}
     # Never re-trigger on a bot's own pushes.
     if: github.actor != 'github-actions[bot]'
     permissions:
@@ -73,6 +111,13 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          determinate: false
+          extra-conf: |
+            sandbox = relaxed
+            ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
+            ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
+            ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
       - name: Resolve tag
         id: tag
