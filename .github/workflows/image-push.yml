@@ -142,6 +142,38 @@ jobs:
             ${{ inputs.netrcFile && format('netrc-file = {0}', inputs.netrcFile) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
+      # gen-lockfile freshness gate — conditional, zero blast radius for
+      # non-gen consumers (a bare `[ -f Cargo.gen.lock ]` guard skips
+      # cleanly when the file doesn't exist). ADDED 2026-07-19: breathe's
+      # own fc6d1e0 (a real, already-committed fix) sat unbuilt for ~15
+      # hours because a PRIOR commit changed Cargo.lock without
+      # regenerating Cargo.gen.lock, and `nix build`'s own failure mode for
+      # this — "error: lockfile-delta: Cargo.gen.lock is STALE" — surfaces
+      # 30-40s into a build, buried in a wall of Nix eval output, with no
+      # CI-level signal distinguishing it from any other build failure.
+      # This is the SAME class of bug breathe itself hit once before
+      # (ae489ea) — a recurring failure mode, not a one-off, and exactly
+      # the shape GEN-TYPED-SPEC-CONTRACT names as a CI-enforced invariant
+      # ("stale specs are a CI failure, not a runtime fetch failure"; org
+      # CLAUDE.md ★★ GEN TYPED-SPEC CONTRACT). Fixed here once, in the
+      # shared reusable, rather than per-consumer, so every gen-based
+      # image build across the fleet gets an early, loud, actionable
+      # failure instead of a buried eval error.
+      - name: Check Cargo.gen.lock freshness (gen consumers only)
+        env:
+          NIX_CONFIG: "experimental-features = nix-command flakes"
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.gen.lock ]; then
+            echo "No Cargo.gen.lock in this repo — not a gen consumer, skipping."
+            exit 0
+          fi
+          nix run github:pleme-io/gen -- build .
+          if ! git diff --exit-code Cargo.gen.lock; then
+            echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
+            exit 1
+          fi
+
       # `nix build` writes ./result as a symlink into /nix/store/...
       # Materialize the actual tarball into the workspace (a real file
       # under /github/workspace, not a store symlink) before handing off —
