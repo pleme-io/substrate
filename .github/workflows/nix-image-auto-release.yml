@@ -85,6 +85,18 @@ on:
         description: "Report vulnix findings without failing the job -- for a package whose closure has never been scanned before and has no committed whitelist baseline yet (a real, honest gap: an unscanned package's first run WILL surface findings nobody has triaged, and a hard gate on an untriaged baseline is indistinguishable from a broken pipeline). Flip to false (the default) once a real CI run's findings have seeded a committed vulnix whitelist for this package."
         type: boolean
         default: false
+      extraSubstituters:
+        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: every hardened-images build paid full cold-compile cost despite running on the same cluster/VPC sui lives on). Empty (default) = no extra cache, zero blast radius for existing consumers."
+        type: string
+        default: ""
+      extraTrustedPublicKeys:
+        description: "Trusted public key(s) for extraSubstituters (space-separated, 'name:base64' form). Required when extraSubstituters is set and require-sigs isn't relaxed, else Nix refuses the unsigned/untrusted cache."
+        type: string
+        default: ""
+      requireSigs:
+        description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters -- e.g. sui serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
+        type: string
+        default: ""
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -150,6 +162,13 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          determinate: false
+          extra-conf: |
+            sandbox = relaxed
+            ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
+            ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
+            ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
       # scan-before-push mode: build the raw image derivation LOCALLY first
       # (no push) so the CVE gate below scans it before it has ever touched
