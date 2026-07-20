@@ -210,10 +210,24 @@ let
           expr = builtins.filter (n: !(cfg.domains.locations or { } ? ${n})) deployNodes;
           expected = [ ];
         };
+        # Scoped to LIVE nodes on purpose. A node declared "down" is never
+        # built and never deployed, so requiring its profile to resolve
+        # asserts something the fleet does not rely on — and it punishes the
+        # honest case: a retired node whose profile table entry has since
+        # been removed is CORRECTLY down, yet would fail this check forever
+        # and hold the whole suite red (rai did exactly that from
+        # 2026-06-23 until 2026-07-20, so `nix flake check` could not be
+        # green on the consuming repo at all).
+        #
+        # The guarantee that matters is preserved: a profile must resolve
+        # for every node that will actually be realized. Reviving a down
+        # node flips it to "live", at which point this check demands the
+        # profile — failing at revive, which is the moment it is actionable,
+        # instead of perpetually.
         node-profiles-resolve = {
           expr = lib.concatMap (
             n: builtins.filter (p: !(profiles ? ${p})) cfg.nodes.${n}.profiles
-          ) (builtins.attrNames cfg.nodes);
+          ) (builtins.filter (n: isLive cfg.nodes.${n}) (builtins.attrNames cfg.nodes));
           expected = [ ];
         };
         # Liveness regression guard: a node declared "down" must not reach
