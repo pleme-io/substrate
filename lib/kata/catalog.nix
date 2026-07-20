@@ -61,7 +61,7 @@
     tier = "kernel";
     maturity = "Working";
     since = "2026-06-12";
-    description = "THE BLANKS: the strict typed schema a private fleet repo fills in (name, domains, users, trust, nodes, apps, caches, secrets backend). Unknown keys rejected — a typo fails at validation, never silently.";
+    description = "THE BLANKS: the strict typed schema a private fleet repo fills in (name, domains, users, trust, nodes, apps, caches, secrets backend). Per-node liveness is typed (status \"live\"|\"down\" + statusReason), never a magic tag — a retired node keeps its declaration and only leaves the deploy projections. Unknown keys rejected — a typo fails at validation, never silently.";
     subsumes = "The implicit, undocumented contract scattered across the nix repo's lib/*.nix registries.";
     dependsOn = [ ];
     exports = [ "fleetConfigModule" "validateFleet" ];

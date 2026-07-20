@@ -39,6 +39,55 @@ in
       fleetKeys = [ ];
     };
   };
+  # ── Liveness (status / statusReason) ─────────────────────────────────
+  # Backward compatibility: an existing fleet.nix that has never heard of
+  # `status` still validates, and every node in it is live.
+  node-status-defaults-live = {
+    expr = {
+      status = good.nodes.rio.status;
+      reason = good.nodes.rio.statusReason;
+    };
+    expected = {
+      status = "live";
+      reason = "";
+    };
+  };
+  node-status-down-accepted = {
+    expr =
+      let
+        n =
+          (kata.validateFleet {
+            name = "demo";
+            nodes.plo = {
+              class = "nixos";
+              system = "x86_64-linux";
+              status = "down";
+              statusReason = "offline 95 days — far-away site";
+            };
+          }).nodes.plo;
+      in
+      {
+        inherit (n) status statusReason;
+      };
+    expected = {
+      status = "down";
+      statusReason = "offline 95 days — far-away site";
+    };
+  };
+  bad-node-status-rejected = {
+    expr =
+      (builtins.tryEval
+        (kata.validateFleet {
+          name = "demo";
+          nodes.rio = {
+            class = "nixos";
+            system = "x86_64-linux";
+            status = "banana";
+          };
+        }).nodes.rio.status
+      ).success;
+    expected = false;
+  };
   name-required = {
     expr = (builtins.tryEval (kata.validateFleet { domains.tld = "x.io"; }).name).success;
     expected = false;

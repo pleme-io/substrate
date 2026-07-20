@@ -96,6 +96,22 @@ let
     profiles = profileTable;
   };
 
+  # The SAME fleet with rio retired — its declaration (incl. the deploy
+  # block, domain entry and wg link) is untouched; only the projections
+  # may change.
+  downFleet = kata.mkFleet {
+    config = blanks // {
+      nodes = blanks.nodes // {
+        rio = blanks.nodes.rio // {
+          status = "down";
+          statusReason = "retired — test fixture";
+        };
+      };
+    };
+    inherit universes;
+    profiles = profileTable;
+  };
+
   rioModules = f.nixosConfigurations.rio.args.modules;
 in
 {
@@ -181,6 +197,49 @@ in
   report-wireguard-empty-without-vpnlinks = {
     expr = noVpn.report.nodes.rio.wireguardLinks;
     expected = [ ];
+  };
+
+  # ── Liveness: declarations stay, deploy projections drop ─────────────
+  report-carries-liveness = {
+    expr = {
+      rio = f.report.nodes.rio.status;
+      reason = f.report.nodes.rio.statusReason;
+    };
+    expected = {
+      rio = "live";
+      reason = "";
+    };
+  };
+  down-node-leaves-every-deploy-projection = {
+    # rio is the fixture's ONLY deploy node. Marked "down" it must vanish
+    # from deployRs + colmena while still building + still being reported.
+    expr = {
+      deployRs = builtins.attrNames downFleet.deployRs.nodes;
+      colmena = builtins.attrNames downFleet.colmena;
+      stillBuilds = downFleet.nixosConfigurations.rio.kind;
+      stillReported = downFleet.report.nodes.rio.status;
+      reason = downFleet.report.nodes.rio.statusReason;
+      # EFFECTIVE deployability, not the (still-declared) deploy block.
+      reportsUndeployable = downFleet.report.nodes.rio.deploys;
+      # MODULARIZE, DON'T DELETE — the declaration itself is untouched.
+      declarationIntact = downFleet.config.nodes.rio.deploy.method;
+    };
+    expected = {
+      deployRs = [ ];
+      colmena = [ ];
+      stillBuilds = "nixos";
+      stillReported = "down";
+      reason = "retired — test fixture";
+      reportsUndeployable = false;
+      declarationIntact = "deploy-rs";
+    };
+  };
+  down-node-invariants-still-pass = {
+    # The regression guard is green precisely BECAUSE the projection is
+    # structural; it exists so a refactor that reintroduces the target
+    # fails a check instead of silently retrying a retired host.
+    expr = (iroha.mkEvalChecks { name = "down"; tests = downFleet.invariants; }).passed;
+    expected = true;
   };
   wireguard-cross-invariant-fails-on-ghost-node = {
     expr =

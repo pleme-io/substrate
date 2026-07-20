@@ -48,12 +48,17 @@
 #                    when no vpnLinks blank is set;
 #     report       — pure-data fleet summary composed from every letter:
 #                    { name, hostCount, nodes.<n> = { class, system, tags,
-#                      fqdn, allFqdns, sshUser, deploys, profiles,
-#                      wireguardLinks } } — one query over the whole fleet;
+#                      status, statusReason, fqdn, allFqdns, sshUser,
+#                      deploys, profiles, wireguardLinks } } — one query
+#                    over the whole fleet. `deploys` is the EFFECTIVE
+#                    deployability (a "down" node reports false even
+#                    though its deploy block is still declared);
 #     users        — kata.mkUsers result (keys threaded from trust.*);
 #     manifest     — iroha.mkManifest result | null (when apps == { });
 #     hostMatrix   — iroha.mkHostMatrix result (nodes projected: profile
 #                    names resolved, sshUser defaulted from domains,
+#                    a "down" node's deploy block NULLED — a retired host
+#                    leaves deployRs + colmena by construction,
 #                    users module names resolved via hmModules,
 #                    users.module (at placement "base") + caches module
 #                    baked into base);
@@ -63,7 +68,8 @@
 #     invariants   — aggregated suite (domains + users + manifest +
 #                    hostMatrix + cross-checks: every node with a deploy
 #                    block appears in domains.locations; every node
-#                    profile name resolved) ++ extraInvariants;
+#                    profile name resolved; no "down" node reaches a
+#                    deploy projection) ++ extraInvariants;
 #     checksFor    — pkgs -> { "kata-fleet-<name>" = drv; } (the
 #                    aggregate invariants as a buildable check);
 #   }
@@ -158,6 +164,19 @@ let
         };
       };
 
+      # ── Liveness projection: declarations stay, deploy targets drop ─────
+      # A node whose `status` is "down" (retired / offline / unreachable)
+      # keeps its full declaration — it still builds
+      # (nixos/darwinConfigurations), still appears in `registry`, `byTag`
+      # and `report`. What it loses is its DEPLOY block: projectNode nulls
+      # it, so iroha's deployRs + colmena cannot even name the node and
+      # nothing blindly attempts + retries a host that can't answer.
+      # "a down node is not a deploy target" is therefore structural here,
+      # not a runtime guard; the crossInvariant below re-proves it
+      # throw-free (same idiom as node-profiles-resolve, which re-proves a
+      # throw that construction already raises).
+      isLive = node: node.status == "live";
+
       projectNode =
         name: node:
         {
@@ -168,7 +187,7 @@ let
           modules = lib.optional (cfg.caches != [ ]) cachesModule;
           users = lib.mapAttrs (u: mods: map (resolveHm name u) mods) node.users;
         }
-        // lib.optionalAttrs (node.deploy != null) {
+        // lib.optionalAttrs (node.deploy != null && isLive node) {
           deploy = {
             inherit (node.deploy) method;
           };
@@ -195,6 +214,20 @@ let
           expr = lib.concatMap (
             n: builtins.filter (p: !(profiles ? ${p})) cfg.nodes.${n}.profiles
           ) (builtins.attrNames cfg.nodes);
+          expected = [ ];
+        };
+        # Liveness regression guard: a node declared "down" must not reach
+        # ANY deploy projection. projectNode already makes this structural
+        # (it nulls a down node's deploy block); this is the throw-free
+        # re-proof, so a future refactor that reintroduces the target
+        # fails a check instead of silently retrying a retired host.
+        down-nodes-are-not-deploy-targets = {
+          expr =
+            let
+              down = builtins.attrNames (lib.filterAttrs (_: n: n.status != "live") cfg.nodes);
+              targeted = (builtins.attrNames hostMatrix.deployRs.nodes) ++ (builtins.attrNames hostMatrix.colmena);
+            in
+            builtins.filter (n: builtins.elem n targeted) down;
           expected = [ ];
         };
         # Cross-letter consistency: every node named in a WireGuard link
@@ -228,11 +261,14 @@ let
         nodes = lib.mapAttrs (
           name: node:
           {
-            inherit (node) class system tags;
+            inherit (node) class system tags status statusReason;
             fqdn = if domains.locations or { } ? ${name} then domains.fqdn name else null;
             allFqdns = if domains.locations or { } ? ${name} then domains.allFqdns name else [ ];
             sshUser = if node.sshUser != null then node.sshUser else domains.sshUserFor name;
-            deploys = node.deploy != null;
+            # EFFECTIVE deployability, not the raw declaration — a "down"
+            # node keeps its deploy block but is dropped from every deploy
+            # projection, so reporting the declaration here would lie.
+            deploys = node.deploy != null && isLive node;
             profiles = node.profiles;
             wireguardLinks = if wireguard == null then [ ] else wireguard.linkNamesForNode name;
           }

@@ -25,8 +25,10 @@
 #   trust.automationKeys ? [ ]  — keys for automation accounts;
 #   nodes          :: attrsOf nodeSpec          — mkHostMatrix node shape:
 #                     { class ("nixos"|"darwin"), system, hostname ?,
-#                       sshUser ?, tags ? [], profiles ? [str] (names —
-#                       resolved by the consumer's profile table),
+#                       sshUser ?, tags ? [], status ? "live" ("live"|
+#                       "down"), statusReason ? "", profiles ? [str]
+#                       (names — resolved by the consumer's profile
+#                       table),
 #                       users ? attrsOf (listOf str) (HM module names),
 #                       deploy ? null | { method ? "deploy-rs" } };
 #   apps           ? { }  — mkManifest apps (ecosystem schema verbatim);
@@ -75,6 +77,28 @@ let
         type = "listOfStr";
         default = [ ];
         description = "Free-form tags (vm, k3s, ...) driving projections.";
+      };
+      # ── Liveness: the TYPED single source, never a magic tag ────────────
+      # "down" = retired / offline / unreachable. MODULARIZE, DON'T DELETE:
+      # a down node keeps its declaration (and its domain, vpn-link, users
+      # and secret entries) verbatim — only the PROJECTIONS drop it, so a
+      # retired node is never blindly deploy-targeted + retried, and comes
+      # back by flipping one field. mkFleet's projectNode nulls a down
+      # node's `deploy` block, which removes it from deployRs/colmena by
+      # construction; nixosConfigurations/darwinConfigurations still build
+      # it, and `report` still lists it (carrying status + statusReason).
+      status = mkOption {
+        type = types.enum [
+          "live"
+          "down"
+        ];
+        default = "live";
+        description = "Node liveness. \"down\" = retired/offline/unreachable — the declaration stays, the deploy projections drop it.";
+      };
+      statusReason = core.mkField {
+        type = "str";
+        default = "";
+        description = "Free text explaining a non-live status: why, and since when (e.g. \"retired 2026-07-02 — replaced by camelot\").";
       };
       profiles = core.mkField {
         type = "listOfStr";
