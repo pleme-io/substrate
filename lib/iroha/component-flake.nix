@@ -29,6 +29,13 @@
 #     systems ? [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
 #     extraDevShellPackages ? (_pkgs: [ ]);
 #     extraChecks ? (_pkgs: { });
+#     extraApps ? (_pkgs: { })  — exact twin of extraChecks: pkgs -> attrset
+#                             of flake app values, merged VERBATIM into
+#                             apps.<system>. The consumer returns
+#                             already-shaped apps ({ type = "app"; program =
+#                             "<path>"; }), exactly as extraChecks returns
+#                             already-built derivations — nothing is
+#                             rewrapped;
 #     enableOptionPath ? null — option path holding the module's `enable`;
 #                             defaults to [ "blackmatter" "components" <shortName> ]
 #                             where shortName strips one leading "blackmatter-";
@@ -45,6 +52,13 @@
 #     checks.<system>                   = (autoEvalChecks → eval-hm-module /
 #                                        eval-nixos-module / eval-darwin-module
 #                                        per present class) // extraChecks pkgs;
+#     apps.<system>                     = extraApps pkgs (iff the consumer
+#                                        passed `extraApps` — nothing else
+#                                        contributes to `apps`, so an absent
+#                                        argument emits NO `apps` attr at all,
+#                                        keeping the legacy output shape
+#                                        byte-identical for the ~20 existing
+#                                        blackmatter-* consumers);
 #     blackmatter.component = { name, description, shortName, systems,
 #       hasHomeManagerModule, hasNixosModule, hasDarwinModule, hasPackage,
 #       hasOverlay, optionPath }        — attr-identical to the legacy emission;
@@ -93,6 +107,7 @@ let
     "systems"
     "extraDevShellPackages"
     "extraChecks"
+    "extraApps"
     "enableOptionPath"
     "autoEvalChecks"
     "extraModuleArgs"
@@ -150,6 +165,7 @@ let
       systems = args.systems or defaultSystems;
       extraDevShellPackages = args.extraDevShellPackages or (_pkgs: [ ]);
       extraChecks = args.extraChecks or (_pkgs: { });
+      extraApps = args.extraApps or (_pkgs: { });
       enableOptionPath = args.enableOptionPath or null;
       autoEvalChecks = args.autoEvalChecks or false;
       extraModuleArgs = args.extraModuleArgs or { };
@@ -339,6 +355,16 @@ let
           moduleChecks // (extraChecks pkgs)
         );
       };
+
+      # Consumer apps pass through VERBATIM (the extraChecks contract, one
+      # output class over): `extraApps pkgs` returns already-shaped flake app
+      # values ({ type = "app"; program = "<path>"; }) and nothing rewraps
+      # them. Emitted ONLY when the argument was passed — no autoEvalChecks
+      # equivalent contributes here, so an absent `extraApps` must leave the
+      # output attr set exactly as it was before this argument existed.
+      appOutputs = lib.optionalAttrs (args ? extraApps) {
+        apps = forAllSystems ({ pkgs, ... }: extraApps pkgs);
+      };
     in
     builtins.seq guard (
       moduleOutputs
@@ -346,6 +372,7 @@ let
       // overlayOutputs
       // devShellOutputs
       // checkOutputs
+      // appOutputs
       // {
         # Metadata surfaced on the flake for tooling (audits, sweep
         # scripts) — CATALOG REFLECTION; attr-identical to the legacy.

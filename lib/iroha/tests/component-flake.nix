@@ -156,6 +156,23 @@ let
   legacyOpt = legacy optSpec;
   mineOpt = mkComponentFlake optSpec;
 
+  # extraApps — the extraChecks twin. The consumer returns ALREADY-SHAPED
+  # flake app values; the builder merges them verbatim into apps.<system>.
+  # No legacy counterpart exists (the argument is v2-only), so the pairing
+  # here is v2-vs-shim, and the legacy binding is only used to prove the
+  # argument stays absent from the pre-existing output shape.
+  appsSpec = minimalSpec // {
+    name = "blackmatter-baz";
+    extraApps = pkgs: {
+      default = {
+        type = "app";
+        program = "/bin/baz-${pkgs.stdenv.hostPlatform.system}";
+      };
+    };
+  };
+  mineApps = mkComponentFlake appsSpec;
+  shimApps = shim appsSpec;
+
   # legacy checks embed evaluation in the runCommand SCRIPT interpolation —
   # forcing .script is how a legacy eval-check passes or throws.
   legacyCheckEvals =
@@ -418,6 +435,56 @@ in
     expected = {
       mine = "custom-check";
       legacy = "custom-check";
+    };
+  };
+
+  # ── extraApps (the extraChecks twin) ─────────────────────────────────
+  extra-apps-merged = {
+    expr = {
+      systems = sortedNames mineApps.apps;
+      perSystem = sortedNames mineApps.apps."x86_64-linux";
+      app = mineApps.apps."x86_64-linux".default;
+    };
+    expected = {
+      systems = [
+        "aarch64-darwin"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "x86_64-linux"
+      ];
+      perSystem = [ "default" ];
+      app = {
+        type = "app";
+        program = "/bin/baz-x86_64-linux";
+      };
+    };
+  };
+  extra-apps-receives-per-system-pkgs = {
+    expr = mineApps.apps."aarch64-darwin".default.program;
+    expected = "/bin/baz-aarch64-darwin";
+  };
+  # BACKWARD COMPATIBILITY: nothing but extraApps feeds `apps`, so a
+  # consumer that never passes it emits no `apps` attr — the legacy output
+  # shape is untouched (parity-top-level-attr-names-* pins this globally).
+  apps-absent-when-extra-apps-unset = {
+    expr = [
+      (mineFull ? apps)
+      (mineMin ? apps)
+      (legacyFull ? apps)
+    ];
+    expected = [
+      false
+      false
+      false
+    ];
+  };
+  shim-extra-apps-flows-through = {
+    # The live shim forwards the argument set verbatim — extraApps must
+    # clear the v2 allowlist and emit through the delegation path too.
+    expr = shimApps.apps."x86_64-linux".default;
+    expected = {
+      type = "app";
+      program = "/bin/baz-x86_64-linux";
     };
   };
 
