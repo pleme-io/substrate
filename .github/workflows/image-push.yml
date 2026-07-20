@@ -35,6 +35,34 @@
 # moving pointer; the DEPLOY target is always the exact `r<n>` tag, which a
 # cluster's committed `# {"$imagepolicy"}` marker pins. The `tag` default below
 # is `latest` for back-compat only — autobump-native repos MUST override it.
+#
+# ── scanBeforePush: the CVE gate belongs BEFORE the push, not after ───────
+# Found live 2026-07-19 (pangea-operator, tag embedded-amd64-r174): this
+# workflow's "Build image with Nix" step already materializes the full image
+# as a local tarball (`image.tar.gz`, right below) minutes before "Push image"
+# ever runs -- but historically nothing scanned that tarball, and any CVE gate
+# a CALLER bolted on afterward (a downstream job scanning the now-published
+# ghcr.io tag) runs AFTER the tag is already live-pollable by Flux's
+# ImagePolicy/ImageUpdateAutomation (★ AUTOBUMP). A build whose post-publish
+# scan job failed still had its vulnerable tag picked up and deployed --
+# confirmed live, ~1.5h of a CRITICAL-severity image running in-cluster before
+# the next (clean) build superseded it. A post-push gate can only ever be a
+# receipt of what already shipped; it structurally cannot prevent the ship.
+#
+# The fix ports the SAME pattern nix-image-auto-release.yml already shipped
+# (its own `scan-before-push` input, live since before this fix) into this
+# reusable: scan the LOCAL `image.tar.gz` via pleme-io/actions/image-scan's
+# `local-archive:` mode (trivy `--input`, no registry round-trip -- the image
+# has never touched a registry when this runs) BETWEEN the build step and the
+# push step. A failing scan stops the job here (GHA's default: a job halts at
+# its first failing step) -- "Login to registry" / "Push image" become
+# structurally unreachable on red, so a CVE-failing image can never reach the
+# registry at all. Flux can't poll a tag that was never pushed.
+#
+# `scanBeforePush` defaults to `false` -- every existing caller's exact
+# atomic build+push behavior is unchanged unless it opts in (same
+# zero-blast-radius shape as nix-image-auto-release.yml's own flag and as
+# `extraSubstituters`/`requireSigs` above).
 
 name: image-push
 
@@ -91,6 +119,22 @@ on:
         default: ""
       requireSigs:
         description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters — e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
+        type: string
+        default: ""
+      scanBeforePush:
+        description: "Zero-tolerance CVE gate (theory/SECURITY-LAYER.md §8's 'build-time pre-publish CVE gate'; same shape as nix-image-auto-release.yml's own scan-before-push): scan the LOCAL image tarball built above with pleme-io/actions/image-scan (trivy --input, no registry round-trip -- the image has never been pushed anywhere at this point) and only run the push step if the scan is clean. False (default) preserves every existing caller's exact atomic build+push behavior unchanged -- opt in per consumer."
+        type: boolean
+        default: false
+      scanFailOnSeverity:
+        description: "Lowest severity that fails the scanBeforePush gate: UNKNOWN | LOW | MEDIUM | HIGH | CRITICAL | none. UNKNOWN = zero-tolerance (every severity gates). Only consulted when scanBeforePush is true."
+        type: string
+        default: "UNKNOWN"
+      scanIgnoreUnfixed:
+        description: "Skip vulns without an available fix in the scanBeforePush gate. Never loosen this as a substitute for a named, tracked .trivyignore exception. Only consulted when scanBeforePush is true."
+        type: string
+        default: "false"
+      scanIgnoreFile:
+        description: "Path (relative to the repo root) to a .trivyignore-format file of named, tracked exceptions for the scanBeforePush gate -- each entry must carry its own justification, never a blanket severity loosening. Empty (default) = no exceptions. Only consulted when scanBeforePush is true."
         type: string
         default: ""
     secrets:
@@ -201,6 +245,23 @@ jobs:
           echo "nix build parallelism flags:${FLAGS:- (defaults)}"
           nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths $FLAGS
           cp -L result image.tar.gz
+
+      # Pre-publish CVE gate -- scans the tarball built above, which has not
+      # touched a registry yet. Skipped entirely (default) for callers that
+      # haven't opted in, preserving their exact prior behavior. A failing
+      # scan halts the job here (GHA's default first-failing-step behavior),
+      # so "Login to registry" / "Push image" below are structurally
+      # unreachable on red -- see the scanBeforePush header comment at the
+      # top of this file for the incident this closes.
+      - name: Zero-tolerance CVE gate (pre-publish — scans the LOCAL tarball, never a pushed image)
+        if: inputs.scanBeforePush
+        uses: pleme-io/actions/image-scan@main
+        with:
+          image-ref: ${{ inputs.registry }}/${{ inputs.imageName || github.repository }}:${{ inputs.tag }}
+          local-archive: image.tar.gz
+          fail-on-severity: ${{ inputs.scanFailOnSeverity }}
+          ignore-unfixed: ${{ inputs.scanIgnoreUnfixed }}
+          ignore-file: ${{ inputs.scanIgnoreFile }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
