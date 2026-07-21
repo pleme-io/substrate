@@ -1,0 +1,149 @@
+# vendor-image-mirror.yml — pull a THIRD-PARTY (unmodified, un-rebuilt)
+# image, gate it through the fleet's zero-tolerance CVE scan, and mirror
+# it into Zot only if it passes.
+#
+# Distinct from nix-image-auto-release.yml (which builds + pushes a
+# pleme-io-OWNED image, e.g. a Nix rebuild of an upstream base) and from
+# the hardened-images program generally: this workflow never rebuilds
+# anything. It exists for the class of image Camelot runs unmodified from
+# an upstream registry (FluxCD, Istio, cloudnative-pg, external-secrets,
+# AWS EKS system images, the ARC controller, metrics-server) that has
+# never been through any pleme-io CVE gate at all, closing that visibility
+# gap without pretending to rebuild every third-party controller
+# ourselves. Composes two already-shipped primitives -- zot-pull-scan
+# (pull + scan + admit/reject) and oci-image-push (skopeo push of a local
+# archive) -- rather than re-implementing either.
+#
+# Zot is cluster-internal-only (zot-pleme-zot.zot.svc.cluster.local),
+# unreachable from a GitHub-hosted runner -- every job here runs on
+# Camelot's own ARC pool (camelot-builder-pleme-eks, in the camelot-ci
+# namespace, already inside Zot's authz.repositories `allowedClientNamespaces`
+# per clusters/camelot-eks/infrastructure/zot/release.yaml), never
+# ubuntu-latest. No private/public repo routing needed here (unlike
+# nix-image-auto-release.yml's runner-resolve split) -- reachability is
+# about the runner's network position, not the caller repo's visibility.
+
+name: vendor-image-mirror
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Full vendor image ref to pull + scan (e.g. ghcr.io/fluxcd/helm-controller:v1.6.2)"
+        type: string
+        required: true
+      zot-registry:
+        description: "Zot's cluster-internal host:port"
+        type: string
+        default: "zot-pleme-zot.zot.svc.cluster.local:5000"
+      zot-repo:
+        description: "Destination repository name in Zot (e.g. vendor-fluxcd-helm-controller)"
+        type: string
+        required: true
+      zot-tag:
+        description: "Destination tag in Zot -- keep the upstream version string so drift is visible (e.g. v1.6.2)"
+        type: string
+        required: true
+      fail-on-severity:
+        description: "Lowest severity that rejects admission. UNKNOWN = zero-tolerance, matching every other faucet gate in the fleet."
+        type: string
+        default: "UNKNOWN"
+      ignore-file:
+        description: "Path (relative to repo root) to a .trivyignore-format file of named, tracked exceptions. Empty = none."
+        type: string
+        default: ""
+      runner:
+        description: "Explicit runner label override. Empty = camelot-builder-pleme-eks (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
+        type: string
+        default: ""
+    secrets:
+      ZOT_USERNAME:
+        description: "Zot push credential username (the akeyless-builder admin user, scoped per-repository -- see release.yaml's authz.repositories)"
+        required: true
+      ZOT_PASSWORD:
+        description: "Zot push credential password"
+        required: true
+    outputs:
+      admitted:
+        description: "'true' iff the pulled image cleared the CVE gate and was mirrored into Zot"
+        value: ${{ jobs.mirror.outputs.admitted }}
+      severity:
+        description: "Highest severity found, as classified by image-scan"
+        value: ${{ jobs.mirror.outputs.severity }}
+      result:
+        description: "'admitted' | 'rejected' | 'pull-failed'"
+        value: ${{ jobs.mirror.outputs.result }}
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: pull + scan + mirror ${{ inputs.zot-repo }}:${{ inputs.zot-tag }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || 'camelot-builder-pleme-eks' }}
+    outputs:
+      admitted: ${{ steps.pull-scan.outputs.admitted }}
+      severity: ${{ steps.pull-scan.outputs.severity }}
+      result: ${{ steps.pull-scan.outputs.result }}
+    steps:
+      # Stage 1+2: pull the vendor image + gate it through the fleet's one
+      # canonical Trivy severity implementation. Scans the PULLED bytes,
+      # never a re-resolved tag -- see zot-pull-scan's own README for why
+      # that distinction is load-bearing.
+      - id: pull-scan
+        uses: pleme-io/actions/zot-pull-scan@v1
+        with:
+          ref: ${{ inputs.ref }}
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+          ignore-file: ${{ inputs.ignore-file }}
+
+      # A rejected or pull-failed image is a genuinely informative CI
+      # failure (the severity + vuln-count are already in the job
+      # summary via zot-pull-scan's own outputs) -- never silently
+      # continue past a non-admitted verdict.
+      - name: Report non-admission
+        if: steps.pull-scan.outputs.admitted != 'true'
+        run: |
+          echo "::error::vendor-image-mirror: ${{ inputs.ref }} was NOT admitted (result=${{ steps.pull-scan.outputs.result }}, severity=${{ steps.pull-scan.outputs.severity }}, vuln-count=${{ steps.pull-scan.outputs.vuln-count }}) -- refusing to mirror into Zot."
+          exit 1
+
+      # Zot serves a self-signed cert (tls.mode: inPod, 825-day validity --
+      # see clusters/camelot-eks/infrastructure/zot/release.yaml's own
+      # comment). The committed zot-ca.crt in that same directory is meant
+      # for exactly this: pin against a SPECIFIC known cert via the
+      # runner's system trust store, never `--tls-verify=false`. Once
+      # trusted here, skopeo (both this step's login and oci-image-push's
+      # own copy below) verifies natively -- no extra flag needed on
+      # either.
+      - name: Trust Zot's CA
+        if: steps.pull-scan.outputs.admitted == 'true'
+        run: |
+          curl -sL -o /tmp/zot-ca.crt \
+            "https://raw.githubusercontent.com/pleme-io/akeyless-k8s/main/clusters/camelot-eks/infrastructure/zot/zot-ca.crt"
+          sudo cp /tmp/zot-ca.crt /usr/local/share/ca-certificates/zot-camelot-eks.crt
+          sudo update-ca-certificates
+
+      # skopeo's own credential lookup (~/.config/containers/auth.json) is
+      # a DIFFERENT file than docker/login-action authenticates -- same
+      # lesson camelot-hardened-images.yml already carries for oci-image-push.
+      - name: Login to Zot
+        if: steps.pull-scan.outputs.admitted == 'true'
+        uses: pleme-io/actions/skopeo-login@main
+        with:
+          registry: ${{ inputs.zot-registry }}
+          username: ${{ secrets.ZOT_USERNAME }}
+          password: ${{ secrets.ZOT_PASSWORD }}
+
+      # oci-image-push is composite (runs natively on this runner, not a
+      # Docker-mode container) -- the same fix already shipped for the
+      # akeylesslabs Harbor pipeline (pleme-io/actions@d1b51db) applies
+      # here identically: a local docker-archive path only resolves
+      # correctly off the runner's own filesystem.
+      - name: Mirror into Zot
+        if: steps.pull-scan.outputs.admitted == 'true'
+        uses: pleme-io/actions/oci-image-push@main
+        with:
+          registry: ${{ inputs.zot-registry }}
+          image: ${{ inputs.zot-repo }}
+          tag: ${{ inputs.zot-tag }}
+          tarball: ${{ steps.pull-scan.outputs.local-archive }}
