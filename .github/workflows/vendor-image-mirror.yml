@@ -56,10 +56,11 @@ on:
         description: "Explicit runner label override. Empty = camelot-builder-pleme-eks (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
         type: string
         default: ""
+      zot-username:
+        description: "Zot push credential username -- not confidential (a fixed, per-repository-scoped admin user, see release.yaml's authz.repositories), so a plain input rather than a secret."
+        type: string
+        default: "akeyless-builder"
     secrets:
-      ZOT_USERNAME:
-        description: "Zot push credential username (the akeyless-builder admin user, scoped per-repository -- see release.yaml's authz.repositories)"
-        required: true
       ZOT_PASSWORD:
         description: "Zot push credential password"
         required: true
@@ -131,7 +132,7 @@ jobs:
         uses: pleme-io/actions/skopeo-login@main
         with:
           registry: ${{ inputs.zot-registry }}
-          username: ${{ secrets.ZOT_USERNAME }}
+          username: ${{ inputs.zot-username }}
           password: ${{ secrets.ZOT_PASSWORD }}
 
       # oci-image-push is composite (runs natively on this runner, not a
