@@ -311,8 +311,11 @@
           gen = genFor system;
           # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
           # replaces inline skopeo bash in the image-push pipeline.
+          # fenix threaded through 2026-07-22 -- see lib/build/oci-push.nix's
+          # own header for the edition2024/MSRV incident this closes.
           oci-push = import ./lib/build/oci-push.nix {
             pkgs = import nixpkgs { inherit system; };
+            inherit fenix system;
           };
           # relver: typed release-version primitive. `nix run …#relver -- next …`
           # replaces inline semver/tag bash in the auto-bump workflows.

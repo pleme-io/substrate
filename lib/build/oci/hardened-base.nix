@@ -33,7 +33,7 @@
 # The consumer repo owns the digest pin — substrate provides the shape
 # but does NOT embed real upstream hashes (they rotate per upstream
 # release and should live where the per-service flake is).
-{ pkgs }:
+{ pkgs, fenix ? null, system ? null }:
 
 let
   inherit (pkgs) lib dockerTools cacert;
@@ -43,7 +43,10 @@ let
   # the inline shell this file used to carry directly: a `for`/`if`/
   # `readlink` loop is real logic, not the 3-line glue the fleet's NO-SHELL
   # rule permits inline.
-  doca = import ../oci-push.nix { inherit pkgs; };
+  # `fenix`/`system` passed through (2026-07-22) so doca can build with a
+  # modern rustc/cargo independent of whatever primary nixpkgs a consumer
+  # has pinned -- see oci-push.nix's own header for the full incident.
+  doca = import ../oci-push.nix { inherit pkgs fenix system; };
 
   # Non-root UID matching distroless convention.
   nonrootUid = 65532;

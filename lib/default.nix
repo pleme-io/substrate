@@ -121,7 +121,24 @@
 
   # Hardened OCI bases + vendor rewrap (Path 2 — pleme-io owns Akeyless
   # image substrate; see arch-synthesizer::akeyless_image).
-  ociHardenedModule = import ./build/oci/hardened-base.nix { inherit pkgs; };
+  # `fenix`/`system` threaded through 2026-07-22 -- oci-push (doca), a
+  # Rust build wired in below this module, needs a modern rustc/cargo
+  # (its Cargo.lock genuinely requires edition2024-capable dependencies,
+  # e.g. rand_pcg 0.10.2) that a consumer's own pinned primary nixpkgs
+  # cannot always provide (a live incident on pleme-io/hardened-images,
+  # still pinned nixos-24.05/cargo 1.77.2 at the time, confirmed this:
+  # every hardened image failed identically building doca, first on a
+  # lockfile-v4 parse error, then -- even after a valid v3 lockfile
+  # regenerated with the OLD cargo -- on cargo 1.77.2 structurally
+  # refusing to compile ANY edition2024 crate at all, confirmed via a
+  # direct local `cargo build --locked` against the exact pinned
+  # nixos-24.05 cargo). `mkRustOverlay`'s own doc comment already names
+  # this exact problem ("Configures buildRustCrate to use fenix's rustc
+  # (critical for edition 2024)") -- oci-push.nix just never received the
+  # fenix input to use it. See oci-push.nix's own header for the applied
+  # fix; falls back to `pkgs.rustPlatform` (the old behavior) when fenix
+  # is null, so this is additive, not a forced dependency.
+  ociHardenedModule = import ./build/oci/hardened-base.nix { inherit pkgs fenix system; };
 
   # CVE mitigation catalog + composition (lib/security/). Takes `lib`, not
   # `pkgs`, at import time -- unlike ociHardenedModule above, the `pkgs`
