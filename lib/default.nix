@@ -131,6 +131,18 @@
   # same way it hardens the primary one.
   mkHardenedPkgsModule = import ./security/mk-hardened-pkgs.nix { inherit (pkgs) lib; };
 
+  # Build-time CVE gate (trivy|grype) + SBOM emission/attestation + cosign
+  # keyless signing (lib/security/{cve-gate,sbom-emit,cosign-sign}.nix).
+  # Landed alongside mkHardenedPkgs (a75d7b5) but never exposed here --
+  # confirmed via a direct grep of this file returning zero hits for any
+  # of the three, despite the files themselves existing, being complete,
+  # and carrying FedRAMP-High control-mapping comments (RA-5/SI-7/SR-3/
+  # CM-8/SR-11). Every consumer of `pkgs` gets the same `pkgs`-bound
+  # closure the other `pkgs`-taking modules above do.
+  cveGateModule = import ./security/cve-gate.nix { inherit pkgs; };
+  sbomEmitModule = import ./security/sbom-emit.nix { inherit pkgs; };
+  cosignSignModule = import ./security/cosign-sign.nix { inherit pkgs; };
+
   # K8s manifest primitives (metadata, syncPolicy, helm source — shared by appset + es)
   k8sManifestModule = import ./infra/k8s-manifest.nix;
 
@@ -2021,6 +2033,20 @@ in rec {
   # apply to it; every catalog entry it doesn't name costs it nothing
   # (ordinary Nix laziness, not machinery this primitive builds).
   mkHardenedPkgs = mkHardenedPkgsModule;
+
+  # Build-time CVE gate (mkCveGateApp: trivy|grype against a docker-archive
+  # tarball or Nix store path) + SBOM emission/attestation (mkSbomApp,
+  # mkSbomAttestApp: syft + cosign attest) + cosign keyless signing/
+  # verification (mkCosignSignApp, mkCosignVerifyApp). Each returns a
+  # `pkgs.writeShellScript` derivation (a store path) -- consumers wrap it
+  # as `{ type = "app"; program = toString (...); }` the same way this
+  # repo's own hardened-images sibling wraps `mkVulnixScanApp`. See each
+  # module's own header comment for the full argument shape and FedRAMP
+  # control mapping.
+  inherit (cveGateModule) mkCveGateApp;
+  inherit (sbomEmitModule) mkSbomApp mkSbomAttestApp;
+  inherit (cosignSignModule) mkCosignSignApp mkCosignVerifyApp;
+
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
   sharedDevShell = sharedDevShellModule;
 
