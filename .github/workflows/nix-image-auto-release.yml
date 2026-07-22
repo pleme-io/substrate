@@ -85,6 +85,18 @@ on:
         description: "Report vulnix findings without failing the job -- for a package whose closure has never been scanned before and has no committed whitelist baseline yet (a real, honest gap: an unscanned package's first run WILL surface findings nobody has triaged, and a hard gate on an untriaged baseline is indistinguishable from a broken pipeline). Flip to false (the default) once a real CI run's findings have seeded a committed vulnix whitelist for this package."
         type: boolean
         default: false
+      grype-scan:
+        description: "Second, independent CVE-database gate (Grype, Anchore) -- complements scan-before-push's trivy gate at the DATABASE layer, not the ecosystem layer: trivy and grype see the same OCI image but consult independent vuln feeds + matchers, so a finding either misses or mis-rates surfaces here even on an ecosystem trivy already covers (Go/Rust included -- unlike vulnix, grype is not restricted to trivy's structural blind spots). Runs the consumer flake's own 'grype-scan:<name>' app (a nixpkgs-sourced grype via substrate's mkCveGateApp, never an imperative install) against the SAME local docker-archive tarball scan-before-push already built -- no second build, no registry round-trip. False (default) preserves every existing caller unchanged; opt in per consumer, same shape as vulnix-scan. Requires scan-before-push (needs image-attr built first)."
+        type: boolean
+        default: false
+      grype-scan-app:
+        description: "Flake app that runs the grype image scan (e.g. 'grype-scan:mysql'). Required when grype-scan is true."
+        type: string
+        default: ""
+      grype-scan-advisory-only:
+        description: "Report grype findings without failing the job -- for an image whose grype baseline has never been triaged yet (same honest-gap rationale as vulnix-scan-advisory-only). Flip to false (the default) once a real CI run's findings have been triaged for this image."
+        type: boolean
+        default: false
       extraSubstituters:
         description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: every hardened-images build paid full cold-compile cost despite running on the same cluster/VPC sui lives on). Empty (default) = no extra cache, zero blast radius for existing consumers."
         type: string
@@ -192,6 +204,20 @@ jobs:
           fail-on-severity: ${{ inputs.scan-fail-on-severity }}
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
+
+      # Second-opinion CVE-database gate (grype) -- sibling to the trivy gate
+      # above, same artifact (the app builds `images_.<name>` as an ordinary
+      # Nix build input, which is the same store path scan-before-push
+      # already realized via `nix build ".#${image-attr}"` moments ago, so
+      # this is a cache hit, not a second build). A failing scan (any
+      # finding at/above the app's configured failOn threshold) stops the
+      # job here, same as the trivy gate.
+      - name: Zero-tolerance CVE gate #2 (grype -- independent CVE database + matcher from trivy)
+        if: inputs.grype-scan
+        continue-on-error: ${{ inputs.grype-scan-advisory-only }}
+        env:
+          GRYPE_SCAN_APP: ${{ inputs.grype-scan-app }}
+        run: nix run ".#${GRYPE_SCAN_APP}"
 
       # vulnix's own NVD feed corpus is ~300MB and vulnix itself only
       # re-fetches a year's archive when NVD reports it changed (confirmed
