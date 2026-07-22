@@ -205,7 +205,7 @@
             overlays = [ (rustOverlay.mkRustOverlay { inherit fenix system; }) ];
           };
         in import ./lib {
-          inherit pkgs crate2nix;
+          inherit pkgs crate2nix system;
           fenix = fenix.packages.${system};
         });
 
@@ -312,10 +312,19 @@
           # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
           # replaces inline skopeo bash in the image-push pipeline.
           # fenix threaded through 2026-07-22 -- see lib/build/oci-push.nix's
-          # own header for the edition2024/MSRV incident this closes.
+          # own header for the edition2024/MSRV incident this closes. Passed
+          # ALREADY PER-SYSTEM-INDEXED (fenix.packages.${system}), matching
+          # oci-push.nix's own expected shape (the same convention
+          # lib/default.nix already uses at its own fenix = fenix.packages.
+          # ${system}; shadow, confirmed against wasm/build.nix +
+          # leptos-build.nix) -- NOT the raw flake input `mkRustOverlay`
+          # above takes (that function does its OWN `.packages.${system}`
+          # indexing internally; oci-push.nix deliberately does not, to
+          # match the more common internal convention).
           oci-push = import ./lib/build/oci-push.nix {
             pkgs = import nixpkgs { inherit system; };
-            inherit fenix system;
+            fenix = fenix.packages.${system};
+            inherit system;
           };
           # relver: typed release-version primitive. `nix run …#relver -- next …`
           # replaces inline semver/tag bash in the auto-bump workflows.

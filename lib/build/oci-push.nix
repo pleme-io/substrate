@@ -46,11 +46,22 @@ let
       let base = baseNameOf path;
       in base != "target" && base != "DESIGN.md" && base != "README.md";
   };
+  # NOTE: `fenix` here is the ALREADY-PER-SYSTEM-INDEXED packages set
+  # (fenix.packages.${system}, e.g. `fenix.stable`/`fenix.combine`
+  # directly work), matching lib/default.nix's own established
+  # convention for this param -- confirmed against wasm/build.nix and
+  # leptos-build.nix, both of which receive the SAME already-indexed
+  # shape from lib/default.nix and call `fenix.combine`/`fenix.latest…`
+  # directly with no further `.packages.${system}` indexing. The
+  # top-level flake.nix `oci-push` package (the direct
+  # `nix run …#oci-push` entry point) passes the ALREADY-INDEXED
+  # `fenix.packages.${system}` for exactly this reason -- see its own
+  # call site's comment.
   rustPlatform =
     if fenix != null && system != null
     then
       let
-        toolchain = fenix.packages.${system}.stable.withComponents [
+        toolchain = fenix.stable.withComponents [
           "rustc" "cargo" "rust-src" "clippy" "rustfmt"
         ];
       in pkgs.makeRustPlatform { cargo = toolchain; rustc = toolchain; }
