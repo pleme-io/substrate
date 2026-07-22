@@ -123,6 +123,14 @@
   # image substrate; see arch-synthesizer::akeyless_image).
   ociHardenedModule = import ./build/oci/hardened-base.nix { inherit pkgs; };
 
+  # CVE mitigation catalog + composition (lib/security/). Takes `lib`, not
+  # `pkgs`, at import time -- unlike ociHardenedModule above, the `pkgs`
+  # a mitigation composes onto is a per-call argument to the returned
+  # function, not fixed at import time, so a consumer can harden a
+  # secondary nixpkgs input (e.g. a package-specific unstable pin) the
+  # same way it hardens the primary one.
+  mkHardenedPkgsModule = import ./security/mk-hardened-pkgs.nix { inherit (pkgs) lib; };
+
   # K8s manifest primitives (metadata, syncPolicy, helm source — shared by appset + es)
   k8sManifestModule = import ./infra/k8s-manifest.nix;
 
@@ -2004,6 +2012,15 @@ in rec {
     mkPackageImage
     nonrootUid
     nonrootGid;
+
+  # CVE mitigation catalog + composition primitive (lib/security/). See
+  # that directory's own default.nix/mk-hardened-pkgs.nix headers for the
+  # full design rationale. `mkHardenedPkgs { pkgs, mitigations = [...]; }`
+  # composes named, catalogued CVE fixes onto a pkgs set via nixpkgs' own
+  # overlay fixed-point mechanism -- an image names which mitigations
+  # apply to it; every catalog entry it doesn't name costs it nothing
+  # (ordinary Nix laziness, not machinery this primitive builds).
+  mkHardenedPkgs = mkHardenedPkgsModule;
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
   sharedDevShell = sharedDevShellModule;
 

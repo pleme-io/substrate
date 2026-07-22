@@ -20,7 +20,20 @@
 #     ports = { http = 8080; health = 8081; metrics = 9090; };
 #     env = [ "LOG_LEVEL=info" ];
 #   };
-{
+#
+# `rec` (not a plain attrset): `mkGoServiceImage` below calls its sibling
+# `mkGoDockerImage` directly. Confirmed live 2026-07-21: this file used to
+# be a plain `{ ... }` and `mkGoServiceImage` reached for
+# `(pkgs.callPackage ./go-docker.nix {}).mkGoDockerImage` instead — a
+# relative import to a file that has never existed at that path
+# (`lib/build/go/go-docker.nix`; the only `go-docker.nix` in the repo is
+# an unrelated 2-line back-compat shim two directories up, at
+# `lib/go-docker.nix`, unreachable via that relative path). Every call to
+# `mkGoServiceImage` threw a Nix eval "file not found" error -- the
+# function was entirely unusable. `rec` is the direct, minimal fix: the
+# two functions are defined in the same file and should just see each
+# other by name.
+rec {
   # Build a layered Docker image from a Go binary.
   #
   # MINIMAL-PRODUCTION-IMAGE knob (default-on for production; see
@@ -241,7 +254,7 @@
       meta.mainProgram = name;
     };
   in
-  (pkgs.callPackage ./go-docker.nix {}).mkGoDockerImage pkgs {
+  mkGoDockerImage pkgs {
     inherit name binary tag architecture ports env minimal withCacert;
   };
 }
