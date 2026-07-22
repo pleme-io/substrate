@@ -91,8 +91,16 @@ jobs:
       # canonical Trivy severity implementation. Scans the PULLED bytes,
       # never a re-resolved tag -- see zot-pull-scan's own README for why
       # that distinction is load-bearing.
+      # @main, not @v1 -- zot-pull-scan was added 2026-06+, months after
+      # v1 was tagged (2026-05-22); the whole action directory doesn't
+      # exist at that ref at all ("Can't find 'action.yml' ... for action
+      # 'pleme-io/actions/zot-pull-scan@v1'", confirmed live 2026-07-21 --
+      # same stale-tag bug class as tatara-script@v1 elsewhere this
+      # session, this time the action doesn't exist at the tag rather
+      # than just missing an output). The action's own README shows @v1
+      # as its usage example -- also stale, fixed alongside this.
       - id: pull-scan
-        uses: pleme-io/actions/zot-pull-scan@v1
+        uses: pleme-io/actions/zot-pull-scan@main
         with:
           ref: ${{ inputs.ref }}
           fail-on-severity: ${{ inputs.fail-on-severity }}
