@@ -225,6 +225,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # GitHub-hosted runners ship ~14GB usable disk; a large from-source Nix
+      # image closure (vector's Rust compile, the erlang_26 overlay) needs more.
+      # Reclaim ~25GB by removing preinstalled toolchains this build never uses.
+      # Gated to hosted runners (contains 'ubuntu') -- ARC/self-hosted nodes have
+      # ample disk and none of these paths. This is what lets a public repo's big
+      # compiles COMPLETE on the stable free hosted runners instead of the
+      # spot-flaky ARC pool (which reclaims runners mid-build).
+      - name: Free disk space (hosted runners only)
+        if: contains(needs.resolve.outputs.runner, 'ubuntu')
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/share/boost /usr/local/lib/android "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          df -h /
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
