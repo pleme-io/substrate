@@ -387,8 +387,24 @@ jobs:
           # honored regardless of trusted-user status. Empty inputs render blank
           # lines → zero effect for consumers that don't opt in. netrc-file
           # authenticates a token-gated cache (the file is mounted on the runner).
+          #
+          # access-tokens (added here, 2026-07-23) is a THIRD, independent
+          # credential layer from the two already fixed in this file (cargo's
+          # git-fetch via url.insteadOf + CARGO_NET_GIT_FETCH_WITH_CLI, and
+          # the pre-flight diagnostic below): Nix's OWN git fetcher for
+          # private flake inputs / fetchGit derivations (e.g. tsunagu, when
+          # it's a Nix build dependency, not just a Cargo one) runs INSIDE
+          # the fixed-output-derivation sandbox, which does NOT inherit the
+          # runner's ~/.gitconfig at all -- confirmed live: "fatal: could not
+          # read Username for 'https://github.com'" building
+          # tsunagu-<rev>.drv, in the SAME job whose cargo-level credential
+          # step had already succeeded minutes earlier. Setting it here (the
+          # DAEMON nix.conf, trusted at install time) makes it honored by the
+          # sandboxed fetcher regardless of trusted-user status, the same way
+          # the attic lines above already are.
           extra-conf: |
             sandbox = relaxed
+            access-tokens = github.com=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.netrcFile && format('netrc-file = {0}', inputs.netrcFile) || '' }}
