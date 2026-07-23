@@ -138,6 +138,26 @@ permissions:
   packages: write
 
 jobs:
+  # ★★ ZERO-SUPPRESSION ratchet (theory/NIX-HARDENING.md §VII.6) — a standalone,
+  # report-only lint scanning the CALLER repo's full suppression surface
+  # (.trivyignore / vulnix whitelists / grype-VEX ignores AND the workflow-YAML
+  # gate-weakeners: *-advisory-only:true, ignore-unfixed:true, scan-ignore-file).
+  # Standalone (no needs:, nothing needs it) + report-only (fail-on-violation:false)
+  # so it can NEVER fail a consumer's release — it just surfaces suppression on
+  # every image build, fleet-wide, zero per-repo footprint. A consumer graduates to
+  # hard-fail by shipping its own cve-suppression-gate.yml with fail-on-violation:
+  # true once its no-cve-suppression/baseline.txt is validated.
+  cve-suppression-visibility:
+    name: CVE-suppression visibility (report-only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/no-cve-suppression@main
+        with:
+          fail-on-violation: "false"
+
   # Runner routing lives in its own job: GitHub Actions' `runs-on:` can only
   # reference github/needs/strategy/matrix/vars/inputs contexts — never a
   # same-job step output — so the resolution has to happen in a job of its
