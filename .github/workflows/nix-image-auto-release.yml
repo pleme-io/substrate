@@ -109,6 +109,10 @@ on:
         description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters -- e.g. sui serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
         type: string
         default: ""
+      superCacheSaveEndpoint:
+        description: "sui super-cache endpoint to PUSH the just-built image-attr's store path to (e.g. http://sui.camelot-build.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above -- without this, every consumer that reads from sui never contributes back, so a from-source overlay (e.g. hardened-images' custom erlang_26 build) recompiles from scratch on every single run forever, even after a successful build. Runs after the local build (scan-before-push's `nix build`, or a fresh build if scan-before-push is false) and before the CVE gates, since the cache write is a pure content-addressed store-path push independent of what the scans later decide -- a rebuild from the same cached bytes always re-scans identically. Best-effort (never fails the job on a push error -- see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
+        type: string
+        default: ""
       sbom-attest:
         description: "Generate an SBOM (syft) from the just-built local tarball and cosign-attest it to the PUSHED image ref (substrate's mkSbomAttestApp) -- runs AFTER release-app, since attestation needs a real registry ref cosign/Rekor can record against. Requires cosign keyless signing (ambient GitHub Actions OIDC -- the caller must grant id-token: write, which this reusable's own top-level permissions block does). Runs the consumer flake's own 'sbom-attest:<name>' app. False (default) preserves every existing caller unchanged; opt in per consumer."
         type: boolean
@@ -235,6 +239,27 @@ jobs:
         env:
           IMAGE_ATTR: ${{ inputs.image-attr }}
         run: nix build ".#${IMAGE_ATTR}" --print-build-logs
+
+      # Push half of extraSubstituters above -- the built store path becomes
+      # a durable, content-addressed cache entry so a from-source overlay
+      # (e.g. a custom erlang_26 build) is only ever compiled once fleet-wide,
+      # not once per CI run. `result` is the standard `nix build` output
+      # symlink the step above just created; resolved to its real store path
+      # since super-cache-save's `outputs` wants store paths, not symlinks.
+      - name: Push built image to super-cache (sui)
+        if: inputs.scan-before-push && inputs.superCacheSaveEndpoint != ''
+        uses: pleme-io/actions/super-cache-save@main
+        with:
+          endpoint: ${{ inputs.superCacheSaveEndpoint }}
+          outputs: ${{ github.workspace }}/result
+          # super-cache-save's first guard clause is `key == "" -> no-op`,
+          # unconditionally, even on the sui-endpoint-push branch where key
+          # is otherwise only used as an output label (the actual push is
+          # gated on endpoint+outputs, not key -- Nix's own content-
+          # addressing is what makes a re-push of identical bytes a cheap
+          # no-op server-side). image-attr is a stable, always-non-empty
+          # per-image identifier -- sufficient to clear the guard.
+          key: ${{ inputs.image-attr }}
 
       # A failing scan stops the job HERE (GitHub Actions' default: a job
       # stops at its first failing step) -- the push step below is
