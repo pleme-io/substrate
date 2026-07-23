@@ -363,6 +363,47 @@ jobs:
 
           echo "All private git dependencies pre-flight OK."
 
+      # ── Nix git-fetcher credential (fixed here, 2026-07-23) ─────────────
+      # THIRD, independent credential layer -- distinct from cargo's git-
+      # fetch (url.insteadOf + CARGO_NET_GIT_FETCH_WITH_CLI, fixed above)
+      # AND from access-tokens below (kept, but confirmed INSUFFICIENT on
+      # its own): access-tokens authenticates NIX'S OWN internal HTTP
+      # fetcher (tarball / GitHub-API-based flake refs), but a fetchgit-
+      # shaped fixed-output derivation (what gen's lockfile-builder emits
+      # for a git Cargo dependency, e.g. tsunagu-<rev>.drv) shells out to
+      # the REAL `git` binary inside its sandbox -- confirmed live:
+      # "Initialized empty Git repository ... fatal: could not read
+      # Username for 'https://github.com'" even with access-tokens already
+      # set in the same nix.conf. That sandboxed git process does NOT
+      # inherit the runner's ~/.gitconfig (a fresh, isolated $HOME -- same
+      # isolation class as the cargo-vs-checkout-extraheader bug above, one
+      # layer deeper) and does not consult access-tokens either; it needs
+      # its own credential via a netrc file, which Nix's fetchgit builder
+      # DOES read when nix.conf's netrc-file points at one -- the same
+      # mechanism the attic-cache netrcFile input already used, generalized
+      # here to also cover github.com.
+      #
+      # Generates ONE combined netrc: a github.com stanza (this token) plus,
+      # when the caller also passed netrcFile (image-rio's attic-cache
+      # case), that file's own content appended -- so both credentials
+      # coexist in the single file nix.conf's netrc-file can point at.
+      - name: Prepare Nix netrc for private git fetches
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+          EXTRA_NETRC: ${{ inputs.netrcFile }}
+        run: |
+          netrc_path="${RUNNER_TEMP}/nix-git-netrc"
+          {
+            echo "machine github.com"
+            echo "login x-access-token"
+            echo "password ${GIT_AUTH_TOKEN}"
+          } > "$netrc_path"
+          if [ -n "${EXTRA_NETRC}" ] && [ -f "${EXTRA_NETRC}" ]; then
+            cat "${EXTRA_NETRC}" >> "$netrc_path"
+          fi
+          chmod 600 "$netrc_path"
+          echo "NIX_GIT_NETRC_PATH=${netrc_path}" >> "$GITHUB_ENV"
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
@@ -405,9 +446,9 @@ jobs:
           extra-conf: |
             sandbox = relaxed
             access-tokens = github.com=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+            netrc-file = ${{ env.NIX_GIT_NETRC_PATH }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
-            ${{ inputs.netrcFile && format('netrc-file = {0}', inputs.netrcFile) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
 
       # gen-lockfile freshness gate — conditional, zero blast radius for
