@@ -208,6 +208,93 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
+      # Fast, cheap, EARLY diagnostic for the private-git-dependency credential
+      # class of failure (root-caused 2026-07-23 -- see the step above for the
+      # incident chain: three URL-syntax guesses, each costing a ~25min Nix
+      # build cycle to fail, before anything checked whether the CREDENTIAL
+      # ITSELF -- as opposed to the URL syntax wrapping it -- was ever valid).
+      # Runs BEFORE "Install Nix" (needs only git + curl, both already assumed
+      # present by the step above) so a bad credential is caught in seconds,
+      # not 25 minutes into a build, with a diagnosis naming the SPECIFIC
+      # cause (empty secret / invalid-or-expired token / fine-grained-PAT
+      # allowlist gap) instead of cargo's generic "spurious network error" or
+      # git's generic "could not read Password".
+      #
+      # Zero blast radius for every consumer with no private git dependency:
+      # skips cleanly the moment Cargo.lock is absent or has no
+      # `git+https://github.com/pleme-io/...` entry (same gating shape the
+      # Cargo.gen.lock freshness check below already uses).
+      - name: Diagnose private git-dependency credential (fast pre-flight)
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          if [ ! -f Cargo.lock ]; then
+            echo "No Cargo.lock in this repo -- nothing to pre-flight, skipping."
+            exit 0
+          fi
+
+          grep -oE 'git\+https://github\.com/pleme-io/[A-Za-z0-9_.-]+' Cargo.lock \
+            | sed 's/^git+//' | sort -u > /tmp/private_dep_urls.txt || true
+          dep_count=$(wc -l < /tmp/private_dep_urls.txt | tr -d ' ')
+
+          if [ "$dep_count" -eq 0 ]; then
+            echo "No pleme-io git dependencies in Cargo.lock -- nothing to pre-flight, skipping."
+            exit 0
+          fi
+
+          echo "Found $dep_count pleme-io git dependenc(y/ies) in Cargo.lock:"
+          sed 's/^/  - /' /tmp/private_dep_urls.txt
+
+          if [ -z "${GIT_AUTH_TOKEN}" ]; then
+            echo "::warning::GIT_AUTH_TOKEN is EMPTY -- both secrets.BOT_PAT and secrets.GHCR_TOKEN resolved unset in this job's context. Any PRIVATE repo among the deps above will fail to clone. If the caller workflow uses an explicit 'secrets:' mapping (not 'secrets: inherit'), confirm it maps at least one of BOT_PAT/GHCR_TOKEN through."
+          else
+            echo "GIT_AUTH_TOKEN is non-empty (${#GIT_AUTH_TOKEN} chars)."
+          fi
+
+          fail=0
+          while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            repo_path="${url#https://github.com/}"
+            echo "::group::pre-flight: $url"
+
+            api_status=$(curl -s -o /tmp/repo_api.json -w "%{http_code}" \
+              -H "Authorization: token ${GIT_AUTH_TOKEN}" \
+              "https://api.github.com/repos/${repo_path}")
+            echo "GitHub API GET /repos/${repo_path} -> HTTP ${api_status}"
+
+            if git -c credential.helper= ls-remote "https://x-access-token:${GIT_AUTH_TOKEN}@github.com/${repo_path}.git" HEAD >/tmp/ls_remote.out 2>/tmp/ls_remote.err; then
+              echo "OK: git ls-remote succeeded."
+            else
+              fail=1
+              echo "::error::pre-flight FAILED for ${url}"
+              cat /tmp/ls_remote.err
+              case "$api_status" in
+                401)
+                  echo "::error::DIAGNOSIS: GitHub API returned 401 for ${repo_path} -- GIT_AUTH_TOKEN is invalid, expired, malformed, or empty (NOT a scope/permission issue -- a valid-but-underscoped token would 404, not 401). Rotate/regenerate the BOT_PAT org secret."
+                  ;;
+                404)
+                  echo "::error::DIAGNOSIS: GitHub API returned 404 for ${repo_path} -- the token authenticates but cannot see this specific repo. If BOT_PAT is a FINE-GRAINED PAT, add ${repo_path} to its repository access allowlist: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens -> BOT_PAT -> Repository access."
+                  ;;
+                200)
+                  echo "::error::DIAGNOSIS: GitHub API sees ${repo_path} fine (200) but git ls-remote still failed -- inconsistent with a simple credential problem; the token may lack git-clone-specific permissions (fine-grained PATs need explicit 'Contents: Read' repository permission, distinct from general API read access) or something else is wrong. Investigate manually."
+                  ;;
+                *)
+                  echo "::error::DIAGNOSIS: unexpected GitHub API status ${api_status} for ${repo_path} -- see the response body above (/tmp/repo_api.json in this step's raw output)."
+                  ;;
+              esac
+            fi
+            echo "::endgroup::"
+          done < /tmp/private_dep_urls.txt
+
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::One or more private git dependencies failed pre-flight -- see diagnoses above. Failing fast here instead of burning ~25 minutes into a Nix build to hit the identical failure as a generic 'spurious network error' / 'could not read Password'."
+            exit 1
+          fi
+
+          echo "All private git dependencies pre-flight OK."
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
