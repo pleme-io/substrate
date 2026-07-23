@@ -61,6 +61,8 @@ jobs:
           fetch-depth: 0
 
       - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
       # Regen Go.build-spec.json + Go.gen.lock. On main: --commit (atomic,

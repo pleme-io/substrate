@@ -166,6 +166,8 @@ jobs:
 
       # relver is invoked via `nix run` (below) — the runner needs nix.
       - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
 
       # relver next = (changed-since-tag)+(compute-next)+(idempotent tag+push).
       # gen-spec-bot-style bot identity (matches git-commit-tag default).

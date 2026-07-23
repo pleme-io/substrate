@@ -85,6 +85,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: helm → helm's own registry

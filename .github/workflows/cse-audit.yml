@@ -73,6 +73,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
       - name: Run cse-lint audit
         env:
           ROOT: ${{ inputs.workspace_root }}

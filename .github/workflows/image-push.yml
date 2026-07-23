@@ -366,6 +366,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
+          github-token: ${{ secrets.BOT_PAT }}
           # pleme-io's default build pattern is IFD-self-derive: gen-based
           # crates (tatara-lisp and friends) generate their Cargo build spec
           # via an Import-From-Derivation marked `__noChroot`. The strict

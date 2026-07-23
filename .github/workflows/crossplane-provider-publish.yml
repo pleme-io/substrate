@@ -58,6 +58,9 @@ on:
       GHCR_TOKEN:
         description: "ghcr.io token (fallback). Falls back to GITHUB_TOKEN."
         required: false
+      BOT_PAT:
+        description: "Cross-repo-scoped PAT for the Nix installer's GitHub API calls (needed when a flake input is a private pleme-io repo). Falls back to GITHUB_TOKEN."
+        required: false
 
 permissions:
   contents: read
@@ -72,6 +75,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
       - name: Derive image reference
         id: ref
         env:

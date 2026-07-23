@@ -54,6 +54,9 @@ on:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
         required: false
+      BOT_PAT:
+        description: "Cross-repo-scoped PAT for the Nix installer's GitHub API calls (needed when a flake input is a private pleme-io repo). Falls back to GITHUB_TOKEN."
+        required: false
 
 jobs:
   publish:
@@ -67,6 +70,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
       - name: Registry login
         env:
           REGISTRY: ${{ inputs.registry }}

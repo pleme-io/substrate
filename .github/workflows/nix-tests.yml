@@ -38,6 +38,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
 
       - name: lockfile-loader-test.nix
         run: nix-instantiate --eval --strict lib/build/estante/tests/lockfile-loader-test.nix
@@ -57,6 +59,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
 
       - name: crate-override-compose-test.nix
         run: nix-instantiate --eval --strict lib/build/rust/crate-override-compose-test.nix
@@ -76,6 +80,8 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
 
       - name: package-graph-test.nix
         run: nix-instantiate --eval --strict lib/build/go/tests/package-graph-test.nix
