@@ -72,6 +72,19 @@ rustPlatform.buildRustPackage {
   version = "0.1.0";
   inherit src;
   cargoLock.lockFile = ../../tools/oci-push/Cargo.lock;
+  # cargo-auditable's own bundled `cargo metadata` JSON parser (as of the
+  # 0.6.2 nixpkgs bundles by default with buildRustPackage) only
+  # recognizes edition 2015/2018/2021 -- it hasn't been updated for
+  # edition2024, and panics on any crate declaring it (confirmed live:
+  # "unknown variant `2024`... error: could not compile `oci-push`" even
+  # though the REAL rustc/cargo compile of that exact crate succeeds --
+  # this is cargo-auditable's own metadata step failing, not the build).
+  # oci-push is an internal substrate build tool, not a published
+  # security-sensitive artifact -- the audit-embedding feature isn't
+  # load-bearing here the way it would be for a real release binary, so
+  # disabling it is the correct, narrow fix rather than pinning yet
+  # another toolchain component.
+  auditable = false;
   nativeBuildInputs = [ pkgs.makeWrapper ];
   postInstall = ''
     wrapProgram $out/bin/oci-push \
