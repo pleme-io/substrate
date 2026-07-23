@@ -212,7 +212,19 @@ jobs:
             echo "No Cargo.gen.lock in this repo — not a gen consumer, skipping."
             exit 0
           fi
-          nix run github:pleme-io/gen -- build .
+          # `gen build` shells out to the literal `cargo metadata` binary (not
+          # a Nix-mediated call) to read the workspace graph. GitHub-hosted
+          # runners ship a pre-installed Rust toolchain, so this was always
+          # silently relying on that; self-hosted pools (e.g. Camelot's
+          # camelot-builder-pleme-eks ARC runners) carry no such toolchain by
+          # default, so `cargo metadata` fails with a bare "No such file or
+          # directory" the moment a consumer's runner input moves off a
+          # GitHub-hosted default (confirmed live: pangea-operator's release
+          # pipeline broke this exact way the day it retargeted off
+          # ubuntu-latest). Providing `cargo` via `nix shell nixpkgs#cargo`
+          # is the hermetic fix — no imperative install, works identically on
+          # every runner regardless of what it ships with.
+          nix shell nixpkgs#cargo --command nix run github:pleme-io/gen -- build .
           if ! git diff --exit-code Cargo.gen.lock; then
             echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
             exit 1
