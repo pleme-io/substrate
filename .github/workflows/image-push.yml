@@ -248,7 +248,7 @@ jobs:
           sed 's/^/  - /' /tmp/private_dep_urls.txt
 
           if [ -z "${GIT_AUTH_TOKEN}" ]; then
-            echo "::warning::GIT_AUTH_TOKEN is EMPTY -- both secrets.BOT_PAT and secrets.GHCR_TOKEN resolved unset in this job's context. Any PRIVATE repo among the deps above will fail to clone. If the caller workflow uses an explicit 'secrets:' mapping (not 'secrets: inherit'), confirm it maps at least one of BOT_PAT/GHCR_TOKEN through."
+            echo "::warning::GIT_AUTH_TOKEN is EMPTY -- both secrets.BOT_PAT and secrets.GHCR_TOKEN resolved unset in this job's context. Any PRIVATE repo among the deps above will fail to clone. Two known causes, root-caused live 2026-07-23 (see pangea-operator's incident): (1) the caller workflow uses an explicit 'secrets:' mapping (not 'secrets: inherit') that forgot to map BOT_PAT/GHCR_TOKEN through -- check the caller's job; (2) THE MORE LIKELY CAUSE if the caller DOES map it correctly: pleme-io is a GitHub FREE-plan org, and GitHub Free-tier orgs do NOT deliver org-level Actions secrets to PRIVATE repos at all (only to public ones) -- the org secret's 'visibility: all' setting is a silent no-op for a private repo on Free. Fix: set a REPO-LEVEL secret of the same name directly on the consuming repo (e.g. 'gh secret set BOT_PAT --repo <owner>/<repo> < ~/.config/github/classic') -- a repo-level secret always reaches its own repo's workflows regardless of org plan tier, and takes precedence over an org-level secret of the same name."
           else
             echo "GIT_AUTH_TOKEN is non-empty (${#GIT_AUTH_TOKEN} chars)."
           fi
@@ -272,7 +272,11 @@ jobs:
               cat /tmp/ls_remote.err
               case "$api_status" in
                 401)
-                  echo "::error::DIAGNOSIS: GitHub API returned 401 for ${repo_path} -- GIT_AUTH_TOKEN is invalid, expired, malformed, or empty (NOT a scope/permission issue -- a valid-but-underscoped token would 404, not 401). Rotate/regenerate the BOT_PAT org secret."
+                  if [ -z "${GIT_AUTH_TOKEN}" ]; then
+                    echo "::error::DIAGNOSIS: GIT_AUTH_TOKEN is EMPTY (see the warning above for the two known causes -- on pleme-io specifically, the GitHub FREE-plan org-secret-to-private-repo restriction is the likely one; set a repo-level secret)."
+                  else
+                    echo "::error::DIAGNOSIS: GitHub API returned 401 for ${repo_path} with a NON-EMPTY token -- the token value itself is invalid, expired, or malformed (NOT a scope/permission issue -- a valid-but-underscoped token would 404, not 401). Rotate/regenerate the credential."
+                  fi
                   ;;
                 404)
                   echo "::error::DIAGNOSIS: GitHub API returned 404 for ${repo_path} -- the token authenticates but cannot see this specific repo. If BOT_PAT is a FINE-GRAINED PAT, add ${repo_path} to its repository access allowlist: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens -> BOT_PAT -> Repository access."
