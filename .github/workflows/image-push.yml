@@ -171,13 +171,21 @@ jobs:
       # across the fleet with a private git dependency is covered, not just
       # this one consumer.
       #
-      # Same BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN precedence this file
-      # already uses for registry auth (see registry-login below) --
-      # pangea-operator's own caller only forwards its token as GHCR_TOKEN,
-      # never under the name BOT_PAT, so a bare `secrets.BOT_PAT` check
-      # would silently no-op for exactly the consumer this was written for.
+      # Same BOT_PAT > GHCR_TOKEN precedence this file already uses for
+      # registry auth (see registry-login below) -- pangea-operator's own
+      # caller only forwards its token as GHCR_TOKEN, never under the name
+      # BOT_PAT, so preferring BOT_PAT alone would silently no-op for
+      # exactly the consumer this was written for.
+      #
+      # No `if:` guard -- the `secrets` context is not permitted in a step
+      # `if:` conditional (GitHub Actions: "You can't use secrets in an if
+      # conditional... use environment variables instead" -- confirmed live
+      # via a rejected `gh workflow run` dispatch: "Unrecognized named-value:
+      # 'secrets'"). Running unconditionally is harmless: with neither
+      # secret set, GIT_AUTH_TOKEN is empty and the rewrite just makes
+      # unauthenticated fetches route through an empty-token URL -- no worse
+      # than the unauthenticated fetch that was already happening.
       - name: Configure git credentials for private git dependencies (cargo, gen)
-        if: ${{ secrets.BOT_PAT != '' || secrets.GHCR_TOKEN != '' }}
         env:
           GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
         run: |
