@@ -17,6 +17,28 @@
 # Usage:
 #   ${(mkSbomApp pkgs { imagePath = "..."; format = "spdx-json"; }).program}
 { pkgs }:
+let
+  # Found live 2026-07-22 (rabbitmq's first real run through this gate):
+  # syft's `docker-archive:` reader expects an UNCOMPRESSED tar (matching
+  # `docker save`'s own default) and fails with "archive/tar: invalid tar
+  # header" on the gzip-compressed tarball Nix's dockerTools actually
+  # produces (confirmed: the same tarball scans fine under both trivy
+  # `--input` and skopeo `copy docker-archive:`, which both transparently
+  # gunzip -- syft's docker-archive provider does not). Detect + decompress
+  # first, so this works identically whether the input happens to be
+  # compressed or not, rather than assuming either. Sets `$scan_target` for
+  # the caller to pass to `docker-archive:$scan_target`; the caller owns
+  # the single combined `trap ... EXIT` (bash traps overwrite, they don't
+  # stack -- a second `trap EXIT` call silently drops the first).
+  syftTarball = imagePath: ''
+    scan_target="${imagePath}"
+    if ${pkgs.gzip}/bin/gzip -t "${imagePath}" 2>/dev/null; then
+      decompressed=$(mktemp)
+      ${pkgs.gzip}/bin/gzip -dc "${imagePath}" > "$decompressed"
+      scan_target="$decompressed"
+    fi
+  '';
+in
 {
   # Generate an SBOM from a built OCI image tarball.
   #
@@ -32,7 +54,10 @@
     set -euo pipefail
     export PATH="${pkgs.syft}/bin:$PATH"
     out="${if outputPath != null then outputPath else "/dev/stdout"}"
-    syft "docker-archive:${imagePath}" \
+    decompressed=""
+    trap 'rm -f "$decompressed"' EXIT
+    ${syftTarball imagePath}
+    syft "docker-archive:$scan_target" \
       --output "${format}=$out" \
       --quiet
   '';
@@ -49,8 +74,10 @@
     export PATH="${pkgs.syft}/bin:${pkgs.cosign}/bin:$PATH"
     export COSIGN_EXPERIMENTAL=1
     SBOM=$(mktemp)
-    trap 'rm -f "$SBOM"' EXIT
-    syft "docker-archive:${imagePath}" --output "${format}=$SBOM" --quiet
+    decompressed=""
+    trap 'rm -f "$SBOM" "$decompressed"' EXIT
+    ${syftTarball imagePath}
+    syft "docker-archive:$scan_target" --output "${format}=$SBOM" --quiet
     cosign attest --yes \
       --predicate "$SBOM" \
       --type "${if format == "cyclonedx-json" then "cyclonedx" else "spdx"}" \
