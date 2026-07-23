@@ -241,6 +241,18 @@ jobs:
       - name: Check Cargo.gen.lock freshness (gen consumers only)
         env:
           NIX_CONFIG: "experimental-features = nix-command flakes"
+          # Cargo's DEFAULT git backend is its own bundled libgit2, which does
+          # NOT reliably honor ~/.gitconfig's url.insteadOf rewrite or a
+          # credential helper the way real git does -- confirmed live
+          # 2026-07-23: the "Configure git credentials" step above ran clean,
+          # yet `cargo metadata` still failed to authenticate cloning a
+          # private git dependency, identically to before that step existed.
+          # This env var is Cargo's own documented fix (the ORIGINAL error's
+          # own hint text: "if the git CLI succeeds then net.git-fetch-with-cli
+          # may help" -- https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli)
+          # -- it forces Cargo to shell out to the real git binary for every
+          # git operation, which DOES respect the rewrite above.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           set -euo pipefail
           if [ ! -f Cargo.gen.lock ]; then
@@ -258,8 +270,12 @@ jobs:
           # pipeline broke this exact way the day it retargeted off
           # ubuntu-latest). Providing `cargo` via `nix shell nixpkgs#cargo`
           # is the hermetic fix — no imperative install, works identically on
-          # every runner regardless of what it ships with.
-          nix shell nixpkgs#cargo --command nix run github:pleme-io/gen -- build .
+          # every runner regardless of what it ships with. `git` is included
+          # too (defensive, same hermeticity reasoning) — CARGO_NET_GIT_FETCH_WITH_CLI
+          # above needs a real git binary on PATH inside this shell, and a
+          # self-hosted runner shipping no toolchain at all can't be assumed
+          # to ship git either.
+          nix shell nixpkgs#cargo nixpkgs#git --command nix run github:pleme-io/gen -- build .
           if ! git diff --exit-code Cargo.gen.lock; then
             echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
             exit 1
