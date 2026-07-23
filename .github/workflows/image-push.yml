@@ -185,11 +185,21 @@ jobs:
       # secret set, GIT_AUTH_TOKEN is empty and the rewrite just makes
       # unauthenticated fetches route through an empty-token URL -- no worse
       # than the unauthenticated fetch that was already happening.
+      #
+      # Token-alone-as-username, NOT `x-access-token:<token>@` -- a live
+      # attempt with the x-access-token form got GitHub's own explicit
+      # "Invalid username or token. Password authentication is not
+      # supported for Git operations." (2026-07-23). `x-access-token` is
+      # the correct convention for a GitHub App / GITHUB_TOKEN installation
+      # token; for a personal-access-token-shaped secret like BOT_PAT,
+      # GitHub's own documented pattern for exactly this scenario (a
+      # private git dependency needed during CI) is the token alone as the
+      # userinfo component, no separate password field.
       - name: Configure git credentials for private git dependencies (cargo, gen)
         env:
           GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
         run: |
-          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
