@@ -156,6 +156,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # actions/checkout's git credentials are scoped to THIS repo's local
+      # .git/config -- they do not propagate to a separate `git clone` cargo
+      # (or anything else on the runner) makes of a DIFFERENT private repo.
+      # `gen build` (below) shells out to the real `cargo metadata`, which
+      # clones every git-dependency in Cargo.toml into ~/.cargo/git/db/ using
+      # plain, ambient, unauthenticated HTTPS -- fine for public deps, a hard
+      # "failed to authenticate" for a private one (confirmed live 2026-07-23:
+      # pangea-operator's own `tsunagu` git dependency, blocking its release
+      # pipeline for hours). A global url.insteadOf rewrite makes every
+      # https://github.com/ fetch on this runner authenticate transparently,
+      # for cargo AND anything else that shells out to plain git -- fixed
+      # once, here, in the shared reusable, so every gen-based image build
+      # across the fleet with a private git dependency is covered, not just
+      # this one consumer.
+      #
+      # Same BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN precedence this file
+      # already uses for registry auth (see registry-login below) --
+      # pangea-operator's own caller only forwards its token as GHCR_TOKEN,
+      # never under the name BOT_PAT, so a bare `secrets.BOT_PAT` check
+      # would silently no-op for exactly the consumer this was written for.
+      - name: Configure git credentials for private git dependencies (cargo, gen)
+        if: ${{ secrets.BOT_PAT != '' || secrets.GHCR_TOKEN != '' }}
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
