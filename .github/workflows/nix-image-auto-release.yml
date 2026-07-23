@@ -154,6 +154,11 @@ jobs:
   cve-suppression-visibility:
     name: CVE-suppression visibility (report-only)
     runs-on: ubuntu-latest
+    # report-only advisory (fail-on-violation:false); the no-cve-suppression
+    # tatara-script has a not-yet-root-caused runtime error, so it must never
+    # false-red a consumer's release. Remove once the script bug is fixed.
+    # pending-no-cve-suppression: script-error
+    continue-on-error: true
     permissions:
       contents: read
     steps:
