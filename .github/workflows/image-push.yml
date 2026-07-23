@@ -186,20 +186,27 @@ jobs:
       # unauthenticated fetches route through an empty-token URL -- no worse
       # than the unauthenticated fetch that was already happening.
       #
-      # Token-alone-as-username, NOT `x-access-token:<token>@` -- a live
-      # attempt with the x-access-token form got GitHub's own explicit
-      # "Invalid username or token. Password authentication is not
-      # supported for Git operations." (2026-07-23). `x-access-token` is
-      # the correct convention for a GitHub App / GITHUB_TOKEN installation
-      # token; for a personal-access-token-shaped secret like BOT_PAT,
-      # GitHub's own documented pattern for exactly this scenario (a
-      # private git dependency needed during CI) is the token alone as the
-      # userinfo component, no separate password field.
+      # `x-access-token:<token>@` is the correct git basic-auth URL form
+      # (matches `https://user:pass@host/`) -- confirmed live 2026-07-23: a
+      # token-alone-as-username attempt (no password field) made git hang
+      # trying to interactively PROMPT for a password ("could not read
+      # Password for 'https://github.com': No such device or address" --
+      # no TTY on a CI runner), never even reaching GitHub. This form DOES
+      # reach GitHub with both fields populated -- and GitHub responds with
+      # its own explicit "Invalid username or token. Password
+      # authentication is not supported for Git operations." That is a
+      # REJECTION of the credential VALUE, not a syntax problem: whatever
+      # GIT_AUTH_TOKEN resolves to (BOT_PAT, or GHCR_TOKEN as its fallback)
+      # is not a token GitHub accepts for cloning pleme-io/tsunagu. Left
+      # in this syntactically-correct form rather than guessing a further
+      # URL variant -- the open question is the credential's own validity/
+      # scope, not this line. See project_gem_ci_shim_reconciler.md for
+      # the full incident chain.
       - name: Configure git credentials for private git dependencies (cargo, gen)
         env:
           GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
         run: |
-          git config --global url."https://${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
