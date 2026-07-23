@@ -156,9 +156,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # actions/checkout's git credentials are scoped to THIS repo's local
-      # .git/config -- they do not propagate to a separate `git clone` cargo
-      # (or anything else on the runner) makes of a DIFFERENT private repo.
+      # CORRECTED 2026-07-23 (see the "SECOND, independent layer" comment
+      # below for the full mechanism): actions/checkout's git credentials
+      # ARE stored in THIS repo's local .git/config, but that does NOT mean
+      # they stay confined to operations on this repo's own remote -- git
+      # matches them by URL PREFIX (`https://github.com/`) against whatever
+      # a git command in this directory targets, so they DO intercept a
+      # separate `git clone`/`git fetch` of a DIFFERENT private repo unless
+      # explicitly unset (which the step below now does).
       # `gen build` (below) shells out to the real `cargo metadata`, which
       # clones every git-dependency in Cargo.toml into ~/.cargo/git/db/ using
       # plain, ambient, unauthenticated HTTPS -- fine for public deps, a hard
@@ -199,14 +204,73 @@ jobs:
       # GIT_AUTH_TOKEN resolves to (BOT_PAT, or GHCR_TOKEN as its fallback)
       # is not a token GitHub accepts for cloning pleme-io/tsunagu. Left
       # in this syntactically-correct form rather than guessing a further
-      # URL variant -- the open question is the credential's own validity/
-      # scope, not this line. See project_gem_ci_shim_reconciler.md for
-      # the full incident chain.
+      # URL variant.
+      #
+      # RESOLVED 2026-07-23, two independent, stacked causes (both real,
+      # both now fixed) -- the "credential invalid" read above was correct
+      # as far as it went, but incomplete:
+      #   (1) pleme-io is a GitHub FREE-plan org. Free-tier orgs do not
+      #       deliver ORG-level Actions secrets to PRIVATE repos AT ALL
+      #       (only public ones) -- BOT_PAT's org-level "visibility: all"
+      #       is a silent no-op for a private repo like pangea-operator.
+      #       GIT_AUTH_TOKEN was therefore genuinely EMPTY here, proven by
+      #       the pre-flight diagnostic below: with it empty, 5 of 6
+      #       pleme-io git deps (all PUBLIC) still cloned fine anonymously;
+      #       only the 1 PRIVATE dep (tsunagu) failed. No amount of
+      #       rotating the org secret can fix this -- the fix is a
+      #       REPO-LEVEL secret of the same name on the consuming repo
+      #       (always reaches its own repo regardless of org plan tier;
+      #       takes precedence over an org-level secret of the same name).
+      #   (2) EVEN with a valid, non-empty GIT_AUTH_TOKEN (confirmed via a
+      #       plain `curl` to the GitHub API returning 200 for tsunagu, in
+      #       the SAME job), `git ls-remote` against tsunagu STILL failed
+      #       with "repository not found" -- the SECOND layer, see the
+      #       "SECOND, independent layer" comment above this step:
+      #       actions/checkout's own persisted local credential silently
+      #       wins over this line's rewrite for any git operation against a
+      #       DIFFERENT repo, unless explicitly unset (now done, above).
+      # See project_gem_ci_shim_reconciler.md for the full incident chain.
+      # SECOND, independent layer of the same incident, root-caused 2026-07-23
+      # AFTER the global url.insteadOf rewrite (below) and a verified-valid
+      # GIT_AUTH_TOKEN were both confirmed working in isolation, yet a real
+      # `git ls-remote` against a private dependency STILL failed with
+      # "repository not found" -- while a plain `curl` to the GitHub API
+      # using the SAME token, in the SAME job, returned 200 (full read
+      # access) for the SAME repo. That split (API: authenticated fine: 200
+      # / git: rejected as if unauthenticated) is the signature of a SECOND
+      # credential silently winning over the first, not of a bad token.
+      #
+      # `actions/checkout@v4` (the step just above) persists its OWN
+      # ephemeral, checkout-repo-scoped GITHUB_TOKEN as a LOCAL git config
+      # entry: `git config --local http.https://github.com/.extraheader
+      # AUTHORIZATION: basic ***` (visible in its own step log). "Local"
+      # means "stored in THIS checkout's .git/config" -- it does NOT mean
+      # "only affects operations on this checkout's own remote". Git matches
+      # `http.<url>.extraheader` by URL PREFIX (`https://github.com/`)
+      # against the ACTUAL request URL, and applies whenever a git command
+      # runs with this checkout as its working directory -- including a
+      # `git ls-remote`/`git fetch` aimed at a COMPLETELY DIFFERENT repo
+      # (tsunagu, here). That extraheader wins over BOTH the global
+      # url.insteadOf rewrite below AND any credentials embedded directly in
+      # the target URL, so every git-level clone of a different private repo
+      # silently authenticates as the checkout's OWN repo-scoped token --
+      # which structurally cannot see any other private repo -- producing
+      # exactly "remote: Repository not found", indistinguishable from a bad
+      # credential unless you cross-check against a git-config-free request
+      # (the pre-flight diagnostic's own `curl` call) the way this incident
+      # was actually root-caused. (An earlier comment on this same step
+      # claimed checkout's credentials "do not propagate to a separate git
+      # clone" -- that undersold the real mechanism: propagation is real,
+      # scoped by URL prefix, and is exactly what this unset below removes.)
+      #
+      # Safe to remove here: checkout has already completed everything it
+      # needs this credential for by this point in the job.
       - name: Configure git credentials for private git dependencies (cargo, gen)
         env:
           GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
         run: |
           git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --unset-all http.https://github.com/.extraheader || true
 
       # Fast, cheap, EARLY diagnostic for the private-git-dependency credential
       # class of failure (root-caused 2026-07-23 -- see the step above for the
