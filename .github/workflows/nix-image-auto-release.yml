@@ -109,6 +109,22 @@ on:
         description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters -- e.g. sui serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
         type: string
         default: ""
+      sbom-attest:
+        description: "Generate an SBOM (syft) from the just-built local tarball and cosign-attest it to the PUSHED image ref (substrate's mkSbomAttestApp) -- runs AFTER release-app, since attestation needs a real registry ref cosign/Rekor can record against. Requires cosign keyless signing (ambient GitHub Actions OIDC -- the caller must grant id-token: write, which this reusable's own top-level permissions block does). Runs the consumer flake's own 'sbom-attest:<name>' app. False (default) preserves every existing caller unchanged; opt in per consumer."
+        type: boolean
+        default: false
+      sbom-attest-app:
+        description: "Flake app that generates + attests the SBOM (e.g. 'sbom-attest:rabbitmq'). Required when sbom-attest is true."
+        type: string
+        default: ""
+      cosign-sign:
+        description: "Keyless-sign the PUSHED image ref (substrate's mkCosignSignApp, Sigstore Fulcio+Rekor -- no long-lived key to rotate). Runs the consumer flake's own 'cosign-sign:<name>' app, after release-app. False (default) preserves every existing caller unchanged; opt in per consumer."
+        type: boolean
+        default: false
+      cosign-sign-app:
+        description: "Flake app that runs the cosign sign (e.g. 'cosign-sign:rabbitmq'). Required when cosign-sign is true."
+        type: string
+        default: ""
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -166,6 +182,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # Needed only when cosign-sign/sbom-attest is true -- keyless cosign
+      # signing exchanges this job's own short-lived OIDC token for a
+      # Fulcio cert (no long-lived signing key to rotate). Granting it
+      # unconditionally at the job level (GitHub Actions permissions can't
+      # be conditioned on an input) is the standard, narrow shape: it lets
+      # THIS job request an OIDC token scoped to itself, nothing more --
+      # zero blast radius for callers that never set cosign-sign/sbom-attest.
+      id-token: write
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -298,3 +322,28 @@ jobs:
         env:
           RELEASE_APP: ${{ inputs.release-app }}
         run: nix run ".#${RELEASE_APP}"
+
+      # Supply-chain attestation, AFTER the push: an SBOM (syft) generated
+      # from the same local tarball scan-before-push already cleared, cosign-
+      # attested to the now-real, now-pushed image ref (attestation needs a
+      # registry ref Rekor's transparency log can record against -- there is
+      # nothing to attest before the push exists). Uses this job's own
+      # ambient GitHub Actions OIDC token (COSIGN_EXPERIMENTAL=1, no
+      # long-lived key) -- the id-token: write permission above is what
+      # makes that token available to request.
+      - name: SBOM + cosign attest (supply-chain evidence for the pushed image)
+        if: inputs.sbom-attest
+        env:
+          SBOM_ATTEST_APP: ${{ inputs.sbom-attest-app }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: nix run ".#${SBOM_ATTEST_APP}"
+
+      # Keyless cosign signature on the pushed ref -- same ambient OIDC as
+      # the SBOM attestation above, a separate step so a consumer can opt
+      # into signing without also generating an SBOM (or vice versa).
+      - name: Cosign sign (keyless, Fulcio + Rekor)
+        if: inputs.cosign-sign
+        env:
+          COSIGN_SIGN_APP: ${{ inputs.cosign-sign-app }}
+          COSIGN_EXPERIMENTAL: "1"
+        run: nix run ".#${COSIGN_SIGN_APP}"
