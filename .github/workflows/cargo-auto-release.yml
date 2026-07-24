@@ -38,15 +38,15 @@ on:
         type: string
         required: false
         default: "true"
-      # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
-      # hosted minutes; org runner groups refuse public repos anyway), public
-      # repos → ubuntu-latest. Schedule-triggered callers may lack
-      # github.event.repository and fall open to hosted (documented edge).
-      # Do NOT put an expression in this default — workflow_call input
-      # defaults are static; the fallback lives in each job's runs-on.
+      # Runner routing: forwarded as runner-resolve's `override` in the
+      # resolve-runner job below. Empty (default) routes by CALLER repo
+      # visibility — private repos → camelot-builder-pleme-eks, public
+      # repos → ubuntu-latest — via runner-resolve's own
+      # visibility-default tier, the canonical home for this precedence
+      # (also honors an optional repo-committed .github/runner.yml, which
+      # a bare ternary here never could).
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest) via runner-resolve."
         type: string
         required: false
         default: ""
@@ -68,8 +68,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # CONSOLIDATED 2026-07-24: was a hand-rolled visibility ternary
+  # duplicated in both `bump` and `ship` below (this file's own prior
+  # comment explained why it lived inline rather than a needs-job —
+  # workflow_call input defaults are static, so the fallback can't live
+  # in `inputs.runner`'s own default). That reasoning still holds for
+  # WHY a job is needed, but the actual override>file>default>
+  # visibility-default precedence now has one canonical home
+  # (pleme-io/actions/runner-resolve, extended the same day this
+  # comment was written after the identical logic was found duplicated
+  # a third time — this file, image-push.yml, and pangea-operator's own
+  # hand-rolled resolve-runner job all re-derived it independently).
+  # Same job-based pattern image-push.yml now uses; this job's own
+  # runs-on is the one place a visibility-only ternary is still correct
+  # (bootstrapping the resolver can't call the resolver).
+  resolve-runner:
+    name: resolve build runner
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          override: ${{ inputs.runner }}
+          public-runner-default: "ubuntu-latest"
+
   bump:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
     if: github.actor != 'github-actions[bot]'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
@@ -101,8 +128,8 @@ jobs:
           push-tags: "true"
 
   ship:
-    needs: bump
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    needs: [resolve-runner, bump]
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
     # privacy posture 2026-07-05: private repos bump+tag only — no public
     # registry publish; see pangea-architectures PRIVACY-WAVES.md. Publishing
     # a new version from a private repo leaks code to crates.io and undoes

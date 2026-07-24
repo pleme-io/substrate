@@ -94,9 +94,9 @@ on:
         type: string
         default: "latest"
       runner:
-        description: "Runner label"
+        description: "Explicit runner label override. Empty (default) routes through pleme-io/actions/runner-resolve's visibility-aware default -- private-repo callers land on Camelot's self-hosted pool, public-repo callers keep free GitHub-hosted minutes. Set this only when a caller genuinely needs something else (an arm64 pool, a macOS runner -- no self-hosted macOS capacity exists fleet-wide)."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       buildCores:
         description: "nix --cores (per-derivation parallelism). Empty = nproc. Lower (e.g. 4) to cap peak RAM of heavy compiles (ruby/llvm) on memory-constrained self-hosted runners that OOM at nproc."
         type: string
@@ -146,9 +146,36 @@ on:
         required: false
 
 jobs:
+  # Resolves the actual build runner via pleme-io/actions/runner-resolve
+  # (★★ AUTO-RELEASE + the org's standing CI-billing invariant: a path
+  # either flows through a genuinely public repo or Camelot's self-hosted
+  # pool, never a metered GitHub-hosted runner on a private repo). A
+  # separate job, not an inline step in `push`, because runs-on: cannot
+  # read a same-job step output (runner-resolve's own action.yml). This
+  # job's OWN runs-on can't call runner-resolve to resolve itself --
+  # it's the one place a visibility-only ternary is correct (the same
+  # pattern cargo-auto-release.yml already proved): the job does zero
+  # real work (one composite-action invocation), so it's cheap wherever
+  # it lands, but a metered GitHub-hosted runner still fails outright on
+  # a private repo under a billing/spending-limit gate (found live this
+  # session, pangea-operator's own resolve-runner job hit the identical
+  # class before its 2026-07-17 fix) -- so even this bootstrap job must
+  # not default to ubuntu-24.04 unconditionally.
+  resolve-runner:
+    name: resolve build runner
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          override: ${{ inputs.runner }}
+
   push:
     name: Build & push image
-    runs-on: ${{ inputs.runner }}
+    needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
     permissions:
       contents: read
       packages: write
