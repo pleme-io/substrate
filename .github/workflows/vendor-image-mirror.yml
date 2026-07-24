@@ -14,6 +14,13 @@
 # (pull + scan + admit/reject) and oci-image-push (skopeo push of a local
 # archive) -- rather than re-implementing either.
 #
+# Since 2026-07-24 the optional `source-registry` / `SOURCE_PASSWORD`
+# inputs also let this mirror an ALREADY-built PRIVATE pleme-io image --
+# e.g. a hardened-* rebuild that image-release.yml already published to
+# private GHCR -- into Zot. The pull+scan+mirror shape is identical; only
+# the source now needs authentication. Left empty (the default), every
+# existing public-source vendor-* leg is entirely unchanged.
+#
 # Zot is cluster-internal-only (zot-pleme-zot.zot.svc.cluster.local),
 # unreachable from a GitHub-hosted runner -- every job here runs on
 # Camelot's own ARC pool (camelot-builder-pleme-eks, in the camelot-ci
@@ -60,10 +67,21 @@ on:
         description: "Zot push credential username -- not confidential (a fixed, per-repository-scoped admin user, see release.yaml's authz.repositories), so a plain input rather than a secret."
         type: string
         default: "akeyless-builder"
+      source-registry:
+        description: "Registry host to authenticate skopeo against BEFORE the source pull -- for a PRIVATE source (e.g. ghcr.io for a private pleme-io/hardened-* package). Empty (default) = no source login, the original public-source behavior (every existing vendor-* leg pulls a PUBLIC upstream image, so this is a no-op for them)."
+        type: string
+        default: ""
+      source-username:
+        description: "Username for the source-registry login (default the workflow actor). Ignored when source-registry is empty."
+        type: string
+        default: "${{ github.actor }}"
     secrets:
       ZOT_PASSWORD:
         description: "Zot push credential password"
         required: true
+      SOURCE_PASSWORD:
+        description: "Password/token for source-registry (e.g. a GHCR read:packages PAT) -- only needed when the SOURCE image is private. Optional: absent keeps the public-source path unchanged."
+        required: false
     outputs:
       admitted:
         description: "'true' iff the pulled image cleared the CVE gate and was mirrored into Zot"
@@ -77,6 +95,11 @@ on:
 
 permissions:
   contents: read
+  # For the optional private-SOURCE pull below: lets the GITHUB_TOKEN
+  # fallback read a private pleme-io GHCR package when no explicit
+  # SOURCE_PASSWORD PAT is supplied. Additive + harmless for every existing
+  # public-source vendor-* leg (they never authenticate the source at all).
+  packages: read
 
 jobs:
   mirror:
@@ -87,6 +110,21 @@ jobs:
       severity: ${{ steps.pull-scan.outputs.severity }}
       result: ${{ steps.pull-scan.outputs.result }}
     steps:
+      # Stage 0 (optional): authenticate skopeo to a PRIVATE source registry
+      # before the pull. zot-pull-scan's stage-1 `skopeo copy` reads skopeo's
+      # own auth file (~/.config/containers/auth.json), so a private source
+      # (e.g. a private pleme-io/hardened-* GHCR package) needs this login
+      # first -- the existing vendor-* legs pull PUBLIC upstream images and
+      # leave source-registry empty, so this step is skipped for them (no
+      # behavior change). Same skopeo-login the Zot push below already uses.
+      - name: Login to source registry (private source)
+        if: inputs.source-registry != ''
+        uses: pleme-io/actions/skopeo-login@main
+        with:
+          registry: ${{ inputs.source-registry }}
+          username: ${{ inputs.source-username }}
+          password: ${{ secrets.SOURCE_PASSWORD || secrets.GITHUB_TOKEN }}
+
       # Stage 1+2: pull the vendor image + gate it through the fleet's one
       # canonical Trivy severity implementation. Scans the PULLED bytes,
       # never a re-resolved tag -- see zot-pull-scan's own README for why
