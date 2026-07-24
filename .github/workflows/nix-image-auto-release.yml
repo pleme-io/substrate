@@ -129,6 +129,18 @@ on:
         description: "Flake app that runs the cosign sign (e.g. 'cosign-sign:rabbitmq'). Required when cosign-sign is true."
         type: string
         default: ""
+      cartorio-attest:
+        description: "FedRAMP three-pillar delivery receipt (pleme-io/actions/cartorio-attest): a BLAKE3 chain-linked receipt + a CycloneDX SBOM built FROM THE NIX CLOSURE + SLSA v1.0 provenance, for the pushed image ref. Runs AFTER release-app. Unlike sbom-attest (syft over the image filesystem) this SBOM is derived from the image's closureInfo (cartorio-closure-info-attr) -- the ROBUST source for a compressed dockerTools image whose own Nix-registered references are near-empty. Cheap by construction: the closure is ALREADY realized locally from scan-before-push's `nix build .#<image-attr>` moments earlier, so building the closure-info attr is a cache hit, never a recompile. The closure exists here where the bytes are genuinely built -- a pulled image downstream cannot re-derive it, so attestation MUST live here. False (default) preserves every existing caller unchanged; opt in per consumer. Needs scan-before-push (the local build that realizes the closure)."
+        type: boolean
+        default: false
+      cartorio-subject:
+        description: "cartorio-attest `subject` -- the attested artifact name (e.g. 'hardened-vector'). Required when cartorio-attest is true."
+        type: string
+        default: ""
+      cartorio-closure-info-attr:
+        description: "Flake package attr producing the image's `pkgs.closureInfo` output dir (a `store-paths` file), the cartorio SBOM source (e.g. 'vectorClosureInfo'). `nix build .#<attr>` here is a local cache hit off the just-built image closure. Required when cartorio-attest is true."
+        type: string
+        default: ""
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -428,3 +440,45 @@ jobs:
           COSIGN_SIGN_APP: ${{ inputs.cosign-sign-app }}
           COSIGN_EXPERIMENTAL: "1"
         run: nix run ".#${COSIGN_SIGN_APP}"
+
+      # FedRAMP three-pillar delivery receipt (cartorio: BLAKE3 chain link + a
+      # CycloneDX SBOM from the Nix closure + SLSA v1.0 provenance), AFTER the
+      # push. The SBOM's ROBUST source is the image's own closureInfo
+      # (cartorio-closure-info-attr) -- a compressed dockerTools tarball's own
+      # Nix-registered references are near-empty, so scanning the image
+      # out-path yields an empty SBOM, whereas closureInfo's uncompressed
+      # `store-paths` listing is always complete (see cartorio-attest's own
+      # `nix-closure-info-path` input warning). Cheap by construction: the
+      # closure was ALREADY realized locally by scan-before-push's `nix build
+      # .#<image-attr>` above (dockerTools copies the package + extraContents
+      # into the image, so their whole closure sits in the local store), so
+      # this `nix build` is a cache-hit resolve, never a recompile. Attestation
+      # lives HERE where the bytes are genuinely built -- a pulled image
+      # downstream cannot re-derive this closure. sign / emit-outcome-chain are
+      # honest LiveTODOs (false); image-digest cross-job plumbing is a LiveTODO
+      # (the exact pinned scan-image-ref is the recorded coordinate, matching
+      # akeylesslabs' own camelot-image-pipeline cartorio leg).
+      - name: Build image closure info (cartorio SBOM source — local cache hit, no recompile)
+        if: inputs.cartorio-attest
+        env:
+          CARTORIO_CLOSURE_INFO_ATTR: ${{ inputs.cartorio-closure-info-attr }}
+        run: nix build ".#${CARTORIO_CLOSURE_INFO_ATTR}" --out-link cartorio-closure --print-build-logs
+      - name: Cartorio attest (BLAKE3 receipt + Nix-closure SBOM + SLSA provenance)
+        if: inputs.cartorio-attest
+        uses: pleme-io/actions/cartorio-attest@main
+        with:
+          subject: ${{ inputs.cartorio-subject }}
+          image-ref: ${{ inputs.scan-image-ref }}
+          nix-closure-info-path: cartorio-closure
+          sign: "false"
+          emit-outcome-chain: "false"
+      - name: Upload cartorio receipt + SBOM + SLSA provenance
+        if: inputs.cartorio-attest
+        uses: actions/upload-artifact@v4
+        with:
+          name: cartorio-${{ inputs.cartorio-subject }}
+          path: |
+            cartorio-receipt.json
+            cartorio-sbom.cdx.json
+            cartorio-slsa.json
+          if-no-files-found: warn
