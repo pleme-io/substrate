@@ -153,7 +153,22 @@ jobs:
   # true once its no-cve-suppression/baseline.txt is validated.
   cve-suppression-visibility:
     name: CVE-suppression visibility (report-only)
-    runs-on: ubuntu-latest
+    # Visibility-routed, NOT a bare ubuntu-latest (corrected 2026-07-24): this
+    # job is `continue-on-error: true`, so a private consumer should never see
+    # it fail the release -- but continue-on-error only suppresses a job that
+    # actually STARTS and whose STEPS fail. On the Free org plan a private
+    # repo's GitHub-hosted job is rejected at DISPATCH by the billing/spending-
+    # limit gate ("recent account payments have failed"), before any step runs,
+    # so continue-on-error never applies and the whole run goes red on every
+    # private consumer (confirmed live -- pleme-io/hardened-images run
+    # 30062292762: every release-* invocation's copy of this job failed in ~3s
+    # at dispatch, turning the run red while the actual build+push jobs
+    # succeeded). Route by the caller's own repo visibility exactly like the
+    # `resolve` job below already does: private -> the self-hosted ARC pool
+    # (the job STARTS, so continue-on-error correctly absorbs any step
+    # failure), public -> ubuntu-latest (free hosted minutes, unchanged). Same
+    # idiom, same file, same rationale as `resolve`.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     # report-only advisory (fail-on-violation:false); the no-cve-suppression
     # tatara-script has a not-yet-root-caused runtime error, so it must never
     # false-red a consumer's release. Remove once the script bug is fixed.
