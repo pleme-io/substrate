@@ -27,8 +27,8 @@
   }: let
     eachSystem = f: nixpkgs.lib.genAttrs systems f;
     # `checks` is optional — passes through when the per-system
-    # builder emits it (substrate's rust shape builders inject
-    # `gen confirm` as a default check when gen is bound).
+    # builder emits it (substrate's rust shape builders inject the
+    # `gen-confirm` = `gen check .` default check when gen is bound).
     perSysHasChecks = system: (mkPerSystem system) ? checks;
   in {
     packages = eachSystem (system: (mkPerSystem system).packages);

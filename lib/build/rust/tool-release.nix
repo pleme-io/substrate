@@ -437,10 +437,36 @@ in {
     else (import ./adapter-apps.nix { pkgs = hostPkgs; inherit gen; }).apps
   );
 
-  # `gen confirm` runs in `nix flake check`. Every consumer gets a
-  # spec-invariant CI gate for free; substrate emits the check when
-  # `gen` is bound. Opt-out with `confirm = false` (TODO when the
-  # consumer-facing flag is wired through).
+  # `gen check` runs in `nix flake check`. Every consumer gets a free
+  # CI gate that the committed workspace (Cargo.toml + members + the
+  # optional Cargo.lock) parses into a typed gen manifest — substrate
+  # emits it whenever `gen` is bound. Opt-out with `confirm = false`
+  # (TODO when the consumer-facing flag is wired through).
+  #
+  # WHY `gen check` and not `gen confirm` / `gen build`
+  # (tier-honest — verified offline in the check sandbox, 2026-07-24):
+  #   * This check runs in a plain `runCommand`: NO network and NO
+  #     `~/.cargo` registry, and `src` excludes the gitignored
+  #     `Cargo.build-spec.json` (delta-only doctrine commits the slim
+  #     `Cargo.gen.lock` instead).
+  #   * `gen confirm` is not a wired CLI subcommand (it errored
+  #     `unrecognized subcommand`), and even the `Adapter::confirm`
+  #     it was meant to reach regenerates the spec via `cargo
+  #     metadata` — which cannot run here (no cargo, no registry, no
+  #     net). `gen build` fails the same way. `gen check-spec` reports
+  #     `MissingSpec` (build-spec gitignored). Only `gen check` — a
+  #     pure `Cargo.toml`/`Cargo.lock` parse (`gen_cargo::parse`) — is
+  #     offline-safe, and it is a real gate: a malformed manifest or a
+  #     missing workspace member fails it (`rc=1`).
+  #   * The gate this gives is "the workspace parses", NOT delta
+  #     freshness or the I1/I2/I3 build-spec invariants (both need the
+  #     generated spec, i.e. `cargo metadata`, unavailable offline).
+  #     The destination is a pure `gen` verb that recomputes
+  #     sha256(Cargo.lock) and compares it to `Cargo.gen.lock`'s
+  #     `cargo_lock_sha256` (the D2 freshness tie) — offline-safe AND
+  #     invariant — released in gen + repointed here via gen-pin.json.
+  #     The attr name stays `gen-confirm` so that destination lands
+  #     without a fleet-wide rename.
   checks =
     if gen == null then {}
     else {
@@ -450,7 +476,7 @@ in {
       } ''
         cp -r $src/* .
         chmod -R u+w .
-        gen confirm .
+        gen check .
         touch $out
       '';
     };
