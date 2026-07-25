@@ -21,7 +21,44 @@ applied to the dynamically-linked / multi-file / vendor-rewrap case
 | Builder | Shape | Use for |
 |---|---|---|
 | `mkPackageImage` | wraps ONE nixpkgs derivation (a compiled binary, or a full package like RabbitMQ) on a hardened base | the default — nearly every service/tool image |
+| `mkDistrolessImage` | `mkPackageImage` + declared `{ shell ? false; entrypointTools ? [] }` — distroless-glibc + (optional glibc-only `dash` /bin/sh) + declared tools | **an image that needs a shell and/or a few bare-invoked tools but must NOT carry busybox** — the wolfi replacement |
 | `mkVendorRewrap` | pulls an upstream image by digest, extracts ONE named binary from its rootfs, repackages on a hardened base | replacing a vendor-shipped image (e.g. an akeyless base image) with a hardened rewrap |
+
+## `mkDistrolessImage` — "shell in distroless" (prefer over `bases.wolfi`)
+
+wolfi = distroless-glibc + **busybox**, and busybox carries a recurring CVE
+stream (e.g. CRITICAL CVE-2022-48174) that a downstream re-scanner flags on the
+*shipped* image — a grype-ignore/VEX never clears their scan, only genuine
+removal does. Where an image needs a `/bin/sh` (a `#!/bin/sh` entrypoint, a
+launcher script) and/or a handful of bare-invoked tools (`mkdir`, `sed`,
+`hostname`, a DB's `barman-cloud`), **declare exactly that** instead of pulling
+in busybox:
+
+```nix
+hardened.mkDistrolessImage {
+  service = "cnpg-postgresql";
+  package = postgresqlDrv;
+  shell = true;                                  # glibc-only dash as /bin/sh
+  entrypointTools = [ pkgs.coreutils pkgs.barman-cloud ];
+  entrypoint = [ "${postgresqlDrv}/bin/postgres" ];
+  publishName = "ghcr.io/pleme-io/cnpg-postgresql";
+  publishTag = version;
+}
+```
+
+- `shell = true` adds nixpkgs `dash` (a tiny POSIX shell, ~near-nil CVE surface;
+  glibc is already in the base) as `/bin/sh` — **not** busybox.
+- `entrypointTools` are put on `PATH=/bin:/usr/bin` so bare-invoked tools
+  resolve. Declare the minimum — every tool is closure the scanner sees.
+- `shell = false` + no tools (the defaults) is plain `distroless-glibc`, reusing
+  the shared base derivation (byte-identical, cache-shared).
+
+Result = distroless-glibc + optional dash `/bin/sh` + declared tools = wolfi's
+functionality **without** busybox. This is the modularized form of the pattern
+`rabbitmq` already ships by hand (a `dash /bin/sh` shim + a coreutils/gnused
+PATH on `distroless-glibc`). `bases.wolfi` stays available for a genuine
+justified exception, but the default posture is distroless + a *declared*
+shell.
 
 Every base carries the fleet's nonroot convention — **uid/gid 65532** (`nonrootUid`/`nonrootGid`), the same numeric convention distroless/Chainguard use. `mkPackageImage`'s `user` defaults to it; only override for a genuine need (host-mount access, a service that must run root).
 
