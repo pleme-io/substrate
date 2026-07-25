@@ -119,6 +119,30 @@ let
   ];
 
   # ═══════════════════════════════════════════════════════════════════
+  # "shell in distroless" — the wolfi replacement's two ingredients
+  # ═══════════════════════════════════════════════════════════════════
+  #
+  # A GLIBC-ONLY `/bin/sh` (nixpkgs `dash` — a tiny POSIX shell, ~200 KiB,
+  # a near-nil CVE surface) instead of busybox. dash ships its binary as
+  # `dash`, not `sh`, so we contribute an explicit `/bin/sh` symlink; the
+  # referenced dash store path is pulled into the image closure by Nix's
+  # own symlink-target reference scan — exactly as busybox's `/bin/sh`
+  # applet symlink is under `mkWolfiBase`. `harden-rootfs` (above) only
+  # materializes `/etc/passwd` + `/etc/group`, so this `/bin/sh` symlink
+  # into `/nix/store/…dash` is the SAME shape wolfi already ships and runs
+  # in production (cnpg/mysql/clickhouse/redis bases) — proven-safe on the
+  # current targets, not novel.
+  #
+  # Why dash and not busybox: busybox carries a recurring CVE stream (e.g.
+  # CRITICAL CVE-2022-48174) that a downstream re-scanner flags on the
+  # *shipped* image; a grype-ignore/VEX never clears their scan — only
+  # genuine removal does. dash removes it.
+  shDashShim = pkgs.runCommand "pleme-io-sh-dash" {} ''
+    mkdir -p $out/bin
+    ln -s ${pkgs.dash}/bin/dash $out/bin/sh
+  '';
+
+  # ═══════════════════════════════════════════════════════════════════
   # Base image builders
   # ═══════════════════════════════════════════════════════════════════
 
@@ -386,6 +410,87 @@ let
     closureInfo = pkgs.closureInfo { rootPaths = (base.contents or []) ++ imageContents; };
   };
 
+  # ═══════════════════════════════════════════════════════════════════
+  # mkDistrolessImage — "shell in distroless": the wolfi replacement
+  # ═══════════════════════════════════════════════════════════════════
+  #
+  # The Pillar 8 destination for an image that needs a shell and/or a few
+  # bare-invoked entrypoint tools but must NOT carry busybox. Where a
+  # consumer would previously reach for `base = bases.wolfi`
+  # (distroless-glibc + busybox), it instead DECLARES what it actually
+  # needs:
+  #
+  #   mkDistrolessImage {
+  #     service = "cnpg-postgresql";
+  #     package = postgresqlDrv;
+  #     shell = true;                              # glibc-only dash /bin/sh
+  #     entrypointTools = [ pkgs.coreutils pkgs.barman-cloud ];
+  #     entrypoint = [ "${postgresqlDrv}/bin/postgres" ];
+  #     publishName = "ghcr.io/pleme-io/cnpg-postgresql";
+  #     publishTag = version;
+  #   }
+  #
+  # Result = distroless-glibc + (optional dash /bin/sh) + (declared tools)
+  #        = wolfi's functionality, WITHOUT busybox.
+  #
+  # `shell = false` + `entrypointTools = []` (the defaults) is exactly
+  # `bases.distroless-glibc` wrapped around `package` — plain distroless,
+  # zero shell, zero extra closure (it reuses the shared base derivation,
+  # so it is byte-identical to and cache-shared with every other plain
+  # distroless image).
+  #
+  # The shell + tools live in the hardened BASE layer (via
+  # `mkDistrolessGlibcBase`'s `extra`), so they inherit the same
+  # /tmp + passwd/group `harden-rootfs` treatment glibc already gets, and
+  # the `closureInfo`/SBOM passthru on `mkPackageImage` covers them for
+  # free. A `PATH=/bin:/usr/bin` is set (matching `mkWolfiBase`'s own PATH)
+  # so bare-invoked tools + /bin/sh resolve; `LD_LIBRARY_PATH` is inherited
+  # from the base config (buildLayeredImage merges `fromImage` Env).
+  #
+  # This is the modularized form the org doctrine names: the third
+  # shell-needing image declares `{ package; shell; entrypointTools }`
+  # instead of re-deriving a wolfi rewrap.
+  mkDistrolessImage = {
+    service,                 # logical name (labels only)
+    package,                 # the nixpkgs derivation to package
+    publishName,
+    publishTag,
+    entrypoint,
+    cmd ? [],
+    # "shell in distroless": add a glibc-only dash as /bin/sh. Off by
+    # default — an image that doesn't bare-invoke a shell stays pure
+    # distroless.
+    shell ? false,
+    # Exactly the packages the entrypoint bare-invokes (coreutils, gnused,
+    # hostname, a DB's barman-cloud CLI, …). Their bins land on
+    # /bin:/usr/bin via the PATH below. Declare the minimum — every tool
+    # is closure the scanner sees.
+    entrypointTools ? [],
+    env ? [],
+    exposedPorts ? {},
+    volumes ? {},
+    workdir ? "/",
+    user ? "${toString nonrootUid}:${toString nonrootGid}",
+    extraContents ? [],
+    writablePaths ? [],
+    labels ? {},
+  }: let
+    shellContents = lib.optional shell shDashShim;
+    baseExtra = shellContents ++ entrypointTools;
+    # Reuse the shared plain base when nothing is added (byte-identical,
+    # cache-shared); otherwise a per-image base carrying the declared
+    # shell + tools, hardened exactly like glibc.
+    base = mkDistrolessGlibcBase (lib.optionalAttrs (baseExtra != []) { extra = baseExtra; });
+    needsPath = shell || entrypointTools != [];
+    # dedup-friendly: a consumer that also passes PATH wins (last-listed).
+    pathEnv = lib.optional needsPath "PATH=/bin:/usr/bin";
+  in mkPackageImage {
+    inherit service package publishName publishTag entrypoint cmd
+      exposedPorts volumes workdir user extraContents writablePaths
+      labels base;
+    env = pathEnv ++ env;
+  };
+
 in {
   # Base image families — consumed via `bases.distroless-glibc` etc.
   bases = {
@@ -402,6 +507,12 @@ in {
 
   # Package image — Path 2 sibling (from-source-derivation shape).
   inherit mkPackageImage;
+
+  # "Shell in distroless" — declare `{ package; shell; entrypointTools }`
+  # to get distroless-glibc + (optional dash /bin/sh) + declared tools,
+  # i.e. wolfi's functionality WITHOUT busybox. The default (shell=false,
+  # no tools) is plain distroless-glibc.
+  inherit mkDistrolessImage;
 
   # Convention: reuse these UIDs across all pleme-io vendor images.
   inherit nonrootUid nonrootGid;

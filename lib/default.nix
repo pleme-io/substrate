@@ -2039,6 +2039,7 @@ in rec {
     mkWolfiBase
     mkVendorRewrap
     mkPackageImage
+    mkDistrolessImage
     nonrootUid
     nonrootGid;
 
