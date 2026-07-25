@@ -140,6 +140,13 @@
   # is null, so this is additive, not a forced dependency.
   ociHardenedModule = import ./build/oci/hardened-base.nix { inherit pkgs fenix system; };
 
+  # Static distroless discovery helper (./build/oci/entrypoint-enumerate.nix)
+  # — a pure Nix function that lists the external commands an entrypoint
+  # script bare-invokes, so `mkDistrolessImage`'s `entrypointTools` can be
+  # SEEDED from a script deterministically (then confirmed by the
+  # boot-check). Needs only `lib`. See theory/NIX-HARDENING.md §III.4.
+  entrypointEnumerate = import ./build/oci/entrypoint-enumerate.nix { inherit (pkgs) lib; };
+
   # CVE mitigation catalog + composition (lib/security/). Takes `lib`, not
   # `pkgs`, at import time -- unlike ociHardenedModule above, the `pkgs`
   # a mitigation composes onto is a per-call argument to the returned
@@ -2040,8 +2047,18 @@ in rec {
     mkVendorRewrap
     mkPackageImage
     mkDistrolessImage
+    distrolessToolset
     nonrootUid
     nonrootGid;
+
+  # Distroless toolset-gathering surface (theory/NIX-HARDENING.md §III.4):
+  #   distrolessToolset.bundles.<name>      — the named concern-bundles
+  #   distrolessToolset.resolveTools sel    — expand bundle-names + raw pkgs
+  #   enumerateDistrolessTools ./script     — static: bare-invoked commands
+  #   suggestDistrolessBundles [ "mkdir" ]  — commands → { bundles; shell; unmapped }
+  enumerateDistrolessTools = entrypointEnumerate.bareCommands;
+  suggestDistrolessBundles = entrypointEnumerate.suggestBundles;
+  inherit entrypointEnumerate;
 
   # CVE mitigation catalog + composition primitive (lib/security/). See
   # that directory's own default.nix/mk-hardened-pkgs.nix headers for the

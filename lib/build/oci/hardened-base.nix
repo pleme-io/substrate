@@ -48,6 +48,14 @@ let
   # has pinned -- see oci-push.nix's own header for the full incident.
   doca = import ../oci-push.nix { inherit pkgs fenix system; };
 
+  # The distroless tool-bundle catalog (./distroless-toolset.nix) — named
+  # concern-bundles (`coreutils`, `textproc`, …) so `mkDistrolessImage`'s
+  # `entrypointTools` is "pick from a standard set", not "hand-roll a raw
+  # package list". `resolveTools` expands a mixed list of bundle names AND
+  # raw packages to a flat package list; raw packages pass through, so this
+  # is backward-compatible with every existing `entrypointTools = [ pkgs.x ]`.
+  toolset = import ./distroless-toolset.nix { inherit pkgs; };
+
   # Non-root UID matching distroless convention.
   nonrootUid = 65532;
   nonrootGid = 65532;
@@ -461,10 +469,17 @@ let
     # default — an image that doesn't bare-invoke a shell stays pure
     # distroless.
     shell ? false,
-    # Exactly the packages the entrypoint bare-invokes (coreutils, gnused,
-    # hostname, a DB's barman-cloud CLI, …). Their bins land on
-    # /bin:/usr/bin via the PATH below. Declare the minimum — every tool
-    # is closure the scanner sees.
+    # Exactly what the entrypoint bare-invokes. Each item is EITHER a
+    # catalog BUNDLE NAME (a string — "coreutils", "textproc", "process",
+    # "net", "archive", "findutils", "which"; see ./distroless-toolset.nix)
+    # OR a RAW package derivation for an image-specific tool with no
+    # generic bundle (a DB's `barman-cloud` CLI, a vendor binary). Bundle
+    # names expand to their minimal package list; raw packages pass through
+    # unchanged. Their bins land on /bin:/usr/bin via the PATH below.
+    # Declare the minimum — every tool is closure the scanner sees. SEED
+    # this list with the static enumerator (./entrypoint-enumerate.nix)
+    # then confirm minimal via the boot-check (theory/NIX-HARDENING.md
+    # §III.4).
     entrypointTools ? [],
     env ? [],
     exposedPorts ? {},
@@ -476,7 +491,11 @@ let
     labels ? {},
   }: let
     shellContents = lib.optional shell shDashShim;
-    baseExtra = shellContents ++ entrypointTools;
+    # Expand bundle names → packages; raw packages pass through. An unknown
+    # bundle name is a `nix eval`-time error (see resolveTools), never a
+    # silent "command not found" at container boot.
+    resolvedTools = toolset.resolveTools entrypointTools;
+    baseExtra = shellContents ++ resolvedTools;
     # Reuse the shared plain base when nothing is added (byte-identical,
     # cache-shared); otherwise a per-image base carrying the declared
     # shell + tools, hardened exactly like glibc.
@@ -513,6 +532,11 @@ in {
   # i.e. wolfi's functionality WITHOUT busybox. The default (shell=false,
   # no tools) is plain distroless-glibc.
   inherit mkDistrolessImage;
+
+  # The tool-bundle catalog itself — `distrolessToolset.bundles.coreutils`
+  # etc. — for a consumer that wants the raw package list of a bundle
+  # (e.g. to compose it into a non-mkDistrolessImage `contents`).
+  distrolessToolset = toolset;
 
   # Convention: reuse these UIDs across all pleme-io vendor images.
   inherit nonrootUid nonrootGid;
