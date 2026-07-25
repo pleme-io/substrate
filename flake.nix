@@ -271,11 +271,13 @@
         # and (once npm + ruby adapters land) across every
         # ecosystem.
         #
-        # The unified surface auto-wires every `Adapter` verb as a
+        # The unified surface auto-wires every REAL gen verb as a
         # flake app in the consumer's outputs: `nix run .#lock`,
-        # `nix run .#build-spec`, `nix run .#plan`, `nix run .#confirm`,
-        # `nix run .#diff`, `nix run .#sbom`. Six operator verbs for
-        # zero consumer-side declaration.
+        # `nix run .#build-spec`, `nix run .#confirm`. (plan/diff/sbom
+        # are Adapter TRAIT methods but not yet CLI subcommands — the
+        # phantom apps were removed from adapter-apps.nix so `nix run`
+        # never lands on an `unrecognized subcommand`.) Zero
+        # consumer-side declaration.
         rust = let
           substrateInputs = {
             inherit nixpkgs crate2nix fenix;

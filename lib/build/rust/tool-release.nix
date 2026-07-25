@@ -35,9 +35,10 @@
   devenv ? null,
   forge ? null,
   # Substrate-bound gen package. When supplied, the resulting
-  # consumer flake exposes every Adapter verb as an app:
-  # `nix run .#{lock,build-spec,plan,confirm,diff,sbom}`. Single
-  # substrate change, six operator verbs in every consumer.
+  # consumer flake exposes every REAL gen verb as an app:
+  # `nix run .#{lock,build-spec,confirm}` (see adapter-apps.nix —
+  # phantom plan/diff/sbom removed). Single substrate change,
+  # the gen operator verbs in every consumer.
   gen ? null,
 }: let
   check = import ../../types/assertions.nix;
@@ -437,36 +438,42 @@ in {
     else (import ./adapter-apps.nix { pkgs = hostPkgs; inherit gen; }).apps
   );
 
-  # `gen check` runs in `nix flake check`. Every consumer gets a free
-  # CI gate that the committed workspace (Cargo.toml + members + the
-  # optional Cargo.lock) parses into a typed gen manifest — substrate
+  # `gen confirm --if-present` runs in `nix flake check`. Every consumer
+  # gets a free CI gate that its committed `Cargo.gen.lock` (the slim
+  # delta) is FRESH against the workspace's `Cargo.lock` — substrate
   # emits it whenever `gen` is bound. Opt-out with `confirm = false`
   # (TODO when the consumer-facing flag is wired through).
   #
-  # WHY `gen check` and not `gen confirm` / `gen build`
+  # WHY `gen confirm --if-present` — the DELTA-FRESHNESS gate
   # (tier-honest — verified offline in the check sandbox, 2026-07-24):
   #   * This check runs in a plain `runCommand`: NO network and NO
   #     `~/.cargo` registry, and `src` excludes the gitignored
   #     `Cargo.build-spec.json` (delta-only doctrine commits the slim
   #     `Cargo.gen.lock` instead).
-  #   * `gen confirm` is not a wired CLI subcommand (it errored
-  #     `unrecognized subcommand`), and even the `Adapter::confirm`
-  #     it was meant to reach regenerates the spec via `cargo
-  #     metadata` — which cannot run here (no cargo, no registry, no
-  #     net). `gen build` fails the same way. `gen check-spec` reports
-  #     `MissingSpec` (build-spec gitignored). Only `gen check` — a
-  #     pure `Cargo.toml`/`Cargo.lock` parse (`gen_cargo::parse`) — is
-  #     offline-safe, and it is a real gate: a malformed manifest or a
-  #     missing workspace member fails it (`rc=1`).
-  #   * The gate this gives is "the workspace parses", NOT delta
-  #     freshness or the I1/I2/I3 build-spec invariants (both need the
-  #     generated spec, i.e. `cargo metadata`, unavailable offline).
-  #     The destination is a pure `gen` verb that recomputes
-  #     sha256(Cargo.lock) and compares it to `Cargo.gen.lock`'s
-  #     `cargo_lock_sha256` (the D2 freshness tie) — offline-safe AND
-  #     invariant — released in gen + repointed here via gen-pin.json.
-  #     The attr name stays `gen-confirm` so that destination lands
-  #     without a fleet-wide rename.
+  #   * `gen confirm` is a PURE offline verb (gen bd36597+): it reads
+  #     ONLY `Cargo.lock` + `Cargo.gen.lock`, recomputes
+  #     `sha256(Cargo.lock)` (== `builtins.hashFile "sha256"`) and
+  #     compares it to the delta's recorded `cargo_lock_sha256` — the
+  #     D2 freshness tie. It is NOT `Adapter::confirm` (which regenerates
+  #     the spec via `cargo metadata` — no cargo/registry/net here).
+  #   * `--if-present` = gate a delta that EXISTS but is stale/untied
+  #     (`rc=1`), TOLERATE a consumer that legitimately commits no delta
+  #     (the IFD reconstruction path — ~10 fleet consumers today).
+  #     Without it, a strict `gen confirm` would REGRESS every consumer
+  #     not on the delta-only doctrine (missing delta → `rc=1`). The
+  #     interim `gen check` (manifest-parse only) never gated freshness;
+  #     this is strictly stronger for delta-committed consumers and
+  #     regression-free for the rest.
+  #   * The gate this gives is DELTA FRESHNESS: a `cargo update` landed
+  #     without a `gen build` (Cargo.lock changed, Cargo.gen.lock did
+  #     not) is caught offline. The I1/I2/I3 build-spec invariants still
+  #     need the generated spec (`cargo metadata`, unavailable offline)
+  #     and are out of scope here. The attr name stays `gen-confirm` so
+  #     the fleet wiring is unchanged. (Note: consumers WITH a committed
+  #     delta also hit substrate's eval-time `lockfile-delta.nix` D2
+  #     guard, which throws on a stale delta during build-graph
+  #     reconstruction — this check is the explicit, isolated
+  #     nix-flake-check surface of the same tie.)
   checks =
     if gen == null then {}
     else {
@@ -476,7 +483,7 @@ in {
       } ''
         cp -r $src/* .
         chmod -R u+w .
-        gen check .
+        gen confirm . --if-present
         touch $out
       '';
     };
