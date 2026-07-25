@@ -59,8 +59,13 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@main
         with:
           github-token: ${{ secrets.BOT_PAT }}
-      - name: Enable magic nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+      # magic-nix-cache-action is EOL'd upstream (repo-scoped, can't carry a
+      # fleet closure -- purify skill's own standing guidance) and outright
+      # broken on a self-hosted ARC runner (`xz: not found` unpacking its
+      # own cache blob), failing this job's first real step on every push
+      # that reaches it (2026-07-25). Same bug, same fix as
+      # pangea-operator/.github/workflows/ci.yml's own flake-check job:
+      # dropped rather than patched.
 
       # ── Private git-dependency credential (2026-07-25) ──────────────────
       # A consumer whose Cargo.toml pulls a private pleme-io git dependency
