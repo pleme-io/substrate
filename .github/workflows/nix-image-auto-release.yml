@@ -73,6 +73,10 @@ on:
         description: "Newline-separated KEY=VALUE pairs passed to the boot-check container (e.g. MYSQL_ROOT_PASSWORD=... for a dev-only smoke boot)."
         type: string
         default: ""
+      boot-check-still-running:
+        description: "Boot-check a SHELL-LESS / distroless image. container-boot-check's normal mode does `docker exec <c> sh -c <boot-check-cmd>`, which needs a shell the image doesn't have -- so instead start the container and assert it is STILL RUNNING after the poll window (its `docker inspect .State.Running` fallback, triggered by an EMPTY health-cmd). The correct gate for a direct-exec binary with a self-booting config (e.g. vector on distroless-glibc: entrypoint runs the binary, a baked config keeps it alive, a boot crash exits the container -> caught). Requires boot-check-image-ref. When true it takes precedence over boot-check-cmd. False (default) preserves every existing caller unchanged."
+        type: boolean
+        default: false
       vulnix-scan:
         description: "Nix-closure CVE gate (vulnix, NVD-backed) -- complements scan-before-push's trivy gate, which structurally cannot see Nix-built images at all for whole classes of package: trivy's os-pkg scanner needs a dpkg/rpm/apk status DB (none exists in a Nix closure), and its language scanners only cover ecosystems with an embedded-buildinfo or lockfile scanner (Go, Rust) -- C/C++ and Erlang/OTP fall through both nets entirely. vulnix instead reads the package's own Nix derivation pname/version metadata against the NVD feed. Runs the consumer flake's own 'vulnix-scan:<name>' app (a nixpkgs-sourced vulnix, never an imperative install) against the package's runtime closure -- never the OCI image. False (default) preserves every existing caller unchanged; opt in per consumer, same shape as scan-before-push. A whitelist (vulnix's native TOML mechanism, the closure-scan sibling of a .trivyignore file) is a per-image Nix value in the consumer's own flake, not a workflow input here -- see pleme-io/hardened-images for the reference shape."
         type: boolean
@@ -374,15 +378,31 @@ jobs:
       # load, not a registry pull -- the same local tarball the scan step
       # above just cleared, never touched a registry yet.
       - name: Load image into Docker for boot-check
-        if: inputs.boot-check-cmd != ''
+        if: inputs.boot-check-cmd != '' || inputs.boot-check-still-running
         run: docker load -i result
 
-      - name: Correctness gate (boot-check — a 0-CVE image that can't boot is not shippable)
-        if: inputs.boot-check-cmd != ''
+      # Two mutually-exclusive boot-check steps rather than one with a
+      # `still-running && '' || cmd` health-cmd ternary -- that trick is UNSAFE
+      # in GitHub expressions because '' is falsy, so `true && '' || cmd`
+      # evaluates to `cmd`, not ''. Explicit gates keep the still-running
+      # (empty health-cmd) and exec-poll (non-empty) paths unambiguous.
+      - name: Correctness gate (boot-check — exec-poll a health-cmd inside the container)
+        if: inputs.boot-check-cmd != '' && !inputs.boot-check-still-running
         uses: pleme-io/actions/container-boot-check@main
         with:
           image: ${{ inputs.boot-check-image-ref }}
           health-cmd: ${{ inputs.boot-check-cmd }}
+          env: ${{ inputs.boot-check-env }}
+
+      - name: Correctness gate (boot-check — still-running, shell-less/distroless image)
+        if: inputs.boot-check-still-running
+        uses: pleme-io/actions/container-boot-check@main
+        with:
+          image: ${{ inputs.boot-check-image-ref }}
+          # Empty health-cmd -> container-boot-check's `docker inspect
+          # .State.Running` fallback: no `docker exec sh -c` (a distroless image
+          # has no shell), just "did the container stay up through the window".
+          health-cmd: ""
           env: ${{ inputs.boot-check-env }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
