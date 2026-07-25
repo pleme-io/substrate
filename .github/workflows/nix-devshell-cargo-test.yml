@@ -62,5 +62,30 @@ jobs:
       - name: Enable magic nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
 
+      # ── Private git-dependency credential (2026-07-25) ──────────────────
+      # A consumer whose Cargo.toml pulls a private pleme-io git dependency
+      # directly (`tsunagu = { git = "https://github.com/pleme-io/..." }`)
+      # fails inside the devShell's `cargo test` with "failed to
+      # authenticate when downloading repository" -- nix-installer-action's
+      # own github-token above only covers NIX's fetcher (flake inputs),
+      # never CARGO's separate git-dependency resolution, so this gap was
+      # unconditional on every consumer with a private Cargo git dep, not
+      # pangea-operator-specific. Same fix as release.yml's own
+      # ccfd349/32b16bd precedent: unset actions/checkout's THIS-repo-scoped
+      # extraheader (it silently wins over url.insteadOf by prefix match if
+      # left in place) and route github.com through BOT_PAT instead.
+      - name: Configure git credentials for private git dependencies (cargo)
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --unset-all http.https://github.com/.extraheader || true
+
       - name: cargo test (inside .#${{ inputs.devshell }})
+        env:
+          # Forces cargo to shell out to the real git binary (which honors
+          # the url.insteadOf rewrite above) instead of its bundled libgit2
+          # backend (which does not) -- same fix as release.yml's own
+          # CARGO_NET_GIT_FETCH_WITH_CLI wiring.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: nix develop ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.test-args }}
