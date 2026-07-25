@@ -121,6 +121,10 @@ on:
         description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters — e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
         type: string
         default: ""
+      superCacheSaveEndpoint:
+        description: "sui super-cache endpoint to PUSH the just-built imageAttr's store path to (e.g. http://sui.camelot-build.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above — without this, every caller that reads from sui never contributes back, so a from-source overlay pays a full cold rebuild on every single run forever, even after a successful build (mirrors nix-image-auto-release.yml's own input of the same name, added there first — pangea-operator's ci.yml/release.yml were the first callers found still missing it). Runs right after the local build and before the CVE gate, since the cache write is a pure content-addressed store-path push independent of what the scan later decides. Best-effort (never fails the job on a push error — see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
+        type: string
+        default: ""
       scanBeforePush:
         description: "Zero-tolerance CVE gate (theory/SECURITY-LAYER.md §8's 'build-time pre-publish CVE gate'; same shape as nix-image-auto-release.yml's own scan-before-push): scan the LOCAL image tarball built above with pleme-io/actions/image-scan (trivy --input, no registry round-trip -- the image has never been pushed anywhere at this point) and only run the push step if the scan is clean. False (default) preserves every existing caller's exact atomic build+push behavior unchanged -- opt in per consumer."
         type: boolean
@@ -565,6 +569,20 @@ jobs:
           echo "nix build parallelism flags:${FLAGS:- (defaults)}"
           nix build "${{ inputs.flakeRef }}#${{ inputs.imageAttr }}" --print-out-paths $FLAGS
           cp -L result image.tar.gz
+
+      # Write half of extraSubstituters above -- the built store path becomes
+      # a durable, content-addressed cache entry so a from-source overlay is
+      # only ever compiled once fleet-wide, not once per caller per run.
+      # `result` is the standard `nix build` output symlink the step above
+      # just created. Mirrors nix-image-auto-release.yml's own "Push built
+      # image to super-cache" step; empty endpoint (default) = no-op.
+      - name: Push built image to super-cache (sui)
+        if: inputs.superCacheSaveEndpoint != ''
+        uses: pleme-io/actions/super-cache-save@main
+        with:
+          endpoint: ${{ inputs.superCacheSaveEndpoint }}
+          outputs: ${{ github.workspace }}/result
+          key: ${{ inputs.imageAttr }}
 
       # Pre-publish CVE gate -- scans the tarball built above, which has not
       # touched a registry yet. Skipped entirely (default) for callers that
