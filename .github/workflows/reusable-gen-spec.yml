@@ -64,6 +64,17 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      # `gen build` shells to `cargo metadata`, which resolves EVERY git
+      # dependency — and checkout's token is scoped to THIS repo only, so a
+      # sibling PRIVATE pleme-io dep (≈20 flipped private 2026-07-23) fails
+      # with "failed to authenticate when downloading repository". The action
+      # owns the BOT_PAT > GITHUB_TOKEN order and the checkout-extraheader
+      # unset that makes the rewrite actually take effect.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: DeterminateSystems/nix-installer-action@main
         with:
           github-token: ${{ secrets.BOT_PAT }}
@@ -87,12 +98,32 @@ jobs:
       # "failed to start `cargo metadata`: No such file or directory".
       # `nix shell nixpkgs#cargo` supplies it hermetically, identically on
       # every runner regardless of what it ships with.
-      - name: Regen delta (push to main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # FAKE-GREEN FIX: a `workflow_dispatch` matched NEITHER this gate nor
+      # the pull_request one below, so every regen + gate + push step
+      # skipped and the job reported SUCCESS having done nothing — a manual
+      # re-run of a genuinely stale repo looked fixed. A dispatch on main is
+      # a deliberate operator re-run and is treated exactly like a push;
+      # a dispatch on any other ref still takes the no-commit path.
+      - name: Regen delta (push to main / dispatch on main)
+        if: >-
+          github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          # cargo's bundled libgit2 ignores url.insteadOf; force the real git
+          # binary so the credential above applies to dep resolution.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: nix shell nixpkgs#cargo --command nix run ${{ inputs.gen-ref }} -- build . --commit
 
-      - name: Regen delta (PR — no commit)
-        if: github.event_name == 'pull_request'
+      # Every non-main-push path: a PR, or a dispatch on a non-main ref.
+      # Regen only, never commit. Paired with the gate above so the two arms
+      # are TOTAL over the events this reusable can receive — that totality
+      # is the actual fix; a third event must not silently fall through both.
+      - name: Regen delta (PR / off-main dispatch — no commit)
+        if: >-
+          github.event_name == 'pull_request'
+          || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: nix shell nixpkgs#cargo --command nix run ${{ inputs.gen-ref }} -- build .
 
       # Drift = the PR didn't include a fresh regen of the committed delta.
@@ -107,8 +138,14 @@ jobs:
             exit 1
           fi
 
+      # Must match the --commit arm above EXACTLY. When these two diverged, a
+      # dispatch on main committed the regenerated delta locally and then
+      # never pushed it, so the commit was discarded with the runner and the
+      # next run regenerated the same delta again — a silent no-progress loop.
       - uses: pleme-io/actions/git-push-with-token@v1
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          github.ref == 'refs/heads/main'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
