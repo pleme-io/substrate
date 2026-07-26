@@ -43,6 +43,39 @@ let
     let m = builtins.match "([^?]+)\\?.*" url; in
     if m == null then url else builtins.head m;
 
+  # GitHub git-source fetching that works for PRIVATE repos.
+  #
+  # `pkgs.fetchgit` shells out to `git clone` inside a fixed-output
+  # derivation. A FOD has network but no credentials, so a private repo
+  # dies with `could not read Username for 'https://github.com'`. The
+  # `netrc-file` and `access-tokens` settings in nix.conf serve nix's
+  # OWN fetchers — they never reach a git process running in a builder,
+  # so configuring them (they already are) cannot fix this.
+  #
+  # `builtins.fetchTree { type = "github"; }` routes through nix's
+  # GitHub fetcher, which DOES honor `access-tokens`. A rev-pinned tree
+  # counts as locked, so it is accepted under pure eval with no narHash
+  # and no `--impure`. Verified against the private pleme-io/hayai at
+  # rev 67a3e114 under both pure and impure eval.
+  #
+  # This is a whole-class fix: 66 of the fleet's 111 pleme-io git-crate
+  # deps are private repos, and every one of them failed the same way.
+  # Non-github and scp-style URLs return null and fall through to the
+  # original `fetchgit` path unchanged.
+  #
+  # Note the recorded `source.sha256` (gen.lock's git_nar_sha256) goes
+  # unused for github sources — fetchTree pins by rev instead, and the
+  # tarball export it produces would not match a git-checkout NAR hash
+  # anyway.
+  githubOwnerRepo = url:
+    let m = builtins.match "https://github\\.com/([^/]+)/([^/]+)/?" url;
+    in if m == null
+       then null
+       else {
+         owner = builtins.elemAt m 0;
+         repo = lib.removeSuffix ".git" (builtins.elemAt m 1);
+       };
+
   # Registry URL canonicalization. Old gen versions (< 70774a2) emitted
   # `https://crates.io/api/v1/crates/<name>/<ver>/download`, which is
   # the redirect entrypoint. crates.io has started serving HTTP 403 on
@@ -90,11 +123,21 @@ let
       }
     else if spec.source.kind == "git" then
       let
-        full = fetchPkgs.fetchgit {
-          url = stripUrlQuery spec.source.url;
-          rev = spec.source.rev;
-          sha256 = spec.source.sha256 or lib.fakeSha256;
-        };
+        cleanUrl = stripUrlQuery spec.source.url;
+        gh = githubOwnerRepo cleanUrl;
+        full =
+          if gh != null then
+            builtins.fetchTree {
+              type = "github";
+              inherit (gh) owner repo;
+              rev = spec.source.rev;
+            }
+          else
+            fetchPkgs.fetchgit {
+              url = cleanUrl;
+              rev = spec.source.rev;
+              sha256 = spec.source.sha256 or lib.fakeSha256;
+            };
         # Conventional workspace-member layouts we look for, in order.
         # Adding a new layout = one entry here; the first hit wins.
         # tatara/escriba ship members at `<root>/<name>` (flat); ishou
