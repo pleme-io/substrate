@@ -16,7 +16,19 @@
 # `clippy.toml`, OR by depending on the Nix helper from
 # `substrate/lib/build/rust/format-ban.nix` to render it at build time.
 
-disallowed-macros = [
-  { path = "std::format",
-    reason = "format!() is banned per pleme-io/theory/TYPED-EMISSION.md. Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer. Free-form string composition is a substrate gap; close it." },
-]
+# MUST STAY ON ONE LINE. A TOML inline table cannot span lines, so the
+# previous pretty-printed form
+#
+#   disallowed-macros = [
+#     { path = "std::format",
+#       reason = "..." },
+#   ]
+#
+# was INVALID TOML, and clippy refused the whole file with
+# `error: error reading Clippy's configuration file: invalid inline table`.
+# That is not a soft failure: clippy aborts the compile, so a repo adopting
+# this file got a hard build error rather than a format!() lint — and any
+# repo whose CI never ran clippy simply carried a config that had never once
+# been parsed. Confirmed live 2026-07-26 in format-ban, the very repo that
+# enforces this rule fleet-wide.
+disallowed-macros = [{ path = "std::format", reason = "format!() is banned per pleme-io/theory/TYPED-EMISSION.md. Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer. Free-form string composition is a substrate gap; close it." }]
