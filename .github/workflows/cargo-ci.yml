@@ -1,7 +1,7 @@
 # Rust crate CI -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/nix-flake-check@v1
+#   - pleme-io/actions/nix-flake-check@main
 #
 # Consumer (.github/workflows/ci.yml):
 #   on: [push, pull_request]
@@ -24,4 +24,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pleme-io/actions/nix-flake-check@v1
+      - uses: pleme-io/actions/nix-flake-check@main

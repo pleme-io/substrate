@@ -142,7 +142,7 @@ jobs:
       # dispatch on main committed the regenerated delta locally and then
       # never pushed it, so the commit was discarded with the runner and the
       # next run regenerated the same delta again — a silent no-progress loop.
-      - uses: pleme-io/actions/git-push-with-token@v1
+      - uses: pleme-io/actions/git-push-with-token@main
         if: >-
           github.ref == 'refs/heads/main'
           && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

@@ -1,8 +1,8 @@
 # Ansible collection upstream-watch -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/spec-watch@v1
-#   - pleme-io/actions/iac-forge@v1
+#   - pleme-io/actions/spec-watch@main
+#   - pleme-io/actions/iac-forge@main
 #   - peter-evans/create-pull-request@v7
 #
 # Consumer (.github/workflows/upstream-watch.yml):
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: spec
-        uses: pleme-io/actions/spec-watch@v1
+        uses: pleme-io/actions/spec-watch@main
         with:
           upstream-url: ${{ inputs.upstream-spec-url }}
 
@@ -54,7 +54,7 @@ jobs:
           echo "${{ steps.spec.outputs.new-sha }}" > .ci/openapi-sha
 
       - if: steps.spec.outputs.changed == 'true'
-        uses: pleme-io/actions/iac-forge@v1
+        uses: pleme-io/actions/iac-forge@main
         with:
           backend: ansible
           spec: .ci/openapi.yaml

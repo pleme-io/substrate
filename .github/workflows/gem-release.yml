@@ -49,7 +49,7 @@ jobs:
       version: ${{ steps.derive.outputs.version }}
     steps:
       - id: derive
-        uses: pleme-io/actions/derive-version-from-tag@v1
+        uses: pleme-io/actions/derive-version-from-tag@main
 
   publish:
     name: Build & push to rubygems.org
@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pleme-io/actions/gem-publish@v1
+      - uses: pleme-io/actions/gem-publish@main
         with:
           gem-name: ${{ inputs.gem-name }}
           tag-version: ${{ needs.derive-version.outputs.version }}

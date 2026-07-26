@@ -1,8 +1,8 @@
 # Ansible collection release -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/ansible-collection-build@v1
-#   - pleme-io/actions/ansible-collection-publish@v1
+#   - pleme-io/actions/ansible-collection-build@main
+#   - pleme-io/actions/ansible-collection-publish@main
 #   - softprops/action-gh-release@v2 (GitHub Release on tag pushes)
 #
 # Consumer (.github/workflows/release.yml):
@@ -37,10 +37,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: build
-        uses: pleme-io/actions/ansible-collection-build@v1
+        uses: pleme-io/actions/ansible-collection-build@main
 
       - name: Publish to Ansible Galaxy (no-op if token unset)
-        uses: pleme-io/actions/ansible-collection-publish@v1
+        uses: pleme-io/actions/ansible-collection-publish@main
         env:
           ANSIBLE_GALAXY_TOKEN: ${{ secrets.ANSIBLE_GALAXY_TOKEN }}
 

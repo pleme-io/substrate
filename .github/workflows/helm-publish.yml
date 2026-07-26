@@ -84,7 +84,7 @@ jobs:
             helm registry login "$host" --username "${{ github.actor }}" --password-stdin
 
       - name: Lint, package & push chart
-        uses: pleme-io/actions/helm-oci-publish@v1
+        uses: pleme-io/actions/helm-oci-publish@main
         with:
           chart-path:     ${{ inputs.chartPath }}
           registry:       ${{ inputs.registry }}

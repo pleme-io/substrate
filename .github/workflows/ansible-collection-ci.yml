@@ -1,7 +1,7 @@
 # Ansible collection CI -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/nix-flake-check@v1
+#   - pleme-io/actions/nix-flake-check@main
 #
 # Consumer (.github/workflows/ci.yml):
 #   jobs:
@@ -35,4 +35,4 @@ jobs:
           curl -fsSL "${{ inputs.openapi-spec-url }}" -o tests/openapi/openapi.yaml
           echo "AKEYLESS_OPENAPI_YAML=$(pwd)/tests/openapi/openapi.yaml" >> "$GITHUB_ENV"
 
-      - uses: pleme-io/actions/nix-flake-check@v1
+      - uses: pleme-io/actions/nix-flake-check@main

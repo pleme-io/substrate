@@ -88,7 +88,7 @@ jobs:
             exit 1
           fi
 
-      - uses: pleme-io/actions/git-push-with-token@v1
+      - uses: pleme-io/actions/git-push-with-token@main
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

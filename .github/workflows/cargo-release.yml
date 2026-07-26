@@ -41,7 +41,7 @@ jobs:
       version: ${{ steps.derive.outputs.version }}
     steps:
       - id: derive
-        uses: pleme-io/actions/derive-version-from-tag@v1
+        uses: pleme-io/actions/derive-version-from-tag@main
 
   publish:
     name: Publish to crates.io

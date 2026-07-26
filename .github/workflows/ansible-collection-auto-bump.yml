@@ -1,7 +1,7 @@
 # Ansible collection auto-bump -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/substrate-bump@v1
+#   - pleme-io/actions/substrate-bump@main
 #
 # Consumer (.github/workflows/auto-bump.yml):
 #   on: { push: { branches: [main] } }
@@ -74,12 +74,12 @@ jobs:
 
       - id: bump
         if: steps.changes.outputs.skip == 'false'
-        uses: pleme-io/actions/substrate-bump@v1
+        uses: pleme-io/actions/substrate-bump@main
         with:
           bump-type: ${{ inputs.bump-type }}
 
       - if: steps.changes.outputs.skip == 'false'
-        uses: pleme-io/actions/git-push-with-token@v1
+        uses: pleme-io/actions/git-push-with-token@main
         with:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main

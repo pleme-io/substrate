@@ -1,7 +1,7 @@
 # Ruby gem auto-bump -- reusable composite workflow (Layer 2).
 #
 # Composes:
-#   - pleme-io/actions/substrate-bump@v1   (polymorphic — detects *.gemspec
+#   - pleme-io/actions/substrate-bump@main   (polymorphic — detects *.gemspec
 #                                           and calls `.#gem:bump`)
 #
 # Consumer (.github/workflows/auto-bump.yml):
@@ -72,12 +72,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - if: steps.changes.outputs.skip == 'false'
-        uses: pleme-io/actions/substrate-bump@v1
+        uses: pleme-io/actions/substrate-bump@main
         with:
           bump-type: ${{ inputs.bump-type }}
 
       - if: steps.changes.outputs.skip == 'false'
-        uses: pleme-io/actions/git-push-with-token@v1
+        uses: pleme-io/actions/git-push-with-token@main
         with:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
