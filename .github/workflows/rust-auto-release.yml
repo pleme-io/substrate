@@ -105,6 +105,20 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
+      # Private git dependencies. checkout's token is scoped to THIS repo, so a
+      # workspace whose members read a sibling PRIVATE pleme-io repo fails with
+      # cargo's misleading "revision <sha> not found" — the fetch is denied, and
+      # cargo reports the resulting empty clone as a missing rev rather than as
+      # auth. escriba tripped exactly this on zenmai (private).
+      #
+      # cargo-auto-release.yml has carried this on bump+ship since the ~20-repo
+      # private flip (2026-07-23); this workspace sibling never got it. Same fix,
+      # same placement: after checkout, before anything cargo touches.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - id: bump
         uses: pleme-io/actions/rust-workspace-bump@main
         with:
@@ -142,6 +156,20 @@ jobs:
           fetch-depth: 0
           ref: main
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # Private git dependencies. checkout's token is scoped to THIS repo, so a
+      # workspace whose members read a sibling PRIVATE pleme-io repo fails with
+      # cargo's misleading "revision <sha> not found" — the fetch is denied, and
+      # cargo reports the resulting empty clone as a missing rev rather than as
+      # auth. escriba tripped exactly this on zenmai (private).
+      #
+      # cargo-auto-release.yml has carried this on bump+ship since the ~20-repo
+      # private flip (2026-07-23); this workspace sibling never got it. Same fix,
+      # same placement: after checkout, before anything cargo touches.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/rust-workspace-publish@main
         with:
@@ -185,6 +213,20 @@ jobs:
           fetch-depth: 0
           ref: main
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # Private git dependencies. checkout's token is scoped to THIS repo, so a
+      # workspace whose members read a sibling PRIVATE pleme-io repo fails with
+      # cargo's misleading "revision <sha> not found" — the fetch is denied, and
+      # cargo reports the resulting empty clone as a missing rev rather than as
+      # auth. escriba tripped exactly this on zenmai (private).
+      #
+      # cargo-auto-release.yml has carried this on bump+ship since the ~20-repo
+      # private flip (2026-07-23); this workspace sibling never got it. Same fix,
+      # same placement: after checkout, before anything cargo touches.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/rust-workspace-publish@main
         with:
