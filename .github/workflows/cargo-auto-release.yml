@@ -21,6 +21,16 @@ on:
         type: string
         required: false
         default: patch
+      crate-path:
+        description: >-
+          Directory containing the crate's Cargo.toml, relative to the repo
+          root. Defaults to "." so existing callers are unaffected. Set it
+          for a repo whose crate is not at the root (e.g. forge -> "cli"),
+          which previously could not use this workflow at all: cargo-bump
+          aborted with "no Cargo.toml at repo root".
+        required: false
+        type: string
+        default: "."
       source-paths:
         type: string
         required: false
@@ -122,6 +132,7 @@ jobs:
         uses: pleme-io/actions/cargo-bump@main
         with:
           bump-type: ${{ inputs.bump-type }}
+          crate-path: ${{ inputs.crate-path }}
           source-paths: ${{ inputs.source-paths }}
           regenerate-cargo-nix: ${{ inputs.regenerate-cargo-nix }}
         env:
