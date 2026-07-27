@@ -18,6 +18,22 @@ name: cargo-ci
 
 on:
   workflow_call:
+    inputs:
+      flake-args:
+        description: >-
+          Extra arguments appended to `nix flake check`. Empty by default, so
+          every existing caller runs the EXACT same command as before — this
+          input is additive, not a behaviour change.
+
+          The one known use is `--impure`, for a flake that exposes a devenv
+          devShell: `nix flake check` evaluates ALL outputs including
+          devShells, and a devenv shell cannot be evaluated purely (it needs
+          the working directory), so it aborts with "devenv was not able to
+          determine the current directory". That is an eval-time property of
+          devenv, not a defect in the repo being checked.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   check:
@@ -25,3 +41,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
+        with:
+          flake-args: ${{ inputs.flake-args }}
