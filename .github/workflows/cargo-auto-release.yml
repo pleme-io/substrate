@@ -32,13 +32,23 @@ on:
         type: string
         default: "."
       source-paths:
+        description: >-
+          Paths whose changes justify a release. Leave EMPTY (the default) to
+          derive them from crate-path — that is what makes crate-path alone
+          sufficient. Set explicitly only to override the derivation.
         type: string
         required: false
-        default: "src Cargo.toml Cargo.lock"
+        default: ""
       add-paths:
+        description: >-
+          Paths git-add'ed into the release commit. Leave EMPTY (the default)
+          to derive from crate-path. A root-relative default here is what
+          broke forge's first crate-path release: the bump correctly wrote
+          cli/Cargo.toml, then the commit step staged a non-existent
+          ./Cargo.toml, staged nothing, and `git commit` exited 1.
         type: string
         required: false
-        default: "Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock"
+        default: ""
       no-verify:
         type: string
         required: false
@@ -133,7 +143,7 @@ jobs:
         with:
           bump-type: ${{ inputs.bump-type }}
           crate-path: ${{ inputs.crate-path }}
-          source-paths: ${{ inputs.source-paths }}
+          source-paths: ${{ inputs.source-paths != '' && inputs.source-paths || (inputs.crate-path == '.' && 'src Cargo.toml Cargo.lock' || format('{0}/src {0}/Cargo.toml {0}/Cargo.lock', inputs.crate-path)) }}
           regenerate-cargo-nix: ${{ inputs.regenerate-cargo-nix }}
         env:
           # cargo's bundled libgit2 ignores url.insteadOf; this forces the
@@ -145,7 +155,7 @@ jobs:
         uses: pleme-io/actions/git-commit-tag@main
         with:
           version: ${{ steps.bump.outputs.new-version }}
-          add-paths: ${{ inputs.add-paths }}
+          add-paths: ${{ inputs.add-paths != '' && inputs.add-paths || (inputs.crate-path == '.' && 'Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock' || format('{0}/Cargo.toml {0}/Cargo.lock {0}/Cargo.nix {0}/Cargo.gen.lock', inputs.crate-path)) }}
 
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
