@@ -265,9 +265,14 @@ in
       '');
     };
 
-    regen = (rubyBuild.mkRubyRegenApp {
+    # `mkRubyRegenApp` RETURNS the app — `{ type, program }` — so there is no
+    # `.regen` to select off it (build.nix's own two call sites bind it
+    # directly). The stray `.regen` here evaluated to `attribute 'regen'
+    # missing`, and survived because app values are lazy: `nix run .#plan`
+    # never forces a sibling app, so only `nix flake check` ever saw it.
+    regen = rubyBuild.mkRubyRegenApp {
       srcDir = self;
       inherit name;
-    }).regen;
+    };
   });
 }

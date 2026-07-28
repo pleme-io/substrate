@@ -220,9 +220,11 @@ in
       '');
     };
 
-    regen = (rubyBuild.mkRubyRegenApp {
+    # See the same fix in fleet-pangea-infra.nix: `mkRubyRegenApp` returns
+    # the app itself (`{ type, program }`), not a set containing `regen`.
+    regen = rubyBuild.mkRubyRegenApp {
       srcDir = self;
       inherit name;
-    }).regen;
+    };
   };
 }
