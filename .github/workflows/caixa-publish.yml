@@ -131,14 +131,26 @@ jobs:
       - name: CSE adherence gate (cse-lint repo --strict)
         run: |
           set -euo pipefail
-          # Single-repo CI gate against the 6 CSE invariants
-          # (claude-md-pointer, hand-roll, module-trio-adoption,
-          # caixa-naivete + others where applicable). Soft-fail today —
-          # `|| true` keeps existing repos publishable while the
-          # migration window closes. Drop the suffix once the fleet is
-          # caixa-clean.
-          nix run github:pleme-io/cse-lint -- repo . --strict 2>&1 || \
-            echo "::warning::cse-lint detected violations; will become a hard gate after the caixa migration window."
+          # HARD GATE as of 2026-07-28. A violation fails the job and
+          # nothing publishes.
+          #
+          # It was soft (`|| echo "::warning::"`) behind a migration
+          # window whose stated end condition was "once the fleet is
+          # caixa-clean". That condition is MET for this path's entire
+          # population: `caixa-publish.yml` has exactly one caller
+          # fleet-wide, `hello-rio`, and it audits clean — `cse-lint repo
+          # --strict` exits 0 with 0 violations across all 12 checks it
+          # runs (measured 2026-07-28 against cse-lint HEAD).
+          #
+          # The ordering was also backwards, which is why this is worth
+          # correcting rather than leaving: the verdict was HARD in
+          # `caixa-validate.yml`, where failure is cheap and the job is
+          # re-runnable, and DISCARDED here, on the path that pushes an
+          # OCI image and a git tag. A computed-then-thrown-away verdict
+          # is not a gate (★★ UNREPRESENTABILITY tier ⊥, "discarded"
+          # subclass) — the step's presence in a green publish log
+          # asserted an adherence nobody had checked.
+          nix run github:pleme-io/cse-lint -- repo . --strict
 
       - name: Lint manifest (feira lint)
         run: |

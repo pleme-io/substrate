@@ -81,8 +81,21 @@ jobs:
       - name: cse-lint repo
         run: |
           set -euo pipefail
-          nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" --strict || \
-            echo "::warning::cse-lint detected violations; gating becomes hard once migration window closes."
+          # HARD GATE as of 2026-07-28. A violation fails the job and no
+          # tag is pushed.
+          #
+          # The `|| echo "::warning::"` it replaces cited a "migration
+          # window" that named no end condition and no date — so there
+          # was nothing that could ever be observed to close, and the
+          # softness had no expiry. A verdict computed and discarded on
+          # the publish path is not a gate (★★ UNREPRESENTABILITY tier
+          # ⊥, "discarded" subclass).
+          #
+          # Blast radius at the time of the change: this workflow has
+          # ZERO callers fleet-wide, so nothing goes red on landing and
+          # the first adopter starts hard rather than inheriting a
+          # softness it would then have to be argued out of.
+          nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" --strict
 
       - name: feira lint
         run: |

@@ -10,8 +10,30 @@
 #   - cross-validation pull requests (no PR should publish, only check)
 #
 # What it does:
-#   1. cse-lint repo . --strict — gates against the 6 CSE invariants
-#      (claude-md-pointer, hand-roll, module-trio-adoption, caixa-naivete)
+#   1. cse-lint repo . --strict — gates against the 12 CSE invariants
+#      that `cse-lint repo` runs, out of the 14 its model declares
+#      (verified 2026-07-28 against cse-lint's own checker list at
+#      src/main.rs:266-278):
+#
+#        claude-md-pointer · hand-roll · module-trio-adoption ·
+#        caixa-naivete · gui-app-consumes-ishou · no-foreign-nord-source ·
+#        gpu-app-headless-mode · mcp-stdout-clean · scenario-corpus-present ·
+#        build-spec-canonical-url · build-spec-schema-version ·
+#        no-lockfile-builder-direct-import
+#
+#      The 2 it does NOT run are manifest-membership and
+#      deployment-coverage: both need a workspace-root view (ecosystem
+#      manifest, k8s/ tree) that single-repo CI does not have, so `repo`
+#      mode skips them by construction. This header previously claimed
+#      "the 6 CSE invariants" and then listed four — a count matching
+#      neither what runs (12) nor the model (14), and the two it would
+#      have needed to reach 6 are precisely the two that cannot run here.
+#
+#      ⚠ READING THE OUTPUT: cse-lint's report prints a histogram row for
+#      all 14 kinds, so a SKIPPED check displays as `✓ 0` identically to
+#      one that ran and passed. Do not read a `✓ 0` on
+#      manifest-membership or deployment-coverage here as evidence they
+#      were checked.
 #   2. feira lint — manifest + Lisp parse for every declared
 #      :bibliotecas / :servicos / :exe entry
 #   3. (optional) feira build — typed structural validation of the
