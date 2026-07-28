@@ -48,6 +48,14 @@
   extraDevInputs ? [],
   devEnvVars ? {},
   module ? null,
+  # Test-gate knobs, threaded through to library.nix. Without this
+  # pass-through a consumer of THIS wrapper could not reach the typed
+  # opt-out or the test flags at all — the surface would exist but be
+  # unreachable from the flake most library consumers actually use.
+  # Defaults match library.nix's: tests ON. See ./test-check.nix.
+  tests ? {},
+  testCrateFlags ? [],
+  testInputs ? [],
   ...
 } @ args:
 let
@@ -66,6 +74,7 @@ let
   baseLibraryArgs = {
     name = libraryName;
     inherit src buildInputs nativeBuildInputs crateOverrides extraDevInputs devEnvVars;
+    inherit tests testCrateFlags testInputs;
   };
   libraryArgs =
     if cargoNix != null
