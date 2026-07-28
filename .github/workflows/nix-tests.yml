@@ -8,6 +8,34 @@ name: nix-tests
 # Add a new entry here for each `tests/*-test.nix` you ship under
 # `lib/build/<area>/tests/`. The pattern is uniform: one Nix
 # expression, exit non-zero on throw, gate on it.
+#
+# TWO TEST FAMILIES SHIP IN THIS REPO, and only one of them used to run
+# here. Know which one you are adding:
+#
+#   A. self-evaluating  — no arguments, `throw`s on the first failure.
+#      Run directly: `nix-instantiate --eval --strict <file>`.
+#      e.g. lib/build/estante/tests/*, lib/util/darwin-test.nix.
+#
+#   B. `{ lib }` + `asCheck pkgs` — wired into `checks.<system>.*` in
+#      flake.nix. `nix-instantiate` CANNOT run these (they take `lib`),
+#      so they need `nix build .#checks.<system>.<name>`.
+#      e.g. mutating-verbs, rust-shape, rust-test-check, the two gates.
+#
+# Family B ran in NO job on ANY trigger until 2026-07-28. Substrate has
+# exactly two workflows that fire on a push to its own main —
+# `auto-bump.yml` (tags only, runs no tests) and this one — and nothing
+# anywhere ran `nix flake check` or built `checks.<system>.*`. So the
+# `mutating-verbs` suite (30 tests, ten of them written days earlier
+# specifically to catch retirement-before-composition drift) was
+# green-by-never-running, and so were `rust-shape`, `rust-test-check`,
+# `flake-checks-gate` and `devshell-preflight` — five suites, all of
+# them the NEWER ones, all invisible.
+#
+# NOTE THE ORDER OF THE FIX. Adding `lib/infra/**` to the path filter
+# on its own would have been VACUOUS: the three jobs below read nothing
+# under `lib/infra`, so the workflow would have fired and verified
+# nothing, while the trigger list read as coverage. The job comes
+# first; the path is what points at it.
 
 on:
   push:
@@ -17,6 +45,15 @@ on:
       - 'lib/build/estante/**'
       - 'lib/build/rust/**'
       - 'lib/build/go/**'
+      # lib/infra/** — the ONLY code that can break `mutating-verbs`.
+      # lib/util/**  — darwin-test.nix already ran below while nothing
+      #                watched the tree it tests; the two gate suites
+      #                live here too.
+      # flake.nix    — declares `checks.<system>.*`; dropping a check
+      #                there is exactly the regression this gates.
+      - 'lib/infra/**'
+      - 'lib/util/**'
+      - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
   pull_request:
     branches:
@@ -25,6 +62,9 @@ on:
       - 'lib/build/estante/**'
       - 'lib/build/rust/**'
       - 'lib/build/go/**'
+      - 'lib/infra/**'
+      - 'lib/util/**'
+      - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
   workflow_dispatch:
 
@@ -85,3 +125,40 @@ jobs:
 
       - name: package-graph-test.nix
         run: nix-instantiate --eval --strict lib/build/go/tests/package-graph-test.nix
+
+  flake-checks:
+    # Family B (see header): the five `{ lib }` + `asCheck pkgs` suites
+    # declared in flake.nix. `nix build` on the check attribute is the
+    # only way to run them — and until this job existed, nothing did.
+    #
+    # Built as five separate steps rather than one `nix flake check` on
+    # purpose: `nix flake check` also evaluates every package, devShell
+    # and app in a repo this size, so a failure there says "substrate is
+    # red" instead of naming the suite. One step per suite keeps the
+    # failure legible, and matches the one-expression-per-step shape the
+    # three jobs above already use.
+    name: infra + util + rust — flake `checks` suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      - name: checks.mutating-verbs (lib/infra — 30 tests)
+        run: nix build --no-link -L '.#checks.x86_64-linux.mutating-verbs'
+
+      - name: checks.rust-shape (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-shape'
+
+      - name: checks.rust-test-check (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-test-check'
+
+      - name: checks.flake-checks-gate (lib/util)
+        run: nix build --no-link -L '.#checks.x86_64-linux.flake-checks-gate'
+
+      - name: checks.devshell-preflight (lib/util)
+        run: nix build --no-link -L '.#checks.x86_64-linux.devshell-preflight'
