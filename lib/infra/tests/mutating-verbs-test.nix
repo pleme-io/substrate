@@ -52,7 +52,20 @@
 #
 # Usage:
 #   nix eval -f lib/infra/tests/mutating-verbs-test.nix --arg lib '(import <nixpkgs> {}).lib' --json
-# Wired as a derivation via `asCheck pkgs` in substrate's flake checks.
+#
+# Wired as a derivation via `asCheck pkgs` into `checks.<system>.mutating-verbs`
+# in flake.nix — and, since 2026-07-28, RUN BY CI: the `flake-checks` job in
+# .github/workflows/nix-tests.yml builds that check, triggered by `lib/infra/**`.
+#
+# Both halves of that sentence had to land together, and the reason is worth
+# keeping. Before that commit these 30 tests ran in NO job on ANY trigger:
+# nothing in .github/ executed `nix flake check` or built `checks.<system>.*`,
+# and the three jobs that did exist only ran argument-free `nix-instantiate`
+# files, which cannot run a suite that takes `lib`. Meanwhile `lib/infra/**` —
+# the only tree whose changes can break these tests — was absent from the path
+# filter. Adding the path WITHOUT the job would have fired a workflow that
+# verified nothing here while the trigger list read as coverage; adding the job
+# without the path would have left it blind to the code it guards.
 { lib }:
 
 let
