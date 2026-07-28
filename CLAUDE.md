@@ -52,6 +52,86 @@ SDLC standardization is structurally enforced.
 **Skill:** `caixa-author` — for authoring or migrating any caixa,
 this is the first reference.
 
+## ★★ `nix flake check` BUILDS ONLY `checks.<system>.*` — a builder that emits none hands out a green lie
+
+**The single most load-bearing fact about this repo's verification
+surface.** `nix flake check` *evaluates* `packages` / `devShells` / `apps`
+— it literally prints `(build skipped)` — and **builds** only
+`checks.<system>.*`. So a flake declaring zero checks makes that command a
+pure *evaluation* check: it passes over a crate that was never compiled,
+let alone tested.
+
+**Measured, not inferred (2026-07-27).** A consumer-shaped fixture over
+`lib/build/rust/library.nix` at substrate `3f4dfb9` reported
+`checks.<system>` = `[]` and `nix flake check` **exit 0 with a
+deliberately failing test in the crate**. On `forge`, `nix flake check
+--impure` returned exit 0 in 8.66 s with `compile_error!` inside
+`#[cfg(test)] mod tests`, and again with literal non-Rust garbage in a
+function body. `cargo-ci.yml`'s header meanwhile claimed it ran
+"`cargo test` via the substrate baseline" — **there was no such
+baseline**, and at least `forge`, `iac-forge`, `engenho` plus nine
+`tool-release` consumers were relying on the claim.
+
+### What every Rust builder now emits
+
+| check | emitted | proves |
+|---|---|---|
+| `checks.build` | always, both build paths | the SHIPPED artifact compiles (same derivation as `packages.default`, so it is paid for once) |
+| `checks.tests` | `library.nix` always; `tool-release.nix` only on `buildMode = "cargo-nix"` | the crate's tests actually RUN (crate2nix `runTests` → `crateWithTest`) |
+
+Policy lives in **`lib/build/rust/test-check.nix`** — one surface, so both
+builders emit the same shape. Opting out is typed (`tests = { enable =
+false; reason = "…"; }`); a bare boolean is refused, same grammar as
+`lib/infra/mutating-verbs.nix`.
+
+### The named gap — do not paper over it
+
+`checks.tests` is **absent on the default `lockfile` build path**, and the
+absence is deliberate. gen's build spec carries **no dev-dependency
+graph** (a crate record has `runtime_dependencies` + `build_dependencies`
+only, and `spec-invariants.nix` *rejects* a `kind = "dev"` edge in
+either), and nixpkgs' bare `buildRustCrate` has no `runTests` argument at
+all — only `buildTests`, which compiles test targets without dev-dep
+externs and never runs them. **12 of 13 surveyed consumers declare
+`[dev-dependencies]`**, so a test target simply cannot be compiled there
+today. Emitting an always-green `checks.tests` that ran nothing would be
+strictly worse than emitting none — a guard over an empty subject set
+reports a tier it does not have (★★ UNREPRESENTABILITY §II.3, tier ⊥).
+
+**The load-bearing fix is upstream in gen-cargo** (emit `dev_dependencies`
+edges into the spec, per the ★★ GEN TYPED-SPEC CONTRACT above) plus a
+substrate-side test-runner derivation. A Nix-side re-derivation of cargo's
+dev-dep feature resolution would be a second, untested copy of the
+resolver. Tracked as **`pending-rust-test-check: lockfile-dev-deps`**.
+Until it lands, the real-test leg for those consumers is the `cargo-test`
+job in `cargo-ci.yml` (`cargo test` inside the flake's devShell on the CI
+runner), which retires into `checks.tests` when the pending item closes.
+
+### `cargo-ci.yml` — two jobs, and the split is the point
+
+`flake-check` runs `nix flake check`, then a gate
+(`lib/util/flake-checks-gate.nix`) that **fails loudly when the flake
+exposes zero checks** and otherwise **prints the check names it built**, so
+a green states what it verified instead of being opaque. `cargo-test`
+composes the existing `nix-devshell-cargo-test.yml` (Operating Principle
+#1 — extend the near-miss) and defaults to `--all-features`: on forge,
+plain `--all-targets` ran 2,663 tests while `--all-features` ran 2,950
+— an `attestation` feature gated 263 of them, and a gate that silently
+skips a tenth of the suite is a fresh subject-set vacuity inside the very
+thing meant to close one.
+
+Both new surfaces are covered by substrate's own gate:
+`checks.<system>.rust-test-check` and `checks.<system>.flake-checks-gate`,
+each **verified red against a deliberately-broken input before landing**
+(removing the availability gate throws on the poisoned `mkTests`;
+dropping the reason requirement fails 3 tests; making the gate return a
+string instead of throwing fails 4).
+
+**Separately documented under-scope, left alone on purpose:**
+`tool-release.nix`'s `gen confirm . --if-present` tolerates `rc=1` for the
+~10 consumers with no committed delta — an honest, documented gap in a
+different gate, not this one.
+
 ## ★ Reusable CI workflows (`.github/workflows/ansible-collection-*.yml`)
 
 Layer 2 of the ansible-collection SDLC: nine composite workflows that

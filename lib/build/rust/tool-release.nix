@@ -141,6 +141,14 @@ in {
   # fleet (calls gen for the pre-rebuild spec sweep); any future
   # tool that shells out to gen at runtime.
   runtimeNeedsGen ? false,
+  # Typed test-gate declaration — see ./test-check.nix. Default ON;
+  # `{ enable = false; reason = "…"; }` is the only way to turn it off and
+  # a bare boolean is refused. NOTE the availability caveat below: on the
+  # DEFAULT `lockfile` build path substrate cannot run tests at all yet, so
+  # this declaration only bites for `buildMode = "cargo-nix"` consumers.
+  tests ? {},
+  testCrateFlags ? [],
+  testInputs ? [],
   ...
 }:
 let
@@ -316,6 +324,9 @@ let
     then "${forge}/bin/forge"
     else "forge";
 
+  # The one typed surface deciding which checks this builder emits.
+  testCheck = import ./test-check.nix { inherit (hostPkgs) lib; };
+
   releaseHelpers = import ../../util/release-helpers.nix;
 
   releaseApp = releaseHelpers.mkReleaseApp {
@@ -474,17 +485,71 @@ in {
   #     guard, which throws on a stale delta during build-graph
   #     reconstruction — this check is the explicit, isolated
   #     nix-flake-check surface of the same tie.)
-  checks =
-    if gen == null then {}
-    else {
-      gen-confirm = hostPkgs.runCommand "gen-confirm" {
-        nativeBuildInputs = [ gen ];
-        src = src;
-      } ''
-        cp -r $src/* .
-        chmod -R u+w .
-        gen confirm . --if-present
-        touch $out
-      '';
+  #
+  # ── checks.build + checks.tests (2026-07-27) ──────────────────────────
+  #
+  # `gen-confirm` above was, until this change, the ONLY thing a
+  # tool-release consumer's `nix flake check` ever BUILT. Everything else
+  # — packages, devShells, apps — is merely EVALUATED by that command
+  # (nix prints "(build skipped)"). So a consumer whose flake exposed no
+  # other check was green over a crate that had never been compiled:
+  # measured on `forge`, `nix flake check` returned exit 0 in 8.66s with
+  # a `compile_error!` in its test module AND with literal non-Rust
+  # garbage in a function body.
+  #
+  #   checks.build — the SHIPPED artifact compiles. This is the same
+  #     derivation as `packages.default`/`unwrapped`, so a consumer that
+  #     also builds `.#default` in CI pays for it exactly once. It is the
+  #     floor: after this, no substrate-built Rust flake can be green over
+  #     an unbuilt crate.
+  #
+  #   checks.tests — ABSENT on the default `lockfile` build path, and that
+  #     absence is deliberate rather than an oversight. gen's build spec
+  #     carries no dev-dependency graph (a crate record has
+  #     `runtime_dependencies` + `build_dependencies` only, and
+  #     spec-invariants.nix REJECTS a `kind = "dev"` edge appearing in
+  #     either), and nixpkgs' bare `buildRustCrate` has no `runTests`
+  #     argument at all — only `buildTests`, which compiles test targets
+  #     without dev-dep externs and never runs them. 12 of 13 surveyed
+  #     consumers declare `[dev-dependencies]`, so a test target simply
+  #     cannot be compiled here today. Emitting an always-green
+  #     `checks.tests` that ran nothing would be strictly worse than
+  #     emitting none — a guard over an empty subject set reports the
+  #     tier it does not have (UNREPRESENTABILITY §II.3, tier ⊥).
+  #     The load-bearing fix is UPSTREAM in gen-cargo (emit
+  #     `dev_dependencies` edges into the spec, per the ★★ GEN TYPED-SPEC
+  #     CONTRACT) plus a substrate-side test-runner derivation; a Nix-side
+  #     re-derivation of cargo's dev-dep feature resolution would be a
+  #     second, untested copy of the resolver.
+  #     Tracked: `pending-rust-test-check: lockfile-dev-deps`.
+  #     On `buildMode = "cargo-nix"` the generated Cargo.nix DOES carry
+  #     devDependencies + crate2nix's `crateWithTest`, so `checks.tests`
+  #     is emitted there and genuinely runs the crate's tests.
+  #
+  # Until that lands, the real-test leg for a lockfile-path consumer is
+  # the `cargo test` job in substrate's own `cargo-ci.yml` (inside this
+  # flake's devShell, on the CI runner) — named there, not implied here.
+  checks = testCheck.surface {
+    who = "rust-release/${toolName}";
+    decl = tests;
+    mode = effectiveMode;
+    buildDrv = nativeBinary;
+    mkTests = _: nativeBinary.override {
+      runTests = true;
+      inherit testCrateFlags testInputs;
     };
+    extra =
+      if gen == null then {}
+      else {
+        gen-confirm = hostPkgs.runCommand "gen-confirm" {
+          nativeBuildInputs = [ gen ];
+          src = src;
+        } ''
+          cp -r $src/* .
+          chmod -R u+w .
+          gen confirm . --if-present
+          touch $out
+        '';
+      };
+  };
 }

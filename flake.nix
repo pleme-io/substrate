@@ -210,6 +210,45 @@
           mutating-verbs =
             (import ./lib/infra/tests/mutating-verbs-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── The Rust builders' verification SURFACE ────────────────────
+          # Wired 2026-07-27, alongside the change that made the surface
+          # exist at all. `nix flake check` builds `checks.<system>.*` and
+          # NOTHING else — packages are only evaluated ("build skipped") —
+          # so a builder that emits no checks hands every consumer a
+          # command that passes over a crate which was never compiled.
+          # Measured on this fixture: at HEAD 3f4dfb9 a consumer-shaped
+          # flake with a DELIBERATELY FAILING test reported
+          # `checks.aarch64-darwin` = [] and `nix flake check` exit 0.
+          #
+          # This gate guards the ingredient, not the mechanism: that
+          # `test-check.nix` keeps emitting `build` on every path, emits
+          # `tests` exactly where substrate can genuinely run them, and —
+          # the load-bearing one — does NOT evaluate the test derivation on
+          # the path where it cannot (asserted with a poisoned `mkTests`
+          # thunk, the same trick mutating-verbs uses for `pkgs`).
+          #
+          # NOT VACUOUS: verified red before landing, not merely observed
+          # green. Deleting the availability gate (so `tests` is emitted on
+          # the lockfile path) fails 3 tests including
+          # `lockfile-never-forces-mkTests`; making the opt-out accept a
+          # bare `enable = false` fails the two reason-required negatives.
+          rust-test-check =
+            (import ./lib/build/rust/tests/test-check-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
+          # ── The "did the gate have anything to build?" gate ────────────
+          # Policy consumed by `.github/workflows/cargo-ci.yml` via
+          # `flakeChecksGatePath` below. It lives in a real Nix file rather
+          # than inline in the workflow because the inline version — a Nix
+          # indented string inside a YAML block scalar inside a shell
+          # single-quoted argument — silently lost its string delimiters on
+          # the first attempt, and a gate that fails to PARSE never runs.
+          #
+          # NOT VACUOUS: `empty-check-set-throws` asserts the gate FAILS on
+          # the exact input it exists to reject; making it return a
+          # friendly string instead of throwing turns four tests red.
+          flake-checks-gate =
+            (import ./lib/util/tests/flake-checks-gate-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were
@@ -296,6 +335,20 @@
 
         # Home-manager tool module helpers (profile orchestration, safe packages)
         hmToolHelpers = ./lib/hm-tool-helpers.nix;
+
+        # The `nix flake check` non-vacuity gate, as a standalone import
+        # path. Consumed by `.github/workflows/cargo-ci.yml` from inside a
+        # CONSUMER's checkout (where substrate's tree is not present), so it
+        # has to be reachable as a flake attr rather than a relative path:
+        #
+        #   nix eval --impure --raw --expr '
+        #     import (builtins.getFlake "github:pleme-io/substrate").flakeChecksGatePath {
+        #       system = builtins.currentSystem;
+        #       checks = (builtins.getFlake (toString ./.)).checks or {};
+        #     }'
+        #
+        # Guarded by checks.<system>.flake-checks-gate above.
+        flakeChecksGatePath = ./lib/util/flake-checks-gate.nix;
 
         # Standalone import paths for consumer flakes
         rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;

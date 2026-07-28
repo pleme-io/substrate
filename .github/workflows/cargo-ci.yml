@@ -1,18 +1,59 @@
 # Rust crate CI -- reusable composite workflow (Layer 2).
 #
+# ── WHAT THIS ACTUALLY RUNS (2026-07-27) ────────────────────────────────
+#
+# Two jobs, and the split is the whole point:
+#
+#   flake-check  `nix flake check`, then a gate asserting the flake exposed
+#                at least one check and PRINTING their names. `nix flake
+#                check` builds `checks.<system>.*` and NOTHING ELSE —
+#                packages/devShells/apps are only EVALUATED (nix literally
+#                prints "(build skipped)"). So on a flake with zero checks
+#                this command is an eval-only check.
+#   cargo-test   `cargo test` inside the flake's devShell, on the runner.
+#                This is the leg that actually executes the crate's tests
+#                for every consumer today.
+#
+# ── THE HEADER THAT USED TO BE HERE WAS FALSE, AND REPOS RELIED ON IT ──
+#
+# Until this commit lines 12-15 claimed this workflow "runs whatever
+# `checks.<system>.*` the flake exposes (usually `cargo test` via the
+# substrate baseline)". There was no such baseline: `lib/build/rust/
+# library.nix` returned `{ packages, devShells, apps }` with no `checks`
+# key at all, and `tool-release.nix` emitted only `gen-confirm` (a
+# Cargo.gen.lock delta-freshness gate, never a test run). Consequence,
+# measured rather than inferred:
+#
+#   * a consumer-shaped fixture over `library.nix` at substrate HEAD
+#     reported `checks.<system>` = [] and `nix flake check` exit 0 WITH A
+#     DELIBERATELY FAILING TEST in the crate;
+#   * on `forge`, `nix flake check --impure` returned exit 0 in 8.66s with
+#     `compile_error!` inside `#[cfg(test)] mod tests`, and again with
+#     literal non-Rust garbage replacing a function body.
+#
+# The defect was therefore worse than "tests do not run": the crate was
+# never COMPILED. forge's 45-second green CI was that, not a fast build.
+#
+# ── WHAT CLOSES IT ──────────────────────────────────────────────────────
+#
+# substrate's Rust builders now emit a real verification surface (see
+# lib/build/rust/test-check.nix): `checks.build` on every path, and
+# `checks.tests` wherever substrate can genuinely run tests (the crate2nix
+# path — the gen lockfile path has no dev-dependency graph yet, tracked as
+# `pending-rust-test-check: lockfile-dev-deps`). The `cargo-test` job below
+# covers every consumer meanwhile, and retires into `checks.tests` when
+# that pending item lands.
+#
 # Composes:
 #   - pleme-io/actions/nix-flake-check@main
+#   - pleme-io/substrate/.github/workflows/nix-devshell-cargo-test.yml
 #
-# Consumer (.github/workflows/ci.yml):
+# Consumer (.github/workflows/ci.yml) -- unchanged, still 2 lines:
 #   on: [push, pull_request]
 #   jobs:
 #     check:
 #       uses: pleme-io/substrate/.github/workflows/cargo-ci.yml@main
-#
-# Runs `nix flake check` which (via substrate's rust-workspace-release-flake
-# helper) evaluates the crate's Cargo.nix, builds via crate2nix, and runs
-# whatever `checks.<system>.*` the flake exposes (usually `cargo test`
-# via the substrate baseline).
+#       secrets: inherit
 
 name: cargo-ci
 
@@ -34,12 +75,64 @@ on:
         required: false
         type: string
         default: ""
+      devshell:
+        description: >-
+          Flake devShell the `cargo test` job runs inside. `default` is what
+          every substrate Rust builder emits (fenix toolchain + the crate's
+          buildInputs). Override when a crate needs a purpose-built shell
+          (e.g. pangea-operator's `ruby-eval`).
+        required: false
+        type: string
+        default: "default"
+      test-args:
+        description: >-
+          Args appended to `cargo test`. The default includes
+          `--all-features` deliberately: on forge, plain `--all-targets` ran
+          2,663 tests while `--all-features` ran 2,950 — an `attestation`
+          feature gated 263 of them. A test gate that silently skips a
+          tenth of the suite is a fresh subject-set vacuity inside the very
+          thing meant to close one. Narrow it here only with a reason.
+        required: false
+        type: string
+        default: "--workspace --all-features --no-fail-fast"
 
 jobs:
-  check:
+  flake-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
         with:
           flake-args: ${{ inputs.flake-args }}
+
+      # A green `nix flake check` is only as strong as the check set it had
+      # to build. Zero checks is a pass over an unbuilt crate, so it fails
+      # here — loudly, naming the fix — and a non-empty set is PRINTED so a
+      # green run states what it actually verified instead of being opaque.
+      #
+      # The policy is substrate's `lib/util/flake-checks-gate.nix`, not
+      # shell branching and not an inline expression: it throws with the
+      # operator-facing message and `nix eval` propagates that as a non-zero
+      # exit, and living in a file means it is parseable, reviewable and
+      # covered by substrate's own `checks.<system>.flake-checks-gate`.
+      # `checks` absent entirely is handled by `or {}` in the caller here,
+      # so the gate never has to classify a missing-attribute error.
+      - name: Gate -- the flake must expose at least one check
+        run: >-
+          nix eval --impure --raw --expr
+          'import (builtins.getFlake "github:pleme-io/substrate").flakeChecksGatePath {
+             system = builtins.currentSystem;
+             checks = (builtins.getFlake (toString ./.)).checks or {};
+           }'
+
+  cargo-test:
+    # Composes substrate's existing devShell test workflow rather than
+    # re-inlining `nix develop -c cargo test` here (Operating Principle #1:
+    # extend the near-miss, never re-implement it). That workflow already
+    # carries the private-git-dependency credential wiring and the
+    # magic-nix-cache removal.
+    uses: pleme-io/substrate/.github/workflows/nix-devshell-cargo-test.yml@main
+    with:
+      devshell: ${{ inputs.devshell }}
+      test-args: ${{ inputs.test-args }}
+    secrets: inherit
