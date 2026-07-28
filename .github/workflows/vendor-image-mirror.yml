@@ -200,21 +200,51 @@ jobs:
       - name: Trust Zot's CA
         if: steps.pull-scan.outputs.admitted == 'true'
         env:
+          # PREFERRED: the CA as an org Actions variable — no network, no auth,
+          # no private repo, cannot 404.
+          #
+          # pleme-io/akeyless-k8s is private PERMANENTLY (operator decision,
+          # 2026-07-28), so authenticating the fetch would mean distributing a
+          # cross-repo PAT to every mirror job forever. That is the wrong shape
+          # for this asset: the file is a self-signed CA *public* certificate
+          # (verified: 1992 bytes, one PEM CERTIFICATE block, zero PRIVATE KEY
+          # blocks, CN=zot-pleme-zot.zot.svc.cluster.local, valid to 2028-10-20).
+          # A CA cert is the thing you DISTRIBUTE so clients can verify the
+          # server; the private key never leaves the cluster. Needing a secret
+          # to read a public certificate was accidental coupling to where it
+          # happened to be stored.
+          #
+          # `vars` in a called workflow resolves against the CALLER's org, and
+          # every caller is pleme-io, so this needs NO per-caller wiring — it
+          # works for the ~14 existing vendor-* legs and every future one.
+          # Matches the org's existing pattern (CAMELOT_IMAGE_RUNNER,
+          # CAMELOT_SUI_SUBSTITUTER).
+          ZOT_CA_PEM: ${{ vars.CAMELOT_ZOT_CA }}
+          # FALLBACK only: a token for the private-repo fetch, for a caller
+          # outside pleme-io where the org variable does not resolve.
           CA_CERT_TOKEN: ${{ secrets.CA_CERT_TOKEN }}
         run: |
           set -euo pipefail
           url="https://raw.githubusercontent.com/pleme-io/akeyless-k8s/main/clusters/camelot-eks/infrastructure/zot/zot-ca.crt"
 
-          if [ -n "${CA_CERT_TOKEN:-}" ]; then
+          if [ -n "${ZOT_CA_PEM:-}" ]; then
+            printf '%s\n' "$ZOT_CA_PEM" > /tmp/zot-ca.crt
+            echo "CA source: org variable CAMELOT_ZOT_CA (no network)"
+          elif [ -n "${CA_CERT_TOKEN:-}" ]; then
             curl -fsSL -H "Authorization: Bearer $CA_CERT_TOKEN" -o /tmp/zot-ca.crt "$url"
+            echo "CA source: authenticated fetch from akeyless-k8s"
           else
-            curl -fsSL -o /tmp/zot-ca.crt "$url"
+            echo "::error::No CA available. Set the org variable CAMELOT_ZOT_CA (preferred)"
+            echo "::error::or pass CA_CERT_TOKEN. akeyless-k8s is PRIVATE — an unauthenticated"
+            echo "::error::fetch returns a 14-byte '404: Not Found' body, which is what this"
+            echo "::error::step used to install as a certificate."
+            exit 1
           fi
 
           if ! grep -q "BEGIN CERTIFICATE" /tmp/zot-ca.crt; then
             echo "::error::Fetched CA is not a PEM certificate ($(wc -c < /tmp/zot-ca.crt) bytes)."
             echo "::error::First bytes: $(head -c 120 /tmp/zot-ca.crt)"
-            echo "::error::pleme-io/akeyless-k8s is PRIVATE -- pass CA_CERT_TOKEN (a PAT with read access)."
+            echo "::error::Set the org variable CAMELOT_ZOT_CA to the PEM (preferred), or pass CA_CERT_TOKEN."
             exit 1
           fi
 
