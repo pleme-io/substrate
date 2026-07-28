@@ -45,8 +45,59 @@ on:
         type: string
         required: false
         default: ""
-    # No `secrets:` block — `secrets: inherit` from the consumer
-    # passes everything down; inner `uses:` calls also use `inherit`.
+    secrets:
+      # DECLARED EXPLICITLY, ALL OPTIONAL — this block is the fix for the
+      # startup_failure that made this whole workflow unusable.
+      #
+      # Previously there was no `secrets:` block at all: the consumer's
+      # `secrets: inherit` fanned out to six per-language reusables, four of
+      # which declare their token `required: true` (cargo + rust
+      # CRATES_API_TOKEN, npm NPM_TOKEN, python PYPI_API_TOKEN). GitHub
+      # resolves the whole called-workflow graph before evaluating any job's
+      # `if:`, so every consumer had to satisfy the UNION of those four — and
+      # a run that cannot be built emits no error, just a run with zero jobs.
+      #
+      # Measured 2026-07-27, which is what turns this from inference into a
+      # diagnosis: `gh api orgs/pleme-io/actions/secrets` returns exactly AGE,
+      # BOT_PAT, CRATES_API_TOKEN and RUBYGEMS_API_KEY. NPM_TOKEN and
+      # PYPI_API_TOKEN exist in NO org and NO repo. The union was therefore
+      # unsatisfiable everywhere, which is precisely why the 1-level direct
+      # calls kept working: 371 repos call cargo-auto-release.yml, which needs
+      # only CRATES_API_TOKEN, and that one IS org-wide.
+      #
+      # Declaring them here makes each one AVAILABLE-BUT-OPTIONAL at this
+      # level, so the arms' `secrets: inherit` passes a declared (possibly
+      # empty) value rather than leaving the graph with an unsatisfiable
+      # constraint. A publish that genuinely needs a missing token now fails AT
+      # PUBLISH with a legible error, instead of the whole run silently never
+      # starting. The arms keep `inherit` deliberately: enumerating per-arm
+      # would add a fifth place to keep in sync every time a reusable's secret
+      # set changes, which is the drift class that produced `crate-path`'s
+      # source-paths/add-paths bug.
+      #
+      # TIER-HONEST: the DIAGNOSIS is confirmed by the org-secret measurement
+      # above. This FIX's efficacy is not yet observed — GitHub's exact
+      # graph-build semantics for `inherit` over a declared-optional secret is
+      # inferred, not proven. Confirm with one live run: a consumer's run must
+      # start WITH JOBS (the failure mode is a run created with zero jobs and
+      # no annotations). If it still fails, the fallback is to make the four
+      # per-language reusables' own tokens `required: false` — same effect,
+      # four more files touched.
+      CRATES_API_TOKEN:
+        description: "crates.io publish token. Org-wide today; required only by the rust/cargo arms."
+        required: false
+      NPM_TOKEN:
+        description: "npmjs.org publish token. Does not exist in the org as of 2026-07-27 — the npm class is 32 repos with zero release workflows, so this is declared for completeness, not because publishing is wired."
+        required: false
+      PYPI_API_TOKEN:
+        description: "pypi.org publish token. Does not exist in the org as of 2026-07-27."
+        required: false
+      BOT_PAT:
+        description: "Org PAT used for push-back of the version bump. Org-wide."
+        required: false
+      ANSIBLE_GALAXY_TOKEN:
+        description: "ansible-galaxy publish token. Its reusable already declares it required:false, so its absence never blocked the graph — declared here so the ansible arm's `inherit` can actually carry it if the secret is ever added."
+        required: false
 
 permissions:
   contents: write
