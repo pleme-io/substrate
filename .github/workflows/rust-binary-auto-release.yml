@@ -147,7 +147,33 @@ jobs:
         with:
           version: ${{ steps.bump.outputs.new-version }}
           commit-message-template: "release: v{version}"
-          add-paths: "Cargo.toml Cargo.lock"
+          # Third release path with the same defect 2987183 fixed in
+          # cargo-auto-release.yml / rust-auto-release.yml: `cargo-bump` calls
+          # `ensure-gen-lock-fresh` (stdlib.tlisp) in `post-bump-checks`,
+          # INDEPENDENTLY of `regenerate-cargo-nix` above, and its
+          # `regen-gen-lock` runs one `gen build .` emitting TWO artifacts —
+          # Cargo.gen.lock AND Cargo.build-spec.json. Neither was staged here,
+          # so both would have died with the runner.
+          #
+          # FLAT LITERAL, no `format('{0}/…')` arm: this reusable has no
+          # `crate-path` input (nor an `add-paths` one) — same as
+          # rust-auto-release.yml. A `{0}/` prefix with no such input would
+          # reproduce the documented forge failure: a root-relative path that
+          # does not exist, nothing staged, `git commit` exit 1.
+          #
+          # Cargo.nix is deliberately still absent: `regenerate-cargo-nix` is
+          # hard-wired "false" above (this workflow exists for apps with git
+          # deps crate2nix cannot resolve), so there is never a regenerated
+          # Cargo.nix to stage.
+          #
+          # Inert for repos without these files, and for the ~406 that
+          # gitignore the spec: git-commit-tag stages PER-PATH under
+          # `exec-check`, which returns the child status rather than raising,
+          # so an ignored (exit 1) or missing (exit 128) pathspec fails alone
+          # and the real paths still stage. Proven on a fixture, not inferred.
+          # No repo that commits a build-spec consumes THIS reusable today —
+          # which is exactly why it was still wrong.
+          add-paths: "Cargo.toml Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
 
       # Push with BOT_PAT so the tag push triggers the consumer's
       # release-binaries.yml (GITHUB_TOKEN would NOT trigger it).
