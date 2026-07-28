@@ -82,6 +82,9 @@ on:
       SOURCE_PASSWORD:
         description: "Password/token for source-registry (e.g. a GHCR read:packages PAT) -- only needed when the SOURCE image is private. Optional: absent keeps the public-source path unchanged."
         required: false
+      CA_CERT_TOKEN:
+        description: "Read access to pleme-io/akeyless-k8s, whose committed zot-ca.crt this workflow trusts. Optional so the ~14 existing vendor-* callers keep working unchanged -- but WITHOUT it the CA fetch now fails LOUDLY rather than installing GitHub's 404 body as a certificate."
+        required: false
     outputs:
       admitted:
         description: "'true' iff the pulled image cleared the CVE gate and was mirrored into Zot"
@@ -162,11 +165,59 @@ jobs:
       # trusted here, skopeo (both this step's login and oci-image-push's
       # own copy below) verifies natively -- no extra flag needed on
       # either.
+      # ── This step installed "404: Not Found" AS A CERTIFICATE for 5 days ──
+      #
+      # It fetched the CA from pleme-io/akeyless-k8s -- a PRIVATE repo -- with
+      # `curl -sL` and no token. GitHub answers an unauthenticated raw request
+      # for a private path with HTTP 404 and a 14-byte body. Measured:
+      #
+      #     curl -sL  <url>  ->  body "404: Not Found",  exit 0
+      #     curl -fsL <url>  ->  no body,                exit 22
+      #
+      # Without `-f`, curl treats the 404 as a successful transfer. Those 14
+      # bytes were copied into /usr/local/share/ca-certificates/, and
+      # `update-ca-certificates` then printed "1 added, 0 removed; done." and
+      # exited 0 -- because it counts FILES, not valid certificates. The step
+      # reported SUCCESS having trusted nothing, and every subsequent skopeo
+      # call died on Zot's self-signed TLS.
+      #
+      # A guard that cannot fail is not a guard. Three changes, most
+      # load-bearing first:
+      #
+      #   1. `-f` -- the fetch FAILS the job instead of laundering an error
+      #      page into a certificate. Unconditional, and on its own it turns a
+      #      silent 5-day outage into an immediate red run.
+      #   2. a PEM-header check -- even a 200 carrying the wrong bytes cannot
+      #      be installed. This is what makes "we trusted something that is
+      #      not a certificate" unconstructible rather than merely unlikely.
+      #   3. an optional CA_CERT_TOKEN -- the actual auth, matching the seam
+      #      pleme-io/actions/zot-push already exposes. substrate's inline
+      #      curl was the only zot-CA fetch in the fleet missing BOTH.
+      #
+      # Why it ever worked: zot-push's own comment calls this cert "public,
+      # safe to fetch" -- akeyless-k8s used to be public. The repo going
+      # private broke it silently, because nothing on this path checked.
       - name: Trust Zot's CA
         if: steps.pull-scan.outputs.admitted == 'true'
+        env:
+          CA_CERT_TOKEN: ${{ secrets.CA_CERT_TOKEN }}
         run: |
-          curl -sL -o /tmp/zot-ca.crt \
-            "https://raw.githubusercontent.com/pleme-io/akeyless-k8s/main/clusters/camelot-eks/infrastructure/zot/zot-ca.crt"
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/pleme-io/akeyless-k8s/main/clusters/camelot-eks/infrastructure/zot/zot-ca.crt"
+
+          if [ -n "${CA_CERT_TOKEN:-}" ]; then
+            curl -fsSL -H "Authorization: Bearer $CA_CERT_TOKEN" -o /tmp/zot-ca.crt "$url"
+          else
+            curl -fsSL -o /tmp/zot-ca.crt "$url"
+          fi
+
+          if ! grep -q "BEGIN CERTIFICATE" /tmp/zot-ca.crt; then
+            echo "::error::Fetched CA is not a PEM certificate ($(wc -c < /tmp/zot-ca.crt) bytes)."
+            echo "::error::First bytes: $(head -c 120 /tmp/zot-ca.crt)"
+            echo "::error::pleme-io/akeyless-k8s is PRIVATE -- pass CA_CERT_TOKEN (a PAT with read access)."
+            exit 1
+          fi
+
           sudo cp /tmp/zot-ca.crt /usr/local/share/ca-certificates/zot-camelot-eks.crt
           sudo update-ca-certificates
 
