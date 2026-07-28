@@ -199,11 +199,29 @@
           # negatives (unknown field / non-bool enable / retirement with no
           # date or no `executes` / a verb this builder doesn't produce).
           #
+          # Also covers COMPOSITION (added 2026-07-28): that a retirement
+          # SURVIVES being composed. The 20 isolation tests above never
+          # asked, so a change that retired only the RETURNED app set —
+          # leaving `deploy` / `cycle` splicing the live cloud mutation
+          # behind a top-level app that reads as refusing — would have kept
+          # this check green. The composition block drives the two real
+          # composition layers end to end (gated-pangea-workspace.nix's
+          # `deploy`, infra-sdlc.nix's `cycle`) against a content-keyed fake
+          # `pkgs`, and ships its own CONTROL: the open build must still
+          # splice the real apply, or a harness that can see nothing would
+          # report every negative as passing.
+          #
           # NOT VACUOUS: verified red before landing, not merely observed
-          # green. Three deliberate breaks were each run and each failed —
+          # green. Five deliberate breaks were each run and each failed —
           # deleting the identity short-circuit (16/20), disabling the
-          # declaration validator (16/20), and deleting the stray-verb check
-          # (19/20). The third break is why `rejects-unknown-verb` uses a
+          # declaration validator (16/20), deleting the stray-verb check
+          # (19/20), replacing `base = retire rawBase` with `base = rawBase`
+          # in gated-pangea-workspace.nix (24/30, 6 composition tests red,
+          # all 20 isolation tests still green — the whole reason the block
+          # exists), and blinding the composition fake to script bodies
+          # (26/30, BOTH controls red while the two negatives they guard
+          # stayed vacuously green — exactly the failure a control is for).
+          # The stray-verb break is why `rejects-unknown-verb` uses a
           # working fake `pkgs` rather than the poisoned one: with the
           # poisoned `pkgs` that test stayed GREEN under the break, passing
           # on a throw from the wrong cause.

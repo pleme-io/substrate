@@ -11,6 +11,45 @@
 # declaration THROWS. `tryEval` catching nothing would fail the assertion, so
 # a validator that stopped validating goes red rather than green.
 #
+# COMPOSITION (the `composition-*` block at the bottom)
+#
+#   Everything above tests `retireApps` in ISOLATION — it never asks whether a
+#   retirement survives being composed. mutating-verbs.nix's own header calls
+#   that out ("Retire at the SOURCE app set, before any composed verb inlines
+#   another verb's `program`") and gated-pangea-workspace.nix implements it,
+#   but for 20 tests nothing checked it: a change that retired only the
+#   RETURNED set would have left `deploy` / `cycle` splicing the live cloud
+#   mutation behind a top-level app that reads as refusing, and this suite
+#   would have stayed green. The composition block drives the two real
+#   composition layers end to end — gated-pangea-workspace.nix (`deploy`) and
+#   infra-sdlc.nix (`cycle`) — and asserts the retirement reaches both.
+#
+#   It ships WITH ITS CONTROL. `composition-control-*` asserts the OPEN build
+#   *does* splice the real apply program, which is what makes the two
+#   "no-longer-splices" negatives falsifiable rather than an artifact of a
+#   harness that can see nothing.
+#
+#   BOTH DIRECTIONS WERE VERIFIED RED, not merely observed green:
+#
+#     break 1 — the property. Replacing `base = retire rawBase` with
+#       `base = rawBase` in gated-pangea-workspace.nix (retire only the
+#       RETURNED set — the exact defect that file's header warns about) →
+#       24/30, failing composition-retirement-reaches-{deploy,apply-ungated,
+#       sdlc-cycle}, composition-apply-ungated-is-the-refusal and both
+#       -drops-real-apply negatives. Every one of the 20 pre-existing tests
+#       stayed green, which is the whole reason this block exists.
+#       `composition-retirement-reaches-composed-apply` also stayed green —
+#       top-level `apply` IS retireable, so the outer pass still replaces it.
+#       That test is the weak one by construction; the load is carried by the
+#       five that cover verbs the outer pass cannot reach.
+#
+#     break 2 — the harness. Keying `compositionPkgs.writeShellScript` on the
+#       NAME only (a fake that cannot see script bodies) → 26/30, failing
+#       BOTH controls. Note what stayed green under it: the two
+#       -drops-real-apply negatives, vacuously, because a blind harness finds
+#       nothing everywhere. That is precisely the failure the controls exist
+#       to catch, and they caught it.
+#
 # Usage:
 #   nix eval -f lib/infra/tests/mutating-verbs-test.nix --arg lib '(import <nixpkgs> {}).lib' --json
 # Wired as a derivation via `asCheck pkgs` in substrate's flake checks.
@@ -58,6 +97,74 @@ let
       executes = "pangea bulk apply -> OpenTofu apply against S3 state";
     };
   } fakeApps;
+
+  # ── Composition harness ───────────────────────────────────────────────
+  #
+  # A second `pkgs` stand-in, and the difference from `fakePkgs` above is
+  # load-bearing rather than stylistic. The real store is CONTENT-addressed:
+  # change a script's text and its path changes. `fakePkgs` keys only on the
+  # NAME, which is correct for the isolation tests (they compare app values,
+  # not script bodies) but would make every composition assertion vacuous —
+  # `${name}-deploy` is the same name whether or not the apply it splices was
+  # retired, so "the composed verb changed" would read FALSE under a build
+  # that is in fact correct, and equally false under one that is broken.
+  #
+  # So this fake makes the returned "path" a function of the text, exactly as
+  # the real writer does. Embedding the text verbatim rather than hashing it
+  # keeps the second question answerable too — not just "did deploy change?"
+  # but "does deploy still invoke the REAL apply program?", which is the
+  # property that actually matters.
+  compositionPkgs = {
+    inherit lib;
+    writeText = n: text: "/nix/store/${n}<<${text}>>";
+    writeShellScript = n: text: "/nix/store/${n}.sh<<${text}>>";
+    opentofu = "/nix/store/opentofu";
+  };
+
+  # `ruby` is passed explicitly so the builder never reaches for
+  # `pkgs.ruby_3_3`; `pangea` / `bundler` / `inspecProfile` stay null, which
+  # keeps every remaining `pkgs` reference inside the four attrs above.
+  mkGatedWorkspace = import ../gated-pangea-workspace.nix {
+    pkgs = compositionPkgs;
+    ruby = "/nix/store/ruby";
+  };
+  mkInfraSdlc = import ../infra-sdlc.nix {
+    pkgs = compositionPkgs;
+    ruby = "/nix/store/ruby";
+  };
+
+  wsArgs = {
+    name = "demo";
+    architecture = "demo_arch";
+    architecturesSrc = "/nix/store/architectures";
+  };
+
+  retireApplyDecl = {
+    enable = false;
+    retiredOn = "2026-07-27";
+    executes = "pangea workspace apply demo -> OpenTofu apply against S3 state";
+  };
+
+  # The same builder, twice, differing ONLY in the retirement declaration.
+  openWs = mkGatedWorkspace wsArgs;
+  retiredWs = mkGatedWorkspace (wsArgs // { mutatingVerbs.apply = retireApplyDecl; });
+  openSdlc = mkInfraSdlc wsArgs;
+  retiredSdlc = mkInfraSdlc (wsArgs // { mutatingVerbs.apply = retireApplyDecl; });
+
+  # The live program a composed verb splices when nothing is retired. Every
+  # "does the composition still reach the real thing?" question below is
+  # `hasInfix` of THIS string.
+  openBaseApply = openWs.apply-ungated.program;
+
+  # Independently-built oracle: what the refusal app for `apply` must be,
+  # constructed straight from mutating-verbs.nix rather than read back out of
+  # the builder under test.
+  expectedRefusal = mv.mkRetiredApp {
+    pkgs = compositionPkgs;
+    name = "demo";
+    verb = "apply";
+    decl = mv.normalize "demo" "apply" retireApplyDecl;
+  };
 
   noticeWithReason = mv.retirementNotice {
     name = "demo";
@@ -188,6 +295,76 @@ let
     (testHelpers.mkTest "accepts-enabled-declaration-of-known-verb"
       (mv.normalize "demo" "apply" { enable = true; } ? retiredOn)
       "an enabled declaration normalizes without requiring retirement fields")
+
+    # ── Composition: does a retirement SURVIVE being composed? ─────────
+    #
+    # Layer 1 — gated-pangea-workspace.nix. `deploy` and `apply-ungated`
+    # are NOT in `retireableVerbs`, so the outer (returned-set) retire pass
+    # cannot touch them: the only thing that can change them is retirement
+    # having been applied to the SOURCE app set before they were composed.
+    # That is exactly the property under test.
+
+    (testHelpers.mkTest "composition-retirement-reaches-composed-apply"
+      (retiredWs.apply.program != openWs.apply.program)
+      "retiring `apply` must change the workspace's composed `apply` app")
+
+    (testHelpers.mkTest "composition-retirement-reaches-deploy"
+      (retiredWs.deploy.program != openWs.deploy.program)
+      ''retiring `apply` must change `deploy`, which splices
+        base.apply.program — `deploy` is not itself retireable, so this can
+        only hold if retirement ran BEFORE composition'')
+
+    (testHelpers.mkTest "composition-retirement-reaches-apply-ungated"
+      (retiredWs.apply-ungated.program != openBaseApply)
+      "retiring `apply` must change `apply-ungated`, which IS the base app")
+
+    (testHelpers.mkTest "composition-apply-ungated-is-the-refusal"
+      (retiredWs.apply-ungated.program == expectedRefusal.program)
+      ''`apply-ungated` must be the refusal app itself, byte-for-byte with
+        one built straight from mutating-verbs.nix — not merely "changed"'')
+
+    (testHelpers.mkTest "composition-retired-deploy-drops-real-apply"
+      (!(lib.hasInfix openBaseApply retiredWs.deploy.program))
+      ''the retired build's `deploy` must NOT contain the real apply
+        program — a deploy that still runs it behind a refusing `apply` is a
+        guard that reads green and gates nothing'')
+
+    (testHelpers.mkTest "composition-control-open-deploy-keeps-real-apply"
+      (lib.hasInfix openBaseApply openWs.deploy.program)
+      ''CONTROL for the two drops-real-apply tests: with nothing retired,
+        `deploy` DOES contain the real apply program. Without this a harness
+        that could see nothing at all would report both negatives as
+        passing'')
+
+    # Layer 2 — infra-sdlc.nix, one composition deeper. `cycle` splices
+    # `gated.apply-ungated.program`, and infra-sdlc applies no retirement of
+    # its own, so a retirement can only reach `cycle` by having been baked
+    # into the base app set two layers down.
+
+    (testHelpers.mkTest "composition-retirement-reaches-sdlc-cycle"
+      (retiredSdlc.cycle.program != openSdlc.cycle.program)
+      "retiring `apply` must reach infra-sdlc's `cycle`, two layers up")
+
+    (testHelpers.mkTest "composition-retired-cycle-drops-real-apply"
+      (!(lib.hasInfix openBaseApply retiredSdlc.cycle.program))
+      ''the retired build's `cycle` must NOT contain the real apply program
+        — otherwise `nix run .#cycle` routes around a declared retirement'')
+
+    (testHelpers.mkTest "composition-control-open-cycle-keeps-real-apply"
+      (lib.hasInfix openBaseApply openSdlc.cycle.program)
+      "CONTROL: with nothing retired, `cycle` DOES contain the real apply")
+
+    # And the other direction — retirement must be SCOPED, not a blanket
+    # rebuild. `plan` is a sibling retireable verb left enabled;
+    # `cycle-destroy` composes destroy/show/test and never touches apply.
+    # Both must come out byte-identical, or "it changed" above proves
+    # nothing about apply in particular.
+    (testHelpers.mkTest "composition-untouched-verbs-are-byte-identical"
+      (retiredWs.plan.program == openWs.plan.program
+        && retiredSdlc.cycle-destroy.program == openSdlc.cycle-destroy.program)
+      ''retiring `apply` must leave `plan` and `cycle-destroy` untouched —
+        without this the change-detection tests could pass on a builder that
+        simply rebuilds everything'')
   ];
 
   result = testHelpers.runTests tests;
