@@ -54,7 +54,26 @@ let
       pred = builtins.match ".*alt\\.receipt\\.json.*" customPathsDrv.buildCommand != null; }
   ];
 
-  allAssertions = shapeAssertions ++ argAssertions;
+  # Executable-prose guard. Every backtick this builder emits is prose (a
+  # hint naming `estante lock --emit-receipt`), but Nix leaves a bare
+  # backtick alone, so it reaches the shell verbatim — and inside a "…"
+  # that is COMMAND SUBSTITUTION. estante is on PATH (buildInputs) and
+  # `lock --emit-receipt` WRITES, so an unescaped hint in the
+  # missing-receipt branch made the error path emit the very receipt whose
+  # absence it was reporting, with the hint replaced by that command's
+  # stdout. Strip the correctly-escaped \` pairs, then assert nothing
+  # backtick-shaped survives. hasInfix (not builtins.match) because
+  # buildCommand is multiline and ERE `.` does not span newlines.
+  strippedEscapes = d: builtins.replaceStrings [ "\\`" ] [ "" ] d.buildCommand;
+
+  proseAssertions = [
+    { label = "no unescaped backtick reaches buildCommand (default paths)";
+      pred = !(pkgs.lib.strings.hasInfix "`" (strippedEscapes drv)); }
+    { label = "no unescaped backtick reaches buildCommand (overridden paths)";
+      pred = !(pkgs.lib.strings.hasInfix "`" (strippedEscapes customPathsDrv)); }
+  ];
+
+  allAssertions = shapeAssertions ++ argAssertions ++ proseAssertions;
 
   runAssert = a:
     if a.pred then true

@@ -38,6 +38,15 @@
           description = "Build-time `estante attest --check` gate for ${name}";
         };
       }
+      # Backticks in the builder body below MUST stay escaped as \`.
+      # Nix leaves a bare backtick alone, so it reaches the shell verbatim,
+      # and inside a "…" that is command substitution rather than prose.
+      # `estante` is on PATH here (buildInputs above) and
+      # `lock --emit-receipt` WRITES: an unescaped hint in the
+      # missing-receipt branch would emit the very receipt whose absence it
+      # is reporting, then exit 2 — with the hint itself replaced by that
+      # command's stdout. (This comment is Nix-level, outside the '' string,
+      # so its own backticks never reach the shell.)
       ''
         mkdir -p work
         cp -R ${src}/. work/
@@ -51,7 +60,7 @@
           exit 2
         fi
         if [ ! -f ${receiptPath} ]; then
-          echo "mkReceiptVerifier: missing ${receiptPath} in src — run `estante lock --emit-receipt`" >&2
+          echo "mkReceiptVerifier: missing ${receiptPath} in src — run \`estante lock --emit-receipt\`" >&2
           exit 2
         fi
         estante \
