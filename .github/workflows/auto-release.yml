@@ -134,14 +134,66 @@ jobs:
       runner: ${{ inputs.runner }}
     secrets: inherit
 
+  ansible-collection:
+    name: 'ansible-collection · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'ansible-collection'
+    uses: pleme-io/substrate/.github/workflows/ansible-collection-release.yml@main
+    secrets: inherit
+
+  github-action:
+    name: 'github-action · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'github-action'
+    uses: pleme-io/substrate/.github/workflows/action-release.yml@main
+    secrets: inherit
+
+  # Catch-all. MUST be a NEGATION of the dispatched set, never `== 'unknown'`.
+  #
+  # detect-repo-type emits TEN types (actions/detect-repo-type/run.tlisp):
+  #   rust-workspace rust-single-crate go ansible-collection helm python npm
+  #   ruby-gem github-action unknown
+  # Before 2026-07-27 this job gated on `== 'unknown'` — an equality test, not a
+  # negation — while only SIX arms existed. A repo detected as `ruby-gem`,
+  # `ansible-collection` or `github-action` therefore matched no arm AND did not
+  # match this one, so the workflow completed with zero jobs and reported GREEN
+  # while publishing nothing. That is a green gate over zero subjects: the
+  # Tier-⊥ vacuous-guard class the fleet's own UNREPRESENTABILITY doctrine names.
+  #
+  # `ruby-gem` is deliberately NOT an arm above. gem-release.yml declares
+  # RUBYGEMS_API_KEY as `required: true`, and adding it here would re-create the
+  # very union-of-required-secrets unsatisfiability that makes this polymorphic
+  # workflow startup_failure. The gem flow stays standalone + tag-triggered (see
+  # the org CLAUDE.md AUTO-RELEASE section); gem repos get a specific, actionable
+  # error below rather than a silent green.
   unsupported:
     name: 'unsupported repo type'
     needs: detect
-    if: needs.detect.outputs.repo-type == 'unknown'
+    if: >-
+      needs.detect.outputs.repo-type != 'rust-workspace' &&
+      needs.detect.outputs.repo-type != 'rust-single-crate' &&
+      needs.detect.outputs.repo-type != 'go' &&
+      needs.detect.outputs.repo-type != 'npm' &&
+      needs.detect.outputs.repo-type != 'python' &&
+      needs.detect.outputs.repo-type != 'helm' &&
+      needs.detect.outputs.repo-type != 'ansible-collection' &&
+      needs.detect.outputs.repo-type != 'github-action'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - name: Fail with diagnostic
+        env:
+          REPO_TYPE: ${{ needs.detect.outputs.repo-type }}
         run: |
-          echo "::error::detect-repo-type returned 'unknown' — no manifest at root recognized"
-          echo "::error::see pleme-io/actions/detect-repo-type for the supported manifest list"
+          if [ "$REPO_TYPE" = "ruby-gem" ]; then
+            echo "::error::ruby-gem repos do not use the polymorphic auto-release."
+            echo "::error::Call gem-auto-bump.yml@main and gem-release.yml@main directly."
+            echo "::error::gem-release.yml needs a named RUBYGEMS_API_KEY secret, which"
+            echo "::error::the single-shot 'secrets: inherit' arm contract cannot carry."
+          elif [ "$REPO_TYPE" = "unknown" ]; then
+            echo "::error::detect-repo-type returned 'unknown' — no manifest at root recognized"
+            echo "::error::see pleme-io/actions/detect-repo-type for the supported manifest list"
+          else
+            echo "::error::repo-type '$REPO_TYPE' is emitted by detect-repo-type but has no"
+            echo "::error::dispatch arm in auto-release.yml. Add one, or route it explicitly."
+          fi
           exit 1
