@@ -155,7 +155,20 @@ jobs:
         uses: pleme-io/actions/git-commit-tag@main
         with:
           version: ${{ steps.bump.outputs.new-version }}
-          add-paths: ${{ inputs.add-paths != '' && inputs.add-paths || (inputs.crate-path == '.' && 'Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock' || format('{0}/Cargo.toml {0}/Cargo.lock {0}/Cargo.nix {0}/Cargo.gen.lock', inputs.crate-path)) }}
+          # Cargo.build-spec.json is staged for the same reason Cargo.gen.lock
+          # is: both are co-outputs of the ONE `gen build .` that
+          # ensure-gen-lock-fresh already runs during the bump (stdlib.tlisp
+          # regen-gen-lock), after the version write and before this step.
+          # Only the lock was ever staged, so the regenerated spec died with
+          # the runner and every repo that COMMITS its spec (17 fleet-wide,
+          # deliberately un-gitignored for no-IFD deterministic builds) went
+          # stale on release. Confirmed on vigy 264cad1, namimado 953241d and
+          # izumi b0fe9f8: each staged Cargo.gen.lock and not the spec.
+          # Safe for the ~406 repos that DO gitignore it — git-commit-tag
+          # stages per-path under exec-check, which returns the status rather
+          # than raising, so an ignored (exit 1) or absent (exit 128) pathspec
+          # fails alone. Verified empirically, not inferred.
+          add-paths: ${{ inputs.add-paths != '' && inputs.add-paths || (inputs.crate-path == '.' && 'Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock Cargo.build-spec.json' || format('{0}/Cargo.toml {0}/Cargo.lock {0}/Cargo.nix {0}/Cargo.gen.lock {0}/Cargo.build-spec.json', inputs.crate-path)) }}
 
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
