@@ -202,6 +202,10 @@ lib/
 │   │                              # whole config in Nix attrsets)
 │   ├── pangea-infra.nix           # Top-level repo-as-workspace builder
 │   ├── pangea-infra-flake.nix     # Top-level Pangea flake wrapper
+│   ├── mutating-verbs.nix         # ★★ typed retirement of hand-run
+│   │                              # mutating verbs (apply/destroy/init/
+│   │                              # mutating flows). ONE surface, honoured
+│   │                              # by every Pangea builder here.
 │   ├── fleet-pangea-infra.nix     # Top-level repo with declarative
 │   │                              # fleet flows in Nix
 │   ├── fleet-pangea-infra-flake.nix # ^ flake wrapper
@@ -610,6 +614,8 @@ Key differences from `rust-tool-release`:
 |--------|--------|-------------|
 | `pangeaInfraBuilder` | `infra/pangea-infra.nix` | Pangea project builder |
 | `pangeaInfraFlakeBuilder` | `infra/pangea-infra-flake.nix` | Pangea flake wrapper |
+| `mutatingVerbsBuilder` | `infra/mutating-verbs.nix` | ★★ typed retirement of hand-run mutating verbs (see below) |
+| `mutatingVerbsTests` | `infra/tests/mutating-verbs-test.nix` | Pure eval tests for the above; `checks.<sys>.mutating-verbs` |
 | `mkTerraformModuleCheck` | `infra/terraform-module.nix` | TF validation derivation |
 | `mkPulumiProvider` | `infra/pulumi-provider.nix` | Pulumi SDK generation |
 | `mkAnsibleCollection` | `infra/ansible-collection.nix` | Ansible Galaxy packaging |
@@ -818,6 +824,56 @@ emitted when the tool gen calls isn't on PATH inside the sandbox.
 Reference: gen-cargo 3f6e4fa hard-fails on prefetch_git_sha256
 failure; substrate 267430e added `nix-prefetch-git` + `git` after the
 fleet rebuild surfaced the missing-tool class.
+
+## ★★ `mutatingVerbs` — typed retirement of hand-run mutating verbs
+
+**One surface, in `lib/infra/mutating-verbs.nix`, honoured by every Pangea
+builder here.** ★★ PLATFORM-MEDIATED INFRASTRUCTURE says a human's only two
+verbs are DECLARE and OBSERVE; ★★ MODULARIZE, DON'T DELETE says retirement is
+a typed flag, never a deletion. `mutatingVerbs` is where those two meet.
+
+```nix
+mutatingVerbs.apply = {
+  enable    = false;                 # default is TRUE for every verb
+  retiredOn = "2026-07-27";          # required when enable = false
+  executes  = "pangea bulk apply -> OpenTofu apply against S3 state";
+  reason    = "…";                   # optional extra WHY prose
+};
+```
+
+A retired verb's app **still exists and still resolves** — `nix run .#apply`
+is a refusal derived from the declaration's own fields, naming the
+declare-and-observe replacement path, exit 1. **The flag resolves at EVAL
+time**: the real program was never built, so no runtime flag, env var or
+argument can satisfy it.
+
+| Builder | Retireable verbs |
+|---|---|
+| `infra/pangea-infra.nix` (+ `-flake`) | validate · plan · apply · destroy · init · drift · test · regen |
+| `infra/fleet-pangea-infra.nix` (+ `-flake`) | the above + flow-list + every generated `flow-<name>` |
+| `infra/constellation-platform-infra.nix` | (threads through to fleet-pangea-infra) |
+| `infra/gated-pangea-workspace.nix` (→ `infra-sdlc.nix`) | plan · apply · destroy · show · status · migrate · list |
+
+**Retire at the SOURCE app set, not the returned one.** `gated-pangea-workspace`
+applies retirement to the base workspace apps *before* `deploy` (and
+`infra-sdlc`'s `cycle` / `cycle-destroy`) splice `base.<verb>.program`.
+Retiring only the returned `apply` would leave those compositions running the
+real cloud mutation behind a top-level app that reads as refusing — a guard
+that is green and checks nothing.
+
+**Sibling of `gated-pangea-workspace`'s test gate, not a duplicate.** A gate
+says *"you may run this, once the tests pass"*; retirement says *"this is not
+a human's to run at all"*. A gate cannot express retirement (a passing suite
+would unlock the very apply the platform forbids) and retirement cannot
+express a gate. Neither subsumes the other, so they **compose** through one
+declaration rather than shipping two mechanisms.
+
+**Backward compatibility is mechanical, not asserted.** Every verb defaults to
+`enable = true`, and `retireApps` on an all-enabled declaration returns the
+app set **by identity** without forcing `pkgs` at all —
+`lib/infra/tests/mutating-verbs-test.nix` proves it by passing
+`pkgs = throw "…"`. Wired as `checks.<system>.mutating-verbs`; verified red
+against three deliberate breaks before landing.
 
 ## ★★ Self-consistent SVH — the favored Rust-closure pattern
 

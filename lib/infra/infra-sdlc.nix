@@ -32,6 +32,14 @@
 #   # Artifacts
 #   pangeaYml
 # }
+#
+# ★★ PLATFORM-MEDIATED INFRASTRUCTURE — `mutatingVerbs` passes through `args`
+# to gated-pangea-workspace.nix, which retires the BASE workspace apps. Every
+# composed verb here (`cycle`, `cycle-destroy`, `drift`) splices
+# `gated.plan-ungated` / `gated.apply-ungated` / `gated.destroy`, all of which
+# are the retired base apps, so a retirement declared once cannot be routed
+# around by reaching for a cycle command. Default is `enable = true` for every
+# verb. See lib/infra/mutating-verbs.nix.
 { pkgs, pangea ? null, ruby ? pkgs.ruby_3_3, bundler ? null }:
 
 args @ {

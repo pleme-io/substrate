@@ -25,6 +25,38 @@
 #   };
 #
 # Returns: { test, plan, apply, verify, plan-ungated, apply-ungated, destroy, ... }
+#
+# ★★ PLATFORM-MEDIATED INFRASTRUCTURE — `mutatingVerbs`
+#
+#   The test gate and typed verb retirement are ORTHOGONAL, and both are
+#   honoured here through the ONE shared primitive in
+#   lib/infra/mutating-verbs.nix — there is no second mechanism.
+#
+#     gate      : "you may run this verb, once the tests pass"
+#     retirement: "this verb is not a human's to run at all; declare instead"
+#
+#   A gate cannot express retirement (a passing suite would unlock the very
+#   apply the platform forbids) and retirement cannot express a gate (it has
+#   no notion of a test suite). Neither subsumes the other, so `mutatingVerbs`
+#   is a field this builder ALSO accepts, using the same declaration shape and
+#   the same refusal renderer as pangea-infra.nix:
+#
+#     mkGatedPangeaWorkspace {
+#       name = "state-backend"; architecture = "state_backend"; …
+#       mutatingVerbs.apply = {
+#         enable    = false;
+#         retiredOn = "2026-07-27";
+#         executes  = "pangea workspace apply state-backend -> OpenTofu apply";
+#       };
+#     }
+#
+#   Retireable verbs here are the BASE workspace verbs:
+#     plan, apply, destroy, show, status, migrate, list
+#   Retirement is applied to the base app set FIRST, so every composed verb
+#   that splices another verb's `program` (`deploy` here; `cycle` /
+#   `cycle-destroy` in infra-sdlc.nix) inherits the refusal instead of
+#   becoming a live hole around it. Default is `enable = true` for every verb,
+#   so omitting the argument changes nothing.
 { pkgs, pangea ? null, ruby ? pkgs.ruby_3_3, bundler ? null }:
 
 args @ {
@@ -33,17 +65,35 @@ args @ {
   architecturesSrc,
   inspecProfile ? null,
   inspecTarget ? null,
+  mutatingVerbs ? {},
   ...
 }:
 
 let
   lib = pkgs.lib;
 
+  mutatingVerbsLib = import ./mutating-verbs.nix { inherit lib; };
+
+  # The base workspace's own verbs — the retireable surface.
+  retireableVerbs = [ "plan" "apply" "destroy" "show" "status" "migrate" "list" ];
+
+  retire = mutatingVerbsLib.retireApps {
+    inherit pkgs name mutatingVerbs;
+    verbs = retireableVerbs;
+  };
+
   # Delegate to the base workspace builder
   mkPangeaWorkspace = import ./pangea-workspace.nix { inherit pkgs pangea; };
-  base = mkPangeaWorkspace (builtins.removeAttrs args [
-    "architecturesSrc" "inspecProfile" "inspecTarget"
+  rawBase = mkPangeaWorkspace (builtins.removeAttrs args [
+    "architecturesSrc" "inspecProfile" "inspecTarget" "mutatingVerbs"
   ]);
+
+  # Retire at the SOURCE. `deploy` below (and infra-sdlc's `cycle` /
+  # `cycle-destroy`) splice `base.<verb>.program` directly, so a retirement
+  # applied only to the returned set would leave those composed verbs running
+  # the real cloud mutation while the top-level app refused — a guard that
+  # reads green and checks nothing.
+  base = retire rawBase;
 
   # RSpec test dependencies
   testDeps = [ ruby ]
@@ -142,7 +192,13 @@ let
     inherit program;
   };
 
-in {
+in
+# Second, idempotent application over the RETURNED set: without it a retired
+# `plan`/`apply` would still run the whole RSpec gate before refusing, and a
+# failing suite would mask the retirement notice with an unrelated error. Same
+# declaration, same verb list, same rendered refusal — so re-applying is a
+# no-op wherever the first pass already replaced the app.
+retire {
   # ── Test gate (standalone) ──────────────────────────────────────
   test = mkApp (toString testScript);
 

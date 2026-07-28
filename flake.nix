@@ -188,6 +188,28 @@
           go-minimal-image =
             (import ./lib/build/go/tests/minimal-image-test.nix { inherit pkgs; }).asCheck pkgs;
 
+          # ── Mutating-verb retirement (★★ PLATFORM-MEDIATED) ────────────
+          # Guards the backward-compatibility contract of
+          # lib/infra/mutating-verbs.nix: with every verb enabled (the
+          # default, and what every existing consumer gets) `retireApps` must
+          # return the app set BY IDENTITY and must not force `pkgs` — the
+          # tests pass `pkgs = throw "…"` to prove it, so a regression that
+          # starts rewrapping enabled apps turns this red instead of silently
+          # moving every consumer's store paths. Also covers the validator
+          # negatives (unknown field / non-bool enable / retirement with no
+          # date or no `executes` / a verb this builder doesn't produce).
+          #
+          # NOT VACUOUS: verified red before landing, not merely observed
+          # green. Three deliberate breaks were each run and each failed —
+          # deleting the identity short-circuit (16/20), disabling the
+          # declaration validator (16/20), and deleting the stray-verb check
+          # (19/20). The third break is why `rejects-unknown-verb` uses a
+          # working fake `pkgs` rather than the poisoned one: with the
+          # poisoned `pkgs` that test stayed GREEN under the break, passing
+          # on a throw from the wrong cause.
+          mutating-verbs =
+            (import ./lib/infra/tests/mutating-verbs-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were

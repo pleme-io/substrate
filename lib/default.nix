@@ -1245,6 +1245,44 @@ in rec {
   gatedPangeaWorkspaceBuilder = ./infra/gated-pangea-workspace.nix;
 
   # ============================================================================
+  # MUTATING-VERB RETIREMENT (standalone import path)
+  # ============================================================================
+  # ★★ MODULARIZE, DON'T DELETE + ★★ PLATFORM-MEDIATED INFRASTRUCTURE.
+  #
+  # The ONE typed surface every Pangea builder here uses to retire a hand-run
+  # mutating verb (`apply` / `destroy` / `init` / a mutating fleet flow). A
+  # retired verb's app still exists and still resolves; its program becomes a
+  # refusal derived from the declaration's own fields, naming the
+  # declare-and-observe replacement path. Resolves at EVAL time — no runtime
+  # flag, env var or argument can satisfy it.
+  #
+  # Honoured by: pangea-infra.nix, pangea-infra-flake.nix,
+  # fleet-pangea-infra.nix, fleet-pangea-infra-flake.nix,
+  # constellation-platform-infra.nix, gated-pangea-workspace.nix (and thus
+  # infra-sdlc.nix). Default is `enable = true` for every verb, so an existing
+  # consumer that never mentions `mutatingVerbs` is byte-for-byte unchanged.
+  #
+  # Usage (consumer side, on any of the builders above):
+  #   mutatingVerbs.apply = {
+  #     enable    = false;
+  #     retiredOn = "2026-07-27";
+  #     executes  = "pangea bulk apply -> OpenTofu apply against S3 state";
+  #     reason    = "optional extra WHY prose";   # optional
+  #   };
+  #
+  # Usage (builder side):
+  #   mv = import "${substrate}/lib/infra/mutating-verbs.nix" { inherit lib; };
+  #   apps = mv.retireApps {
+  #     inherit pkgs name mutatingVerbs;
+  #     verbs = [ "plan" "apply" "destroy" ];
+  #   } rawApps;
+  mutatingVerbsBuilder = ./infra/mutating-verbs.nix;
+
+  # Pure eval tests for the above (identity-when-enabled + validator
+  # negatives). `(import mutatingVerbsTests { inherit lib; }).asCheck pkgs`.
+  mutatingVerbsTests = ./infra/tests/mutating-verbs-test.nix;
+
+  # ============================================================================
   # INFRASTRUCTURE SDLC (standalone import path)
   # ============================================================================
   # Complete lifecycle apps for gated Pangea workspaces. Encapsulates the full

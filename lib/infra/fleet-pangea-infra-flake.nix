@@ -38,6 +38,10 @@
 #     domain = "example.com";  # optional: for renderer
 #     flows = { ... };
 #   };
+#
+# ★★ PLATFORM-MEDIATED INFRASTRUCTURE — `mutatingVerbs` threads straight
+# through to fleet-pangea-infra.nix. Default is `enable = true` for every
+# verb, so omitting it is a no-op. See lib/infra/mutating-verbs.nix.
 {
   nixpkgs,
   ruby-nix,
@@ -57,13 +61,14 @@
   systems ? ["x86_64-linux" "aarch64-linux" "aarch64-darwin"],
   shellHookExtra ? "",
   devShellExtras ? [],
+  mutatingVerbs ? {},
 }:
   flake-utils.lib.eachSystem systems (system:
     let
       base = (import ./fleet-pangea-infra.nix {
         inherit nixpkgs system ruby-nix substrate forge fleet pangea;
       }) {
-        inherit self name flows shellHookExtra devShellExtras;
+        inherit self name flows shellHookExtra devShellExtras mutatingVerbs;
       };
 
       pkgs = import nixpkgs { inherit system; };

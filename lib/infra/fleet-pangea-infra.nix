@@ -31,6 +31,24 @@
 #   test          — bundle exec rspec
 #   drift         — plan in CI mode, fail if changes detected
 #   regen         — regenerate Gemfile.lock + gemset.nix
+#
+# ★★ PLATFORM-MEDIATED INFRASTRUCTURE — `mutatingVerbs`
+#
+#   Same typed retirement surface as pangea-infra.nix, and the retireable set
+#   additionally covers every generated `flow-<name>` app (a fleet flow runs
+#   pangea underneath, so a mutating flow is a mutating verb):
+#
+#     fleetPangeaInfra {
+#       inherit self; name = "my-infra"; flows = { deploy = { … }; };
+#       mutatingVerbs.flow-deploy = {
+#         enable    = false;
+#         retiredOn = "2026-07-27";
+#         executes  = "fleet flow run deploy -> pangea apply -> OpenTofu";
+#       };
+#     }
+#
+#   Default is `enable = true` for every verb, so omitting the argument
+#   changes nothing. See lib/infra/mutating-verbs.nix.
 {
   nixpkgs,
   system,
@@ -46,6 +64,7 @@
   flows ? {},
   shellHookExtra ? "",
   devShellExtras ? [],
+  mutatingVerbs ? {},
 }:
 let
   pkgs = import nixpkgs {
@@ -75,6 +94,10 @@ let
     forgeCmd = "${forge.packages.${system}.default}/bin/forge";
     defaultGhcrToken = "";
   };
+
+  # Typed verb retirement (★★ MODULARIZE, DON'T DELETE). Identity when every
+  # verb is enabled — see lib/infra/tests/mutating-verbs-test.nix.
+  mutatingVerbsLib = import ./mutating-verbs.nix { inherit (pkgs) lib; };
 
   # Resolve fleet binary: prefer flake input, fall back to PATH
   fleetBin = if fleet != null
@@ -165,7 +188,13 @@ in
     '';
   };
 
-  apps = flowApps // {
+  # Every app below is built exactly as before; `retireApps` is the identity
+  # unless a consumer declared `enable = false` for one of `verbs`.
+  apps = mutatingVerbsLib.retireApps {
+    inherit pkgs name mutatingVerbs;
+    verbs = [ "flow-list" "validate" "plan" "apply" "destroy" "init" "drift" "test" "regen" ]
+      ++ builtins.attrNames flowApps;
+  } (flowApps // {
     # Fleet flow management
     flow-list = {
       type = "app";
@@ -185,6 +214,18 @@ in
     destroy = mkPangeaApp { appName = "destroy"; subcommand = "destroy"; };
     init = mkPangeaApp { appName = "init"; subcommand = "init"; };
 
+    # pending-typed-drift: see the long note on the same verb in
+    # pangea-infra.nix. Same grep-on-console-text shape, same NO SHELL
+    # violation, same typed replacements available and unwired
+    # (`pangea drift detect` on the Ruby side; `magma plan
+    # --detailed-exitcode` / `--json` + the `magma-drift` `classify` on the
+    # magma side, gated on this builder gaining the `executor` seam that
+    # currently exists only in pangea-arch-workspace.nix).
+    #
+    # This block and pangea-infra.nix's are NOT byte-identical — this one
+    # exports PATH/RUBYLIB/DRY_TYPES_WARNINGS and invokes the `pangea`
+    # wrapper, that one shells `bundle exec pangea` bare. Deliberately not
+    # merged: one shared definition would change one site's behaviour.
     drift = {
       type = "app";
       program = toString (pkgs.writeShellScript "${name}-drift" ''
@@ -228,5 +269,5 @@ in
       srcDir = self;
       inherit name;
     }).regen;
-  };
+  });
 }

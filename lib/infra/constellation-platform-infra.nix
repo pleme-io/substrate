@@ -42,6 +42,10 @@
   constellation,  # REQUIRED: parsed constellation.json (attrset)
   shellHookExtra ? "",
   devShellExtras ? [],
+  # ★★ PLATFORM-MEDIATED INFRASTRUCTURE — threaded through to
+  # fleet-pangea-infra.nix. Default enables every verb (no-op).
+  # See lib/infra/mutating-verbs.nix.
+  mutatingVerbs ? {},
 }:
 let
   pkgs = import nixpkgs { inherit system; };
@@ -134,7 +138,7 @@ let
     inherit nixpkgs system ruby-nix substrate forge fleet pangea;
   };
   base = fleetPangeaInfra {
-    inherit self name shellHookExtra devShellExtras;
+    inherit self name shellHookExtra devShellExtras mutatingVerbs;
     flows = allFlows;
   };
 
