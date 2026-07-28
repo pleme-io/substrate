@@ -1,6 +1,9 @@
 ---
 name: pangea-infrastructure
 description: Security-first infrastructure patterns -- typed Pangea resources, architecture composition, test pyramid, gated workspaces
+metadata:
+  version: "2.0.0"
+  last_verified: "2026-07-27"
 domain: infrastructure
 triggers:
   - pangea
@@ -20,31 +23,32 @@ triggers:
 # Pangea Infrastructure Skill
 
 Security-first infrastructure patterns using substrate's `lib/infra/` module.
-All infrastructure is typed Ruby code with mandatory security constraints,
-tested at three layers, and gated on test passage before any cloud operation.
+Infrastructure is typed Ruby that synthesizes Terraform JSON, tested at three
+layers.
+
+> **Read this first — how you actually ship infra today.** Per the org-level
+> ★★ PLATFORM-MEDIATED INFRASTRUCTURE directive, the human's only two verbs
+> are **declare** and **observe**. You commit an `InfrastructureTemplate` /
+> `ArchitectureGem` CR and `pangea-operator` reconciles it (magma in-process,
+> Postgres state). Running `nix run .#plan` / `.#apply` by hand against a
+> workspace the operator manages is a **named anti-pattern** — it creates
+> drift the reconciler cannot observe.
+>
+> The nix apps documented below are still real and still correct for
+> **unmanaged / bootstrap / local-development** workspaces. Do not reach for
+> them against a managed workspace. For the declare-and-observe path use the
+> `pangea-operator-author` skill; for authoring new typed compositions use
+> `pangea-architecture`.
 
 ## Security-First Principles
 
-These are non-negotiable defaults. Infrastructure that violates them will not
-pass synthesis tests.
+These are the **policy** every new architecture is expected to meet. Read them
+as requirements to uphold, **not** as a description of what every existing
+architecture already does — the fleet is not uniformly compliant (see the
+honesty notes inline).
 
 ### Absolute Least-Privilege
 
-```ruby
-# CORRECT: specific actions, specific resources
-iam_policy "s3-reader" do
-  actions ["s3:GetObject", "s3:ListBucket"]
-  resources ["arn:aws:s3:::my-bucket", "arn:aws:s3:::my-bucket/*"]
-end
-
-# WRONG: wildcards -- will fail tests
-iam_policy "admin" do
-  actions ["s3:*"]
-  resources ["*"]
-end
-```
-
-Rules:
 - Every service gets its own IAM role (no shared roles)
 - Trust policies explicitly list allowed principals
 - No wildcards in resource ARNs or actions
@@ -52,37 +56,45 @@ Rules:
 
 ### KMS Encryption on All Storage
 
-Every S3 bucket and DynamoDB table must use a dedicated KMS key:
+Production storage should use a dedicated KMS key rather than the AWS-managed
+default.
+
+> **Honesty note.** This is policy, not observed reality. The real
+> `StateBackend` architecture ships a `:dev` profile that deliberately uses
+> `AES256` with **no** versioning as a cost optimization, and its
+> `:production` profile uses `alias/aws/s3` — the AWS-managed key, not a
+> dedicated one. See `pangea-architectures/lib/pangea/architectures/state_backend.rb`
+> lines 16-29. When you write a new architecture, prefer a dedicated key;
+> when you read an existing one, check its `PROFILES` rather than assuming.
+
+### prevent_destroy on Stateful Resources
+
+`prevent_destroy` is a Terraform **lifecycle meta-argument**, passed in the
+same attributes hash as everything else. `ResourceBuilder` splits the six
+meta keys (`lifecycle`, `depends_on`, `count`, `for_each`, `provider`,
+`provisioner`) out of the attribute hash before validation
+(`pangea-core/lib/pangea/resources/resource_builder.rb:34`):
 
 ```ruby
-s3_bucket "state" do
-  versioning true
-  encryption :kms
-  kms_key_id kms_key.arn           # dedicated key, never aws/s3 default
-  public_access_block do
-    block_public_acls true
-    block_public_policy true
-    ignore_public_acls true
-    restrict_public_buckets true
-  end
-  lifecycle_rule do
-    prevent_destroy true
-  end
-end
+synth.aws_iam_role(:k3s_cluster, {
+  name: role_name,
+  assume_role_policy: trust_policy,
+  lifecycle: { prevent_destroy: true },   # meta-argument, not an attribute
+})
 ```
 
-### prevent_destroy on All Stateful Resources
-
-All databases, S3 buckets, DynamoDB tables, KMS keys, EBS volumes, and EFS
-file systems must have `prevent_destroy`. Destroying a protected resource
-requires:
-1. Explicitly removing `prevent_destroy` in a separate commit
-2. PR review from a platform team member
-3. Documented justification
+> **Do not confuse this with `lifecycle_rule`.** That is a real but unrelated
+> `aws_s3_bucket` *attribute* (S3 object expiration/transition), declared at
+> `pangea-aws/lib/pangea/resources/aws_s3_bucket/types.rb:20`. It has nothing
+> to do with destroy protection.
+>
+> **Honesty note.** `prevent_destroy` appears in exactly **one** of the 124
+> architectures (`k3s_cluster_iam.rb:71`). `StateBackend` instead uses
+> DynamoDB's `deletion_protection_enabled`. Treat "prevent_destroy on all
+> stateful resources" as the bar for new work, not an invariant you can rely
+> on when reading.
 
 ### Required Tags
-
-Every resource must carry:
 
 | Tag | Purpose | Example |
 |-----|---------|---------|
@@ -99,261 +111,201 @@ Every resource must carry:
 - Use Akeyless dynamic producers with automatic rotation
 - tameshi hashes secret VALUES (BLAKE3) into the deployment chain without storing them
 
-## Typed Pangea Resource Functions
+## The Authoring Surface — `synth.<tf_type>(:name, { attrs })`
 
-Resource functions are typed Ruby methods that enforce security constraints
-at the type level. Missing required fields cause test failures, not runtime
-errors.
+Resource methods are generated by `Pangea::Resources::ResourceBuilder
+.define_resource` and are **named after the Terraform type**
+(`aws_s3_bucket`, not `s3_bucket`). They are called **on the synthesizer**,
+take a positional name and an **attributes Hash**, and return a
+`ResourceReference` carrying interpolation outputs (`.id`, `.arn`, ...).
 
 ```ruby
-# lib/resources.rb
-module Resources
-  def self.kms_key(name)
-    {
-      type: :kms_key,
-      name: name,
-      enable_key_rotation: true,
-      deletion_window_in_days: 30,
-      lifecycle: { prevent_destroy: true },
-      tags: default_tags.merge("Purpose" => "encryption")
-    }
-  end
-
-  def self.s3_bucket(name, region, kms_key_id:)
-    {
-      type: :s3_bucket,
-      name: name,
-      region: region,
-      versioning: true,
-      encryption: :kms,
-      kms_key_id: kms_key_id,
-      public_access_block: {
-        block_public_acls: true,
-        block_public_policy: true,
-        ignore_public_acls: true,
-        restrict_public_buckets: true
-      },
-      lifecycle: { prevent_destroy: true },
-      tags: default_tags.merge("Purpose" => "state-storage")
-    }
-  end
-
-  def self.dynamodb_table(name, kms_key_id:)
-    {
-      type: :dynamodb_table,
-      name: name,
-      billing_mode: "PAY_PER_REQUEST",
-      encryption: :kms,
-      kms_key_id: kms_key_id,
-      point_in_time_recovery: true,
-      lifecycle: { prevent_destroy: true },
-      tags: default_tags.merge("Purpose" => "state-locking")
-    }
-  end
-
-  def self.default_tags
-    {
-      "ManagedBy" => "pangea",
-      "Environment" => "production",
-      "Team" => "platform"
-    }
-  end
-end
+# pangea-architectures/lib/pangea/architectures/encrypted_storage.rb:47
+ebs_key = synth.aws_kms_key(:"#{name}-ebs-key", {
+  description: "EBS volume encryption key for #{name}",
+  customer_master_key_spec: 'SYMMETRIC_DEFAULT',
+  enable_key_rotation: true,
+  deletion_window_in_days: 30,
+  policy: key_policy,
+  tags: base_tags.merge(Name: "#{name}-ebs-key", Purpose: 'ebs-encryption'),
+})
 ```
+
+**There is no block form.** `define_resource` generates
+`define_method(tf_type) { |name, attributes = {}| ... }` — no `&block`
+parameter. Writing `s3_bucket "state" do versioning true end` silently
+discards the block, leaves `attributes` empty, and then fails on missing
+required attributes. There is a lower-level
+`resource :type, :name do ... end` block form in terraform-synthesizer, but
+`pangea-architectures/CLAUDE.md` explicitly forbids it in templates.
+
+**One Terraform resource per concern.** S3 versioning, encryption, and public
+access blocking are three *separate* resources, not nested blocks:
+
+```ruby
+# pangea-architectures/lib/pangea/architectures/state_backend.rb:53-86
+s3_bucket = synth.aws_s3_bucket(:state, {
+  bucket: bucket,
+  tags: base_tags.merge(Name: bucket),
+})
+
+encryption = synth.aws_s3_bucket_server_side_encryption_configuration(:state, {
+  bucket: s3_bucket.id,
+  rule: [enc_rule],
+})
+
+versioning = synth.aws_s3_bucket_versioning(:state, {
+  bucket: s3_bucket.id,
+  versioning_configuration: { status: 'Enabled' },
+})
+
+public_access = synth.aws_s3_bucket_public_access_block(:state, {
+  bucket: s3_bucket.id,
+  block_public_acls: true,
+  block_public_policy: true,
+  ignore_public_acls: true,
+  restrict_public_buckets: true,
+})
+```
+
+Cross-resource wiring is by **reference output**, not by reading a hash key:
+`bucket: s3_bucket.id` renders `${aws_s3_bucket.state.id}`.
 
 ## Architecture Composition
 
-An architecture is a reusable composition of typed resource functions. It
-synthesizes the complete resource graph in pure Ruby.
+An architecture is a **`module`** (not a class) exposing
+**`def self.build(synth, config = {})`**. It takes the synthesizer, applies a
+frozen profile, validates config through a `Dry::Struct` type, declares
+resources as side effects on `synth`, and returns a **Hash of
+`ResourceReference`s keyed by role**.
 
 ```ruby
-# lib/architectures/state_backend.rb
-module Architectures
-  class StateBackend
-    def initialize(workspace:, region: "us-east-1")
-      @workspace = workspace
-      @region = region
-    end
+# pangea-architectures/lib/pangea/architectures/state_backend.rb
+module Pangea
+  module Architectures
+    module StateBackend
+      PROFILES = {
+        dev: {
+          encryption: 'AES256', kms_key_id: nil,
+          versioning: false, deletion_protection: false,
+        }.freeze,
+        production: {
+          encryption: 'aws:kms', kms_key_id: 'alias/aws/s3',
+          versioning: true, deletion_protection: true,
+        }.freeze,
+      }.freeze
 
-    def synthesize
-      resources = []
+      def self.build(synth, config = {})
+        config = Pangea::Presets.apply(config, PROFILES)
+        config = Types::StateBackendConfig.new(config).to_h
+        synth.extend(Pangea::Resources::AWS) unless synth.respond_to?(:aws_s3_bucket)
 
-      # KMS key for encryption (shared by bucket and table)
-      kms = Resources.kms_key("#{@workspace}-state-key")
-      resources << kms
+        # ... declare resources on synth ...
 
-      # S3 bucket for state storage
-      resources << Resources.s3_bucket(
-        "#{@workspace}-state", @region,
-        kms_key_id: kms[:arn]
-      )
-
-      # DynamoDB table for state locking
-      resources << Resources.dynamodb_table(
-        "#{@workspace}-locks",
-        kms_key_id: kms[:arn]
-      )
-
-      resources
+        { bucket: s3_bucket, encryption: encryption,
+          public_access: public_access, lock_table: lock_table }
+      end
     end
   end
 end
 ```
 
 Key patterns:
-- Architecture classes take workspace and region as constructor args
-- `synthesize` returns the full resource list
-- Resources reference each other via ARNs (typed wiring)
-- Security is built in at every resource function -- it cannot be skipped
+- `module` + `self.build(synth, config = {})` — the shape in **120 of 124**
+  architecture files. There is no `synthesize` method and no constructor.
+- Config is a **Hash**, validated by a `Dry::Struct` under `Types::`.
+- Frozen `PROFILES` + `Pangea::Presets.apply` carry environment variation.
+- The return value is references for *callers to wire against*; the resources
+  themselves live in `synth`.
 
 ## RSpec Test Pyramid
 
-### Layer 1: Resource Unit Tests
+### Layers 1 + 2 — synthesis tests (zero cloud cost)
 
-Test individual resource functions in isolation. Instant, zero cost.
-
-```ruby
-# spec/resources/s3_bucket_spec.rb
-RSpec.describe "s3_bucket resource" do
-  let(:resource) { Resources.s3_bucket("test-bucket", "us-east-1",
-    kms_key_id: "arn:aws:kms:us-east-1:123:key/abc") }
-
-  it "enables versioning" do
-    expect(resource[:versioning]).to eq(true)
-  end
-
-  it "uses KMS encryption" do
-    expect(resource[:encryption]).to eq(:kms)
-  end
-
-  it "blocks all public access" do
-    block = resource[:public_access_block]
-    expect(block[:block_public_acls]).to eq(true)
-    expect(block[:block_public_policy]).to eq(true)
-    expect(block[:ignore_public_acls]).to eq(true)
-    expect(block[:restrict_public_buckets]).to eq(true)
-  end
-
-  it "sets prevent_destroy" do
-    expect(resource[:lifecycle][:prevent_destroy]).to eq(true)
-  end
-end
-```
-
-### Layer 2: Architecture Synthesis Tests
-
-Test full compositions. Verify cross-resource wiring. Zero cloud cost.
+Tests assert against the **rendered Terraform JSON**, not against a Ruby
+resource array. The API is `Pangea::Testing::SynthesisTestHelpers`
+(`pangea-core/lib/pangea/testing/synthesis_test_helpers.rb`):
+`create_synthesizer`, `normalize_synthesis`, `validate_terraform_structure`,
+`validate_resource_structure`, `validate_resource_attributes`,
+`validate_dependency_ordering`.
 
 ```ruby
-# spec/architectures/state_backend_spec.rb
-RSpec.describe Architectures::StateBackend do
-  let(:arch) { described_class.new(workspace: "test", region: "us-east-1") }
-  let(:resources) { arch.synthesize }
+# pangea-architectures/spec/architectures/state_backend_spec.rb
+RSpec.describe Pangea::Architectures::StateBackend do
+  include Pangea::Testing::SynthesisTestHelpers
 
-  describe "resource presence" do
-    it "creates a KMS key" do
-      expect(resources).to include_resource_of_type(:kms_key)
+  let(:synth) { create_synthesizer }
+  let(:base_config) { { bucket: 'pleme-io-tofu-state', dynamodb_table: 'pleme-io-tofu-locks' } }
+
+  describe 'dev profile (default)' do
+    let(:result) do
+      described_class.build(synth, base_config)
+      normalize_synthesis(synth.synthesis)
     end
 
-    it "creates an S3 bucket" do
-      expect(resources).to include_resource_of_type(:s3_bucket)
+    it 'produces valid Terraform JSON' do
+      validate_terraform_structure(result, :resource)
     end
 
-    it "creates a DynamoDB table" do
-      expect(resources).to include_resource_of_type(:dynamodb_table)
-    end
-  end
-
-  describe "encryption wiring" do
-    let(:kms) { resources.find_by_type(:kms_key) }
-
-    it "wires KMS key to S3 bucket" do
-      bucket = resources.find_by_type(:s3_bucket)
-      expect(bucket[:kms_key_id]).to eq(kms[:arn])
+    it 'blocks all public access' do
+      config = validate_resource_structure(result, 'aws_s3_bucket_public_access_block', 'state')
+      expect(config['block_public_acls']).to eq(true)
+      expect(config['block_public_policy']).to eq(true)
+      expect(config['ignore_public_acls']).to eq(true)
+      expect(config['restrict_public_buckets']).to eq(true)
     end
 
-    it "wires KMS key to DynamoDB table" do
-      table = resources.find_by_type(:dynamodb_table)
-      expect(table[:kms_key_id]).to eq(kms[:arn])
-    end
-  end
-
-  describe "security" do
-    it "sets prevent_destroy on all stateful resources" do
-      stateful = resources.select { |r|
-        [:s3_bucket, :dynamodb_table, :kms_key].include?(r[:type])
-      }
-      stateful.each do |r|
-        expect(r[:lifecycle][:prevent_destroy]).to eq(true),
-          "#{r[:type]} #{r[:name]} missing prevent_destroy"
-      end
-    end
-
-    it "tags all resources" do
-      resources.each do |r|
-        %w[ManagedBy Purpose Environment Team].each do |tag|
-          expect(r[:tags]).to have_key(tag),
-            "#{r[:type]} #{r[:name]} missing tag: #{tag}"
-        end
-      end
+    it 'does NOT create versioning (cost optimization)' do
+      expect(result.dig('resource', 'aws_s3_bucket_versioning')).to be_nil
     end
   end
 end
 ```
 
-### Security-Specific Tests
+Assert absence with `result.dig('resource', '<tf_type>')` being `nil`; assert
+presence and attributes with `validate_resource_structure(result, '<tf_type>',
+'<name>')`, which returns the resource's config hash (string keys).
 
-Always test these security properties:
+> **There are no `include_resource_of_type` / `find_by_type` matchers.**
+> Verified 2026-07-27: zero occurrences anywhere in the pleme-io tree, and no
+> `RSpec::Matchers.define` in pangea-core / pangea-architectures / pangea-aws.
+> Earlier revisions of this skill — and `substrate/docs/adding-an-architecture.md`
+> line 174 — show them. That example code does not run.
 
-```ruby
-describe "security constraints" do
-  it "no wildcard IAM actions" do
-    iam = resources.select { |r| r[:type] == :iam_policy }
-    iam.each do |policy|
-      policy[:actions].each do |action|
-        expect(action).not_to include("*"),
-          "#{policy[:name]} has wildcard action: #{action}"
-      end
-    end
-  end
+## Gated vs Ungated Workspaces — two different builders
 
-  it "no wildcard IAM resources" do
-    iam = resources.select { |r| r[:type] == :iam_policy }
-    iam.each do |policy|
-      policy[:resources].each do |resource|
-        expect(resource).not_to eq("*"),
-          "#{policy[:name]} has wildcard resource"
-      end
-    end
-  end
-end
-```
+This is the distinction most easily gotten wrong, because the two builders
+look similar and only one of them gates.
 
-## Gated Workspace Pattern
+| Builder | Apps produced | Gates on tests? |
+|---|---|---|
+| `infra/pangea-infra.nix` (+ `-flake.nix`) | `validate` `plan` `apply` `destroy` `init` `drift` `test` `regen` | **NO** |
+| `infra/gated-pangea-workspace.nix` | `test` `plan` `apply` `verify` `plan-ungated` `apply-ungated` `destroy` | **YES** |
+| `infra/pangea-arch-workspace.nix` (canonical subdirectory workspace) | `plan` `deploy` `destroy` `synth` `test` `import` + `extraApps` | NO |
 
-Tests must pass before plan or apply can execute. The substrate Pangea
-builders enforce this ordering.
+**`pangea-infra.nix` does not enforce test ordering.** Its `mkPangeaApp`
+helper (line 68) expands to nothing but a `pangea bulk <subcommand>` call —
+no rspec invocation, no marker file, no ordering check. `nix run .#apply`
+will run with failing tests. Its `test` app is an independent app that shells
+`bundle exec rspec`. Its `validate` app is literally `subcommand = "plan"`.
 
-```bash
-nix run .#test      # Layer 1 + Layer 2 (must pass)
-nix run .#plan      # Only runs if test passed
-nix run .#apply     # Only runs if test passed
-nix run .#verify    # Layer 3 (post-apply InSpec)
-nix run .#drift     # Detect configuration drift
-nix run .#destroy   # Explicit confirmation required
-```
-
-### Setting up a gated workspace
+**`verify` (InSpec Layer 3) comes only from `gated-pangea-workspace.nix`**,
+which builds it from an `inspecProfile` argument. If you want the gate and
+the InSpec verify step, that is the builder to import:
 
 ```nix
-# flake.nix
+mkGatedPangeaWorkspace = import "${substrate}/lib/infra/gated-pangea-workspace.nix" {
+  inherit pkgs;
+};
+```
+
+The ungated builder, for a local or bootstrap workspace:
+
+```nix
 outputs = (import "${substrate}/lib/infra/pangea-infra-flake.nix" {
   inherit nixpkgs ruby-nix flake-utils substrate forge;
 }) { inherit self; name = "my-infra"; };
 ```
-
-This produces all the gated apps above. The `pangea-infra.nix` builder
-generates shell scripts that enforce ordering.
 
 ### Workspace configuration (shikumi pattern)
 
@@ -371,103 +323,81 @@ workspaceConfig = pangeaWorkspace {
   namespace = "production";
   stateBackend = { type = "local"; };
   providers.aws = { region = "us-east-1"; version = "~> 5.0"; };
+  # also accepted: config = {}; remoteBackend = null;
 };
 ```
 
-This generates a `pangea.yml` YAML file that the Pangea Ruby DSL reads at
-runtime. No shell business logic between Nix and application.
+This writes `<name>-pangea.yml` (JSON content, valid YAML by subset) and
+copies it to `$HOME/.pangea/workspace-configs/<name>/pangea.yml` at app
+runtime. It produces `{ plan, apply, destroy, show, status, migrate, list,
+pangeaYml }` — **not** the gated app set.
 
-## InSpec Auto-Generation from RSpec Assertions
+## InSpec Verification (Layer 3)
 
-For every RSpec synthesis assertion, create a corresponding InSpec control.
-This ensures what you synthesize is what you verify.
-
-### Mirroring table
-
-| RSpec synthesis test | InSpec control |
-|---------------------|----------------|
-| `expect(resource[:versioning]).to eq(true)` | `it { should have_versioning_enabled }` |
-| `expect(resource[:encryption]).to eq(:kms)` | `it { should have_default_encryption_enabled }` |
-| `expect(resource[:billing_mode]).to eq("PAY_PER_REQUEST")` | `its("billing_mode") { should eq "PAY_PER_REQUEST" }` |
-| `expect(resources).to include_resource_of_type(:kms_key)` | `describe aws_kms_key(...) { it { should exist } }` |
-
-### InSpec controls
+InSpec profiles are **standalone repos with a top-level `controls/`**
+(`inspec-aws-k3s`, `inspec-secure-vpc`, `inspec-k3s-cis`,
+`inspec-nixos-baseline`, `inspec-akeyless`), or generated flat under
+`pangea-architectures/lib/pangea/architectures/generated/inspec/`. There is
+no `inspec/controls/` directory anywhere in the fleet.
 
 ```ruby
-# inspec/controls/state_backend.rb
-control "state-backend-kms" do
-  impact 1.0
-  title "State backend KMS key exists and is enabled"
-
-  describe aws_kms_key(key_id: input("kms_key_id")) do
-    it { should exist }
-    it { should be_enabled }
-  end
-end
-
-control "state-backend-s3" do
-  impact 1.0
-  title "State backend S3 bucket is secure"
-
-  describe aws_s3_bucket(bucket_name: input("bucket_name")) do
-    it { should exist }
-    it { should have_versioning_enabled }
-    it { should have_default_encryption_enabled }
-    it { should_not be_public }
-  end
-end
-
-control "state-backend-dynamodb" do
-  impact 1.0
-  title "State backend DynamoDB table exists"
-
-  describe aws_dynamodb_table(table_name: input("table_name")) do
-    it { should exist }
-    its("billing_mode_summary.billing_mode") { should eq "PAY_PER_REQUEST" }
-  end
+# inspec-aws-k3s/controls/s3_etcd_bucket.rb — real, verified
+describe aws_s3_bucket(bucket_name: input('bucket_name')) do
+  it { should exist }
+  it { should have_versioning_enabled }
+  it { should have_default_encryption_enabled }
+  it { should_not be_public }
 end
 ```
 
-Use `inspec-akeyless` resource pack for Akeyless-specific verification.
+> **Verified in use:** `aws_s3_bucket`, `have_versioning_enabled`,
+> `have_default_encryption_enabled`, `should_not be_public`.
+> **Not used anywhere in the fleet** (do not copy from an older revision of
+> this skill): `aws_kms_key`, `aws_dynamodb_table`,
+> `billing_mode_summary.billing_mode`. They may exist upstream in
+> inspec-aws, but no pleme-io profile exercises them, so they are unproven
+> here.
 
-## SDLC Nix Apps
-
-The full infrastructure SDLC is exposed as nix apps:
-
-| App | What it does |
-|-----|-------------|
-| `nix run .#test` | RSpec unit + synthesis tests (Layer 1 + 2) |
-| `nix run .#validate` | Pangea config validation |
-| `nix run .#plan` | Synthesize + diff (gated on test) |
-| `nix run .#apply` | Apply changes to cloud (gated on test) |
-| `nix run .#verify` | InSpec post-apply verification (Layer 3) |
-| `nix run .#drift` | Detect config drift (plan in CI mode) |
-| `nix run .#destroy` | Destroy resources (explicit confirmation) |
-| `nix run .#regen` | Regenerate Gemfile.lock + gemset.nix |
+Use the `inspec-akeyless` resource pack for Akeyless-specific verification
+(7 custom resources under `libraries/`).
 
 ## Creating a New Architecture -- Checklist
 
-Full guide: `docs/adding-an-architecture.md`
+1. Define the architecture **module** in `pangea-architectures/lib/pangea/architectures/`
+   with `def self.build(synth, config = {})`
+2. Add a frozen `PROFILES` constant + a `Types::<Name>Config` Dry::Struct
+3. Declare resources as `synth.aws_<tf_type>(:name, { attrs })`; wire across
+   resources with `.id` / `.arn` outputs
+4. Return a Hash of `ResourceReference`s keyed by role
+5. Write synthesis specs with `SynthesisTestHelpers` (Layers 1 + 2)
+6. Create the consumer flake — `gated-pangea-workspace.nix` if you want the
+   test gate + `verify`, `pangea-infra-flake.nix` if you do not
+7. Generate workspace config via `pangea-workspace.nix` (shikumi pattern)
+8. Write InSpec controls in a `controls/` dir (Layer 3), if the architecture
+   warrants live verification
+9. Verify required tags, and `lifecycle: { prevent_destroy: true }` on
+   genuinely stateful resources
+10. For anything the operator manages, declare it as a CR — do not hand-run
+    `plan`/`apply` (see the banner at the top)
 
-1. Define architecture class in `pangea-architectures/lib/architectures/`
-2. Write typed resource functions with all security fields
-3. Write RSpec unit tests for each resource function (Layer 1)
-4. Write RSpec synthesis tests for full architecture (Layer 2)
-5. Create consumer flake with `pangea-infra-flake.nix`
-6. Generate workspace config via `pangea-workspace.nix` (shikumi pattern)
-7. Write InSpec controls mirroring RSpec assertions (Layer 3)
-8. Verify test gate: `nix run .#test` must pass before `plan`/`apply`
-9. Verify all resources have required tags
-10. Verify `prevent_destroy` on all stateful resources
-11. Verify KMS encryption on all storage
+> `substrate/docs/adding-an-architecture.md` covers the same ground but is
+> **itself stale** as of 2026-07-27: it shows `class StateBackend` (real is
+> `module`), the nonexistent `include_resource_of_type` matcher, four
+> nonexistent mixins (`Synthesizable`, `Composable`, `SecurityEnforced`,
+> `InSpecMirrorable`), a nonexistent `to_inspec_profile`, a nonexistent
+> `Pangea::Aws::S3Bucket` class, and a `pangeaWorkspace.mkWorkspaceConfig`
+> attribute that does not exist. Prefer this skill over that doc until it is
+> corrected.
 
 ## Related Repos
 
-| Repo | Purpose | Tests |
+Counts verified 2026-07-27.
+
+| Repo | Purpose | Scale |
 |------|---------|-------|
-| `pangea-architectures` | Reusable infra compositions with RSpec synthesis tests | 118 |
-| `inspec-akeyless` | InSpec resource pack for Akeyless verification | 62 |
-| `iac-test-runner` | K8s bringup/verify/teardown orchestrator | 180 |
-| `pangea-core` | Foundation DSL -- ResourceBuilder, types, validation | -- |
-| `pangea-aws` | AWS provider (448 resources, auto-generated) | -- |
-| `pangea-akeyless` | Akeyless provider (122 resources, auto-generated) | -- |
+| `pangea-architectures` | Reusable infra compositions with RSpec synthesis tests | 124 architectures; 2,254 examples in `spec/` |
+| `inspec-akeyless` | InSpec resource pack for Akeyless verification | 62 minitest units; 7 custom resources |
+| `iac-test-runner` | K8s bringup/verify/teardown orchestrator | 237 Rust tests |
+| `pangea-core` | Foundation DSL -- ResourceBuilder, types, validation, testing helpers | -- |
+| `pangea-aws` | AWS provider (auto-generated) | 1,638 resource types |
+| `pangea-akeyless` | Akeyless provider (auto-generated) | 118 resource types |

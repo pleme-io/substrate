@@ -1,6 +1,9 @@
 ---
 name: substrate-builder
 description: Build patterns in substrate -- find the right builder, add new ones, follow the import DAG
+metadata:
+  version: "1.0.0"
+  last_verified: "2026-07-27"
 domain: nix
 triggers:
   - substrate
@@ -24,15 +27,36 @@ consumers import it and call its builders.
 
 ```
 lib/
-  build/          Language build patterns (rust/, go/, zig/, swift/, typescript/,
-                  ruby/, python/, dotnet/, java/, wasm/, web/)
-  infra/          IaC patterns (pangea, terraform, pulumi, ansible)
-  service/        Service lifecycle (deploy, helm, migration, health)
+  types/          Type lattice (foundation, ports, build/service/deploy/infra/kube
+                  specs, convergence typestate, validate) -- a PURE leaf, only
+                  needs nixpkgs.lib
+  build/          Language + artifact build patterns. 26 dirs, not just the
+                  headline languages:
+                    rust/ go/ zig/ swift/ typescript/ npm/ ruby/ python/
+                    dotnet/ java/ wasm/ web/ nixos/ tatara/ estante/ scripting/
+                    oci/ docker/ darwin/ nix/ shared/
+                    + quirk-apply-only dirs: ansible/ bundler/ gomod/ helm/
+                      pip/ poetry/
+  kube/           nix-kube: 29 primitives, 9 compositions, module system, tests
+  infra/          IaC patterns (pangea, terraform, pulumi, ansible, AMI,
+                  workload archetypes, renderers, policies)
+  service/        Service lifecycle (deploy, helm, migration, health, crossplane)
+  security/       CVE gate, SBOM emit, cosign signing, hardened pkgs
+  iroha/          The Nix primitive alphabet (option surfaces, daemon units,
+                  overlay algebra, profiles) -- pure { lib }
+  kata/           Fleet-standard layer above iroha (fleet-config, domains,
+                  users, mkFleet, wireguard, kubeconfig)
+  release/        Release pattern catalog + renderers
   hm/             home-manager helpers (standalone, only needs nixpkgs.lib)
   codegen/        Code generation (OpenAPI SDKs, source registry)
   util/           Foundation layer (config, darwin, docker, test, release)
+  workspace/      Managed flake composition
   devenv/         devenv.sh modules (standalone)
 ```
+
+`iroha` and `kata` are also top-level flake outputs (`substrate.iroha`,
+`substrate.kata`), not just `lib/` subdirectories -- they are imported with
+your own `lib`, never through `substrate.lib.${system}`.
 
 ## Finding the Right Builder
 
@@ -42,15 +66,24 @@ lib/
 |----------|-----------|-------------|
 | Rust | `build/rust/` | `mkCrate2nixProject`, `mkCrate2nixServiceApps`, `mkCrate2nixTool`, rust-service.nix (high-level) |
 | Go | `build/go/` | `mkGoTool`, `mkGoMonorepoSource`, `mkGoMonorepoBinary`, `mkGoGrpcService` |
-| Zig | `build/zig/` | `mkZigToolRelease`, zig-tool-release-flake.nix |
+| Zig | `build/zig/` | `mkZigOverlay`; `zigToolReleaseFlakeBuilder` / `zigToolReleaseBuilder` (path exports) |
 | Swift | `build/swift/` | `mkSwiftOverlay`, sdk-helpers.nix |
 | TypeScript | `build/typescript/` | `mkTypescriptToolAuto`, `mkTypescriptTool`, `mkTypescriptPackage` |
+| npm | `build/npm/` | `mkNpmTool`, `mkPnpmTool` |
 | Ruby | `build/ruby/` | `mkRubyDockerImage`, `mkRubyServiceApps`, ruby-gem-flake.nix |
 | Python | `build/python/` | `mkPythonPackage`, `mkUvPythonPackage` |
 | .NET | `build/dotnet/` | `mkDotnetPackage` |
 | Java | `build/java/` | `mkJavaMavenPackage` |
 | WASM | `build/wasm/` | `mkWasmBuild`, `mkWasmDockerImage` |
 | Web | `build/web/` | `mkViteBuild`, `mkDream2nixBuild`, `mkNodeDockerImage` |
+| NixOS image | `build/nixos/` | `mkNixosAwsAmi` (NixOS closure -> AWS AMI) |
+
+**The Zig row is the trap in this table.** Every other language exposes a
+`mk{Lang}*` function through `substrate.lib.${system}`; Zig's tool-release
+does NOT. It is consumed as a *path export* you `import` yourself
+(`zigToolReleaseFlakeBuilder`), exactly like the standalone Rust flake
+builders. Reaching for a `mkZigToolRelease` symbol will not resolve --
+there is no such export.
 
 ### By use case
 
@@ -75,18 +108,24 @@ These rules prevent circular imports. Violating them breaks evaluation.
 
 ```
 ALLOWED:
-  build/ ----> util/
-  service/ --> build/ and util/
-  infra/ ----> util/
+  build/ ----> util/, types/
+  service/ --> build/, util/, types/
+  infra/ ----> util/, types/
   codegen/ --> util/
 
 PROHIBITED:
-  util/ -----> build/, service/, infra/       (would create cycles)
-  build/ ----> service/, infra/               (build is lower layer)
-  build/rust/ -> build/go/                    (cross-language forbidden)
-  hm/ -------> anything internal              (standalone)
-  devenv/ ---> anything internal              (standalone)
+  util/ -----> build/, service/, infra/, types/   (would create cycles)
+  build/ ----> service/, infra/                   (build is lower layer)
+  build/rust/ -> build/go/                        (cross-language forbidden)
+  types/ ----> anything internal                  (PURE leaf: nixpkgs.lib only)
+  hm/ -------> anything internal                  (standalone)
+  devenv/ ---> anything internal                  (standalone)
+  iroha/, kata/ -> anything internal              (pure { lib })
 ```
+
+`types/` is the DAG's leaf and the constraint most easily broken by
+accident: a builder may validate *through* types, but types may never
+reach back into a builder, into `util/`, or into `pkgs`.
 
 Within a language directory, files may import each other freely:
 `build/rust/service.nix` can import `build/rust/overlay.nix`.

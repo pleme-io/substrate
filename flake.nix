@@ -79,6 +79,20 @@
       url = "github:nix-community/home-manager/4eb4fec41674d5b059aa2eedf0f98453890546fa";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # skill-lint — validates the SKILL.md files this repo ships (see
+    # checks.skill-map below).
+    #
+    # `inputs.substrate.follows = ""` is LOAD-BEARING, not tidiness.
+    # skill-lint's own flake is a substrate consumer
+    # (`substrate.rust.tool`), so a naive input pulls a SECOND, independently
+    # locked substrate subtree into substrate's own lock. Measured
+    # 2026-07-27: 52 nodes / 1150 lines -> 103 nodes / 2378 lines. The empty
+    # follows resolves skill-lint's substrate to the root flake — this one —
+    # collapsing that to 53 nodes / 1169 lines, a single added node.
+    skill-lint = {
+      url = "github:pleme-io/skill-lint";
+      inputs.substrate.follows = "";
+    };
   };
 
   outputs = inputs @ {
@@ -173,6 +187,48 @@
           # system incl. darwin.
           go-minimal-image =
             (import ./lib/build/go/tests/minimal-image-test.nix { inherit pkgs; }).asCheck pkgs;
+
+          # ── Per-skill STRUCTURE gate ───────────────────────────────────
+          # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
+          # fleet-wide (blackmatter-pleme); the two skills substrate ships were
+          # validated by nothing. A gate wired into 1 of 7 repos is green
+          # because it never looks, which is indistinguishable from passing.
+          #
+          # This gate could not be wired until the skills were FIXED, not
+          # merely observed: both `pangea-infrastructure` and
+          # `substrate-builder` were missing their whole `metadata` block, and
+          # baselining both would have left ZERO subjects — which skill-lint's
+          # own DiscoveryChecker correctly refuses ("no skills found" is an
+          # error, never a pass). A gate over an empty set is the vacuous-guard
+          # failure mode, so the honest options were a permanently-red gate or
+          # a real fix. Both skills were re-verified against the tree the same
+          # day and their genuine defects corrected; the gate covers the
+          # result.
+          #
+          # WHY THE EMPTY MAP DIR: skill-lint calls skill_map() inside
+          # CheckContext::from_source BEFORE any --skip-* flag is consulted, so
+          # a map argument is mandatory even when every map-dependent check is
+          # off. substrate has no local skill-map.d — the fleet map lives in
+          # blackmatter-pleme — so the gate is handed an empty one and the
+          # map-dependent checks are skipped explicitly.
+          #
+          # COVERED: every SKILL.md here parses, its `name` matches its
+          # directory, and it carries `description` + `metadata.version` +
+          # `metadata.last_verified`. NOT COVERED, do not round this up:
+          # whether these skills appear in the fleet map at all, and whether
+          # `last_verified` is RECENT — freshness is deliberately not gated
+          # (a bot bumping a date to go green manufactures a false claim), and
+          # map parity belongs to blackmatter-pleme, not to this flake.
+          #
+          # NOT VACUOUS: verified red before landing, not merely observed
+          # green — the same binary and args fail on a removed metadata block.
+          skill-map = pkgs.runCommand "skill-map-check" {
+            nativeBuildInputs = [ inputs.skill-lint.packages.${system}.default ];
+          } ''
+            skill-lint check --skills-dir ${./skills} --map-dir ${pkgs.emptyDirectory} \
+              --skip-sync --skip-map-integrity --skip-version
+            touch $out
+          '';
         }
         # The end-to-end build+RUN gate: build the smoke fixture as a minimal
         # scratch-base image and serve /health=200. Linux-only (execs a linux

@@ -971,7 +971,8 @@
         "flake-utils": "flake-utils",
         "home-manager": "home-manager_2",
         "nix-darwin": "nix-darwin",
-        "nixpkgs": "nixpkgs_6"
+        "nixpkgs": "nixpkgs_6",
+        "skill-lint": "skill-lint"
       }
     },
     "rust-analyzer-src": {
@@ -1009,6 +1010,24 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "skill-lint": {
+      "inputs": {
+        "substrate": []
+      },
+      "locked": {
+        "lastModified": 1785202027,
+        "narHash": "sha256-juluOQ9dKQL3suDI1wyyPSSEUP5NujzLOUe7ggdKU2I=",
+        "owner": "pleme-io",
+        "repo": "skill-lint",
+        "rev": "ff1a092ffb3ba97398a39027277d72fe7176d6b8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pleme-io",
+        "repo": "skill-lint",
         "type": "github"
       }
     },
