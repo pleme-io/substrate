@@ -19,10 +19,45 @@
 - **Pillar 8** (Image building): `substrate/lib/oci-image-*.nix` patterns are THE way every pleme-io container image is built. No Dockerfiles. Hardened minimal roots.
 - **Pillar 9** (SDLC): `rust-tool-release-flake.nix`, `rust-workspace-release-flake.nix`, `rust-service-flake.nix`, `rust-library.nix`, `ruby-gem-flake.nix`, `wasi-service-flake.nix`, `wasi-service-flux-flake.nix`, `tatara/program-flake.nix`, `build/rust/ios-game-flake.nix` (the iOS-game SDLC devloop — a **100%-local** chain: cross-compile Rust → iOS, the local `check` gate (lint/test/build-sim) + `watch` TDD loop, then deploy to the simulator "VM" or a tethered phone via the Xcode impurity boundary; emits the guided `nix run .#{sdlc,watch,check,test,lint,build-sim,run-sim,build-device,game-device,game}` app distribution; reference consumer `pleme-io/asobi`. There is NO remote CI in the iOS delivery path — a GitHub runner can't reach a local VM/phone; the optional `ios-game-ci.yml` only mirrors the local `check` gate for teams with macOS Actions budget) — every repo's `flake.nix` anchors on one of these. `nix run .#app` / `nix run .#test` / `nix run .#release` uniformity comes from here.
 
+> **★ Standing rule for every claim in this file: state the denominator.**
+> Four coverage claims in this file were found wrong on the same day and
+> had rotted the same way (this section, `cse-lint` below, `checks.tests`,
+> and `cargo-ci.yml`). A *named* fact — a path, a flag, a workflow name —
+> gets corrected eventually, because sooner or later someone reads the file
+> it names. A *coverage* claim — "every repo", "on every commit", "always"
+> — rots silently, because nobody counts the denominator. So wherever this
+> file states a reach, it states what that reach is **out of**, and when it
+> was counted.
+>
+> Two measurement traps produced wrong numbers inside the audit that found
+> these, so re-measure rather than inherit. (1) `rg` / `grep -r` from the
+> fleet root returns **zero** for nested repos —
+> `~/code/github/pleme-io/.gitignore` is `*`, un-ignoring only `flake.nix`
+> and `flake.lock`; use `rg --no-ignore` or `find … -exec grep`. (2) A naive
+> grep counts **prose about a thing as an instance of the thing**: grepping
+> `buildMode = "cargo-nix"` hits a comment stating that zero consumers set
+> it, and grepping `cargo-ci.yml` hits four repos documenting why they
+> deliberately do not use it. Match uncommented lines, then read the hits.
+
 ## ★ Reusable CI workflows (`.github/workflows/caixa-*.yml`)
 
-Every pleme-io caixa repo's CI is **5–10 lines** pointing at one of
-four reusable workflows shipped from this repo:
+These four reusable workflows ship from this repo. **Three repos call one,
+out of 224 in the checkout that carry a `caixa.lisp` / `*.caixa.lisp`** —
+`mirante` and `programs` (`caixa-validate.yml`), `hello-rio`
+(`caixa-publish.yml`). All three match the caller shape below, at 17–25
+lines rather than 5–10.
+
+The other 221 are not un-CI'd; they are CI'd by a different family. Across
+every workflow in those repos the `uses:` lines resolve to
+`cargo-auto-release.yml` (152), `security-gate.yml` (143),
+`pre-merge-gate.yml` (143), `go-auto-release.yml` (43) and
+`reusable-gen-spec.yml` (33) — the two `caixa-*` callers are the tail, not
+the norm. **So this section documents an available shape, not the fleet's
+actual caixa CI.** A fifth reusable, `caixa-auto-release.yml`, also ships
+here and has zero callers.
+
+Counted 2026-07-28 over a local fleet checkout that contains vendored
+mirrors — lower bounds, not org-wide percentages.
 
 | workflow | for | gates |
 |---|---|---|
@@ -43,11 +78,31 @@ jobs:
     permissions: { contents: write, packages: write }
 ```
 
-The `cse-lint repo --strict` gate enforces the 6 CSE invariants
-(claude-md-pointer, hand-roll, manifest-membership,
-module-trio-adoption, deployment-coverage, **caixa-naivete**) on every
-commit. A regression on any invariant fails CI before publish — the
-SDLC standardization is structurally enforced.
+**`cse-lint repo --strict` is a hard gate in exactly one of these
+workflows.** `caixa-validate.yml:70` runs it bare, so a violation fails the
+job. `caixa-publish.yml:140` and `caixa-publish-tlisp.yml:84` end the same
+command in `|| echo "::warning::…"` — deliberately, each with a
+migration-window comment — so on the publish path a violation prints a
+warning and the build goes green. **A discarded verdict is not a gate**
+(★★ UNREPRESENTABILITY tier ⊥, "discarded" subclass): never read the step's
+presence in a publish log as enforcement.
+
+Reach: `mirante` and `programs` hit the hard gate (`push: main` +
+`pull_request`); `hello-rio` hits the swallowed one (`push: main`). The only
+other `cse-lint` invocation in any workflow in the checkout is substrate's
+own `cse-audit.yml`, a separate `cse-lint audit` surface with no callers.
+
+So "enforces the 6 CSE invariants on every commit … structurally enforced"
+was wrong three ways: it reaches **3 repos of 224**, it is a hard gate in
+**2 of those 3**, and it fires on pushed commits and PRs rather than every
+commit. The six invariants it checks (claude-md-pointer, hand-roll,
+manifest-membership, module-trio-adoption, deployment-coverage,
+**caixa-naivete**) are the tool's, not this pipeline's guarantee —
+`caixa-validate.yml`'s own header names only four of them.
+
+And a caller is not a run: **554 of 716 workflow-bearing pleme-io repos have
+Actions disabled at the repo level**, so every count above is an upper bound
+on what actually executes.
 
 **Skill:** `caixa-author` — for authoring or migrating any caixa,
 this is the first reference.
@@ -77,12 +132,41 @@ baseline**, and at least `forge`, `iac-forge`, `engenho` plus nine
 | check | emitted | proves |
 |---|---|---|
 | `checks.build` | always, both build paths | the SHIPPED artifact compiles (same derivation as `packages.default`, so it is paid for once) |
-| `checks.tests` | `library.nix` always; `tool-release.nix` only on `buildMode = "cargo-nix"` | the crate's tests actually RUN (crate2nix `runTests` → `crateWithTest`) |
+| `checks.tests` | `library.nix` always; `tool-release.nix` only on `buildMode = "cargo-nix"` | the crate's tests actually RUN (crate2nix `runTests` → `crateWithTest`) — **emitted by the builders, reaching zero consumers; see below** |
 
 Policy lives in **`lib/build/rust/test-check.nix`** — one surface, so both
 builders emit the same shape. Opting out is typed (`tests = { enable =
 false; reason = "…"; }`); a bare boolean is refused, same grammar as
 `lib/infra/mutating-verbs.nix`.
+
+### `checks.tests` reaches ZERO consumers — the row above is about the builders, not the fleet
+
+Two independent reasons, both measured 2026-07-28 over a local fleet
+checkout containing vendored mirrors (lower bounds, not org-wide
+percentages). Either one alone would be sufficient; both hold.
+
+1. **`substrate.rust.library` never reaches `library.nix`.** All five
+   `substrate.rust.<shape>` entry points are `callShape` over one builder
+   (`flake.nix:496-506` → `mk-rust-tool-flake.nix` → `tool-release.nix`);
+   `shape` validates and records, it does not select a builder.
+   `lib/build/rust/shape.nix` states this and prices the routing fix — read
+   it before assuming the shape name means anything about the build path.
+   So the **136** `flake.nix` files naming `substrate.rust.library` — out of
+   **270** naming any `substrate.rust.*`, or **290** counting direct
+   `mkRustToolFlake` — all land on the `tool-release` path, where the row's
+   other condition applies: **zero of them set `buildMode = "cargo-nix"`**.
+
+2. **The 16 repos that DO reach `library.nix` discard its `checks`.**
+   Pattern-3 standalone import is a live route the shape-routing argument
+   misses entirely: 15 repos import `lib/rust-library.nix` (the two-line
+   shim to `build/rust/library.nix`) and `pleme-app-core` imports
+   `lib/build/rust/library.nix` directly. Every one of the 16 then writes
+   `inherit (lib) packages devShells apps;` — the string `checks` does not
+   appear **anywhere** in any of their `flake.nix` files. The builder emits
+   the check; the consumer flake never re-exports it; `nix flake check`
+   there builds nothing. That is the same green lie this whole section
+   exists to close, one layer further out, and it is not fixed by anything
+   in `test-check.nix`.
 
 ### The named gap — do not paper over it
 
@@ -106,6 +190,25 @@ resolver. Tracked as **`pending-rust-test-check: lockfile-dev-deps`**.
 Until it lands, the real-test leg for those consumers is the `cargo-test`
 job in `cargo-ci.yml` (`cargo test` inside the flake's devShell on the CI
 runner), which retires into `checks.tests` when the pending item closes.
+
+**That leg carries three repos — `engenho`, `forge`, `iac-forge` — against
+the 270 `flake.nix` files naming a `substrate.rust.*` builder** (290 counting
+direct `mkRustToolFlake`). `nix-devshell-cargo-test.yml`, which
+`cargo-ci.yml` composes, has one further direct caller, `pangea-operator`.
+So for the great majority of consumers there is no real-test leg at all
+today: not `checks.tests`, and not this job either.
+
+Count uncommented `uses:` lines, not mentions. A plain grep for the string
+`cargo-ci.yml` returns 8 repos: 3 callers, substrate itself (which defines
+it), and **4 — `pangea-forge`, `ruby-synthesizer`, `yaml-synthesizer`,
+`shikumi` — that name it only in comments explaining why they deliberately
+do NOT adopt the shim**, each with its own measured blockers worth reading
+before "simplifying" any of them back.
+
+Counted 2026-07-28 over a local fleet checkout containing vendored mirrors:
+lower bounds, not org-wide percentages. And a caller is not a run — **554 of
+716 workflow-bearing pleme-io repos have Actions disabled at the repo
+level**, so 3 callers is itself an upper bound on how many execute this leg.
 
 ### `cargo-ci.yml` — two jobs, and the split is the point
 
