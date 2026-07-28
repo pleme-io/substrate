@@ -149,6 +149,13 @@ in {
   tests ? {},
   testCrateFlags ? [],
   testInputs ? [],
+  # The `substrate.rust.<shape>` entry point this consumer came through,
+  # forwarded by mk-rust-tool-flake.nix. It does NOT select a builder — all
+  # five shapes land here — but it travels into `who` below so every
+  # diagnostic names the shape the consumer asked for instead of a generic
+  # "rust-release". See ./shape.nix for the full statement and the fleet
+  # counts behind that decision.
+  shape ? "tool",
   ...
 }:
 let
@@ -326,6 +333,12 @@ let
 
   # The one typed surface deciding which checks this builder emits.
   testCheck = import ./test-check.nix { inherit (hostPkgs) lib; };
+
+  # Validates `shape` against the closed set and yields the identity the
+  # check surface reports under. Evaluating this is what makes an unknown
+  # shape a throw rather than a silently-ignored argument.
+  shapeSpec = import ./shape.nix { inherit (hostPkgs) lib; };
+  resolvedShape = shapeSpec.resolve toolName shape;
 
   releaseHelpers = import ../../util/release-helpers.nix;
 
@@ -530,7 +543,10 @@ in {
   # the `cargo test` job in substrate's own `cargo-ci.yml` (inside this
   # flake's devShell, on the CI runner) — named there, not implied here.
   checks = testCheck.surface {
-    who = "rust-release/${toolName}";
+    # Names the shape as well as the crate: a `substrate.rust.library`
+    # consumer reading a diagnostic can see it was built by the tool-release
+    # builder, which is the fact that used to be invisible.
+    who = resolvedShape.who;
     decl = tests;
     mode = effectiveMode;
     buildDrv = nativeBinary;

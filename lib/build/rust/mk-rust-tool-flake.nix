@@ -27,10 +27,24 @@
   buildInputs ? [],
   nativeBuildInputs ? [],
   module ? null,           # optional HM/NixOS/Darwin module trio spec
-  shape ? "tool",          # tool | workspace | library | service | binary
+  # tool | workspace | library | service | binary.
+  #
+  # Until 2026-07-28 this was declared here and NEVER READ AGAIN, so all five
+  # `substrate.rust.<shape>` entry points were byte-identical and a typo was
+  # silently swallowed. It is now validated against a closed set and carried
+  # into the builder's identity — see ./shape.nix for what it does, what it
+  # deliberately does NOT do (it still selects no builder), and the fleet
+  # counts that make routing on it a 132-repo IFD regression rather than a
+  # one-line fix.
+  shape ? "tool",
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
+
+  shapeSpec = import ./shape.nix { lib = inputs.nixpkgs.lib; };
+  # Force the validation at eval time rather than lazily at some later use
+  # site, so an unknown shape fails at the call that supplied it.
+  resolvedShape = shapeSpec.normalize (toString src) shape;
 
   # ── Spec resolution: committed spec OR Cargo.toml fallback ─────────
   #
@@ -311,6 +325,10 @@ in toolFlake (
     inherit src;
     repo = resolvedRepo;
     inherit crateOverrides buildInputs nativeBuildInputs;
+    # Carried so the builder's diagnostics name the shape the consumer
+    # actually asked for. `rust-release/shikumi` told a `rust.library`
+    # consumer nothing about which entry point it came through.
+    shape = resolvedShape;
   }
   // (if multiMember then { packageName = pickedMember; } else {})
   // (if effectiveModule != null then { module = effectiveModule; } else {})

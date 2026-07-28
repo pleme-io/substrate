@@ -249,6 +249,43 @@
           flake-checks-gate =
             (import ./lib/util/tests/flake-checks-gate-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── The "can the cargo-test job ENTER the devShell?" gate ──────
+          # Policy INTENDED for `.github/workflows/nix-devshell-cargo-test.yml`,
+          # exposed as `devshellPreflightPath` below.
+          #
+          # ⚠ NOT WIRED AS OF THIS COMMIT. No workflow imports
+          # `devshellPreflightPath` — verified 2026-07-28 by grepping
+          # `.github/` for it (zero hits). What ships here is the POLICY plus
+          # its own tests; the CI leg that would invoke it is a follow-up.
+          # Said out loud because a comment claiming a wiring that does not
+          # exist is the same defect class this file's other gates close.
+          #
+          # Why it is worth having ready: `nix develop` failing is the ONLY
+          # thing standing between a consumer and a completely opaque red.
+          # Measured 2026-07-28 across 292 `substrate.rust.*` consumer
+          # flake.nix files, ZERO set `buildMode = "cargo-nix"`, so
+          # `checks.tests` is emitted for none of them and that job is the
+          # only leg that runs their tests at all.
+          #
+          # NOT VACUOUS: `devenv-backed-throws` and
+          # `unevaluable-devshell-throws` assert the gate FAILS on the two
+          # shapes it exists to diagnose; making it return a friendly string
+          # instead of throwing turns six tests red.
+          devshell-preflight =
+            (import ./lib/util/tests/devshell-preflight-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
+          # ── The `shape` argument is no longer inert ────────────────────
+          # `mk-rust-tool-flake.nix` declared `shape ? "tool"` and never read
+          # it, so all five `substrate.rust.<shape>` entry points were the
+          # same builder and `shape = "libary"` was silently swallowed.
+          #
+          # NOT VACUOUS: `unknown-shape-throws` asserts the exact input the
+          # old code accepted now fails, and
+          # `known-set-covers-every-flake-call-site` reads THIS file to catch
+          # the closed set and the `callShape` sites drifting apart.
+          rust-shape =
+            (import ./lib/build/rust/tests/shape-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were
@@ -349,6 +386,22 @@
         #
         # Guarded by checks.<system>.flake-checks-gate above.
         flakeChecksGatePath = ./lib/util/flake-checks-gate.nix;
+
+        # The devShell-enterability gate, as a standalone import path. Same
+        # reasoning as flakeChecksGatePath: it is consumed from inside a
+        # CONSUMER's checkout, where substrate's tree is not present.
+        #
+        #   nix eval --impure --raw --expr '
+        #     import (builtins.getFlake "github:pleme-io/substrate").devshellPreflightPath {
+        #       system    = builtins.currentSystem;
+        #       devshell  = "default";
+        #       devShells = (builtins.getFlake (toString ./.)).devShells or {};
+        #     }'
+        #
+        # `--impure` is not optional here: on the very revs this gate exists
+        # to diagnose, the devShell attribute cannot be evaluated purely.
+        # Guarded by checks.<system>.devshell-preflight above.
+        devshellPreflightPath = ./lib/util/devshell-preflight.nix;
 
         # Standalone import paths for consumer flakes
         rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;
