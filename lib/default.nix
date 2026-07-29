@@ -680,7 +680,12 @@ in rec {
   # staticRoot defaults to /usr/share/nginx/html with no nginx in the image
   # because a chart mounts a ConfigMap subPath there; see the file header.
   staticSpaImageBuilder = ./build/web/static-spa-image.nix;
-  inherit ((import ./build/web/static-spa-image.nix { })) mkStaticSpaImage;
+  # pkgs pre-applied so the call site matches its sibling mkPackageImage
+  # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
+  # surface that needs pkgs threaded by hand.
+  mkStaticSpaImage =
+    (import ./build/web/static-spa-image.nix { }).mkStaticSpaImage pkgs;
+  inherit ((import ./build/web/static-spa-image.nix { })) normalizeListenPort;
   inherit ((import ./build/go/hardened-image.nix { }))
     mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
 
