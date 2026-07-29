@@ -2,6 +2,26 @@
 #
 # Run: nix eval --json -f lib/kube/tests.nix
 # All tests return true on success, throw on failure.
+#
+# 57 assertions, and CI RUNS THEM as of 2026-07-28 — until then this file
+# executed in no job on any trigger, and `lib/kube/**` was not in any
+# workflow's path filter. It is now wired through the family-C catalog in
+# `lib/util/eval-suites.nix` (`only = "kube/tests"`), which asserts
+# `allPassed` and enforces a floor of 57 so a suite that quietly shrinks
+# fails instead of reporting a smaller green.
+#
+# The long-standing "37 pure eval tests" in the repo CLAUDE.md was never
+# re-counted; the real number is 57. All 57 ARE reached: the `allPassed`
+# aggregator at the bottom of this file inherits every `test*` attribute
+# defined above it, verified mechanically (zero defined-but-unforced
+# attrs). If you add a test here, add it to that inherit list too — an
+# attribute the aggregator does not name is never forced, and a test that
+# is never forced cannot fail (★★ UNREPRESENTABILITY tier ⊥, "unreached"
+# subclass).
+#
+# NOTE: this comment is also the isolating test of the new `lib/kube/**`
+# path-filter entry. This commit touches lib/kube ONLY, so a nix-tests run
+# appearing for it can only have been triggered by that entry.
 let
   # Primitives
   meta = import ./primitives/metadata.nix;
