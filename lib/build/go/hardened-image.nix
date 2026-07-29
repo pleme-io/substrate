@@ -395,7 +395,16 @@ let
       tar xf "$image" -C "$IMAGE_DIR" 2>/dev/null || tar xzf "$image" -C "$IMAGE_DIR"
       export IMAGE_DIR="$PWD/$IMAGE_DIR"
       echo "minimal conformance: $(cat "$minimalCheck/result")"
-      tatara-script "$checkScript" | tee "$out/report.txt"
+      # NOT piped into tee: a pipeline's status is the LAST command's, so
+      # `tatara-script | tee` would report tee's success and let a failing gate
+      # pass silently. Write the report, then replay it, then let the real exit
+      # code stand.
+      set -o pipefail
+      if ! tatara-script "$checkScript" > "$out/report.txt" 2>&1; then
+        cat "$out/report.txt"
+        exit 1
+      fi
+      cat "$out/report.txt"
       echo "${name} hardened-image conformance: PASS" > "$out/result"
     '';
 

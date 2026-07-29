@@ -23,6 +23,14 @@
 ;;
 ;; Usage:
 ;;   tatara-script hardened-image-check.tlisp
+;;
+;; exec-capture takes VARARG strings, not a list, and returns a record rather
+;; than a string. These two accessors are the same ones _tlisp-stdlib defines;
+;; they are repeated here because this script is executed directly rather than
+;; concatenated after that stdlib.
+
+(define (status-of result) (alist-get result "status" -1))
+(define (stdout-of result) (alist-get result "stdout" ""))
 
 (define failures (list))
 
@@ -51,8 +59,9 @@
       (and (string-ends-with? p ".json")
            (not (string-ends-with? p "manifest.json"))
            (not (string-ends-with? p "index.json"))
+           (not (string-ends-with? p "repositories"))
            (not (string-ends-with? p "oci-layout"))))
-    (glob (path-join image-dir "*.json"))))
+    (walk-dir image-dir)))
 
 (define cfg-candidates (config-json-candidates))
 
@@ -84,7 +93,7 @@
 
 (define (layer-setuid-lines tarpath)
   (filter (fn (line) (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" line))
-          (string-split (exec-capture "tar" (list "tvf" tarpath)) "\n")))
+          (string-split (stdout-of (exec-capture "tar" "tvf" tarpath)) "\n")))
 
 (define setuid-lines
   (reduce (fn (acc t) (append acc (layer-setuid-lines t))) (list) layer-tars))
@@ -97,7 +106,7 @@
 
 ;; ── 3. PIE ───────────────────────────────────────────────────────────────
 (define (elf-type path)
-  (let ((out (exec-capture "readelf" (list "-h" path))))
+  (let ((out (stdout-of (exec-capture "readelf" "-h" path))))
     (let ((m (re-find "Type:\\s+(\\S+)" out)))
       (if (null? m) "unknown" (car (re-captures "Type:\\s+(\\S+)" out))))))
 
@@ -109,11 +118,11 @@
 
 ;; ── 4. stripped, no build id ─────────────────────────────────────────────
 (when (and (not (eq? bin-path "")) (is-file? bin-path))
-  (let ((sections (exec-capture "readelf" (list "-S" bin-path))))
+  (let ((sections (stdout-of (exec-capture "readelf" "-S" bin-path))))
     (if (re-match? "\\.symtab" sections)
         (fail "binary retains a symbol table; -s -w did not take effect")
         (note "binary is stripped (no .symtab)")))
-  (let ((notes (exec-capture "readelf" (list "-n" bin-path))))
+  (let ((notes (stdout-of (exec-capture "readelf" "-n" bin-path))))
     (if (re-match? "(?i)build id" notes)
         (fail "binary carries a GNU build id; -buildid= did not take effect")
         (note "binary carries no build id"))))
