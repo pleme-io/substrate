@@ -154,8 +154,19 @@ let
 
     tags = hardenedTags;
     ldflags = hardenedLdflags;
-    GOFLAGS = hardenedGoflags;
     inherit doCheck;
+
+    # -buildmode=pie has no home in buildGoModule's own vocabulary: there is no
+    # buildFlags attribute, and passing GOFLAGS as a top level attr collides
+    # with the GOFLAGS buildGoModule itself writes into `env` ("the env
+    # attribute set cannot contain any attributes passed to derivation").
+    # Appending in preBuild is what actually reaches go build without fighting
+    # either mechanism. Unlike the -trimpath append that was removed from this
+    # file, this flag is NOT something buildGoModule manages, so there is
+    # nothing to duplicate.
+    preBuild = lib.optionalString pie ''
+      export GOFLAGS="''${GOFLAGS:-} -buildmode=pie"
+    '';
 
     # -trimpath is NOT set here. buildGoModule already injects it into GOFLAGS
     # whenever allowGoReference is false (nixpkgs build-support/go/module.nix),
