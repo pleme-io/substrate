@@ -41,8 +41,36 @@
 # `checks.tests` wherever substrate can genuinely run tests (the crate2nix
 # path — the gen lockfile path has no dev-dependency graph yet, tracked as
 # `pending-rust-test-check: lockfile-dev-deps`). The `cargo-test` job below
-# covers every consumer meanwhile, and retires into `checks.tests` when
-# that pending item lands.
+# is the meanwhile leg, and retires into `checks.tests` when that pending
+# item lands.
+#
+# ── "COVERS EVERY CONSUMER" WAS FALSE THE DAY IT WAS WRITTEN ───────────
+#
+# That is what this header said on 2026-07-27, and it is the sentence that
+# broke the fleet. `cargo-test` reaches every consumer *unconditionally* —
+# it is a runner-side job gated on nothing, so it arrived at all three
+# callers the instant `@main` moved. But REACHING a consumer is not
+# COVERING one. Measured 2026-07-28, `devShells.<sys>.default.name` for
+# every caller of this workflow:
+#
+#   forge      -> "devenv-shell"    (its own devenv.flakeModule; the only
+#                                    pleme-io repo that imports it)
+#   engenho    -> "devenv-shell"    (stale substrate pin, pre-e232917)
+#   iac-forge  -> "devenv-shell"    (stale substrate pin, pre-e232917)
+#
+# `nix develop` cannot enter a devenv shell non-interactively, so the job
+# ran the tests of 0 of its 3 consumers. The gate it replaced was vacuous
+# by ABSENCE (`checks.tests` reached nobody because no consumer sets
+# `buildMode = "cargo-nix"`); this one was vacuous by BREAKAGE. Both verify
+# nothing; the second also turns a working pipeline red.
+#
+# The lesson is the general one, not the devenv specific: a new job added
+# to a SHARED reusable asserts a capability of every consumer, and this one
+# asserted "`.#default` is enterable non-interactively" — which no
+# substrate builder ever guaranteed and which held for none of them. Hence
+# the preflight now wired into nix-devshell-cargo-test.yml, which states
+# that precondition as a checked, actionable verdict instead of an
+# assumption, and the `devshell-args` lever below.
 #
 # Composes:
 #   - pleme-io/actions/nix-flake-check@main
@@ -95,6 +123,21 @@ on:
         required: false
         type: string
         default: "--workspace --all-features --no-fail-fast"
+      devshell-args:
+        description: >-
+          Extra arguments for `nix develop` itself, forwarded to the
+          cargo-test job. Empty by default.
+
+          NOT the same thing as `flake-args` above, and deliberately not
+          wired to it: `flake-args` means "extra args for `nix flake
+          check`". Threading one string into two different commands would
+          give it two meanings, and — measured on forge 2026-07-28 — would
+          not even work, because `--impure` is necessary but NOT sufficient
+          to enter a devenv-backed devShell. See the input of the same name
+          in nix-devshell-cargo-test.yml for the full measurement.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   flake-check:
@@ -135,4 +178,5 @@ jobs:
     with:
       devshell: ${{ inputs.devshell }}
       test-args: ${{ inputs.test-args }}
+      devshell-args: ${{ inputs.devshell-args }}
     secrets: inherit

@@ -45,6 +45,40 @@ on:
         description: "Args appended to `cargo test` inside the devShell"
         type: string
         default: "--workspace --no-fail-fast"
+      devshell-args:
+        description: >-
+          Extra arguments passed to `nix develop` itself (NOT to `cargo
+          test` — that is `test-args`). Empty by default, so every existing
+          caller runs the exact same command as before.
+
+          This input exists because `lib/util/devshell-preflight.nix` has
+          been telling operators to use it since 2026-07-28 — its lever #2
+          prints `devshell-args: "--impure"` — while the input did not
+          exist. A remediation message naming a knob that cannot be set is
+          not a remediation.
+
+          The one known use is `--impure`, for a flake whose devShell is
+          DELIBERATELY devenv-backed: devenv asserts on the working
+          directory, which is empty under a non-interactive `nix develop`.
+
+          ⚠ MEASURED 2026-07-28 ON `forge`, so nobody re-derives it the
+          hard way: `--impure` alone is NOT sufficient. It clears the
+          working-directory assertion and then surfaces the next one —
+          `error: To use 'languages.rust.channel', Add … inputs.rust-overlay.url`
+          — because devenv's Rust module resolves a `rust-overlay` input the
+          consumer never declared. Passing `--impure` is half a fix; the
+          flake must also declare that input. The preflight step below says
+          so at the point of failure.
+
+          Deliberately NOT wired to `cargo-ci.yml`'s `flake-args`. That input
+          means "extra args for `nix flake check`"; forwarding it here would
+          silently give one string two jobs' worth of meaning, and the
+          measurement above shows it would not even work — a caller passing
+          `--impure` for the flake-check leg would get a different opaque red
+          on this leg rather than a green.
+        required: false
+        type: string
+        default: ""
 
 jobs:
   cargo-test:
@@ -86,6 +120,54 @@ jobs:
           git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --unset-all http.https://github.com/.extraheader || true
 
+      # ── devShell preflight (wired 2026-07-28) ──────────────────────────
+      #
+      # WHY THIS STEP EXISTS: without it, the only thing standing between a
+      # consumer and a completely opaque red is `nix develop` itself. When
+      # the devShell cannot be entered, nix fails with an evaluation trace
+      # before cargo is ever invoked — the job goes red for a reason that
+      # has nothing to do with the tests, and the trace does not say what to
+      # do about it. A red nobody can act on gets muted, which is strictly
+      # worse than the vacuous green it replaced.
+      #
+      # THE POLICY WAS ALREADY BUILT AND ALREADY TESTED — it just ran
+      # nowhere. `lib/util/devshell-preflight.nix` landed with its own
+      # `checks.<system>.devshell-preflight` suite (both failure arms
+      # verified red against deliberately-broken input), and its own header
+      # said out loud: "⚠ NOT WIRED AS OF THIS COMMIT. No workflow imports
+      # devshellPreflightPath — verified by grepping .github/ for it (zero
+      # hits)." A guard that passes its own unit tests while running against
+      # zero real subjects is the "unreached" subclass of tier ⊥ — the exact
+      # shape this repo spent 2026-07-27/28 removing elsewhere. This step is
+      # the subject set.
+      #
+      # IT CLASSIFIES, IT DOES NOT REPAIR. The three failure verdicts
+      # (Missing / Unevaluable / DevenvBacked) each print the actionable
+      # levers — re-lock substrate, or set `devshell-args: "--impure"` AND
+      # declare the `rust-overlay` input — because the repair is one command
+      # in the CONSUMER's repo and cannot be done from here.
+      #
+      # IT DOES NOT FALL BACK TO A BARE TOOLCHAIN, deliberately: this whole
+      # workflow exists to replace "a `dtolnay/rust-toolchain@stable` +
+      # bare `cargo test` job that passes only because ubuntu-latest's
+      # ambient environment happens to satisfy the requirement." Falling
+      # back on failure would restore that accident silently and go green on
+      # a subject that is not the thing being verified.
+      #
+      # `--impure` is not optional on the eval: on the very revs this gate
+      # exists to diagnose, the devShell attribute cannot be evaluated
+      # purely at all. Policy lives in a real Nix file rather than inline
+      # shell for the same reason `flake-checks-gate.nix` does — a gate
+      # three quoting layers deep that fails to PARSE never runs.
+      - name: Preflight -- can this job ENTER .#${{ inputs.devshell }}?
+        run: >-
+          nix eval --impure --raw --expr
+          'import (builtins.getFlake "github:pleme-io/substrate").devshellPreflightPath {
+             system    = builtins.currentSystem;
+             devshell  = "${{ inputs.devshell }}";
+             devShells = (builtins.getFlake (toString ./.)).devShells or {};
+           }'
+
       - name: cargo test (inside .#${{ inputs.devshell }})
         env:
           # Forces cargo to shell out to the real git binary (which honors
@@ -93,4 +175,4 @@ jobs:
           # backend (which does not) -- same fix as release.yml's own
           # CARGO_NET_GIT_FETCH_WITH_CLI wiring.
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        run: nix develop ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.test-args }}
+        run: nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.test-args }}

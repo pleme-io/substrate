@@ -354,6 +354,39 @@
             import ./lib/build/go/tests/minimal-image-serve-test.nix { inherit pkgs; };
         });
 
+        # ── The subject set for nix-devshell-cargo-test.yml's own gate ────
+        #
+        # `.github/workflows/devshell-cargo-test-selftest.yml` calls the REAL
+        # `nix-devshell-cargo-test.yml` against this shell, so the reusable
+        # is exercised end to end by a consumer-shaped caller inside this
+        # repo rather than only in the three downstream repos that discover
+        # its breakage after `@main` has already moved.
+        #
+        # That gap is the whole reason this exists. On 2026-07-27 a
+        # `cargo-test` job was added to the shared `cargo-ci.yml`; because
+        # nothing here consumed it, the first execution of that job anywhere
+        # was in a consumer's CI, and it failed for all three of them. A
+        # shared reusable with no in-repo caller has no way to go red before
+        # its blast radius does.
+        #
+        # Deliberately a PLAIN `mkShell`: it is the shape substrate's own
+        # Rust builders emit since e232917 (`devenv = null` -> fenix
+        # mkShell), so the green half of the selftest asserts the supported
+        # shape genuinely works — `name` resolves to "nix-shell", the
+        # preflight returns Ok, and cargo really runs. A devenv-backed shell
+        # is deliberately NOT added here: `nix flake check` evaluates every
+        # devShell, so declaring one would make substrate's own flake
+        # un-evaluable purely — the exact defect being diagnosed, self-
+        # inflicted. The devenv arm is covered by
+        # `checks.<system>.devshell-preflight`'s `devenv-backed-throws`.
+        devShells = eachSystem (system: let
+          pkgs = import nixpkgs { inherit system; };
+        in {
+          selftest-cargo = pkgs.mkShell {
+            packages = [ pkgs.cargo pkgs.rustc ];
+          };
+        });
+
         # Devenv modules for consumer repos
         # Import these in devenv.shells.default.imports or devenv.lib.mkShell modules
         devenvModules = {

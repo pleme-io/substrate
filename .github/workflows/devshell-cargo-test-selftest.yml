@@ -1,0 +1,191 @@
+# devshell-cargo-test-selftest — the in-repo caller `nix-devshell-cargo-test.yml`
+# never had, and the absence of which is the whole reason 2026-07-27's
+# `cargo-test` job broke every one of its consumers on first contact.
+#
+# ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────
+#
+# `cargo-ci.yml` is a FLEET REUSABLE consumed at `@main`. A job added to it
+# reaches every caller the instant main moves — there is no staging, no
+# per-consumer opt-in, and (until this file) no caller inside substrate
+# itself. So the first execution of a new leg anywhere in the world was in
+# somebody else's CI. On 2026-07-27 that leg asserted a capability no
+# substrate builder guarantees — "`.#default` is enterable
+# non-interactively" — and, measured 2026-07-28, it held for NONE of the
+# three callers (forge / engenho / iac-forge all resolve
+# `devShells.<sys>.default.name` to "devenv-shell").
+#
+# A shared reusable with no in-repo caller cannot go red before its blast
+# radius does. This workflow is that caller.
+#
+# ── BOTH DIRECTIONS, BECAUSE ONE DIRECTION PROVES NOTHING ───────────────
+#
+#   green           calls the REAL reusable against a supported devShell.
+#                   Proves the whole shipped path works end to end: checkout,
+#                   nix install, credentials, the new preflight returning Ok,
+#                   and `cargo test` exiting 0.
+#
+#   green_evidence  proves the tests genuinely EXECUTED. This is a SEPARATE
+#                   job on purpose, and the reason is the point of the whole
+#                   family: `cargo test` exits 0 when it runs zero tests, and
+#                   a job whose body is `uses:` a reusable workflow cannot
+#                   inspect its own log. So `green` succeeding does NOT
+#                   distinguish "the suite ran" from "nothing ran and the
+#                   step exited 0" — the exact round-up being removed. This
+#                   job asserts on cargo's own `1 passed` output.
+#
+#   red             drives the preflight against a devShell that does not
+#                   exist and asserts it EXITS NON-ZERO and NAMES the fix. A
+#                   gate never observed to fail may be checking nothing
+#                   (★★ UNREPRESENTABILITY tier ⊥); this is the deliberate
+#                   break.
+#
+# TIER-HONEST ABOUT WHAT `red` COVERS: it exercises the preflight's `Missing`
+# arm, not the `DevenvBacked` arm that caused the 2026-07-27 breakage. What
+# it proves is the WIRING — that the step runs, that a refusal verdict
+# actually fails the job, and that the message is actionable — which is the
+# part that had never executed anywhere. All three refusal arms share one
+# throw path, and `DevenvBacked`'s own message content is covered by
+# `checks.<system>.devshell-preflight`'s `devenv-backed-throws`. A
+# devenv-backed devShell is NOT added to this flake to close that last gap,
+# because `nix flake check` evaluates every devShell and declaring one would
+# make substrate's own flake un-evaluable purely — self-inflicting the defect
+# under diagnosis.
+#
+# ── WHY `red` IS A NORMAL JOB AND NOT A REUSABLE CALL ───────────────────
+#
+# It would be tighter to call the reusable with a bad devshell and assert
+# the CALL failed. GitHub does not allow it: a job whose body is `uses:` a
+# reusable workflow does not support `continue-on-error`, so an expected-red
+# reusable call can only be expressed as a genuinely failing run. That would
+# leave substrate's own CI permanently red — the "abandoned red" pathology
+# that gets a gate muted, which is worse than the vacuity it replaced.
+#
+# So `red` mirrors the preflight STEP's command instead. ⚠ That is a real
+# (small) duplication: if the preflight invocation in
+# nix-devshell-cargo-test.yml changes, change it here too. Stated out loud
+# rather than left to rot, because an un-flagged copy is how a gate quietly
+# stops matching the thing it guards.
+#
+# Manual + on-change: this burns two nix installs, so it is not on every
+# push, but it MUST run whenever the workflows or the policy it guards move.
+
+name: devshell-cargo-test-selftest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nix-devshell-cargo-test.yml"
+      - ".github/workflows/cargo-ci.yml"
+      - ".github/workflows/devshell-cargo-test-selftest.yml"
+      - "lib/util/devshell-preflight.nix"
+      - "lib/util/tests/fixtures/selftest-crate/**"
+  pull_request:
+    paths:
+      - ".github/workflows/nix-devshell-cargo-test.yml"
+      - ".github/workflows/cargo-ci.yml"
+      - ".github/workflows/devshell-cargo-test-selftest.yml"
+      - "lib/util/devshell-preflight.nix"
+      - "lib/util/tests/fixtures/selftest-crate/**"
+
+permissions:
+  contents: read
+
+jobs:
+  # ── GREEN: the supported shape works, and the tests genuinely execute ──
+  #
+  # `selftest-cargo` is a plain `pkgs.mkShell` — the shape substrate's Rust
+  # builders have emitted since e232917 (`devenv = null` -> fenix mkShell).
+  # A green here is the standing proof that the preflight does not reject
+  # the supported shape (no false positive) AND that the cargo leg runs.
+  green:
+    name: supported devShell -> tests actually run
+    uses: ./.github/workflows/nix-devshell-cargo-test.yml
+    with:
+      devshell: selftest-cargo
+      # Points cargo at the fixture crate: substrate has no root Cargo.toml,
+      # so the inherited `--workspace` default would find nothing to do and
+      # a "success" would mean nothing.
+      test-args: "--manifest-path lib/util/tests/fixtures/selftest-crate/Cargo.toml"
+    secrets: inherit
+
+  # ── GREEN-EVIDENCE: the tests did not merely "not fail", they RAN ─────
+  green_evidence:
+    name: supported devShell -> cargo reports tests executed
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      # `cargo test` exits 0 on a suite that ran ZERO tests, so the exit
+      # code is not evidence of execution. Grep cargo's own summary line
+      # instead. The fixture declares exactly one test, so `1 passed` is an
+      # exact expectation rather than a floor that a shrinking suite could
+      # silently satisfy.
+      - name: cargo test in .#selftest-cargo must report 1 passed
+        run: |
+          out=$(nix develop ".#selftest-cargo" -c cargo test \
+            --manifest-path lib/util/tests/fixtures/selftest-crate/Cargo.toml 2>&1)
+          echo "$out"
+          echo "$out" | grep -q "test result: ok. 1 passed" \
+            || { echo "::error::no evidence any test EXECUTED in the devShell"; exit 1; }
+
+  # ── RED: the gate fails, loudly and actionably, on a broken subject ────
+  red:
+    name: broken devShell -> preflight refuses (deliberate break)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      # Mirrors the `Preflight` step in nix-devshell-cargo-test.yml, pointed
+      # at a devShell this flake does not declare. Asserts three things, all
+      # of which must hold for the gate to be worth having:
+      #   1. it EXITS NON-ZERO (a gate that cannot fail is not a gate)
+      #   2. it NAMES the missing shell (the operator can locate the fault)
+      #   3. it LISTS what does exist (the operator can fix it in one edit)
+      # An `exit 0` here means the preflight went green over a devShell that
+      # is not there — the exact round-up the whole family exists to remove.
+      - name: Preflight must REFUSE a devShell that does not exist
+        run: |
+          if out=$(nix eval --impure --raw --expr \
+            'import (builtins.getFlake "github:pleme-io/substrate").devshellPreflightPath {
+               system    = builtins.currentSystem;
+               devshell  = "no-such-devshell";
+               devShells = (builtins.getFlake (toString ./.)).devShells or {};
+             }' 2>&1); then
+            echo "::error::preflight returned SUCCESS for a devShell that does not exist"
+            echo "$out"
+            exit 1
+          fi
+          echo "$out" | grep -q "no-such-devshell" \
+            || { echo "::error::refusal did not name the missing devShell"; echo "$out"; exit 1; }
+          echo "$out" | grep -q "selftest-cargo" \
+            || { echo "::error::refusal did not list the devShells that DO exist"; echo "$out"; exit 1; }
+          echo "preflight correctly refused, and named both the fault and the fix"
+
+  # Fails the run if either direction is missing, so a skipped job cannot
+  # masquerade as a pass — `success()` alone treats `skipped` as non-failure.
+  verdict:
+    name: both directions observed
+    needs: [green, green_evidence, red]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every direction to have actually succeeded
+        run: |
+          echo "green=${{ needs.green.result }}"
+          echo "green_evidence=${{ needs.green_evidence.result }}"
+          echo "red=${{ needs.red.result }}"
+          [ "${{ needs.green.result }}" = "success" ] || exit 1
+          [ "${{ needs.green_evidence.result }}" = "success" ] || exit 1
+          [ "${{ needs.red.result }}" = "success" ] || exit 1

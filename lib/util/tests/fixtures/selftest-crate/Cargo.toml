@@ -1,0 +1,17 @@
+# Fixture crate for `.github/workflows/devshell-cargo-test-selftest.yml`.
+#
+# Deliberately dependency-free: the selftest's green half must prove that
+# `nix develop .#selftest-cargo -c cargo test` genuinely COMPILES AND RUNS a
+# test, and a crate with no registry dependencies makes that assertion about
+# the devShell rather than about network reachability or a lockfile.
+#
+# Not a member of any workspace — substrate has no root Cargo.toml — so
+# `cargo test --manifest-path <this>` is self-contained.
+[package]
+name = "substrate-devshell-selftest"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
