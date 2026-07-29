@@ -62,8 +62,9 @@ let
   #                  the binary leaking the builder's filesystem layout.
   #   -s -w          drop the symbol table and DWARF. Smaller, and a stripped
   #                  binary is meaningfully harder to work with in-place.
-  #   -buildid=      empty build id, so the artifact is bit-reproducible
-  #                  across otherwise identical builds.
+  #   -buildid=      empty build id, for bit-reproducibility. NOT passed here:
+  #                  buildGoModule appends it by default and warns on a
+  #                  duplicate. The check still asserts the property.
   #   -buildmode=pie ASLR for the text segment. Costs a little startup time
   #                  and a little size; worth it for a network-facing service.
   mkHardenedGoBinary = pkgs: {
@@ -127,8 +128,13 @@ let
            ++ (if pie then [ ''-extldflags "-static-pie"'' ] else [ ''-extldflags "-static"'' ])
       else [];
 
+    # -buildid= is NOT listed here: buildGoModule already appends it unless an
+    # explicit -buildid= is present, and warns when you pass it yourself
+    # (nixpkgs build-support/go/module.nix). -s -w it does NOT set, so those
+    # stay ours. The conformance check asserts the resulting properties on the
+    # artifact rather than trusting either layer.
     hardenedLdflags =
-      [ "-s" "-w" "-buildid=" ] ++ versionLdflags ++ staticLdflags ++ ldflagsExtra;
+      [ "-s" "-w" ] ++ versionLdflags ++ staticLdflags ++ ldflagsExtra;
 
     buildFlags = lib.optionals pie [ "-buildmode=pie" ];
   in
@@ -254,6 +260,9 @@ let
     maxStorePaths ? 5,
     execSmoke ? null,
     created ? "1970-01-01T00:00:01Z",
+    # Threaded to the conformance check, whose body is tlisp. Required there,
+    # so a consumer that wants the check must supply it.
+    tataraScript ? null,
   }:
   let
     lib = pkgs.lib;
@@ -312,7 +321,7 @@ let
     };
 
     conformance = mkHardenedGoImageCheck pkgs {
-      inherit name image binary maxStorePaths execSmoke pie;
+      inherit name image binary maxStorePaths execSmoke pie tataraScript;
       binName = name;
       expectUser = "${toString hardenedBase.nonrootUid}:${toString hardenedBase.nonrootGid}";
     };

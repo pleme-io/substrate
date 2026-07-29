@@ -25,6 +25,16 @@
     # flakes can drop `inputs.flake-utils.url = ...` and `inputs.
     # crate2nix.url = ...` etc. — substrate's pin propagates.
     flake-utils.url = "github:numtide/flake-utils";
+    # tatara-lisp ships the `tatara-script` binary, which is what the
+    # no-shell rule is enforced WITH. tatara-lisp itself consumes substrate,
+    # so this is a circular repo reference; that is fine because each flake
+    # resolves its inputs from its own lock rather than recursing, and the
+    # copy of substrate inside tatara-lisp is only used to build the script
+    # binary. Deliberate, not accidental.
+    tatara-lisp = {
+      url = "github:pleme-io/tatara-lisp";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     crate2nix = {
       url = "github:nix-community/crate2nix";
       flake = false;
@@ -352,6 +362,16 @@
         // nixpkgs.lib.optionalAttrs (nixpkgs.lib.hasSuffix "linux" system) {
           go-minimal-image-serves =
             import ./lib/build/go/tests/minimal-image-serve-test.nix { inherit pkgs; };
+
+          # The hardened peer of the above: same fixture, built through
+          # mkHardenedGoImage with nothing overridden, so a wrong default in
+          # that builder fails here. tataraScript comes from the flake input
+          # because the conformance body is tlisp, not shell.
+          go-hardened-image =
+            import ./lib/build/go/tests/hardened-image-test.nix {
+              inherit pkgs;
+              tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+            };
         });
 
         # ── The subject set for nix-devshell-cargo-test.yml's own gate ────
