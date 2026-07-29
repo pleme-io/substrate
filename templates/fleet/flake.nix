@@ -50,11 +50,24 @@
       };
     in
     {
-      inherit (fleet) nixosConfigurations darwinConfigurations;
+      # ── THE GATE ────────────────────────────────────────────────────
+      # `fleet.shipping` is `fleet.*` with the whole invariant suite
+      # forced first. Nothing in a fleet workflow invokes `checks`:
+      # `nixos-rebuild` never looks at it, and a private fleet repo runs
+      # no CI — so a declared-but-uninvoked check is not a weak gate, it
+      # is nothing. Selecting a node here forces the verdict and a red
+      # fleet THROWS, naming every failing case, before one byte is
+      # built. TIER: eval-rejected (a Nix `throw`, not a compile error).
+      #
+      # Taking these from `fleet` directly instead is the ungated shape —
+      # it still works, and still proves nothing.
+      inherit (fleet.shipping) nixosConfigurations darwinConfigurations;
 
-      # Typed deploy data (feed deploy-rs / colmena at your edge).
-      fleetDeploy = fleet.deployRs;
-      fleetRegistry = fleet.registry;
+      # Typed deploy data (feed deploy-rs / colmena at your edge). Gated
+      # too — deploy DATA for a fleet that fails its own invariants is
+      # exactly what must not leave the repo.
+      fleetDeploy = fleet.shipping.deployRs;
+      fleetRegistry = fleet.shipping.registry;
 
       # Composed letters — derived for free from the one mkFleet call.
       # `fleet.sshAliases` is shaped as blackmatter.components.ssh.extraHosts;
@@ -65,6 +78,9 @@
 
       # One typed query over the whole fleet:
       #   nix eval .#fleetReport --json | jq
+      # DELIBERATELY UNGATED, like `checks` below — when the gate is red
+      # these are how you find out why. A gate that also blinds the
+      # diagnostics is unusable rather than strict.
       fleetReport = fleet.report;
 
       checks = nixpkgs.lib.genAttrs [ "aarch64-darwin" "x86_64-linux" ] (

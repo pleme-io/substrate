@@ -445,6 +445,170 @@ in
       ).success;
     expected = false;
   };
+  # ── THE GATE ────────────────────────────────────────────────────────
+  # `checksFor` is a declaration; nothing in a fleet workflow builds it.
+  # `gate` / `gated` / `shipping` are the invoker, so a red fleet cannot
+  # ship without one command having been run. Every arm below is verified
+  # in BOTH directions — a gate that throws on everything proves as little
+  # as one that never throws.
+
+  gate-is-green-on-a-healthy-fleet = {
+    # The count of assertions actually forced — not a bare `true`, so the
+    # value itself states the size of the subject set.
+    expr = f.gate == builtins.length (builtins.attrNames f.invariants);
+    expected = true;
+  };
+  gated-passes-values-through-when-green = {
+    expr = builtins.attrNames (f.gated f.registry);
+    expected = [
+      "cid"
+      "rio"
+    ];
+  };
+  shipping-outputs-resolve-when-green = {
+    expr = {
+      nixos = builtins.attrNames f.shipping.nixosConfigurations;
+      darwin = builtins.attrNames f.shipping.darwinConfigurations;
+      deploy = builtins.attrNames f.shipping.deployRs.nodes;
+      byTag = f.shipping.byTag "k3s";
+    };
+    expected = {
+      nixos = [ "rio" ];
+      darwin = [ "cid" ];
+      deploy = [ "rio" ];
+      byTag = [ "rio" ];
+    };
+  };
+
+  gate-throws-every-shipping-output-on-a-RED-fleet = {
+    # Same fixture as `invariants-fail-when-deployed-node-lacks-domain`
+    # (rio deploys but has no domain entry) — that test proves the suite
+    # goes red; this one proves the red is INVOKED. Each shipping output
+    # is forced independently: one of them left ungated would show up
+    # here as a lone `true`.
+    expr =
+      let
+        bad = kata.mkFleet {
+          config = blanks // {
+            domains = {
+              tld = "demo.io";
+              locations.cid = "mobile";
+            };
+          };
+          inherit universes;
+          profiles = profileTable;
+        };
+        force = v: (builtins.tryEval (builtins.seq v true)).success;
+      in
+      {
+        suiteIsRed = (iroha.mkEvalChecks { name = "bad"; tests = bad.invariants; }).passed;
+        gate = force bad.gate;
+        nixos = force bad.shipping.nixosConfigurations;
+        darwin = force bad.shipping.darwinConfigurations;
+        deployRs = force bad.shipping.deployRs;
+        colmena = force bad.shipping.colmena;
+        registry = force bad.shipping.registry;
+        byTag = force bad.shipping.byTag;
+        gatedArbitraryValue = force (bad.gated 42);
+      };
+    expected = {
+      suiteIsRed = false;
+      gate = false;
+      nixos = false;
+      darwin = false;
+      deployRs = false;
+      colmena = false;
+      registry = false;
+      byTag = false;
+      gatedArbitraryValue = false;
+    };
+  };
+  red-fleet-stays-DIAGNOSABLE = {
+    # The asymmetry is what makes the gate usable rather than merely
+    # strict: with every shipping output throwing, `report` / `invariants`
+    # / `checksFor` must still evaluate, or an operator has no way to find
+    # out WHY the fleet is red.
+    expr =
+      let
+        bad = kata.mkFleet {
+          config = blanks // {
+            domains = {
+              tld = "demo.io";
+              locations.cid = "mobile";
+            };
+          };
+          inherit universes;
+          profiles = profileTable;
+        };
+        stubPkgs.runCommand = n: _: _: { stub = n; };
+      in
+      {
+        report = bad.report.nodes.rio.status;
+        hostCount = bad.report.hostCount;
+        invariantsReadable = bad.invariants ? "fleet:deployed-nodes-have-domains";
+        # checksFor still RESOLVES on a red fleet — the derivation it
+        # returns is the one that fails when built, which is the point.
+        checksFor = builtins.attrNames (bad.checksFor stubPkgs);
+      };
+    expected = {
+      report = "live";
+      hostCount = 1;
+      invariantsReadable = true;
+      checksFor = [ "kata-fleet-demo" ];
+    };
+  };
+
+  gate-refuses-an-EMPTY-invariant-suite = {
+    # ★ THE OTHER LOAD-BEARING HALF. An empty suite is `passed = true`
+    # (`lib.runTests { }` returns `[ ]`), so a fleet with zero invariants
+    # would sail through looking like the strongest possible evidence.
+    # mkFleet's own invariants are never empty by construction, so the
+    # refusal is proved at the harness it comes from — with the fleet's
+    # non-empty count asserted here as the companion fact.
+    expr = {
+      emptyRefused =
+        (builtins.tryEval (iroha.mkEvalChecks { name = "e"; tests = { }; }).gate).success;
+      emptyLooksPassing = (iroha.mkEvalChecks { name = "e"; tests = { }; }).passed;
+      fleetSuiteIsNonEmpty = f.gate > 0;
+    };
+    expected = {
+      emptyRefused = false;
+      emptyLooksPassing = true;
+      fleetSuiteIsNonEmpty = true;
+    };
+  };
+
+  ungated-outputs-are-UNCHANGED = {
+    # Blast-radius control: adding the gate must not alter what mkFleet
+    # already returned. The top-level outputs stay ungated, so an existing
+    # consumer that reads `fleet.nixosConfigurations` on a RED fleet
+    # behaves exactly as it did before this change.
+    expr =
+      let
+        bad = kata.mkFleet {
+          config = blanks // {
+            domains = {
+              tld = "demo.io";
+              locations.cid = "mobile";
+            };
+          };
+          inherit universes;
+          profiles = profileTable;
+        };
+      in
+      {
+        nixos = builtins.attrNames bad.nixosConfigurations;
+        registry = builtins.attrNames bad.registry;
+      };
+    expected = {
+      nixos = [ "rio" ];
+      registry = [
+        "cid"
+        "rio"
+      ];
+    };
+  };
+
   checks-for-shape = {
     expr =
       let

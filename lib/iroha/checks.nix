@@ -16,12 +16,20 @@
 #       asCheck   — pkgs -> derivation. Builds iff all pass; on failure the
 #                   build log lists EVERY failed case (aggregate-before-
 #                   assert, per the verification-matrix forcing rule).
+#       gate      — the SAME verdict as a pure EVAL-time value. Forcing it
+#                   throws (naming every failing case, and refusing an
+#                   EMPTY suite) or yields the assertion count. `asCheck`
+#                   only decides something when a derivation is BUILT;
+#                   `gate` decides on selection, so it can be seq'd onto a
+#                   shipping output where no command has to be run.
+#                   TIER: eval-rejected, not truly-unrepresentable.
 #     }
 #
 #   mkSuiteTree :: { name, suites :: attrsOf (attrsOf { expr, expected }) } -> tree
 #     Aggregates per-letter suites: flattens "<suite>.<case>" into one
 #     mkEvalChecks with names "test:<suite>:<case>"; carries per-suite
-#     results too. tree = { suites, all (a suite), passed, summary, asCheck }.
+#     results too.
+#     tree = { suites, all (a suite), passed, summary, gate, asCheck }.
 #
 #   mkModuleEvalCheck :: {
 #     name,
@@ -57,6 +65,38 @@ let
         f:
         "  FAIL ${f.name}\n    expected: ${builtins.toJSON f.expected}\n    got:      ${builtins.toJSON f.result}";
       report = lib.concatStringsSep "\n" (map renderFailure failures);
+
+      # ── THE GATE — the verdict, forced at EVAL time ──────────────────
+      #
+      # `asCheck` is a DERIVATION: it decides nothing until something
+      # BUILDS it (`nix flake check`, `nix build .#checks.<sys>.<name>`).
+      # A repo that never runs those commands gets no verdict at all — a
+      # private fleet with no CI, a `nixos-rebuild` that never looks at
+      # `checks`. A declared-but-uninvoked check is not a weak gate; it is
+      # nothing. `gate` is the same verdict as a pure VALUE, so a consumer
+      # can force it on the way into a shipping output
+      # (`builtins.seq suite.gate v`) where the workflow cannot route
+      # around it: selecting the output throws, before a byte is built, on
+      # any host, with no CI, no builder and no matching system.
+      #
+      # ★ NON-EMPTY SUBJECT SET is the load-bearing half, not a flourish.
+      # `lib.runTests { }` returns `[ ]`, so `passed` is TRUE over zero
+      # assertions — a suite with nothing in it reports the
+      # strongest-looking evidence available while proving nothing
+      # (★★ UNREPRESENTABILITY tier ⊥, "vacuous" subclass). Refuse it
+      # rather than report it green.
+      #
+      # TIER: eval-rejected. Stronger than a CI gate (only-mitigated, and
+      # vacuous wherever Actions never run — which is why this must not
+      # depend on CI); weaker than truly-unrepresentable, because a Nix
+      # `throw` is not a compile error. Do not round it up.
+      gate =
+        if total == 0 then
+          throw "iroha gate (${name}): the suite is EMPTY — a gate over zero assertions proves nothing while looking like the strongest possible evidence. Refusing to evaluate."
+        else if !passed then
+          throw "iroha gate (${name}): FAILED — ${summary}\n${report}"
+        else
+          total;
     in
     {
       tests = tests';
@@ -65,6 +105,7 @@ let
         failures
         passed
         summary
+        gate
         ;
       asCheck =
         pkgs:
@@ -117,7 +158,7 @@ let
         }
       ) suites;
       inherit all;
-      inherit (all) passed summary;
+      inherit (all) passed summary gate;
       asCheck = all.asCheck;
     };
 

@@ -71,8 +71,25 @@
 #                    profile name resolved; no "down" node reaches a
 #                    deploy projection) ++ extraInvariants;
 #     checksFor    — pkgs -> { "kata-fleet-<name>" = drv; } (the
-#                    aggregate invariants as a buildable check);
+#                    aggregate invariants as a buildable check —
+#                    DECLARATION only: something has to build it);
+#     gate         — the same verdict as an EVAL-time value. Forcing it
+#                    throws (naming every failing case, and REFUSING an
+#                    empty suite) or yields the assertion count. This is
+#                    the invoker `checksFor` is not;
+#     gated        — v -> v, having first forced `gate`. Wrap any output
+#                    a red fleet must not ship;
+#     shipping     — { nixosConfigurations, darwinConfigurations,
+#                    deployRs, colmena, registry, byTag } — the deployable
+#                    outputs, pre-gated. Diagnostics (report / invariants
+#                    / checksFor) are deliberately absent so a red fleet
+#                    stays inspectable;
 #   }
+#
+# The gate is ADDITIVE: `nixosConfigurations` & co. at the top level are
+# returned exactly as before, ungated. A consumer opts in by taking them
+# from `shipping` instead. TIER: eval-rejected — a Nix `throw`, not a
+# compile error.
 { lib }:
 let
   domainsLib = import ./domains.nix { inherit lib; };
@@ -298,6 +315,35 @@ let
         // prefix "hosts" hostMatrix.invariants
         // prefix "fleet" crossInvariants
         // extraInvariants;
+
+      # ── THE SUITE, built ONCE ────────────────────────────────────────
+      # Feeds both faces of the same verdict: `checksFor` (the buildable
+      # derivation) and `gate` (the eval-time value). Two constructions
+      # would be two chances to drift.
+      suite = iroha.mkEvalChecks {
+        name = "kata-fleet-${cfg.name}";
+        tests = invariants;
+      };
+
+      # ── THE INVOKER ──────────────────────────────────────────────────
+      # `checksFor` is a DECLARATION. Nothing in a fleet workflow ever
+      # invokes it: `nixos-rebuild` / `darwin-rebuild` never look at
+      # `checks`, and a fleet repo is private by default, so no CI runs
+      # `nix flake check` either. Before this, every consumer therefore had
+      # to re-derive an invoker by hand or go without — which is three
+      # copies of one gate, or (in the live fleet's case) none at all,
+      # under a `TIER: eval-rejected` claim that nothing was enforcing.
+      #
+      # `gated v` forces the whole invariant suite, then yields v. Wrap a
+      # SHIPPING output in it and a red fleet throws — naming every failing
+      # case — before a byte is built, on any host, with no CI, no builder
+      # and no matching system.
+      #
+      # DIAGNOSTIC outputs (`report`, `invariants`, `checksFor`) are
+      # deliberately NOT gated, and `shipping` deliberately excludes them:
+      # a fleet whose gate is red must stay inspectable, or the gate is
+      # unusable rather than merely strict.
+      gated = v: builtins.seq suite.gate v;
     in
     builtins.seq _placementGuard {
       config = cfg;
@@ -320,16 +366,24 @@ let
         byTag
         registry
         ;
-      checksFor =
-        pkgs:
-        {
-          "kata-fleet-${cfg.name}" =
-            (iroha.mkEvalChecks {
-              name = "kata-fleet-${cfg.name}";
-              tests = invariants;
-            }).asCheck
-              pkgs;
-        };
+
+      # The gate, three ways — all additive; nothing above changed shape.
+      #   gate     — the forced verdict itself (throws, or the count).
+      #   gated    — wrap any value: `gated fleet.registry`.
+      #   shipping — every deployable output, pre-gated. The one-line
+      #              adoption is `inherit (fleet.shipping) …`.
+      inherit (suite) gate;
+      inherit gated;
+      shipping = {
+        nixosConfigurations = gated hostMatrix.nixosConfigurations;
+        darwinConfigurations = gated hostMatrix.darwinConfigurations;
+        deployRs = gated hostMatrix.deployRs;
+        colmena = gated hostMatrix.colmena;
+        registry = gated hostMatrix.registry;
+        byTag = gated hostMatrix.byTag;
+      };
+
+      checksFor = pkgs: { "kata-fleet-${cfg.name}" = suite.asCheck pkgs; };
     };
 in
 {

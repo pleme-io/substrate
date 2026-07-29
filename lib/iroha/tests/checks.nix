@@ -150,6 +150,49 @@ in
       ).success;
     expected = false;
   };
+  # ── gate: the eval-time face of the same verdict ────────────────────
+  # `asCheck` decides nothing until a derivation is BUILT. `gate` decides
+  # on selection, so a consumer can seq it onto a shipping output where no
+  # command has to be run. Three directions, all required — a gate that
+  # throws on everything is as useless as one that never throws.
+  gate-passes-and-counts = {
+    # Green: yields the assertion count, so `builtins.seq` is cheap and
+    # the value itself says how many subjects were actually checked.
+    expr = passing.gate;
+    expected = 2;
+  };
+  gate-throws-on-a-failing-suite = {
+    expr = (builtins.tryEval failing.gate).success;
+    expected = false;
+  };
+  gate-refuses-an-EMPTY-suite = {
+    # ★ THE LOAD-BEARING HALF. `lib.runTests { }` returns `[ ]`, so an
+    # empty suite is `passed = true` — the strongest-looking evidence
+    # available, proving nothing (★★ UNREPRESENTABILITY tier ⊥, "vacuous"
+    # subclass). Without this arm a fleet with zero invariants sails
+    # through the gate green.
+    expr =
+      let
+        empty = mkEvalChecks {
+          name = "empty";
+          tests = { };
+        };
+      in
+      {
+        # The trap, stated as data: `passed` really is true here.
+        passedIsVacuouslyTrue = empty.passed;
+        gateRefuses = (builtins.tryEval empty.gate).success;
+      };
+    expected = {
+      passedIsVacuouslyTrue = true;
+      gateRefuses = false;
+    };
+  };
+  suite-tree-exposes-the-gate = {
+    expr = tree.gate;
+    expected = 2;
+  };
+
   module-eval-check-asserts = {
     expr = (mkEvalChecks { name = "m"; tests = modCheck; }).passed;
     expected = true;
