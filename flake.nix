@@ -372,6 +372,16 @@
               inherit pkgs;
               tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
             };
+
+          # The SPA peer: proves the port rule applied, the assets sit at the
+          # interface path, no libc came back in through the binary's package,
+          # the shaped /bin/sh satisfies the chart's preStop hook while refusing
+          # everything else, and it still serves.
+          web-static-spa-image =
+            import ./lib/build/web/tests/static-spa-image-test.nix {
+              inherit pkgs;
+              tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+            };
         });
 
         # ── The subject set for nix-devshell-cargo-test.yml's own gate ────

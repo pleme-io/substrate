@@ -44,6 +44,23 @@
 #   };
 { }:
 let
+  # Privileged ports are the one thing a non-root process cannot simply be
+  # configured into. The old infra passes 80 because that is what nginx-as-root
+  # used, so rather than fail on it, normalize: a privileged port maps to its
+  # unprivileged echo and anything already unprivileged passes through untouched.
+  #
+  #   80   -> 8000
+  #   443  -> 8443
+  #   8000 -> 8000   (idempotent, so declaring the real port is also correct)
+  #
+  # Idempotence is the property that matters: a caller may pass either the
+  # interface port or the actual port and get the same image, so this can be
+  # applied without knowing which one it was handed.
+  normalizeListenPort = port:
+    if port == 80 then 8000
+    else if port == 443 then 8443
+    else port;
+
   mkStaticSpaImage = pkgs: {
     name,
     version ? "0.0.0",
@@ -63,8 +80,16 @@ let
     serverConfigPath ? "/etc/hanabi/config.yaml",
     # See the interface note in the header before changing this.
     staticRoot ? "/usr/share/nginx/html",
-    listenPort ? 8000,
+    # Accepts the interface port (80) or the real one (8000); both resolve to
+    # 8000 because the server runs non-root. See normalizeListenPort.
+    listenPort ? 80,
     healthPath ? "/health",
+    # Ship a /bin/sh so a lifecycle hook that names one does not fail on every
+    # pod termination. NOT substrate's shDashShim: dash is glibc-only, and
+    # pulling glibc onto a static base to satisfy `sleep 10` costs the whole
+    # closure argument, the same trap distroless.nix documents for tini. compatSh
+    # is a static Go binary that answers to /bin/sh and cannot execute anything.
+    compatShell ? true,
     tag ? version,
     extraEnv ? [],
     labels ? {},
@@ -74,6 +99,45 @@ let
     lib = pkgs.lib;
     hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
     hardenedGo = import ../go/hardened-image.nix { };
+
+    actualPort = normalizeListenPort listenPort;
+
+    # Copy the binary out of its own package rather than referencing it.
+    #
+    # mkPackageImage derives image contents from the package's closure. A
+    # pkgsStatic package's closure is not just the binary: it can carry
+    # propagated -dev outputs and the C toolchain, which for a STATIC binary is
+    # pure dead weight and, worse, can put a libc back in the image the
+    # conformance check then correctly rejects for containing "libc.so".
+    #
+    # cp, deliberately. `ln -s` and `lib.getBin` both retain the store reference
+    # and so retain the closure, which is the whole thing being avoided. A static
+    # binary needs nothing from its build closure at runtime, so severing it is
+    # sound rather than a trick.
+    #
+    # Side benefit: the entrypoint becomes /bin/<name>, a stable path, instead of
+    # a store path that changes on every rebuild.
+    serverBinary = pkgs.runCommand "${name}-server-bin" { } ''
+      mkdir -p "$out/bin"
+      cp ${server}/bin/${serverBin} "$out/bin/${serverBin}"
+    '';
+
+    # A shaped /bin/sh: implements the lifecycle-hook vocabulary and nothing
+    # else. Built through mkHardenedGoBinary so the shim itself is held to the
+    # same compile-time hardening as anything else in the image.
+    compatSh =
+      let
+        bin = hardenedGo.mkHardenedGoBinary pkgs {
+          name = "compat-sh";
+          src = ../oci/compat-sh;
+          vendorHash = null;
+          doCheck = true;
+        };
+      in
+      pkgs.runCommand "compat-sh-bin-sh" { } ''
+        mkdir -p "$out/bin"
+        cp ${bin}/bin/compat-sh "$out/bin/sh"
+      '';
 
     uid = hardenedBase.nonrootUid;
     gid = hardenedBase.nonrootGid;
@@ -97,14 +161,14 @@ let
     image = hardenedBase.mkPackageImage {
       service = name;
       base = hardenedBase.bases.distroless-static;
-      package = server;
+      package = serverBinary;
       publishName = name;
       publishTag = tag;
-      entrypoint = [ "${server}/bin/${serverBin}" ];
+      entrypoint = [ "/bin/${serverBin}" ];
       inherit user;
       workdir = "/";
-      exposedPorts = { "${toString listenPort}/tcp" = { }; };
-      extraContents = [ assets configFile ];
+      exposedPorts = { "${toString actualPort}/tcp" = { }; };
+      extraContents = [ assets configFile ] ++ lib.optional compatShell compatSh;
       # NO server-specific env. Verified against hanabi's own loader: the only
       # env var it reads for this is CONFIG_PATH, which already defaults to
       # /etc/hanabi/config.yaml, and static_dir/http_port come from the config
@@ -115,13 +179,21 @@ let
       # set server-specific env, swapping the server would not be a drop-in. So
       # everything the server needs is baked into the image and the config file,
       # and the chart passes exactly what it always passed.
-      env = extraEnv;
+      # The base ships cacert but nothing points at it, and a Rust server using
+      # rustls with native roots will not find the bundle on its own. This is the
+      # same line mkGoDockerImage sets for the same reason.
+      env = [
+        "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+      ] ++ extraEnv;
       labels = {
         "com.pleme.image.minimal" = "true";
         "com.pleme.image.hardened" = "true";
         "com.pleme.spa.staticRoot" = staticRoot;
         "com.pleme.spa.healthPath" = healthPath;
-        "com.pleme.spa.listenPort" = toString listenPort;
+        "com.pleme.spa.listenPort" = toString actualPort;
+        # Recorded so a reader can see the mapping happened rather than
+        # wondering why the declared port and the exposed port differ.
+        "com.pleme.spa.requestedPort" = toString listenPort;
         "org.opencontainers.image.title" = name;
         "org.opencontainers.image.version" = version;
       } // labels;
@@ -132,17 +204,26 @@ let
     # the check asserts the DECLARED value rather than a fixed one.
     conformance = hardenedGo.mkHardenedGoImageCheck pkgs {
       inherit name image tataraScript;
-      binary = server;
+      # The copied binary, not the package, so the check inspects exactly what
+      # ships.
+      binary = serverBinary;
       binName = serverBin;
       expectUser = user;
       pie = false;
-      # server + cacert + passwd + group + assets + config, plus headroom.
+      # serverBinary + cacert + passwd + group + tmp stub + assets + config = 7,
+      # with one slot of headroom. This ceiling is only meetable because the
+      # binary's build closure was severed above.
       maxStorePaths = 8;
     };
   in
   image // {
     inherit assets configFile conformance;
-    interface = { inherit staticRoot healthPath listenPort; };
+    inherit normalizeListenPort;
+    interface = {
+      inherit staticRoot healthPath;
+      requestedPort = listenPort;
+      listenPort = actualPort;
+    };
     checks = { inherit conformance; };
   };
 in

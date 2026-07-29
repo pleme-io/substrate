@@ -238,6 +238,9 @@ jobs:
       - name: checks.go-hardened-image (lib/build/go — PIE, stripped, non-root, serves)
         run: nix build --no-link -L '.#checks.x86_64-linux.go-hardened-image'
 
+      - name: checks.web-static-spa-image (lib/build/web — port rule, no libc, shaped /bin/sh)
+        run: nix build --no-link -L '.#checks.x86_64-linux.web-static-spa-image'
+
   # ══ Family C (see header) ══════════════════════════════════════════
   #
   # 22 report-returning suites, 830 assertions, none of which ran in any
