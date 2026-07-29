@@ -31,6 +31,19 @@
 #     results too.
 #     tree = { suites, all (a suite), passed, summary, gate, asCheck }.
 #
+#   mkBuildChecks :: { name, assertions, prelude ? "", nativeBuildInputs ? …,
+#                      env ? {} } -> { assertions, count, gate, asCheck }
+#     The BUILD-tier sibling of mkEvalChecks: proves properties of a real
+#     ARTIFACT (a built image's layers, a generated file's bytes, a tool's
+#     exit status) rather than of a pure value. The caller declares WHAT
+#     must hold as typed `assertion` records and NEVER writes `$out` —
+#     see the block above the implementation for why that is the whole
+#     point.
+#
+#   buildAssert :: the typed assertion constructors fed to mkBuildChecks
+#     (predicate / succeeds / fails / fileExists / fileContains /
+#     fileLacks / outputContains).
+#
 #   mkModuleEvalCheck :: {
 #     name,
 #     modules            — list of modules under test;
@@ -109,7 +122,20 @@ let
         ;
       asCheck =
         pkgs:
-        if passed then
+        # ★ THE EMPTY ARM IS LOAD-BEARING HERE TOO, and it was missing until
+        # 2026-07-28. `gate` refused an empty suite from the day it landed;
+        # `asCheck` did not — and `passed = results == [ ]` is vacuously TRUE
+        # over zero tests, so `mkEvalChecks { tests = { }; }` emitted the
+        # GREEN derivation printing "0/0 passed". A consumer that wires
+        # `asCheck` into `checks.<system>.*` (which is the documented way to
+        # use this harness) and never forces `gate` therefore got the exact
+        # vacuity `gate` exists to refuse, reported as the strongest-looking
+        # evidence a CI log can show. Refuse it on BOTH faces of the verdict
+        # or the refusal is only as good as which face the consumer happened
+        # to pick. (★★ UNREPRESENTABILITY tier ⊥, "vacuous" subclass.)
+        if total == 0 then
+          throw "iroha check (${name}): the suite is EMPTY — a check derivation over zero assertions always builds green, which proves nothing. Refusing to construct it."
+        else if passed then
           pkgs.runCommand "iroha-check-${name}" { } ''
             echo "iroha ${name}: ${summary}" > $out
           ''
@@ -160,6 +186,224 @@ let
       inherit all;
       inherit (all) passed summary gate;
       asCheck = all.asCheck;
+    };
+
+  # ── buildAssert — the typed verdict vocabulary ───────────────────────
+  #
+  # An assertion is a RECORD, never a line of prose: `{ name; run; detail }`
+  # where `run` is shell whose EXIT STATUS is the verdict (0 = pass). The
+  # caller says what must hold; mkBuildChecks generates the reporting, the
+  # aggregation and the `exit 1`.
+  #
+  # `predicate` is the escape hatch for a genuinely bespoke shell test.
+  # Reach for a named constructor first: a constructor cannot be written
+  # with its verdict already discarded, and `predicate` can (`run = "grep
+  # x f || true"` always exits 0). That residual is why this helper is
+  # tier-honest about closing the DISCARDED subclass at the derivation
+  # boundary, not inside an arbitrary shell fragment.
+  buildAssert = rec {
+    predicate =
+      {
+        name,
+        run,
+        detail ? "",
+      }:
+      {
+        inherit name run detail;
+      };
+
+    succeeds =
+      {
+        name,
+        cmd,
+        detail ? "",
+      }:
+      predicate {
+        inherit name detail;
+        run = cmd;
+      };
+
+    # Negative controls are first-class: a suite of only-positive
+    # assertions cannot tell "the property holds" from "the harness sees
+    # nothing" (★★ UNREPRESENTABILITY tier ⊥).
+    fails =
+      {
+        name,
+        cmd,
+        detail ? "",
+      }:
+      predicate {
+        inherit name;
+        detail = if detail != "" then detail else "expected a NON-ZERO exit, got 0";
+        run = "! { ${cmd} ; }";
+      };
+
+    fileExists =
+      {
+        name,
+        path,
+        detail ? "",
+      }:
+      predicate {
+        inherit name;
+        detail = if detail != "" then detail else "expected file to exist: ${path}";
+        run = "test -e ${lib.escapeShellArg path}";
+      };
+
+    fileContains =
+      {
+        name,
+        path,
+        pattern,
+        detail ? "",
+      }:
+      predicate {
+        inherit name;
+        detail = if detail != "" then detail else "expected ${path} to match /${pattern}/";
+        run = "grep -Eq -- ${lib.escapeShellArg pattern} ${lib.escapeShellArg path}";
+      };
+
+    fileLacks =
+      {
+        name,
+        path,
+        pattern,
+        detail ? "",
+      }:
+      predicate {
+        inherit name;
+        detail = if detail != "" then detail else "expected ${path} NOT to match /${pattern}/";
+        run = "! grep -Eq -- ${lib.escapeShellArg pattern} ${lib.escapeShellArg path}";
+      };
+
+    outputContains =
+      {
+        name,
+        cmd,
+        pattern,
+        detail ? "",
+      }:
+      predicate {
+        inherit name;
+        detail = if detail != "" then detail else "expected the output of `${cmd}` to match /${pattern}/";
+        run = "{ ${cmd} ; } 2>&1 | grep -Eq -- ${lib.escapeShellArg pattern}";
+      };
+  };
+
+  # ── mkBuildChecks — the BUILD-tier sibling of mkEvalChecks ───────────
+  #
+  # mkEvalChecks proves properties of pure VALUES. This proves properties
+  # of REAL ARTIFACTS — the cases that need a builder, a sandbox and a
+  # shell, which is exactly where a verdict gets DISCARDED. The hand-rolled
+  # shape is:
+  #
+  #     pkgs.runCommand "x-check" { } ''
+  #       grep -q thing file        # ← the verdict
+  #       echo ok > $out            # ← thrown away, unconditionally
+  #     ''
+  #
+  # That derivation is INDISTINGUISHABLE IN A CI LOG from one that works:
+  # it is green, and it would be green if the subject were completely
+  # broken. Reading the source finds it correct-looking; running the gate
+  # finds it green. (★★ UNREPRESENTABILITY §II.3 tier ⊥, "discarded"
+  # subclass.) The cure named there is a NON-IGNORABLE TYPED VERDICT, so:
+  #
+  #   • THE CALLER NEVER WRITES `$out`. This helper owns it and writes it
+  #     ONLY on the pass branch, so `touch $out` regardless of the verdict
+  #     has no code path at a call site. That is the structural half.
+  #   • A verdict is a typed `buildAssert` record, not prose.
+  #   • An EMPTY assertion list is REFUSED at eval time — a check over zero
+  #     subjects reports the strongest-looking evidence available while
+  #     proving nothing (the same tier ⊥, "vacuous" subclass, that
+  #     `mkEvalChecks`'s `gate` refuses).
+  #   • Duplicate assertion names are refused, for `mkSuiteTree`'s reason:
+  #     a silently-collapsed case is an unsound total.
+  #
+  # Aggregate-before-assert, same rule as `asCheck`: EVERY assertion runs,
+  # EVERY failure prints with its captured output, then the build fails
+  # once — so one run reports every broken predicate, not just the first.
+  #
+  # TIER: only-mitigated-but-real (a build-phase `exit 1`), with the
+  # structural discard closed at the derivation boundary and the vacuous
+  # subject set eval-rejected. NOT truly-unrepresentable: `predicate` takes
+  # shell, and shell can always be written to swallow its own verdict. Do
+  # not round this up.
+  mkBuildChecks =
+    {
+      name,
+      assertions,
+      prelude ? "",
+      nativeBuildInputs ? (_: [ ]),
+      env ? { },
+    }:
+    let
+      isAssertion =
+        a: builtins.isAttrs a && a ? name && a ? run && builtins.isString a.name && builtins.isString a.run;
+      names = map (a: a.name) assertions;
+      validated =
+        if !(builtins.isList assertions) then
+          throw "iroha.mkBuildChecks (${name}): `assertions` must be a LIST of buildAssert records — got ${builtins.typeOf assertions}."
+        else if assertions == [ ] then
+          throw "iroha.mkBuildChecks (${name}): the assertion list is EMPTY — a build check over zero subjects always succeeds, which is the strongest-looking evidence available and proves nothing. Refusing to construct it."
+        else if !(builtins.all isAssertion assertions) then
+          throw "iroha.mkBuildChecks (${name}): every assertion must be a `{ name :: str; run :: str; detail ? str }` record — build one with `iroha.buildAssert.*` rather than by hand."
+        else if builtins.length (lib.unique names) != builtins.length names then
+          throw "iroha.mkBuildChecks (${name}): duplicate assertion names (${lib.concatStringsSep ", " names}) — a silently-collapsed case is an unsound total; rename one."
+        else
+          assertions;
+      count = builtins.length validated;
+
+      renderOne = a: ''
+        if ( set -e
+        ${a.run}
+        ) > "$_iroha_out" 2>&1; then
+          echo "  PASS ${a.name}"
+        else
+          echo "  FAIL ${a.name}${lib.optionalString (a.detail or "" != "") " — ${a.detail}"}"
+          sed 's/^/        /' "$_iroha_out" || true
+          _iroha_fail=$((_iroha_fail + 1))
+        fi
+      '';
+
+      script = ''
+        set -uo pipefail
+        _iroha_fail=0
+        _iroha_out="$(mktemp)"
+        echo "== iroha build-check ${name}: ${toString count} assertion(s) =="
+
+        # The prelude runs under `set -e`: a failed SETUP must abort rather
+        # than let every assertion fail confusingly against a half-built
+        # subject. Filesystem effects and shell variables it sets survive
+        # into the assertions (it is not a subshell).
+        set -e
+        ${prelude}
+        set +e
+
+        ${lib.concatStringsSep "\n" (map renderOne validated)}
+
+        if [ "$_iroha_fail" -ne 0 ]; then
+          echo "== ${name}: $_iroha_fail of ${toString count} assertion(s) FAILED =="
+          exit 1
+        fi
+        echo "== ${name}: ${toString count}/${toString count} passed =="
+        mkdir -p "$out"
+        echo "iroha build-check ${name}: ${toString count}/${toString count} passed" > "$out/result"
+      '';
+    in
+    {
+      assertions = validated;
+      inherit count script;
+      # The eval-time face: forcing it validates the declaration (empty /
+      # malformed / duplicate-named) without needing a builder.
+      gate = count;
+      asCheck =
+        pkgs:
+        pkgs.runCommand "iroha-build-check-${name}" (
+          {
+            nativeBuildInputs = nativeBuildInputs pkgs;
+          }
+          // env
+        ) script;
     };
 
   mkModuleEvalCheck =
@@ -213,5 +457,11 @@ let
       };
 in
 {
-  inherit mkEvalChecks mkSuiteTree mkModuleEvalCheck;
+  inherit
+    mkEvalChecks
+    mkSuiteTree
+    mkModuleEvalCheck
+    mkBuildChecks
+    buildAssert
+    ;
 }

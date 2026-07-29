@@ -66,8 +66,22 @@
       fi
     '';
 
+    # ★ NON-EMPTY SUBJECT SET. With `tenants` or `environments` empty the
+    # `concatMapStringsSep` below expands to the empty string, leaving
+    # `errors=0; if [ $errors -gt 0 ]` — so the script exited 0 announcing
+    # "All 0 config directories present". A gate over zero subjects reports
+    # the strongest-looking evidence a log can carry while proving nothing
+    # (★★ UNREPRESENTABILITY §II.3 tier ⊥, "vacuous" subclass).
+    _nonEmpty =
+      if tenants == [ ] then
+        throw "mkEnvironmentConfig (${name}): `tenants` is EMPTY — the generated validate script would check no directories and exit 0."
+      else if environments == [ ] then
+        throw "mkEnvironmentConfig (${name}): `environments` is EMPTY — the generated validate script would check no directories and exit 0."
+      else
+        true;
+
     # Validate: check all tenants/envs exist
-    validate = pkgs.writeShellScript "validate-${name}-config" ''
+    validate = assert _nonEmpty; pkgs.writeShellScript "validate-${name}-config" ''
       set -euo pipefail
       errors=0
       ${lib.concatMapStringsSep "\n" (tenant:

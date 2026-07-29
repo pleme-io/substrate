@@ -163,8 +163,26 @@ rec {
       };
     in (getAttrFromPath configPath result.config).profile == profileName;
     profileNames = attrNames profiles;
+    # ★ NON-EMPTY SUBJECT SET. `lib.all` over `[ ]` is TRUE, so a
+    # `profiles = { }` (a renamed attr, a filter that matched nothing, a
+    # profile set that moved) produced the SUCCESS derivation announcing
+    # "All 0 profiles evaluate successfully" — a green check over zero
+    # subjects, which is the strongest-looking evidence a CI log can carry
+    # and proves nothing (★★ UNREPRESENTABILITY tier ⊥, "vacuous"
+    # subclass). Refuse it rather than report it.
     allPass = all (name: evalProfile name) profileNames;
-  in pkgs.runCommand name {} (
+  in
+  # ★ THE GUARD MUST SIT WHERE IT IS FORCED. A first cut put this inside
+  # `allPass`, which is only reached from the `runCommand` SCRIPT argument
+  # — a lazily-forced string that `builtins.seq` on the result never
+  # touches, so the refusal silently did not fire (measured 2026-07-28: the
+  # empty-profiles probe returned `true`, i.e. constructed fine). Guarding
+  # the returned value itself fires on WHNF, which is what any consumer
+  # forcing the check will do.
+  if profiles == { } then
+    builtins.throw "${name}: `profiles` is EMPTY — a profile-eval check over zero profiles always succeeds, because `lib.all` over `[ ]` is true. Refusing to construct it."
+  else
+  pkgs.runCommand name {} (
     if allPass
     then "echo 'All ${toString (length profileNames)} profiles evaluate successfully' > $out"
     else builtins.throw "${name}: profile evaluation failed"

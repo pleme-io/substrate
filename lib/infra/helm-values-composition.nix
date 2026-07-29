@@ -99,12 +99,47 @@
       ) environments
     ) tenants;
 
+    # ★ NON-EMPTY SUBJECT SET.
+    #
+    # `allCombinations` is a cross product over tenants × environments ×
+    # cloudProviders × `regions.${cloud} or [ ]`. That last `or [ ]` is the
+    # trap: a cloud named in `cloudProviders` with no entry in `regions`
+    # contributes ZERO combinations silently, and if it is the only cloud
+    # the whole product is empty. `concatMapStringsSep` over `[ ]` emits the
+    # empty string, so the generated script collapsed to `errors=0; … if
+    # [ $errors -gt 0 ]` and reported "Validation complete: 0 errors, 0
+    # warnings" — green, having checked nothing (★★ UNREPRESENTABILITY
+    # §II.3 tier ⊥, "vacuous" subclass).
+    #
+    # NOT a defect, and deliberately left alone: `warnings`. It counts
+    # MISSING tier-4 per-service override files, which the hierarchy
+    # documents as optional (`services ? [ ]` is the default). A warning
+    # that does not fail the build is that warning working correctly — it
+    # is not a discarded verdict, and turning it into one would break every
+    # consumer that legitimately ships no per-service overrides.
+    _nonEmpty =
+      if tiers == [ ] then
+        throw "mkValuesHierarchy (${name}): `tiers` is EMPTY — the generated validate script would check no files and exit 0."
+      else if allCombinations == [ ] then
+        throw ''
+          mkValuesHierarchy (${name}): the tenant x environment x cloud x region
+          cross product is EMPTY, so validation would check nothing and exit 0.
+            tenants        = ${toString (builtins.length tenants)}
+            environments   = ${toString (builtins.length environments)}
+            cloudProviders = ${builtins.concatStringsSep ", " cloudProviders}
+            regions        = ${builtins.concatStringsSep ", " (builtins.attrNames regions)}
+          A cloud listed in `cloudProviders` with no key in `regions` contributes
+          zero combinations silently — that is the usual cause.''
+      else
+        true;
+
     # Validate that all expected directories/files exist
-    validateScript = pkgs.writeShellScript "validate-${name}-values" ''
+    validateScript = assert _nonEmpty; pkgs.writeShellScript "validate-${name}-values" ''
       set -euo pipefail
       SRC="''${1:-.}"
       errors=0
       warnings=0
+      echo "Validating ${toString (builtins.length allCombinations)} combination(s) x ${toString (builtins.length tiers)} tier(s)"
 
       ${lib.concatMapStringsSep "\n" (combo:
         lib.concatMapStringsSep "\n" (tier: let
@@ -129,7 +164,7 @@
       ) allCombinations}
 
       echo ""
-      echo "Validation complete: $errors errors, $warnings warnings"
+      echo "Validation complete: $errors errors, $warnings warnings (over ${toString (builtins.length allCombinations)} combination(s))"
       if [ $errors -gt 0 ]; then exit 1; fi
     '';
 

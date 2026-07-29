@@ -226,6 +226,14 @@ jobs:
       - name: checks.skill-map (skills/ — per-skill structure gate)
         run: nix build --no-link -L '.#checks.x86_64-linux.skill-map'
 
+      # The BUILD-tier harness (iroha.mkBuildChecks), run against a real
+      # builder. Its judge is deliberately hand-written plain shell rather
+      # than mkBuildChecks itself — see the check's own header in flake.nix
+      # for the measured reason (a self-referential version exited 0 on the
+      # exact break this catches, where the independent one exits 1).
+      - name: checks.iroha-build-checks (lib/iroha — build-tier harness selftest)
+        run: nix build --no-link -L '.#checks.x86_64-linux.iroha-build-checks'
+
       # STILL UNBUILT, and said out loud rather than silently omitted:
       #   pending-unbuilt-check: go-minimal-image-serves
       # It is declared linux-only (flake.nix's `optionalAttrs hasSuffix

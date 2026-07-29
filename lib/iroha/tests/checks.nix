@@ -1,7 +1,43 @@
 # Tests — iroha.checks (the harness proves itself).
 { lib, iroha }:
 let
-  inherit (iroha) mkEvalChecks mkSuiteTree mkModuleEvalCheck;
+  inherit (iroha)
+    mkEvalChecks
+    mkSuiteTree
+    mkModuleEvalCheck
+    mkBuildChecks
+    buildAssert
+    ;
+
+  # A stand-in for `pkgs` in the build-tier tests. These assert on the
+  # SHAPE and the REFUSALS of the declaration, which are decided at eval
+  # time; actually running a builder is what `checks.<system>.iroha-build-checks`
+  # in flake.nix does.
+  fakePkgs = {
+    runCommand = drvName: attrs: script: {
+      inherit drvName attrs script;
+    };
+  };
+
+  buildSuite = mkBuildChecks {
+    name = "sample";
+    assertions = [
+      (buildAssert.succeeds {
+        name = "true-succeeds";
+        cmd = "true";
+      })
+      (buildAssert.fails {
+        name = "false-fails";
+        cmd = "false";
+      })
+    ];
+  };
+
+  buildDrv = buildSuite.asCheck fakePkgs;
+
+  # `count` is the forcing position: any of mkBuildChecks' four structural
+  # refusals fires when it is forced. `success = false` ⇒ refused.
+  constructs = args: (builtins.tryEval (mkBuildChecks args).count).success;
 
   passing = mkEvalChecks {
     name = "passing";
@@ -191,6 +227,130 @@ in
   suite-tree-exposes-the-gate = {
     expr = tree.gate;
     expected = 2;
+  };
+
+  asCheck-refuses-an-EMPTY-suite = {
+    # ★ The sibling of `gate-refuses-an-EMPTY-suite`, and it was MISSING
+    # until 2026-07-28 — `gate` refused an empty suite while `asCheck`
+    # happily emitted the green "0/0 passed" derivation. Since `asCheck`
+    # is the documented way to reach `checks.<system>.*`, the refusal
+    # covered the face consumers mostly do NOT use. Both faces, or the
+    # guard is decided by which one the caller picked.
+    expr =
+      let
+        empty = mkEvalChecks {
+          name = "empty";
+          tests = { };
+        };
+      in
+      (builtins.tryEval (empty.asCheck { runCommand = _: _: _: null; })).success;
+    expected = false;
+  };
+  asCheck-still-builds-a-NON-empty-suite = {
+    # The other direction: a refusal that fires on everything is as
+    # useless as one that never fires.
+    expr = (builtins.tryEval (passing.asCheck { runCommand = n: _: _: n; })).value;
+    expected = "iroha-check-passing";
+  };
+
+  # ── mkBuildChecks — the BUILD-tier sibling ──────────────────────────
+  build-checks-counts-its-assertions = {
+    expr = buildSuite.count;
+    expected = 2;
+  };
+  build-checks-gate-yields-the-count = {
+    expr = buildSuite.gate;
+    expected = 2;
+  };
+  build-checks-refuses-an-EMPTY-assertion-list = {
+    # Same tier ⊥ "vacuous" subclass the eval tier refuses: a build check
+    # over zero subjects always succeeds.
+    expr = constructs {
+      name = "empty";
+      assertions = [ ];
+    };
+    expected = false;
+  };
+  build-checks-refuses-duplicate-assertion-names = {
+    # mkSuiteTree's reason: a silently-collapsed case is an unsound total.
+    expr = constructs {
+      name = "dup";
+      assertions = [
+        (buildAssert.succeeds { name = "same"; cmd = "true"; })
+        (buildAssert.succeeds { name = "same"; cmd = "true"; })
+      ];
+    };
+    expected = false;
+  };
+  build-checks-refuses-a-non-record-assertion = {
+    # A raw shell string is exactly the hand-rolled shape this replaces.
+    expr = constructs {
+      name = "raw";
+      assertions = [ "grep -q thing file" ];
+    };
+    expected = false;
+  };
+  build-checks-accepts-a-well-formed-declaration = {
+    expr = constructs {
+      name = "ok";
+      assertions = [ (buildAssert.succeeds { name = "a"; cmd = "true"; }) ];
+    };
+    expected = true;
+  };
+  build-checks-owns-dollar-out = {
+    # ★ THE STRUCTURAL HALF. The caller never writes `$out`; the helper
+    # does, and ONLY after the failure counter has been tested. So the
+    # `touch $out` regardless-of-the-verdict shape has no code path at a
+    # call site. Assert the generated script really has that order.
+    expr =
+      let
+        s = buildDrv.script;
+        failExit = ''if [ "$_iroha_fail" -ne 0 ]'';
+      in
+      {
+        exitsOnFailure = lib.hasInfix failExit s;
+        writesOut = lib.hasInfix ''mkdir -p "$out"'' s;
+        # The ONLY $out write is after the exit branch.
+        outWriteIsAfterTheExit =
+          (builtins.length (lib.splitString failExit (lib.head (lib.splitString ''mkdir -p "$out"'' s)))) == 2;
+      };
+    expected = {
+      exitsOnFailure = true;
+      writesOut = true;
+      outWriteIsAfterTheExit = true;
+    };
+  };
+  build-checks-runs-every-assertion-before-failing = {
+    # Aggregate-before-assert: the exit is once, at the end — not inside
+    # the per-assertion branch, which would report only the first break.
+    expr =
+      let
+        s = buildDrv.script;
+      in
+      {
+        bothPresent = lib.hasInfix "true-succeeds" s && lib.hasInfix "false-fails" s;
+        countsRatherThanExits = lib.hasInfix "_iroha_fail=$((_iroha_fail + 1))" s;
+        exitCountIsOne = (builtins.length (lib.splitString "exit 1" s)) == 2;
+      };
+    expected = {
+      bothPresent = true;
+      countsRatherThanExits = true;
+      exitCountIsOne = true;
+    };
+  };
+  build-assert-fails-inverts-the-exit-status = {
+    expr = (buildAssert.fails { name = "n"; cmd = "grep -q x f"; }).run;
+    expected = "! { grep -q x f ; }";
+  };
+  build-assert-quotes-its-arguments = {
+    # A pattern with shell metacharacters must reach grep intact rather
+    # than being re-interpreted by the builder's shell.
+    expr = (buildAssert.fileContains {
+      name = "q";
+      path = "a b.txt";
+      pattern = "foo|bar";
+    }).run;
+    expected = "grep -Eq -- 'foo|bar' 'a b.txt'";
   };
 
   module-eval-check-asserts = {

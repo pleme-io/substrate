@@ -338,6 +338,107 @@
           #
           # NOT VACUOUS: verified red before landing, not merely observed
           # green — the same binary and args fail on a removed metadata block.
+          # ── The BUILD-tier harness, proven against a REAL builder ──────
+          #
+          # `iroha.mkBuildChecks` is the class-level cure for the tier ⊥
+          # "discarded" subclass: the hand-rolled `runCommand "x-check"`
+          # whose builder ends in an unconditional `touch $out`. Its eval
+          # tests (in `checks.iroha`) prove the DECLARATION refusals —
+          # empty list, duplicate names, non-record assertion — but a
+          # helper whose generated script has never been executed by a
+          # real builder is the "unreached" subclass of the very thing it
+          # closes. So this runs it.
+          #
+          # ★★ THE JUDGE IS DELIBERATELY *NOT* `mkBuildChecks`.
+          #
+          # The first cut of this check WAS written with mkBuildChecks, and
+          # breaking the helper proved why that is wrong: deleting its
+          # `exit 1` made the suite under test AND the suite doing the
+          # judging discard their verdicts together, so the build printed
+          #
+          #     == negative-control: 1 of 2 assertion(s) FAILED ==
+          #     == negative-control: 2/2 passed ==
+          #     == harness-selftest: 2 of 6 assertion(s) FAILED ==
+          #     == harness-selftest: 6/6 passed ==
+          #
+          # and STILL EXITED 0. A guard that weakens itself while printing
+          # green is the self-referential shape ★★ UNREPRESENTABILITY
+          # §II.3 calls out explicitly — the most extreme round-up
+          # available, because the evidence looks like the strongest kind.
+          #
+          # So the exit decision here is hand-written, plain shell, with no
+          # dependency on the helper's own aggregation. The helper is only
+          # ever the SUBJECT.
+          iroha-build-checks =
+            let
+              inherit (self.iroha) mkBuildChecks buildAssert;
+              failingSuite = mkBuildChecks {
+                name = "negative-control";
+                assertions = [
+                  (buildAssert.succeeds { name = "passes"; cmd = "true"; })
+                  (buildAssert.succeeds { name = "fails"; cmd = "false"; })
+                ];
+              };
+              passingSuite = mkBuildChecks {
+                name = "positive-control";
+                assertions = [ (buildAssert.succeeds { name = "passes"; cmd = "true"; }) ];
+              };
+              failingScript = pkgs.writeShellScript "iroha-negative-control" failingSuite.script;
+              passingScript = pkgs.writeShellScript "iroha-positive-control" passingSuite.script;
+            in
+            pkgs.runCommand "iroha-build-checks-selftest" { } ''
+              # `set +e` is REQUIRED and must come first: stdenv's builder
+              # already has `set -e` on, and this check deliberately runs
+              # commands that are EXPECTED to exit non-zero. Without it the
+              # script aborts on the very first (successful) negative
+              # control, which reads as the check failing.
+              set +e
+              set -uo pipefail
+              fail=0
+              ok()  { echo "  PASS $1"; }
+              bad() { echo "  FAIL $1"; fail=$((fail + 1)); }
+
+              echo "== iroha.mkBuildChecks harness selftest (judge is NOT mkBuildChecks) =="
+
+              # 1. THE LOAD-BEARING ONE. A suite with a failing assertion
+              #    must exit NON-ZERO. If the verdict is ever discarded
+              #    again, this is what goes red.
+              out="$PWD/neg" ${failingScript} > neg.log 2>&1
+              rc=$?
+              [ "$rc" -ne 0 ] && ok "failing suite exits non-zero (rc=$rc)" \
+                              || bad "failing suite exited 0 — THE VERDICT IS BEING DISCARDED"
+
+              # 2. The structural property: `$out` is written only on the
+              #    pass branch, so a failed run leaves nothing behind.
+              [ ! -e "$PWD/neg" ] && ok "failing run wrote no receipt" \
+                                  || bad "failing run still produced \$out — pass-branch-only write regressed"
+
+              # 3. Aggregate-before-assert: the passing sibling still ran,
+              #    and the failing one is named.
+              grep -q "PASS passes" neg.log && ok "sibling assertion still ran" \
+                                            || bad "aggregate-before-assert regressed"
+              grep -q "FAIL fails"  neg.log && ok "failing assertion is named" \
+                                            || bad "failure not named in output"
+
+              # 4. The other direction — a refusal that fires on everything
+              #    is as useless as one that never fires.
+              out="$PWD/pos" ${passingScript} > pos.log 2>&1
+              rc=$?
+              [ "$rc" -eq 0 ] && ok "passing suite exits 0" \
+                              || bad "passing suite exited $rc"
+              [ -f "$PWD/pos/result" ] && ok "passing run wrote its receipt" \
+                                       || bad "passing run wrote no receipt"
+
+              if [ "$fail" -ne 0 ]; then
+                echo "== $fail assertion(s) FAILED =="
+                echo "--- negative-control log ---"; cat neg.log
+                exit 1
+              fi
+              echo "== iroha.mkBuildChecks selftest: 6/6 passed =="
+              mkdir -p "$out"
+              echo "iroha mkBuildChecks harness: 6/6 passed" > "$out/result"
+            '';
+
           skill-map = pkgs.runCommand "skill-map-check" {
             nativeBuildInputs = [ inputs.skill-lint.packages.${system}.default ];
           } ''

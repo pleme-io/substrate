@@ -312,10 +312,49 @@ flake-utils.lib.eachDefaultSystem (system: let
   # ── Lifecycle apps (nix run .#<app>) ─────────────────────────────
   # Standard SDLC commands available via `nix run` for every repo.
 
+  # ★ A SKIP IS NOT A PASS, AND A FAILURE IS NOT A SKIP.
+  #
+  # Eight of these apps used to be written as
+  #
+  #     npx eslint . 2>/dev/null || echo "no eslint config"
+  #
+  # which reports the SAME green exit for two states that could not be
+  # more different: "this repo has no linter configured" and "the linter
+  # ran and found violations". The `2>/dev/null` then throws away the
+  # diagnostic that would have told them apart, so `nix run .#lint` on a
+  # repo full of real lint errors printed a reassuring sentence and exited
+  # 0. That is a verdict computed and discarded — ★★ UNREPRESENTABILITY
+  # §II.3 tier ⊥, "discarded" subclass — and it is invisible in a log,
+  # because the log looks exactly like the healthy case.
+  #
+  # `set -euo pipefail` is on every app for the same reason: without it a
+  # bare failing command mid-script is silently stepped over.
   mkApp = name: script: {
     type = "app";
-    program = toString (pkgs.writeShellScript "repo-${name}" script);
+    program = toString (pkgs.writeShellScript "repo-${name}" ''
+      set -euo pipefail
+      ${script}
+    '');
   };
+
+  # Decide PRESENCE first, from an explicit subject test — then run the
+  # tool BARE so its exit status is the verdict. An absent subject is a
+  # NAMED skip that says what would have made it run; it is never
+  # confused with a clean pass, and a real failure is never confused
+  # with an absent subject.
+  guarded =
+    {
+      subject,
+      hint,
+      cmd,
+    }:
+    ''
+      if ${subject}; then
+        ${cmd}
+      else
+        echo "skip: ${hint} — nothing to check, and this is NOT a pass"
+      fi
+    '';
 
   # Language-specific lifecycle commands
   lifecycleApps =
@@ -327,18 +366,45 @@ flake-utils.lib.eachDefaultSystem (system: let
       tidy = mkApp "tidy" ''${pkgs.go}/bin/go mod tidy'';
     }
     else if language == "npm" || language == "typescript" then {
-      lint = mkApp "lint" ''${pkgs.nodejs_22}/bin/npx eslint . 2>/dev/null || echo "no eslint config"'';
-      test = mkApp "test" ''${pkgs.nodejs_22}/bin/npm test 2>/dev/null || echo "no test script"'';
-      fmt = mkApp "fmt" ''${pkgs.nodejs_22}/bin/npx prettier --write . 2>/dev/null || echo "no prettier config"'';
+      lint = mkApp "lint" (guarded {
+        subject = ''ls eslint.config.* .eslintrc* >/dev/null 2>&1'';
+        hint = "no eslint config (eslint.config.* / .eslintrc*)";
+        cmd = ''${pkgs.nodejs_22}/bin/npx eslint .'';
+      });
+      test = mkApp "test" (guarded {
+        # `npm test` on a package with no `scripts.test` exits non-zero,
+        # which the old `|| echo` shape could not tell from a failing
+        # suite. Ask package.json directly instead.
+        subject = ''${pkgs.nodejs_22}/bin/node -e 'process.exit(require("./package.json").scripts?.test?0:1)' '';
+        hint = "package.json declares no scripts.test";
+        cmd = ''${pkgs.nodejs_22}/bin/npm test'';
+      });
+      fmt = mkApp "fmt" (guarded {
+        subject = ''ls .prettierrc* prettier.config.* >/dev/null 2>&1'';
+        hint = "no prettier config (.prettierrc* / prettier.config.*)";
+        cmd = ''${pkgs.nodejs_22}/bin/npx prettier --write .'';
+      });
     }
     else if language == "python" then {
       lint = mkApp "lint" ''${pkgs.ruff}/bin/ruff check .'';
-      test = mkApp "test" ''${pkgs.python3}/bin/python -m pytest 2>/dev/null || echo "no pytest"'';
+      test = mkApp "test" (guarded {
+        subject = ''[ -d tests ] || [ -d test ] || [ -f pytest.ini ] || [ -f tox.ini ] || [ -f setup.cfg ] || [ -f pyproject.toml ]'';
+        hint = "no pytest subject (tests/ | test/ | pytest.ini | tox.ini | setup.cfg | pyproject.toml)";
+        cmd = ''${pkgs.python3}/bin/python -m pytest'';
+      });
       fmt = mkApp "fmt" ''${pkgs.ruff}/bin/ruff format .'';
     }
     else if language == "java" then {
-      test = mkApp "test" ''${pkgs.maven}/bin/mvn test 2>/dev/null || echo "maven test failed"'';
-      lint = mkApp "lint" ''${pkgs.maven}/bin/mvn verify -DskipTests 2>/dev/null || true'';
+      test = mkApp "test" (guarded {
+        subject = ''[ -f pom.xml ]'';
+        hint = "no pom.xml";
+        cmd = ''${pkgs.maven}/bin/mvn test'';
+      });
+      lint = mkApp "lint" (guarded {
+        subject = ''[ -f pom.xml ]'';
+        hint = "no pom.xml";
+        cmd = ''${pkgs.maven}/bin/mvn verify -DskipTests'';
+      });
     }
     else if language == "rust" then {
       lint = mkApp "lint" ''${pkgs.clippy}/bin/cargo-clippy --check -- -D warnings'';
@@ -351,23 +417,97 @@ flake-utils.lib.eachDefaultSystem (system: let
       lint = mkApp "lint" ''${pkgs.tflint}/bin/tflint --no-color .'';
     }
     else if language == "helm" then {
+      # ★ The old loop body was `[ -f "$chart/Chart.yaml" ] && helm lint
+      # "$chart"`, and its bug was NOT the one it looks like. `helm lint`
+      # was the last command in the loop, so a SINGLE failing chart did
+      # propagate exit 1. What it discarded was every failure that had a
+      # passing chart after it: with `charts/a-bad` broken and
+      # `charts/z-good` fine, the loop printed "1 chart(s) failed" for
+      # a-bad, carried on, and exited 0 with z-good's status. Measured
+      # 2026-07-28 — OLD EXIT=0, NEW EXIT=1 on that exact pair. So the
+      # verdict was computed, printed, and then overwritten by the next
+      # iteration (★★ UNREPRESENTABILITY §II.3 tier ⊥, "discarded").
+      #
+      # It also had the opposite defect: with no `nullglob`, an empty
+      # `charts/` left the literal `charts/*/`, the `[ -f ]` failed, and
+      # the loop exited 1 — a SPURIOUS RED over zero subjects, which
+      # trains an operator to ignore the app. Counting the subjects fixes
+      # both directions at once.
+      #
+      # Aggregate-before-assert: every chart is linted, every failure is
+      # named, then the app fails once — so one run reports all broken
+      # charts rather than only the first.
       lint = mkApp "lint" ''
+        found=0
+        failed=0
         for chart in charts/*/; do
-          [ -f "$chart/Chart.yaml" ] && ${pkgs.kubernetes-helm}/bin/helm lint "$chart"
+          [ -f "$chart/Chart.yaml" ] || continue
+          found=$((found + 1))
+          ${pkgs.kubernetes-helm}/bin/helm lint "$chart" || { echo "FAIL: $chart"; failed=$((failed + 1)); }
         done
+        if [ "$found" -eq 0 ]; then
+          echo "skip: no charts/*/Chart.yaml — nothing to lint, and this is NOT a pass"
+        elif [ "$failed" -gt 0 ]; then
+          echo "$failed of $found chart(s) FAILED lint"
+          exit 1
+        else
+          echo "$found/$found chart(s) linted clean"
+        fi
       '';
       template = mkApp "template" ''
+        found=0
+        failed=0
         for chart in charts/*/; do
-          [ -f "$chart/Chart.yaml" ] && ${pkgs.kubernetes-helm}/bin/helm template "$chart"
+          [ -f "$chart/Chart.yaml" ] || continue
+          found=$((found + 1))
+          ${pkgs.kubernetes-helm}/bin/helm template "$chart" || { echo "FAIL: $chart"; failed=$((failed + 1)); }
         done
+        if [ "$found" -eq 0 ]; then
+          echo "skip: no charts/*/Chart.yaml — nothing to template, and this is NOT a pass"
+        elif [ "$failed" -gt 0 ]; then
+          echo "$failed of $found chart(s) FAILED to template"
+          exit 1
+        else
+          echo "$found/$found chart(s) templated"
+        fi
       '';
     }
     else if language == "ruby" then {
-      test = mkApp "test" ''${pkgs.ruby}/bin/bundle exec rake test 2>/dev/null || ${pkgs.ruby}/bin/bundle exec rspec 2>/dev/null || echo "no tests"'';
-      lint = mkApp "lint" ''${pkgs.ruby}/bin/bundle exec rubocop 2>/dev/null || echo "no rubocop"'';
+      # The old chain was `rake test || rspec || echo "no tests"`, so a
+      # FAILING rake suite silently fell through to rspec, and a failing
+      # rspec fell through to a green echo. Select the runner from what
+      # the repo actually ships, then let it decide.
+      test = mkApp "test" (guarded {
+        subject = ''[ -f Rakefile ] || [ -d spec ]'';
+        hint = "no Rakefile and no spec/";
+        cmd = ''
+          if [ -d spec ]; then
+            ${pkgs.ruby}/bin/bundle exec rspec
+          else
+            ${pkgs.ruby}/bin/bundle exec rake test
+          fi
+        '';
+      });
+      lint = mkApp "lint" (guarded {
+        subject = ''ls .rubocop.yml .rubocop.yaml >/dev/null 2>&1'';
+        hint = "no .rubocop.yml";
+        cmd = ''${pkgs.ruby}/bin/bundle exec rubocop'';
+      });
     }
     else if language == "shell" then {
-      lint = mkApp "lint" ''${pkgs.shellcheck}/bin/shellcheck *.sh **/*.sh 2>/dev/null || echo "no shell scripts"'';
+      lint = mkApp "lint" ''
+        shopt -s nullglob globstar
+        # `**/*.sh` under globstar already matches zero-or-more leading
+        # directories, so it covers top-level `*.sh` too. Listing both
+        # globs (as this did) hands shellcheck every top-level script
+        # TWICE and prints every finding twice.
+        scripts=(**/*.sh)
+        if [ "''${#scripts[@]}" -eq 0 ]; then
+          echo "skip: no *.sh files — nothing to lint, and this is NOT a pass"
+        else
+          ${pkgs.shellcheck}/bin/shellcheck "''${scripts[@]}"
+        fi
+      '';
     }
     else {};
 

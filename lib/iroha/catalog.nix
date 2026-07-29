@@ -36,10 +36,10 @@
     tier = "kernel";
     maturity = "Working";
     since = "2026-06-12";
-    description = "Self-hosting proof harness: nix-unit-shaped eval suites, aggregate-before-assert check derivations, module-eval checks with class-rejection assertions. The mkModuleEvalCheck 'evaluates' probe is shallow (module graph + option names); deep value proof is the `asserts` entries' job.";
-    subsumes = "nix repo parts/checks.nix hand-rolled mkTest/runTests; substrate util/test-helpers.nix runner; stale nix-test-runner input.";
+    description = "Self-hosting proof harness at BOTH tiers: nix-unit-shaped eval suites over pure values (mkEvalChecks/mkSuiteTree/mkModuleEvalCheck) and aggregate-before-assert check derivations over real artifacts (mkBuildChecks + the buildAssert vocabulary). Both refuse an EMPTY subject set. The mkModuleEvalCheck 'evaluates' probe is shallow (module graph + option names); deep value proof is the `asserts` entries' job.";
+    subsumes = "nix repo parts/checks.nix hand-rolled mkTest/runTests; substrate util/test-helpers.nix runner; stale nix-test-runner input. mkBuildChecks subsumes the hand-rolled `runCommand \"x-check\"` shape whose builder ends in an unconditional `touch $out` — the caller can no longer write $out, so the verdict cannot be discarded at the derivation boundary.";
     dependsOn = [ ];
-    exports = [ "mkEvalChecks" "mkSuiteTree" "mkModuleEvalCheck" ];
+    exports = [ "mkEvalChecks" "mkSuiteTree" "mkModuleEvalCheck" "mkBuildChecks" "buildAssert" ];
   };
 
   option-surface = {

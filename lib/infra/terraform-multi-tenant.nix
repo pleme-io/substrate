@@ -47,22 +47,57 @@
     lib = pkgs.lib;
     tfBin = lib.getExe terraform;
 
+    # ★ NON-EMPTY SUBJECT SET. `modules` defaulted to `[ ]`, and the
+    # `concatMapStringsSep` below expands to the EMPTY STRING over it — so
+    # the checkPhase became `errors=0; if [ $errors -gt 0 ]` and the
+    # derivation succeeded printing "All modules validated successfully"
+    # having validated none. Same for `cloudProviders`. A gate over zero
+    # subjects reports a tier it does not have (★★ UNREPRESENTABILITY
+    # tier ⊥, "vacuous" subclass); refuse it at eval instead.
+    _nonEmpty =
+      if modules == [ ] then
+        throw "mkMultiTenantModuleCheck (${pname}): `modules` is EMPTY — the generated checkPhase would validate nothing and exit 0. Name the modules, or do not declare the check."
+      else if cloudProviders == [ ] then
+        throw "mkMultiTenantModuleCheck (${pname}): `cloudProviders` is EMPTY — the generated checkPhase would validate nothing and exit 0."
+      else
+        true;
+
     moduleChecks = lib.concatMapStringsSep "\n" (cloud:
       lib.concatMapStringsSep "\n" (mod: ''
         echo "==> Validating ${cloud}/${mod}"
         if [ -d "${modulesDir}/${cloud}/${mod}" ]; then
+          seen_${lib.replaceStrings [ "-" "." "/" ] [ "_" "_" "_" ] mod}=1
           cd "${modulesDir}/${cloud}/${mod}"
           ${tfBin} fmt -check -recursive -diff . || { echo "FAIL: fmt ${cloud}/${mod}"; errors=$((errors + 1)); }
           ${tfBin} init -backend=false -input=false 2>/dev/null || true
           ${tfBin} validate || { echo "FAIL: validate ${cloud}/${mod}"; errors=$((errors + 1)); }
           cd "$OLDPWD"
         else
-          echo "SKIP: ${cloud}/${mod} (not found)"
+          echo "SKIP: ${cloud}/${mod} (not present for this cloud)"
         fi
       '') modules
     ) cloudProviders;
 
-  in pkgs.stdenv.mkDerivation {
+    # A per-cloud SKIP is legitimate — not every module exists for every
+    # cloud. A module that is present for NO cloud is not: the caller named
+    # it, and it was validated nowhere. Without this, a typo in `modules`
+    # is a silent green across the whole cross product.
+    modulesSeenCheck = lib.concatMapStringsSep "\n" (mod: ''
+      if [ -z "''${seen_${lib.replaceStrings [ "-" "." "/" ] [ "_" "_" "_" ] mod}:-}" ]; then
+        echo "FAIL: module '${mod}' was declared but found under NO cloud provider (${lib.concatStringsSep ", " cloudProviders}) — a named module validated nowhere is not a skip"
+        errors=$((errors + 1))
+      fi
+    '') modules;
+
+  in
+  # ★ THE GUARD MUST SIT WHERE IT IS FORCED. A first cut wrote
+  # `moduleChecks = assert _nonEmpty; …`, but `moduleChecks` is only
+  # reached from `checkPhase` — a lazily-forced string that forcing the
+  # derivation to WHNF never touches, so the refusal silently did not fire
+  # (measured 2026-07-28: the empty-modules probe constructed fine).
+  # Guarding the mkDerivation call itself fires on WHNF.
+  assert _nonEmpty;
+  pkgs.stdenv.mkDerivation {
     inherit pname version src;
     nativeBuildInputs = [ terraform ] ++ lib.optional (tflint != null) tflint;
     dontConfigure = true;
@@ -72,11 +107,12 @@
       errors=0
       OLDPWD=$(pwd)
       ${moduleChecks}
+      ${modulesSeenCheck}
       if [ $errors -gt 0 ]; then
         echo "$errors module(s) failed validation"
         exit 1
       fi
-      echo "All modules validated successfully"
+      echo "All ${toString (builtins.length modules)} module(s) validated successfully across ${toString (builtins.length cloudProviders)} cloud provider(s)"
     '';
 
     doCheck = true;
