@@ -832,12 +832,25 @@ set of test commands for product repos:
 
 ## Pure Nix Evaluation Tests (Substrate Internal)
 
-Substrate itself is tested with 362+ pure Nix evaluation tests across 9 suites.
-These tests run instantly (no builds, no VMs) and verify every type, assertion,
-and convergence property at the Nix evaluation layer.
+Substrate itself is tested with **830 pure Nix evaluation assertions across 22
+suites**, counted 2026-07-28. These run instantly (no builds, no VMs) and verify
+every type, assertion, and convergence property at the Nix evaluation layer.
+
+**None of them ran in CI before 2026-07-28.** The table below existed and the
+suites were real; nothing built them. They are now wired through the family-C
+catalog in `lib/util/eval-suites.nix`, one workflow step per suite.
+
+> ⚠ **Do not gate these by running the file directly.** `runTests` REPORTS a
+> failure (`allPassed = false`); it does not throw. So
+> `nix-instantiate --eval --strict lib/util/tests.nix` exits 0 whether every
+> assertion passes or every assertion fails — measured on a deliberately-broken
+> copy, where the direct command exited 0 and the catalog gate exited 1. Use
+> `nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix
+> { only = "<suite>"; }'`, which reads the verdict and also enforces a
+> per-suite assertion floor.
 
 ```bash
-# Run all test suites:
+# Ad-hoc, for reading a summary by hand (NOT a gate — see the warning above):
 nix eval --impure --expr '(import ./lib/types/tests.nix { lib = (import <nixpkgs> {}).lib; }).summary'
 nix eval --impure --expr '(import ./lib/types/assertion-tests.nix).summary'
 nix eval --impure --expr '(import ./lib/types/property-tests.nix).testConvergenceStages.summary'
@@ -855,7 +868,7 @@ nix eval --impure --expr '(import ./lib/util/tests.nix).summary'
 | `types/assertion-tests.nix` | 47 | Every assertion function (nonEmptyStr, port, enum, etc.) |
 | `types/property-tests.nix` | 18 | Convergence typestate + information flow properties |
 | `infra/tests/convergence-improvements-test.nix` | 26 | All 8 formal-methods improvements end-to-end |
-| `kube/tests.nix` | 37+ | All K8s primitives, compositions, modules |
+| `kube/tests.nix` | 57 | All K8s primitives, compositions, modules (the long-standing "37+" was never re-counted) |
 | `infra/tests.nix` | 105 | All infra builders, archetypes, renderers |
 | `hm/tests.nix` | 65 | All home-manager helpers |
 | `util/tests.nix` | 22 | Utility functions, test-helpers self-tests |
@@ -863,7 +876,15 @@ nix eval --impure --expr '(import ./lib/util/tests.nix).summary'
 ### What These Tests Prove
 
 - **Type safety**: Invalid inputs (wrong type, out-of-range, empty string) are rejected
-- **Information flow**: Secret names in plain `env` cause evaluation-time failure
+- **Information flow**: `checkInformationFlow` fails a spec whose `env` exposes a
+  secret name — but read the subject set before counting this as coverage. Seven
+  of `testInformationFlow`'s eight assertions run over `sampleSpecs`, every one
+  of which has `secrets = []` and `env = {}`, so `leaked == []` holds by
+  construction and none of the seven can detect anything. Only the control
+  exercises detection, and until 2026-07-28 even that one re-implemented the
+  filter inline and never called the function (blinding the checker left all 8
+  green). The control now calls the real function; the seven are still
+  structurally vacuous
 - **Bilateral promises**: Importing a protocol not exported by the provider throws
 - **Attestation determinism**: Same spec always produces same SHA-256 hash
 - **Recursive merge**: Partial nested override preserves sibling defaults
