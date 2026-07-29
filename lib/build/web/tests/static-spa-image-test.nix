@@ -101,12 +101,32 @@ pkgs.runCommand "web-static-spa-image"
     #    would find it. The chart's literal hook must work.
     workdir="$(mktemp -d)"
     ( cd "$workdir" && tar xzf "$image" 2>/dev/null || tar xf "$image" 2>/dev/null ) || true
+
+    # Diagnostic first. A "not found" that cannot distinguish an absent file from
+    # a wrong search is not a finding, it is a guess.
+    echo "  -- layer tars --"
+    find "$workdir" -name '*.tar' 2>/dev/null | sed 's|^|      |'
+    echo "  -- every entry mentioning sh across all layers --"
+    for layer in $(find "$workdir" -name '*.tar' 2>/dev/null); do
+      tar tvf "$layer" 2>/dev/null | grep -E '(^|/)bin/|sh$' | sed 's|^|      |' || true
+    done
+
     shbin=""
     for layer in $(find "$workdir" -name '*.tar' 2>/dev/null); do
-      if tar tf "$layer" 2>/dev/null | grep -qx 'bin/sh'; then
-        ( cd "$workdir" && tar xf "$layer" bin/sh 2>/dev/null ) || true
-        [ -f "$workdir/bin/sh" ] && shbin="$workdir/bin/sh" && break
+      # Match bin/sh with or without a leading ./ and follow it if it is a symlink
+      # into the store, which is how buildLayeredImage stores contents entries.
+      entry=$(tar tf "$layer" 2>/dev/null | grep -E '^\./?bin/sh$' | head -n1 || true)
+      [ -n "$entry" ] || continue
+      ( cd "$workdir" && tar xf "$layer" "$entry" 2>/dev/null ) || true
+      candidate="$workdir/$(echo "$entry" | sed 's|^\./||')"
+      if [ -L "$candidate" ]; then
+        target=$(readlink "$candidate")
+        echo "      bin/sh is a symlink to $target"
+        [ -x "$target" ] && shbin="$target"
+      elif [ -f "$candidate" ]; then
+        shbin="$candidate"
       fi
+      [ -n "$shbin" ] && break
     done
 
     if [ -z "$shbin" ]; then
