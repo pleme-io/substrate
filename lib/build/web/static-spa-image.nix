@@ -62,7 +62,15 @@ let
     else port;
 
   mkStaticSpaImage = pkgs: {
+    # Logical service name: labels, the config derivation, the conformance
+    # check's own name.
     name,
+    # Published repository name, separate from `name` the way mkPackageImage
+    # keeps service and publishName separate. The fleet convention for a
+    # rebuilt-and-hardened artifact is `hardened-<name>`, which also avoids
+    # colliding with the un-hardened image of the same version already sitting in
+    # a registry.
+    publishName ? name,
     version ? "0.0.0",
     # The server package. Expected to be a STATIC binary: the base has no
     # dynamic loader, so a glibc-linked server would not start. Asserted by the
@@ -162,7 +170,7 @@ let
       service = name;
       base = hardenedBase.bases.distroless-static;
       package = serverBinary;
-      publishName = name;
+      publishName = publishName;
       publishTag = tag;
       entrypoint = [ "/bin/${serverBin}" ];
       inherit user;
@@ -224,7 +232,7 @@ let
     # consumer's sandbox has no reason to have.
     compatSh = if compatShell then compatSh else null;
     interface = {
-      inherit staticRoot healthPath;
+      inherit staticRoot healthPath publishName;
       requestedPort = listenPort;
       listenPort = actualPort;
     };
