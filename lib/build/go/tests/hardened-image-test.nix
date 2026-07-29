@@ -4,7 +4,8 @@
 # proves the HARDENED stack does, and that every compile-time property the
 # builder claims is actually present in the artifact:
 #
-#   • the binary is PIE, stripped, and carries no GNU build id
+#   • the binary matches its DECLARED pie setting, is stripped, and carries no
+#     GNU build id
 #   • the binary is static (no INTERP) with no libc anywhere in the closure
 #   • the image runs as numeric 65532:65532, never root
 #   • no setuid/setgid bits in any layer
@@ -43,6 +44,11 @@ pkgs.runCommand "go-hardened-image"
     nativeBuildInputs = [ pkgs.curl pkgs.coreutils pkgs.binutils ];
     inherit binary conformance;
     hardenedJson = builtins.toJSON image.hardened;
+    # Assert what the builder DECLARED, not a fixed value. The default lane is
+    # deliberately non-PIE because a PIE Go binary built with CGO off carries a
+    # dynamic INTERP and cannot run on scratch; hardcoding DYN here would fight
+    # that correctness rather than check it.
+    expectPie = if image.hardened.pie then "1" else "0";
   }
   ''
     set -uo pipefail
@@ -59,8 +65,14 @@ pkgs.runCommand "go-hardened-image"
     echo "== hardened image: binary properties =="
 
     etype=$(readelf -h "$binary/bin/smoke" | awk '/Type:/ {print $2}')
-    echo "  ELF type: $etype"
-    [ "$etype" = "DYN" ] || bad "binary is $etype, expected DYN (PIE)"
+    echo "  ELF type: $etype (declared pie=$expectPie)"
+    if [ "$expectPie" = "1" ]; then
+      [ "$etype" = "DYN" ] || bad "pie was declared but the binary is $etype"
+    else
+      # Non-PIE is the correct outcome on the pure-Go lane. EXEC plus the
+      # no-INTERP check below is what makes it runnable on scratch.
+      [ "$etype" = "EXEC" ] || bad "pie was not declared but the binary is $etype"
+    fi
 
     if readelf -l "$binary/bin/smoke" | grep -q INTERP; then
       bad "binary has a dynamic INTERP segment; it would not run on scratch"
