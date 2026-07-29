@@ -59,6 +59,7 @@ let
     staticDir,
     # The server's own config file, copied to serverConfigPath.
     serverConfig,
+    # hanabi's own default, so no CONFIG_PATH env is needed to find it.
     serverConfigPath ? "/etc/hanabi/config.yaml",
     # See the interface note in the header before changing this.
     staticRoot ? "/usr/share/nginx/html",
@@ -104,11 +105,17 @@ let
       workdir = "/";
       exposedPorts = { "${toString listenPort}/tcp" = { }; };
       extraContents = [ assets configFile ];
-      env = [
-        "HANABI_CONFIG=${serverConfigPath}"
-        "HANABI_STATIC_DIR=${staticRoot}"
-        "HANABI_HTTP_PORT=${toString listenPort}"
-      ] ++ extraEnv;
+      # NO server-specific env. Verified against hanabi's own loader: the only
+      # env var it reads for this is CONFIG_PATH, which already defaults to
+      # /etc/hanabi/config.yaml, and static_dir/http_port come from the config
+      # FILE (server.static_dir, server.http_port) rather than from env at all.
+      #
+      # That is also the right interface. The chart deploying this image was
+      # written for nginx and knows nothing about the server inside; if it had to
+      # set server-specific env, swapping the server would not be a drop-in. So
+      # everything the server needs is baked into the image and the config file,
+      # and the chart passes exactly what it always passed.
+      env = extraEnv;
       labels = {
         "com.pleme.image.minimal" = "true";
         "com.pleme.image.hardened" = "true";
