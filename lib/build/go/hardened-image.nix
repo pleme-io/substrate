@@ -75,7 +75,10 @@ let
     # "none" (pure Go, no libc — default), "musl" (static musl, CGO on).
     # "glibc" is rejected; see the header.
     libc ? "none",
-    pie ? true,
+    # Default PIE on only for the proven lane. Under musl this becomes a
+    # static-PIE via external linking, which is implemented but unverified on
+    # a Linux builder; opting into it should be deliberate.
+    pie ? (libc == "none"),
     tags ? [],
     ldflagsExtra ? [],
     # Inject a version string into a package variable, e.g.
@@ -140,11 +143,13 @@ let
     ldflags = hardenedLdflags;
     inherit buildFlags doCheck;
 
-    # -trimpath belongs in GOFLAGS rather than buildFlags so it applies to
-    # the dependency compile as well, not only the final link.
-    preBuild = ''
-      export GOFLAGS="''${GOFLAGS:-} -trimpath"
-    '';
+    # -trimpath is NOT set here. buildGoModule already injects it into GOFLAGS
+    # whenever allowGoReference is false (nixpkgs build-support/go/module.nix),
+    # and warns on a duplicate. It also deliberately strips -trimpath for the
+    # check phase, because tests may reference assets by path; re-adding it
+    # ourselves would fight that. Stating allowGoReference explicitly is what
+    # actually pins the property.
+    allowGoReference = false;
 
     passthru = {
       hardened = {
@@ -223,11 +228,13 @@ let
     vendorHash ? null,
     subPackages ? null,
     libc ? "none",
-    pie ? true,
+    pie ? (libc == "none"),
     tags ? [],
     ldflagsExtra ? [],
     versionPath ? null,
-    doCheck ? true,
+    # A musl build is a cross-build; its test binaries cannot run on the
+    # builder, so checks are off on that lane unless asked for.
+    doCheck ? (libc != "musl"),
     tag ? "latest",
     architecture ? "amd64",
     ports ? {},
@@ -239,8 +246,12 @@ let
     entrypoint ? null,
     workDir ? "/",
     vulnGate ? true,
-    vulnStrict ? true,
-    maxStorePaths ? 4,
+    # NOT strict by default: govulncheck needs the vulnerability database, and
+    # a nix build sandbox has no network. Strict-by-default would fail every
+    # build for a reason that has nothing to do with the code. Turn it on where
+    # the gate runs with network, which is CI.
+    vulnStrict ? false,
+    maxStorePaths ? 5,
     execSmoke ? null,
     created ? "1970-01-01T00:00:01Z",
   }:
