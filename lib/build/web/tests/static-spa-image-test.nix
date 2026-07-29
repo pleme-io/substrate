@@ -53,7 +53,11 @@ pkgs.runCommand "web-static-spa-image"
     inherit image;
     binary = image.assets;
     serverBin = "${server}/bin/smoke";
-    compatSh = "${image}";
+    # The shim as its own input. The image's /bin/sh is a symlink into the store,
+    # so following it from here would resolve to a path this sandbox does not
+    # have; the symlink's PRESENCE is asserted from the layer listing instead,
+    # and its BEHAVIOUR is asserted against this binary.
+    shbin = "${image.compatSh}/bin/sh";
     exposed = builtins.toString image.interface.listenPort;
     requested = builtins.toString image.interface.requestedPort;
     staticRoot = image.interface.staticRoot;
@@ -111,28 +115,21 @@ pkgs.runCommand "web-static-spa-image"
       tar tvf "$layer" 2>/dev/null | grep -E '(^|/)bin/|sh$' | sed 's|^|      |' || true
     done
 
-    shbin=""
+    # 5a. the image really exposes /bin/sh, however buildLayeredImage stored it.
+    found_sh=0
     for layer in $(find "$workdir" -name '*.tar' 2>/dev/null); do
-      # Match bin/sh with or without a leading ./ and follow it if it is a symlink
-      # into the store, which is how buildLayeredImage stores contents entries.
-      entry=$(tar tf "$layer" 2>/dev/null | grep -E '^\./?bin/sh$' | head -n1 || true)
-      [ -n "$entry" ] || continue
-      ( cd "$workdir" && tar xf "$layer" "$entry" 2>/dev/null ) || true
-      candidate="$workdir/$(echo "$entry" | sed 's|^\./||')"
-      if [ -L "$candidate" ]; then
-        target=$(readlink "$candidate")
-        echo "      bin/sh is a symlink to $target"
-        [ -x "$target" ] && shbin="$target"
-      elif [ -f "$candidate" ]; then
-        shbin="$candidate"
-      fi
-      [ -n "$shbin" ] && break
+      if tar tf "$layer" 2>/dev/null | grep -Eq '^\./?bin/sh$'; then found_sh=1; break; fi
     done
-
-    if [ -z "$shbin" ]; then
+    if [ "$found_sh" -ne 1 ]; then
       bad "no /bin/sh in the image; the chart's preStop hook would fail every termination"
     else
-      chmod +x "$shbin" || true
+      echo "  /bin/sh present in the image"
+    fi
+
+    # 5b. and the shim it points at behaves.
+    if [ ! -x "$shbin" ]; then
+      bad "the compat shim is not executable at $shbin"
+    else
       if "$shbin" -c "sleep 0.05"; then
         echo "  /bin/sh honours the chart's preStop hook"
       else

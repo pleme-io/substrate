@@ -219,6 +219,10 @@ let
   image // {
     inherit assets configFile conformance;
     inherit normalizeListenPort;
+    # Exposed so a test can exec the shim directly. Following the image's
+    # /bin/sh symlink does not work from outside: it points at a store path the
+    # consumer's sandbox has no reason to have.
+    compatSh = if compatShell then compatSh else null;
     interface = {
       inherit staticRoot healthPath;
       requestedPort = listenPort;
