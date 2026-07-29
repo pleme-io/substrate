@@ -136,7 +136,14 @@ let
     hardenedLdflags =
       [ "-s" "-w" ] ++ versionLdflags ++ staticLdflags ++ ldflagsExtra;
 
-    buildFlags = lib.optionals pie [ "-buildmode=pie" ];
+    # -buildmode=pie goes in GOFLAGS, NOT in a `buildFlags` attribute.
+    # buildGoModule has no buildFlags: it assembles its go-build flags from
+    # `tags` and `ldflags` only, so a buildFlags list is silently swallowed by
+    # mkDerivation and the binary comes out EXEC instead of DYN. The first Linux
+    # run of the conformance check is what caught that, which is the entire
+    # argument for asserting properties on the artifact rather than trusting the
+    # flags we think we passed.
+    hardenedGoflags = lib.optionals pie [ "-buildmode=pie" ];
   in
   assert _libcOk;
   buildPkgs.buildGoModule ({
@@ -147,7 +154,8 @@ let
 
     tags = hardenedTags;
     ldflags = hardenedLdflags;
-    inherit buildFlags doCheck;
+    GOFLAGS = hardenedGoflags;
+    inherit doCheck;
 
     # -trimpath is NOT set here. buildGoModule already injects it into GOFLAGS
     # whenever allowGoReference is false (nixpkgs build-support/go/module.nix),
@@ -163,6 +171,7 @@ let
         cgo = cgoEnabled;
         tags = hardenedTags;
         ldflags = hardenedLdflags;
+        goflags = hardenedGoflags;
       };
     };
   } // (lib.optionalAttrs (subPackages != null) { inherit subPackages; })

@@ -107,8 +107,12 @@
 ;; ── 3. PIE ───────────────────────────────────────────────────────────────
 (define (elf-type path)
   (let ((out (stdout-of (exec-capture "readelf" "-h" path))))
-    (let ((m (re-find "Type:\\s+(\\S+)" out)))
-      (if (null? m) "unknown" (car (re-captures "Type:\\s+(\\S+)" out))))))
+    (let ((caps (re-captures "Type:\\s+(\\S+)" out)))
+      ;; re-captures returns the whole match first, then the groups, so the
+      ;; group is the SECOND element. Taking car yields "Type:   EXEC".
+      (if (or (null? caps) (< (length caps) 2))
+          "unknown"
+          (car (cdr caps))))))
 
 (when (and (not (eq? bin-path "")) (is-file? bin-path) (eq? expect-pie "1"))
   (let ((t (elf-type bin-path)))
