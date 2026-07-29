@@ -651,6 +651,24 @@ in rec {
   goDockerImageBuilder = ./build/go/docker.nix;
 
   # ============================================================================
+  # HARDENED GO IMAGE BUILDER — the compile-side half of MINIMAL-PRODUCTION-IMAGE
+  # ============================================================================
+  # mkGoDockerImage takes an already-built binary on faith. This one builds it
+  # under enforced compile-time hardening (CGO off by default so there is no
+  # libc at all, netgo/osusergo, -trimpath, -s -w, empty build id, PIE) and
+  # wires the result to its own conformance + govulncheck gates. musl is the
+  # CGO escape hatch, glibc is rejected at eval time.
+  #
+  # Usage:
+  #   hardenedGo = import "${substrate}/lib/build/go/hardened-image.nix" { };
+  #   img = hardenedGo.mkHardenedGoImage pkgs {
+  #     name = "svc"; src = ./.; vendorHash = "sha256-..."; version = "1.0.0";
+  #   };
+  goHardenedImageBuilder = ./build/go/hardened-image.nix;
+  inherit ((import ./build/go/hardened-image.nix { }))
+    mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
+
+  # ============================================================================
   # NODE SERVICE DOCKER IMAGE BUILDER (L2, standalone import path) — registry §4f
   # ============================================================================
   # JS-service OCI wrapper mirroring mkGoDockerImage (node interpreter + built

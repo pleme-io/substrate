@@ -540,4 +540,9 @@ in {
 
   # Convention: reuse these UIDs across all pleme-io vendor images.
   inherit nonrootUid nonrootGid;
+
+  # The passwd/group stubs, exported so a builder that assembles its own
+  # contents list (lib/build/go/hardened-image.nix) reuses these exact files
+  # rather than writing a second, drifting copy of the same three lines.
+  inherit nonrootPasswd nonrootGroup;
 }

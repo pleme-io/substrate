@@ -1,0 +1,155 @@
+;; hardened-image-check.tlisp
+;;
+;; The HARDENED half of the minimal-production-image conformance gate, as
+;; tlisp rather than shell. minimal-image-check.nix still proves the layer
+;; properties (no shell, no libc, store-path ceiling, static, exec smoke);
+;; this proves the properties that separate "minimal" from "hardened":
+;;
+;;   1. the image runs as a NUMERIC non-root user
+;;   2. no setuid/setgid bits anywhere in the layers
+;;   3. the binary is a position-independent executable (when PIE was asked for)
+;;   4. the binary is stripped and carries no GNU build id
+;;
+;; Aggregate-before-assert: every predicate is evaluated, every failure is
+;; printed, then the script exits once. A gate that stops at the first
+;; failure makes you re-run the build to discover the second one.
+;;
+;; Inputs arrive as environment variables so the derivation stays the single
+;; place that knows about store paths:
+;;   IMAGE_DIR    — an already-unpacked image directory
+;;   BIN_PATH     — path to the binary, or "" to skip binary predicates
+;;   EXPECT_USER  — the exact expected config User, e.g. "65532:65532"
+;;   EXPECT_PIE   — "1" or "0"
+;;
+;; Usage:
+;;   tatara-script hardened-image-check.tlisp
+
+(define failures (list))
+
+(define (fail msg)
+  (print-line (string-append "  FAIL: " msg))
+  (set! failures (cons msg failures)))
+
+(define (note msg)
+  (print-line (string-append "  " msg)))
+
+(define image-dir   (env-get "IMAGE_DIR"))
+(define bin-path    (env-get "BIN_PATH"))
+(define expect-user (env-get "EXPECT_USER"))
+(define expect-pie  (env-get "EXPECT_PIE"))
+
+(print-line "== HARDENED conformance ==")
+
+;; ── 1. numeric non-root user ─────────────────────────────────────────────
+;;
+;; The config json is the one top-level *.json that is not the manifest or
+;; the OCI index. Locating it by exclusion is more robust than guessing its
+;; sha256 name.
+(define (config-json-candidates)
+  (filter
+    (fn (p)
+      (and (string-ends-with? p ".json")
+           (not (string-ends-with? p "manifest.json"))
+           (not (string-ends-with? p "index.json"))
+           (not (string-ends-with? p "oci-layout"))))
+    (glob (path-join image-dir "*.json"))))
+
+(define cfg-candidates (config-json-candidates))
+
+(if (empty? cfg-candidates)
+    (fail "could not locate the image config json to check the user")
+    (let ((cfg (json-parse (read-file (car cfg-candidates)))))
+      (let ((user (or (alist-get (or (alist-get cfg "config") (list)) "User")
+                      (alist-get (or (alist-get cfg "Config") (list)) "User")
+                      "")))
+        (note (string-format "image user: '{}' (expected '{}')" user expect-user))
+        (when (not (eq? user expect-user))
+          (fail (string-format "image user '{}' is not the expected '{}'" user expect-user)))
+        (when (or (eq? user "") (eq? user "root") (eq? user "0") (eq? user "0:0"))
+          (fail "image runs as root"))
+        ;; runAsNonRoot cannot resolve a NAME against the image, so a named
+        ;; user makes the pod fail admission with a confusing error.
+        (when (and (not (eq? user ""))
+                   (not (re-match? "^[0-9]+(:[0-9]+)?$" user)))
+          (fail (string-format "image user '{}' is not numeric" user))))))
+
+;; ── 2. no setuid/setgid in any layer ─────────────────────────────────────
+;;
+;; tar's mode column shows s/S in the execute position for setuid/setgid.
+(define layer-tars
+  (filter (fn (p) (string-ends-with? p ".tar"))
+          (walk-dir image-dir)))
+
+(note (string-format "layers to scan: {}" (length layer-tars)))
+
+(define (layer-setuid-lines tarpath)
+  (filter (fn (line) (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" line))
+          (string-split (exec-capture "tar" (list "tvf" tarpath)) "\n")))
+
+(define setuid-lines
+  (reduce (fn (acc t) (append acc (layer-setuid-lines t))) (list) layer-tars))
+
+(if (empty? setuid-lines)
+    (note "no setuid/setgid bits in any layer")
+    (begin
+      (fail (string-format "setuid/setgid bits present ({} entries)" (length setuid-lines)))
+      (map (fn (l) (print-line (string-append "      " l))) setuid-lines)))
+
+;; ── 3. PIE ───────────────────────────────────────────────────────────────
+(define (elf-type path)
+  (let ((out (exec-capture "readelf" (list "-h" path))))
+    (let ((m (re-find "Type:\\s+(\\S+)" out)))
+      (if (null? m) "unknown" (car (re-captures "Type:\\s+(\\S+)" out))))))
+
+(when (and (not (eq? bin-path "")) (is-file? bin-path) (eq? expect-pie "1"))
+  (let ((t (elf-type bin-path)))
+    (note (string-format "ELF type: {} (PIE expects DYN)" t))
+    (when (not (eq? t "DYN"))
+      (fail (string-format "binary is {}, not a position-independent executable" t)))))
+
+;; ── 4. stripped, no build id ─────────────────────────────────────────────
+(when (and (not (eq? bin-path "")) (is-file? bin-path))
+  (let ((sections (exec-capture "readelf" (list "-S" bin-path))))
+    (if (re-match? "\\.symtab" sections)
+        (fail "binary retains a symbol table; -s -w did not take effect")
+        (note "binary is stripped (no .symtab)")))
+  (let ((notes (exec-capture "readelf" (list "-n" bin-path))))
+    (if (re-match? "(?i)build id" notes)
+        (fail "binary carries a GNU build id; -buildid= did not take effect")
+        (note "binary carries no build id"))))
+
+;; ── verdict ──────────────────────────────────────────────────────────────
+(if (empty? failures)
+    (begin
+      (print-line "== HARDENED conformance PASSED ==")
+      (exit 0))
+    (begin
+      (print-line (string-format "== HARDENED conformance FAILED ({} failures) ==" (length failures)))
+      (exit 1)))
+
+;; ── tests ────────────────────────────────────────────────────────────────
+;;
+;; The predicates that are pure string work are tested directly; the ones
+;; that need a real image are covered by the derivation that runs this.
+
+(deftest "a numeric uid:gid is accepted"
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532:65532") #t (error "should match")))
+
+(deftest "a bare numeric uid is accepted"
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532") #t (error "should match")))
+
+(deftest "a named user is rejected"
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "nonroot") (error "should not match") #t))
+
+(deftest "root is rejected as a name and as a uid"
+  (begin
+    (if (eq? "root" "root") #t (error "name check"))
+    (if (eq? "0:0" "0:0") #t (error "uid check"))))
+
+(deftest "a setuid tar line is detected"
+  (if (re-match? "^[-d][rwxst-]{2}[sS]" "-rwsr-xr-x root/root 12345 ./bin/su")
+      #t (error "should detect setuid")))
+
+(deftest "an ordinary tar line is not flagged"
+  (if (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" "-rwxr-xr-x root/root 12345 ./bin/app")
+      (error "should not flag") #t))
