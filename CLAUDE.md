@@ -208,6 +208,41 @@ direct `mkRustToolFlake`). `nix-devshell-cargo-test.yml`, which
 So for the great majority of consumers there is no real-test leg at all
 today: not `checks.tests`, and not this job either.
 
+**And on 2026-07-27 it ran the tests of ZERO of those three.** State the
+denominator here too, because "carries three repos" is a reach, not a
+coverage. Measured 2026-07-28, `devShells.<sys>.default.name` per caller:
+`forge` → `devenv-shell` (its own `devenv.flakeModule`, the only pleme-io
+repo importing it), `engenho` → `devenv-shell`, `iac-forge` → `devenv-shell`
+(both stale substrate pins, pre-`e232917`). `nix develop` cannot enter a
+devenv shell non-interactively, so the leg that was added to make the test
+claim true broke all three consumers and verified none. `checks.tests` was
+vacuous by **absence**; this was vacuous by **breakage**.
+
+The general lesson, which outlives the devenv specifics: **a job added to a
+shared `@main` reusable asserts a capability of every consumer.** This one
+asserted "`.#default` is enterable non-interactively" — never guaranteed by
+any substrate builder, and true for none of them. Two things now hold it:
+
+- **The preflight is wired.** `lib/util/devshell-preflight.nix` shipped
+  tested-but-unwired (its own header: "No workflow imports
+  `devshellPreflightPath` — zero hits"), which is the *unreached* subclass of
+  tier ⊥ — a guard passing its unit tests against zero real subjects.
+  `nix-devshell-cargo-test.yml` now invokes it, so a non-enterable devShell
+  yields an actionable verdict naming the fix instead of a raw nix trace.
+- **The reusable has an in-repo caller.** `devshell-cargo-test-selftest.yml`
+  + `devShells.<sys>.selftest-cargo` + a dependency-free fixture crate. Until
+  it existed, the first execution of a new leg *anywhere* was in a downstream
+  repo's CI — a shared reusable with no caller here cannot go red before its
+  blast radius does.
+
+`--impure` is **not** the fix, measured rather than assumed: `nix develop
+--impure .#default` on forge does not succeed, it fails *differently*
+(`error: To use 'languages.rust.channel', Add … inputs.rust-overlay.url`).
+Hence `devshell-args` is a distinct input and `flake-args` is deliberately
+not forwarded into `nix develop`. Receipts: run `30411786849` — `1 passed`
+through the shipped path after `preflight OK`, and the deliberate break
+refusing non-zero.
+
 Count uncommented `uses:` lines, not mentions. A plain grep for the string
 `cargo-ci.yml` returns 8 repos: 3 callers, substrate itself (which defines
 it), and **4 — `pangea-forge`, `ruby-synthesizer`, `yaml-synthesizer`,
