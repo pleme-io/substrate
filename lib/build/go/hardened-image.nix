@@ -33,13 +33,27 @@
 # prefer cgo resolvers, which is exactly how a "static" build acquires a libc
 # dependency by accident.
 #
+# PIE AND STATIC ARE MUTUALLY EXCLUSIVE FOR GO, and this cost real CI runs to
+# establish rather than assume. `-buildmode=pie` with CGO_ENABLED=0 uses
+# INTERNAL linking and emits a binary with a dynamic INTERP segment — a PIE
+# that wants ld.so. On a scratch base there is no ld.so, so the container does
+# not start. The Linux conformance check caught exactly this: "binary has a
+# dynamic INTERP segment — NOT static".
+#
+# Getting BOTH means static-PIE, which needs EXTERNAL linking, which needs a C
+# toolchain. That is the musl lane. So the honest matrix is:
+#
+#   libc = "none"  pie = false   static, no libc, no ASLR of the text segment
+#   libc = "musl"  pie = true    static-PIE, ASLR, musl statically embedded
+#
+# This qualifies the "CGO off is strictly better" claim above: CGO off wins on
+# closure and CVE surface, and gives up PIE to do it. Which trade is right is a
+# per-service call, which is why both lanes exist rather than one blessed path.
+#
 # TIER HONESTY. The image build and the conformance check need Linux (they
 # unpack a real tarball and exec the real binary). On darwin these derivations
-# EVALUATE but are built by the Linux CI runner. `pie = true` under
-# `libc = "musl"` produces a static-PIE, which needs external linking; that
-# combination is implemented here but has NOT been proven on a Linux builder
-# yet — treat it as unverified until a CI run says otherwise. `libc = "none"`
-# with `pie = true` is the well-trodden path.
+# EVALUATE but are built by the Linux CI runner. The musl static-PIE lane is
+# implemented and NOT yet proven on a Linux builder.
 #
 # Usage:
 #   hardened = import "${substrate}/lib/build/go/hardened-image.nix" { };
@@ -76,10 +90,10 @@ let
     # "none" (pure Go, no libc — default), "musl" (static musl, CGO on).
     # "glibc" is rejected; see the header.
     libc ? "none",
-    # Default PIE on only for the proven lane. Under musl this becomes a
-    # static-PIE via external linking, which is implemented but unverified on
-    # a Linux builder; opting into it should be deliberate.
-    pie ? (libc == "none"),
+    # PIE is available on the MUSL lane, not the pure-Go one. See the header:
+    # -buildmode=pie with CGO off yields a dynamically-linked PIE that needs
+    # ld.so, which a scratch base does not have. Proven on Linux, not guessed.
+    pie ? (libc == "musl"),
     tags ? [],
     ldflagsExtra ? [],
     # Inject a version string into a package variable, e.g.
@@ -254,7 +268,7 @@ let
     vendorHash ? null,
     subPackages ? null,
     libc ? "none",
-    pie ? (libc == "none"),
+    pie ? (libc == "musl"),
     tags ? [],
     ldflagsExtra ? [],
     versionPath ? null,
