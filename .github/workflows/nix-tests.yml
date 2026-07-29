@@ -9,7 +9,7 @@ name: nix-tests
 # `lib/build/<area>/tests/`. The pattern is uniform: one Nix
 # expression, exit non-zero on throw, gate on it.
 #
-# TWO TEST FAMILIES SHIP IN THIS REPO, and only one of them used to run
+# THREE TEST FAMILIES SHIP IN THIS REPO, and only one of them used to run
 # here. Know which one you are adding:
 #
 #   A. self-evaluating  — no arguments, `throw`s on the first failure.
@@ -21,6 +21,13 @@ name: nix-tests
 #      so they need `nix build .#checks.<system>.<name>`.
 #      e.g. mutating-verbs, rust-shape, rust-test-check, the two gates.
 #
+#   C. REPORT-RETURNING — the suite evaluates to a VALUE describing the
+#      run (`runTests`'s `{ total; allPassed; failures; … }`, an
+#      `allPassed` attr, or `{ passed; total; }`). Run through the
+#      catalog + gate in `lib/util/eval-suites.nix`.
+#      e.g. lib/types/tests.nix, lib/kube/tests.nix, lib/hm/tests.nix,
+#      lib/infra/tests*, lib/build/shared/*-test.nix.
+#
 # Family B ran in NO job on ANY trigger until 2026-07-28. Substrate has
 # exactly two workflows that fire on a push to its own main —
 # `auto-bump.yml` (tags only, runs no tests) and this one — and nothing
@@ -30,6 +37,19 @@ name: nix-tests
 # green-by-never-running, and so were `rust-shape`, `rust-test-check`,
 # `flake-checks-gate` and `devshell-preflight` — five suites, all of
 # them the NEWER ones, all invisible.
+#
+# Family C ran in NO job either, and was far larger: 22 suites, 830
+# assertions, wired 2026-07-28 by the four jobs at the bottom of this
+# file. See `lib/util/eval-suites.nix` for the catalog.
+#
+# ⚠ FAMILY C CANNOT BE WIRED THE WAY FAMILY A IS. `runTests` does NOT
+# throw on failure — it returns `allPassed = false` and keeps going. So
+# `nix-instantiate --eval --strict lib/util/tests.nix` exits 0 whether
+# every assertion passes or every assertion fails; it catches only an
+# EVALUATION error. Measured on a deliberately-broken copy of that file
+# (2026-07-28): the family-A command exited 0 while the gate exited 1.
+# Wiring family C by copying the family-A steps would have added four
+# jobs running 830 assertions and gating on none of them.
 #
 # NOTE THE ORDER OF THE FIX. Adding `lib/infra/**` to the path filter
 # on its own would have been VACUOUS: the three jobs below read nothing
@@ -42,28 +62,52 @@ on:
     branches:
       - main
     paths:
-      - 'lib/build/estante/**'
-      - 'lib/build/rust/**'
-      - 'lib/build/go/**'
-      # lib/infra/** — the ONLY code that can break `mutating-verbs`.
-      # lib/util/**  — darwin-test.nix already ran below while nothing
-      #                watched the tree it tests; the two gate suites
-      #                live here too.
-      # flake.nix    — declares `checks.<system>.*`; dropping a check
-      #                there is exactly the regression this gates.
+      # lib/build/**  — was three named subtrees (estante, rust, go). Widened
+      #                 2026-07-28: lib/build/shared/*-test.nix loads
+      #                 `lib/build/<ecosystem>/quirk-apply.nix` across EVERY
+      #                 ecosystem, so a change under lib/build/python (or any
+      #                 future subtree) can break a watched suite. Naming
+      #                 subtrees one at a time reproduces the defect this
+      #                 workflow exists to fix: the next subtree added is
+      #                 unwatched by default. The wildcard fails the other
+      #                 way, which is the correct direction for a gate.
+      # lib/infra/**  — mutating-verbs, plus the eight infra eval suites.
+      # lib/util/**   — darwin-test.nix already ran below while nothing
+      #                 watched the tree it tests; the two gate suites and
+      #                 the eval-suites catalog live here too.
+      # lib/types/**  — 144 assertions (tests + assertion-tests + the two
+      # lib/kube/**   —  57 assertions   property suites); watched from
+      # lib/hm/**     —  65 assertions   2026-07-28, when they first ran.
+      # lib/iroha/**  — checks.iroha, and lib/kata/** checks.kata: both
+      # lib/kata/**     declared for months and built by no job until
+      #                 2026-07-28, so neither tree was watched either.
+      # skills/**     — checks.skill-map lints exactly these.
+      # flake.nix     — declares `checks.<system>.*`; dropping a check
+      #                 there is exactly the regression this gates.
+      - 'lib/build/**'
       - 'lib/infra/**'
       - 'lib/util/**'
+      - 'lib/types/**'
+      - 'lib/kube/**'
+      - 'lib/hm/**'
+      - 'lib/iroha/**'
+      - 'lib/kata/**'
+      - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
   pull_request:
     branches:
       - main
     paths:
-      - 'lib/build/estante/**'
-      - 'lib/build/rust/**'
-      - 'lib/build/go/**'
+      - 'lib/build/**'
       - 'lib/infra/**'
       - 'lib/util/**'
+      - 'lib/types/**'
+      - 'lib/kube/**'
+      - 'lib/hm/**'
+      - 'lib/iroha/**'
+      - 'lib/kata/**'
+      - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
   workflow_dispatch:
@@ -162,3 +206,175 @@ jobs:
 
       - name: checks.devshell-preflight (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.devshell-preflight'
+
+      # The other FOUR declared checks. The five steps above were wired on
+      # 2026-07-28 and these were left behind in the same commit — so
+      # `checks.<system>` had nine entries and CI built five of them, which
+      # is the same defect one layer over: a check that no job builds is
+      # green because nothing ran it. Each verified locally on
+      # aarch64-darwin before wiring (2.2s / 1.4s / 3.3s / 2.1s, all green),
+      # so none of these is a long pole.
+      - name: checks.iroha (lib/iroha — every letter's suite)
+        run: nix build --no-link -L '.#checks.x86_64-linux.iroha'
+
+      - name: checks.kata (lib/kata — fleet vocabulary)
+        run: nix build --no-link -L '.#checks.x86_64-linux.kata'
+
+      - name: checks.go-minimal-image (lib/build/go — base-selection forcing-function)
+        run: nix build --no-link -L '.#checks.x86_64-linux.go-minimal-image'
+
+      - name: checks.skill-map (skills/ — per-skill structure gate)
+        run: nix build --no-link -L '.#checks.x86_64-linux.skill-map'
+
+      # STILL UNBUILT, and said out loud rather than silently omitted:
+      #   pending-unbuilt-check: go-minimal-image-serves
+      # It is declared linux-only (flake.nix's `optionalAttrs hasSuffix
+      # "linux"`), so it cannot be built or verified from the darwin
+      # workstation this was wired on, and it is the one check that
+      # BUILDS AN IMAGE AND BINDS A SOCKET. Wiring a socket-binding
+      # sandbox build that has never once been observed to run is how a
+      # gate lands red on main, so it is named here instead. Closing it
+      # needs one linux run (`nix build .#checks.x86_64-linux.go-minimal-image-serves`
+      # on rio or a workflow_dispatch) and then a step alongside the four
+      # above.
+
+  # ══ Family C (see header) ══════════════════════════════════════════
+  #
+  # 22 report-returning suites, 830 assertions, none of which ran in any
+  # job on any trigger before 2026-07-28. Every step below goes through
+  # `lib/util/eval-suites.nix`, which reads the suite's VERDICT — running
+  # these files directly with `nix-instantiate --eval --strict` exits 0 on
+  # a failing suite, because `runTests` reports rather than throws.
+  #
+  # One step per suite, matching the shape the three jobs above already
+  # use: a failure names the suite, not "substrate is red". The catalog
+  # also enforces a per-suite assertion FLOOR, so a suite that silently
+  # loses tests fails instead of reporting a smaller green.
+  #
+  # NOT VACUOUS: verified red against three deliberately-broken inputs
+  # before landing, not merely observed green — a flipped assertion in
+  # lib/util/tests.nix (1 of 22 failed, exit 1, where the naive family-A
+  # command exited 0 on the same file), six tests deleted from
+  # lib/types/tests.nix (SHRANK 73 < 79, exit 1), and an unknown suite
+  # name (exit 1). All three restored green afterwards.
+
+  types-kube-suites:
+    name: types + kube — eval suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      # The catalog's own forcing-function: fails when a suite has been
+      # added to lib/util/eval-suites.nix but given no step in this file.
+      # "Catalogued and running nowhere" is the precise defect this whole
+      # workflow repairs; this makes it unable to recur silently.
+      - name: eval-suites catalog covers every step
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "coverage"; }'
+
+      - name: types/tests.nix (79 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "types/tests"; }'
+
+      - name: types/assertion-tests.nix (47 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "types/assertion-tests"; }'
+
+      - name: types/property-tests.nix — information flow (8 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "types/property-information-flow"; }'
+
+      - name: types/property-tests.nix — convergence stages (10 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "types/property-convergence-stages"; }'
+
+      - name: kube/tests.nix (57 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "kube/tests"; }'
+
+  hm-util-suites:
+    name: hm + util — eval suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      - name: hm/tests.nix (65 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "hm/tests"; }'
+
+      - name: util/tests.nix (22 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/tests"; }'
+
+  infra-suites:
+    name: infra — eval suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      - name: infra/tests.nix (105 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/tests"; }'
+
+      - name: infra/tests/convergence-improvements-test.nix (26 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/convergence-improvements"; }'
+
+      - name: infra/tests/leptos-deploy-test.nix (30 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/leptos-deploy"; }'
+
+      - name: infra/tests/all-scaffolds-test.nix (26 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/all-scaffolds"; }'
+
+      - name: infra/tests/scaffold-test.nix (15 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/scaffold"; }'
+
+      - name: infra/tests/scaffold-completeness-test.nix (32 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/scaffold-completeness"; }'
+
+      - name: infra/tests/scaffold-snapshot-test.nix (12 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/scaffold-snapshot"; }'
+
+      - name: infra/tests/scaffold-compile-test.nix (52 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/scaffold-compile"; }'
+
+  build-suites:
+    name: build — shared + nixos + rust + go eval suites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      - name: build/shared/dispatcher-coverage-test.nix (49 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/shared/dispatcher-coverage"; }'
+
+      - name: build/shared/fleet-catalog-coverage-test.nix (103 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/shared/fleet-catalog-coverage"; }'
+
+      - name: build/shared/quirk-applier-test.nix (19 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/shared/quirk-applier"; }'
+
+      - name: build/shared/typed-dispatcher-test.nix (8 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/shared/typed-dispatcher"; }'
+
+      - name: build/nixos/tests.nix (38 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/nixos/tests"; }'
+
+      - name: build/rust/tests/spec-invariants-test.nix (11 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/rust/spec-invariants"; }'
+
+      - name: build/go/tests/package-builder-ferrite-test.nix (16 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/package-builder-ferrite"; }'

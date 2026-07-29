@@ -138,16 +138,32 @@ in rec {
   );
 
   # Run information flow tests across all sample specs
+  #
+  # ⚠ READ THE SUBJECT SET BEFORE COUNTING THIS AS COVERAGE. Every spec in
+  # `sampleSpecs` is built with `secrets = []` and `env = {}`, so inside
+  # `checkInformationFlow` both `secretNames` and `envKeys` are empty and
+  # `leaked == []` holds BY CONSTRUCTION. Those seven assertions prove the
+  # checker evaluates once per archetype; not one of them can detect a
+  # leak, because none of them is given anything that could leak. That is
+  # the vacuous-guard shape (★★ UNREPRESENTABILITY §II.3, tier ⊥) — a
+  # RuntimeCheck over zero subjects is an Assertion.
+  #
+  # The control below is what makes this suite mean anything, and it only
+  # started doing so on 2026-07-28: it used to re-implement the leak filter
+  # inline and assert on its own copy, so it passed without ever calling
+  # the function under test. Blinding `checkInformationFlow` entirely left
+  # all 8 tests green. It now calls the real function and asserts the
+  # REJECTION, so a checker that stops detecting turns this red.
   testInformationFlow = runTests (
     (map checkInformationFlow sampleSpecs)
     ++ [
-      # Positive test: spec with secret in env should be flagged
       (mkTest "info-flow-violation-detected"
-        (let
-          badSpec = { name = "bad"; secrets = [{ name = "DB_PASSWORD"; }]; env = { DB_PASSWORD = "leaked!"; }; };
-          leaked = builtins.filter (k: builtins.elem k ["DB_PASSWORD"]) (builtins.attrNames badSpec.env);
-        in leaked != [])
-        "should detect when a secret name appears in env")
+        (!(checkInformationFlow {
+          name = "bad";
+          secrets = [{ name = "DB_PASSWORD"; }];
+          env = { DB_PASSWORD = "leaked!"; };
+        }).passed)
+        "checkInformationFlow should FAIL a spec whose env exposes a secret name")
     ]
   );
 
