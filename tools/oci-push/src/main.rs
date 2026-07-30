@@ -864,6 +864,7 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut pass: Option<String> = None;
     let mut insecure = false;
     let mut ca_cert: Option<String> = None;
+    let mut digest_only = false;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -872,6 +873,26 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             "--pass" => pass = Some(next_value(&mut it, "pass")?),
             "--insecure" => insecure = true,
             "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
+            // --digest-only added 2026-07-29. Prints ONLY the digest, to stdout,
+            // with no trailing prose. Additive and non-breaking: without it the
+            // behaviour is exactly as before (pretty manifest on stdout, digest
+            // on stderr).
+            //
+            // Why it is needed: the digest is the one field a promotion pipeline
+            // actually wants, and it was the one field not machine-readable.
+            // Emitting the manifest on stdout and the digest on stderr means a
+            // caller had to either parse a pretty-printed JSON blob or scrape
+            // stderr, and the obvious third option -- pull the digest out of the
+            // manifest -- is not available at all, because a digest is the hash
+            // OF the manifest and does not appear inside it.
+            //
+            // What it unlocks: tag -> immutable digest resolution in one call, so
+            // a consumer can copy `repo@sha256:...` instead of `repo:tag`. That
+            // turns "the tag moved under us" from a silent wrong-bytes promotion
+            // into something that cannot happen -- the failure mode that
+            // motivated this whole change was a rolling tag that quietly stopped
+            // tracking while every gate stayed green.
+            "--digest-only" => digest_only = true,
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -887,6 +908,11 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
+    // Env fallback, same shape as --insecure above. Without this the action's
+    // `digest-only:` input would be declared but inert -- a flag reachable only
+    // from a hand-typed argv, which is the exact defect class of a typed option
+    // that nothing reads.
+    let digest_only = digest_only || env_input("INPUT_DIGEST_ONLY").as_deref() == Some("true");
     let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
 
     runtime()?.block_on(async {
@@ -899,8 +925,12 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
                 detail: e.to_string(),
             })?;
         let rendered = serde_json::to_string_pretty(&manifest).map_err(PushError::Json)?;
-        println!("{rendered}");
-        eprintln!("digest: {digest}");
+        if digest_only {
+            println!("{digest}");
+        } else {
+            println!("{rendered}");
+            eprintln!("digest: {digest}");
+        }
         Ok::<(), PushError>(())
     })
 }
@@ -914,15 +944,37 @@ fn cmd_pull<I: Iterator<Item = String>>(_it: I) -> Result<(), PushError> {
 }
 
 /// `list` — list the tags of a repository.
+// `--insecure` / `--dest-ca-cert` added 2026-07-29, for parity with `inspect`
+// and `push`. Before this, `list` was the ONE subcommand that built its
+// ClientConfig inline (`protocol: proto, ..Default::default()`) instead of going
+// through `client_config_for`, so it had no `extra_root_certificates` and no way
+// to accept one. Consequence: a registry serving a self-signed cert was
+// unreachable to `list` by construction, and no flag or env var could fix it --
+// `update-ca-certificates` on the host does not help either, because the
+// oci-client build here selects `rustls-tls`, whose trust anchors are the
+// compiled-in webpki set (`rustls-native-certs` is not in the lock).
+//
+// That made `doca list` unusable against a cluster-internal registry, which is
+// exactly where tag discovery is most wanted: enumerating what a scan-and-admit
+// registry has actually admitted, so a promotion can pin the newest admitted
+// version instead of dereferencing a rolling tag that may have stopped moving.
+// The flag names match `inspect`'s deliberately, including the slightly odd
+// `--dest-ca-cert` (there is no source/dest split on a read, but a caller
+// scripting several subcommands should not have to remember which spelling each
+// one takes).
 fn cmd_list<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut reference: Option<String> = None;
     let mut user: Option<String> = None;
     let mut pass: Option<String> = None;
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--ref" => reference = Some(next_value(&mut it, "ref")?),
             "--user" => user = Some(next_value(&mut it, "user")?),
             "--pass" => pass = Some(next_value(&mut it, "pass")?),
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -935,12 +987,11 @@ fn cmd_list<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         user.or_else(|| env_input("INPUT_USER")),
         pass.or_else(|| env_input("INPUT_PASS")),
     );
-    let proto = protocol_for(r.registry());
+    let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
+    let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
+    let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
     runtime()?.block_on(async {
-        let client = Client::new(ClientConfig {
-            protocol: proto,
-            ..Default::default()
-        });
+        let client = Client::new(cfg);
         let resp = client
             .list_tags(&r, &auth, None, None)
             .await
