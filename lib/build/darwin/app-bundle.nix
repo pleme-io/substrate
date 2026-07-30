@@ -22,7 +22,15 @@
 #                            #   OR a "<pkg>/bin/<basename>" string path
 #     iconSvg;               # path to the 1024×1024 source SVG
 #     bundleId;              # CFBundleIdentifier, e.g. "io.pleme.mado"
-#     version ? "0.1.0";     # CFBundleShortVersionString
+#     version;               # CFBundleShortVersionString — REQUIRED. Pass
+#                            #   `<pkg>.version` so it tracks autobump. This
+#                            #   used to default to the literal "0.1.0", and
+#                            #   both nix-repo callers omitted it, so the
+#                            #   installed Mado.app reported 0.1.0 against a
+#                            #   0.1.98 binary — 98 releases of drift, shown
+#                            #   to the operator, with nothing failing. A
+#                            #   default that is silently WRONG is worse than
+#                            #   an absent one: it looks answered.
 #     exeName ? <derived>;   # basename of the binary in MacOS/ — defaults to
 #                            #   lowercased name; override when the real binary
 #                            #   name differs (e.g. name="Mado", exeName="mado")
@@ -40,7 +48,10 @@
     exe,
     iconSvg,
     bundleId,
-    version ? "0.1.0",
+    # No default: a version is a FACT about the artifact, and inventing
+    # one produces a bundle that lies. Missing it is now an eval error
+    # naming the caller instead of a wrong number in Finder.
+    version,
     exeName ? pkgs.lib.toLower name,
     minSystemVersion ? "11.0",
     extraPlist ? {},

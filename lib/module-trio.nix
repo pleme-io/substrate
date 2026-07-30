@@ -572,7 +572,12 @@ in
               exeName          = binaryName;
               iconSvg          = appCfg.iconSvg;
               bundleId         = appCfg.bundleId;
-              version          = cfg.package.version or "0.1.0";
+              # `or "0.1.0"` here was the same silent lie as the builder's
+              # old default: a package without a version would ship a
+              # bundle claiming 0.1.0. Throw instead, naming the package,
+              # so the fix is obvious rather than invisible in Finder.
+              version          = cfg.package.version or (throw
+                "module-trio: ${name}'s package exposes no `version`, so the .app bundle would claim a made-up one. Set `version` on the derivation.");
               minSystemVersion = appCfg.minSystemVersion;
             };
 
