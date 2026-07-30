@@ -1,0 +1,102 @@
+name: caixa-tlisp-auto-release
+
+# Reusable workflow: autobump + release a pure-tatara-lisp caixa (Biblioteca).
+#
+# Distinct from caixa-auto-release.yml, which is the Helm-flavoured caixa —
+# it renders cluster artifacts via feira and ships an OCI chart. A tlisp
+# library has neither. Distinct from caixa-publish-tlisp.yml, which tags but
+# does not bump.
+#
+# Delivery is tag-only, and for a reason worth stating: a consumer INLINES the
+# library's stdlib.tlisp, because `require` does not import at tatara-script
+# top level. So the deliverable is the tagged manifest itself, whose :files
+# entries carry each shipped file's :sha256, :size and :body.
+#
+# That embedding is why bumping the version alone is wrong. caixa-bump
+# refreshes the embedded content alongside the version and verifies its own
+# rewrite by re-reading it; without that, a release tags a new version
+# carrying the previous revision's bodies, silently.
+#
+# Consumer shim:
+#
+#   on: { push: { branches: [main] } }
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/caixa-tlisp-auto-release.yml@main
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        type: string
+        required: false
+        default: patch
+      source-paths:
+        description: "Space-separated globs caixa-bump inspects for changes since the last tag — no change means no bump and no tag."
+        type: string
+        required: false
+        default: "*.tlisp *.md"
+      manifest-glob:
+        description: "Manifest path passed to git-commit-tag's add-paths. Defaults to any root *.caixa.lisp."
+        type: string
+        required: false
+        default: "*.caixa.lisp"
+      runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility."
+        type: string
+        required: false
+        default: ""
+    secrets:
+      # required:false for every secret, deliberately — see the note in
+      # cargo-auto-release.yml. GitHub validates the whole reusable call graph
+      # at startup, before any job `if:` runs, so one `required: true` here
+      # would break every caller of the polymorphic auto-release.yml including
+      # repos that never reach this arm.
+      BOT_PAT:
+        description: "Org PAT used to push the release commit and tag. Falls back to GITHUB_TOKEN."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 'caixa · bump → commit → tag → push'
+    # A bot-authored release commit must not retrigger the release.
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      # fetch-depth: 0 so caixa-bump can see the last tag and decide whether
+      # anything actually moved.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Bump the manifest and refresh its embedded file hashes
+        id: bump
+        uses: pleme-io/actions/caixa-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          source-paths: ${{ inputs.source-paths }}
+
+      # bumped=false is the no-change path: a re-run of an unchanged main is a
+      # green no-op, not version churn.
+      - name: Commit and tag
+        if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.bump.outputs.new-version }}
+          add-paths: ${{ inputs.manifest-glob }}
+          commit-message-template: "release: v{version}"
+
+      - name: Push the commit and the tag
+        if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
