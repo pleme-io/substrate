@@ -125,9 +125,26 @@ let
     #
     # Side benefit: the entrypoint becomes /bin/<name>, a stable path, instead of
     # a store path that changes on every rebuild.
-    serverBinary = pkgs.runCommand "${name}-server-bin" { } ''
+    # STRIPPED here, not trusted to arrive stripped. hanabi's Cargo.toml does
+    # set `strip = true` under [profile.release], and it is inert: the crate2nix
+    # / gen build path composes its own rustc invocations and never reads
+    # [profile.release], which is visible in its own build log emitting
+    # `-C opt-level=3 -C codegen-units=1` while the manifest asks for
+    # opt-level "z". So the manifest says stripped, the artifact is not, and
+    # the conformance check caught the difference ("binary retains a symbol
+    # table") on the first image that reached it.
+    #
+    # An image builder should not take a hardening property on trust from its
+    # input anyway. Doing it here makes the property hold for every server
+    # handed to this function regardless of how upstream was built, and it
+    # costs one command on a binary that is already being copied.
+    serverBinary = pkgs.runCommand "${name}-server-bin"
+      { nativeBuildInputs = [ pkgs.binutils ]; } ''
       mkdir -p "$out/bin"
       cp ${server}/bin/${serverBin} "$out/bin/${serverBin}"
+      chmod +w "$out/bin/${serverBin}"
+      strip --strip-all "$out/bin/${serverBin}"
+      chmod a-w,a+x "$out/bin/${serverBin}"
     '';
 
     # A shaped /bin/sh: implements the lifecycle-hook vocabulary and nothing

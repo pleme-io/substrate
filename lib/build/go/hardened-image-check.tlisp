@@ -124,7 +124,7 @@
 (when (and (not (eq? bin-path "")) (is-file? bin-path))
   (let ((sections (stdout-of (exec-capture "readelf" "-S" bin-path))))
     (if (re-match? "\\.symtab" sections)
-        (fail "binary retains a symbol table; -s -w did not take effect")
+        (fail "binary retains a symbol table (Go: -s -w ldflags; Rust/other: strip the artifact -- note Cargo [profile.release] strip is IGNORED by the crate2nix/gen build path)")
         (note "binary is stripped (no .symtab)")))
   (let ((notes (stdout-of (exec-capture "readelf" "-n" bin-path))))
     (if (re-match? "(?i)build id" notes)
