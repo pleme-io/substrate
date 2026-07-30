@@ -1,0 +1,37 @@
+name: auto-release-min
+# Bisect probe: detect + caixa + unsupported only, no language arms.
+# If a consumer of THIS starts, the startup_failure lives in one of the eight
+# language arms. If it also fails, the cause is in detect/unsupported or the
+# file's own shape.
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        type: string
+        required: false
+        default: patch
+    secrets:
+      BOT_PAT:
+        required: false
+permissions:
+  contents: write
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      repo-type: ${{ steps.detect.outputs.repo-type }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        uses: pleme-io/actions/detect-repo-type@main
+  caixa:
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'caixa'
+    uses: pleme-io/substrate/.github/workflows/caixa-tlisp-auto-release.yml@main
+    secrets: inherit
+  unsupported:
+    needs: detect
+    if: needs.detect.outputs.repo-type != 'caixa'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "::error::unsupported ${{ needs.detect.outputs.repo-type }}"; exit 1
