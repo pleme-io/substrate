@@ -684,8 +684,8 @@ in rec {
   # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
   # surface that needs pkgs threaded by hand.
   mkStaticSpaImage =
-    (import ./build/web/static-spa-image.nix { }).mkStaticSpaImage pkgs;
-  inherit ((import ./build/web/static-spa-image.nix { })) normalizeListenPort;
+    (import ./build/web/static-spa-image.nix { inherit fenix system; }).mkStaticSpaImage pkgs;
+  inherit ((import ./build/web/static-spa-image.nix { inherit fenix system; })) normalizeListenPort;
   inherit ((import ./build/go/hardened-image.nix { }))
     mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
 
