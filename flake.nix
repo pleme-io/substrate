@@ -155,6 +155,17 @@
       member = "gen-cli";
     };
     genFor = system: genFlake.packages.${system}.default;
+
+    # ── the fleet Go compiler, built from SUBSTRATE's nixpkgs ──────────────
+    #
+    # Bound here rather than reached through `self.goToolchains` so the `lib`
+    # output does not depend on its own sibling attribute. Same pattern as
+    # `genFor` above. The pin (version + every hash) is committed data in
+    # lib/build/go/go-toolchain-pin.json — the fenix data/stable.json analogue.
+    goToolchainFor = system:
+      (import ./lib/build/go/overlay.nix).mkGoToolchain {
+        pkgs = import nixpkgs { inherit system; };
+      };
   in
     flake-parts.lib.mkFlake { inherit inputs; } {
       inherit systems;
@@ -371,6 +382,7 @@
             import ./lib/build/go/tests/hardened-image-test.nix {
               inherit pkgs;
               tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+              goToolchain = goToolchainFor system;
             };
 
           # The SPA peer: proves the port rule applied, the assets sit at the
@@ -381,6 +393,7 @@
             import ./lib/build/web/tests/static-spa-image-test.nix {
               inherit pkgs;
               tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+              goToolchain = goToolchainFor system;
             };
         });
 
@@ -431,6 +444,31 @@
           infrastructure = ./lib/devenv/infrastructure.nix;
         };
 
+        # ── goToolchains — the Go answer to `fenix`, and the whole point ────
+        #
+        # THE fleet Go compiler, built from SUBSTRATE's own nixpkgs and published
+        # per-system so a consumer needs no new flake input to get a current
+        # compiler — exactly the ergonomic `rustOverlays` gives for Rust.
+        #
+        # "Built from substrate's own nixpkgs" is the load-bearing half, not a
+        # detail. fenix works on a nixos-24.05 consumer precisely BECAUSE that
+        # consumer's nixpkgs never builds rustc. substrate's Go toolchain used to
+        # be `prev.callPackage`d out of the consumer's package set, and against
+        # the consumer that needed it that did not degrade — it ABORTED
+        # uncatchably (`replaceVars` does not exist in 24.05). Measured; see
+        # lib/build/go/overlay.nix's header.
+        #
+        #   # consumer flake — no `inputs.fenix`, no `inputs.go-overlay`
+        #   hardened = import "${substrate}/lib/build/go/hardened-image.nix" {
+        #     goToolchain = substrate.goToolchains.${system}.stable;
+        #   };
+        #
+        # The version + every hash is committed data (lib/build/go/
+        # go-toolchain-pin.json, the fenix data/stable.json analogue), so a
+        # fleet-wide compiler bump is a two-field diff here, not a lock bump and
+        # not a resolution at eval.
+        goToolchains = eachSystem (system: { stable = goToolchainFor system; });
+
         # Per-system library and overlay exports
         # Consumers access as: substrate.lib.${system}, substrate.rustOverlays.${system}.rust
         lib = eachSystem (system: let
@@ -442,6 +480,12 @@
         in import ./lib {
           inherit pkgs crate2nix system;
           fenix = fenix.packages.${system};
+          # The pinned Go compiler, so mkHardenedGoBinary / mkStaticSpaImage
+          # reached through `substrate.lib.${system}` are current BY DEFAULT.
+          # Deliberately NOT applied as an overlay on `pkgs` above: that would
+          # rebuild every Go package in the closure, which is the exact thing
+          # lib/build/rust/overlay.nix refuses to do for rustc/cargo.
+          goToolchain = goToolchainFor system;
         });
 
         # NOTE: Named `rustOverlays` (not `overlays`) because flake-parts reserves
@@ -449,6 +493,22 @@
         # Per-system attrsets like this would fail the overlay type check.
         rustOverlays = eachSystem (system: {
           rust = (import ./lib/build/rust/overlay.nix).mkRustOverlay { inherit fenix system; };
+        });
+
+        # Go sibling of `rustOverlays`, same naming reason. The package-set-wide
+        # altitude: closes over substrate's pinned toolchain so a consumer can
+        # apply it to its OWN nixpkgs and have every Go package in that set built
+        # by the fleet compiler.
+        #
+        # SECONDARY BY DESIGN. This replaces `go` and `buildGoModule` globally,
+        # so it rebuilds every Go package in the consumer's closure and pkgsMusl
+        # inherits it too. Reach for the per-derivation `goToolchain` seam first
+        # (`substrate.goToolchains.${system}.stable` into one builder); use this
+        # only when a consumer genuinely wants one answer for a whole package set.
+        goOverlays = eachSystem (system: {
+          go = (import ./lib/build/go/overlay.nix).mkGoOverlay {
+            goToolchain = goToolchainFor system;
+          };
         });
 
         # Home-manager tool module helpers (profile orchestration, safe packages)
@@ -664,9 +724,15 @@
           forge ? null,
           system,
           fenix ? null,
+          # The Go sibling of `fenix` above. A consumer calling libFor with its
+          # OWN pkgs should pass `substrate.goToolchains.${system}.stable` here —
+          # that is what decouples its Go artifacts from its own nixpkgs pin.
+          # Omitting it leaves Go builds on the consumer's `pkgs.go`, which
+          # mkHardenedGoBinary's CVE floor will reject at eval if it is stale.
+          goToolchain ? null,
         }:
           import ./lib {
-            inherit pkgs system crate2nix fenix forge;
+            inherit pkgs system crate2nix fenix forge goToolchain;
           };
       };
     };

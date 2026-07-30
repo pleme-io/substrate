@@ -13,10 +13,15 @@
 #
 # Linux-only: it execs a linux binary and binds a socket. Wired into
 # checks.{x86_64,aarch64}-linux.web-static-spa-image.
-{ pkgs, tataraScript ? null }:
+{ pkgs, tataraScript ? null,
+  # The pinned fleet Go compiler — see hardened-image-test.nix's note. Both
+  # builders under test compile Go here (the fixture server AND the image's
+  # compat-sh), and both are floored.
+  goToolchain ? null,
+}:
 let
-  spa = import ../static-spa-image.nix { };
-  hardenedGo = import ../../go/hardened-image.nix { };
+  spa = import ../static-spa-image.nix { inherit goToolchain; };
+  hardenedGo = import ../../go/hardened-image.nix { inherit goToolchain; };
 
   server = hardenedGo.mkHardenedGoBinary pkgs {
     name = "smoke";

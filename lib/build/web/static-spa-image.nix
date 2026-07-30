@@ -31,8 +31,21 @@
 # with no config, which presents as an application bug rather than a packaging
 # one. Changing this default breaks a contract the chart owns.
 #
+# THIS BUILDER COMPILES GO, WHICH IS NOT OBVIOUS FROM ITS NAME, and that is how
+# a "hardened distroless SPA image" came to carry 48 CVEs. The image ships a
+# compat-sh — a shaped /bin/sh built through mkHardenedGoBinary — and until
+# 2026-07-30 that compiled with the CONSUMER's `pkgs.go`. On the consumer that
+# hit it (nixos-24.05, go 1.22.8) the Rust server binary, the SPA assets, the
+# config and the CA roots ALL scanned clean and the shim's Go stdlib was the
+# entire finding list, CRITICAL included. So `goToolchain` is threaded here for
+# the same reason lib/build/oci-push.nix threads `fenix`: a builder must not
+# inherit its compiler from whatever the caller happened to pin. See
+# lib/build/go/toolchain.nix's header for the incident in full.
+#
 # Usage:
-#   spa = import "${substrate}/lib/build/web/static-spa-image.nix" { };
+#   spa = import "${substrate}/lib/build/web/static-spa-image.nix" {
+#     goToolchain = substrate.goToolchains.${system}.stable; # for compat-sh
+#   };
 #   img = spa.mkStaticSpaImage pkgs {
 #     name = "web-ui";
 #     version = "2.41.132";
@@ -42,7 +55,14 @@
 #     serverConfig = ./hanabi.yaml; # the scoped profile
 #     listenPort = 8000;
 #   };
-{ }:
+{
+  # The fleet Go toolchain, ALREADY BUILT — `substrate.goToolchains.${system}
+  # .stable`. Reaches compat-sh's mkHardenedGoBinary call below. When null,
+  # mkHardenedGoBinary's CVE floor rejects the build at eval on any consumer
+  # whose own `go` is below the floor, which is the intended behaviour: an
+  # unnoticed stale compiler is what this whole seam exists to stop.
+  goToolchain ? null,
+}:
 let
   # Privileged ports are the one thing a non-root process cannot simply be
   # configured into. The old infra passes 80 because that is what nginx-as-root
@@ -106,7 +126,10 @@ let
   let
     lib = pkgs.lib;
     hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
-    hardenedGo = import ../go/hardened-image.nix { };
+    # goToolchain threaded, not defaulted away: compat-sh below is compiled
+    # through this, and it is the binary that carried the whole 2026-07-30
+    # finding list. See this file's header.
+    hardenedGo = import ../go/hardened-image.nix { inherit goToolchain; };
 
     actualPort = normalizeListenPort listenPort;
 

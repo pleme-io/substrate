@@ -28,6 +28,25 @@
   system ? null,
   crate2nix ? null,
   fenix ? null,
+  # THE fleet Go compiler, already built — `substrate.goToolchains.${system}
+  # .stable`. The exact Go sibling of `fenix` above, and threaded for the same
+  # reason: a consumer's own nixpkgs pin must not decide which compiler its
+  # artifacts are built by. It decided anyway until 2026-07-30, and a hardened
+  # distroless image shipped 48 CVEs (1 CRITICAL) from a single 152-line Go shim
+  # compiled by nixos-24.05's go 1.22.8 — see lib/build/go/toolchain.nix.
+  #
+  # Must be built from SUBSTRATE's nixpkgs, never the consumer's: building it
+  # from a 24.05 pkgs does not degrade, it ABORTS uncatchably on the missing
+  # `replaceVars` (measured — see build/go/overlay.nix). flake.nix's own `lib`
+  # passes it, so every consumer of `substrate.lib.${system}` inherits a current
+  # compiler with no call-site change; a `libFor` consumer threads it the same
+  # way it already threads fenix.
+  #
+  # null keeps the pre-2026-07-30 behaviour (the consumer's own `go`). That is
+  # not silently safe, and deliberately so: mkHardenedGoBinary's CVE floor
+  # rejects such a build at eval time unless the consumer's `go` already clears
+  # the floor.
+  goToolchain ? null,
 }: let
   # Import Rust overlay module (always available, doesn't need fenix at import time)
   rustOverlayModule = import ./build/rust/overlay.nix;
@@ -516,7 +535,23 @@ in rec {
   # Builds Go from upstream source (go.dev) with NixOS-compatibility patches.
   # Full independence from nixpkgs Go version — single source of truth.
   # Usage: pkgs = import nixpkgs { overlays = [ (substrateLib.mkGoOverlay {}) ]; };
-  inherit (goOverlayModule) mkGoOverlay getGoToolchain;
+  #
+  # THREE ALTITUDES, and the per-derivation one is the default — see
+  # build/go/overlay.nix's header. `mkGoOverlay` replaces `go`/`buildGoModule`
+  # package-set-wide, which is what build/rust/overlay.nix explicitly refuses to
+  # do for rustc/cargo; prefer handing `goToolchain` to a single builder.
+  #
+  # `getGoToolchain { pkgs = <a pre-25.05 pkgs>; }` ABORTS (uncatchably) on the
+  # missing `replaceVars`. `mkGoToolchain` is the shape to use, called with a
+  # pkgs new enough to build a toolchain — normally substrate's own, via
+  # `substrate.goToolchains.${system}.stable`.
+  inherit (goOverlayModule) mkGoOverlay getGoToolchain mkGoToolchain;
+
+  # The Go compiler this lib instance builds Go artifacts with, re-exported so a
+  # consumer can read what it actually got rather than infer it. null means "the
+  # consumer's own pkgs.go", in which case mkHardenedGoBinary's floor decides
+  # whether that is acceptable.
+  inherit goToolchain;
 
   # ============================================================================
   # ZIG OVERLAY (from zig-overlay.nix)
@@ -683,10 +718,16 @@ in rec {
   # pkgs pre-applied so the call site matches its sibling mkPackageImage
   # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
   # surface that needs pkgs threaded by hand.
+  #
+  # `goToolchain` threaded into BOTH: mkStaticSpaImage compiles a compat-sh
+  # through mkHardenedGoBinary, and that Go shim was the entire CVE surface of
+  # the 2026-07-30 incident image. This is what makes the pinned compiler the
+  # DEFAULT for anything reached through `substrate.lib.${system}` — no call-site
+  # change anywhere.
   mkStaticSpaImage =
-    (import ./build/web/static-spa-image.nix { }).mkStaticSpaImage pkgs;
-  inherit ((import ./build/web/static-spa-image.nix { })) normalizeListenPort;
-  inherit ((import ./build/go/hardened-image.nix { }))
+    (import ./build/web/static-spa-image.nix { inherit goToolchain; }).mkStaticSpaImage pkgs;
+  inherit ((import ./build/web/static-spa-image.nix { inherit goToolchain; })) normalizeListenPort;
+  inherit ((import ./build/go/hardened-image.nix { inherit goToolchain; }))
     mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
 
   # ============================================================================
