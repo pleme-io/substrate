@@ -164,20 +164,33 @@ let
     pname = name;
     inherit version src vendorHash;
 
-    # CGO_ENABLED is a top-level attr, NOT an `env` key — the exact mirror of
-    # the GOFLAGS rule documented below. buildGoModule declares
-    # `CGO_ENABLED ? go.CGO_ENABLED` as an argument and then `inherit`s it
-    # straight onto mkDerivation (nixpkgs build-support/go/module.nix:40,170),
-    # so setting it in `env` too makes both sides define it and eval dies with
-    # "the env attribute set cannot contain any attributes passed to
-    # derivation ... overlapping: CGO_ENABLED".
+    # CGO_ENABLED goes in `env`, NOT top-level. CORRECTED 2026-07-30 after this
+    # file failed eval in CI with exactly the error the previous comment here
+    # claimed it was avoiding:
     #
-    # The two knobs therefore go opposite ways, which is the whole trap:
-    # GOFLAGS is written into `env` BY buildGoModule (so we must never pass it
-    # top-level), CGO_ENABLED is written top-level BY buildGoModule (so we must
-    # never pass it in `env`). Read the nixpkgs source for the direction rather
-    # than guessing from symmetry.
-    CGO_ENABLED = cgoEnabled;
+    #   error: The 'env' attribute set cannot contain any attributes passed to
+    #   derivation. The following attributes are overlapping: CGO_ENABLED
+    #
+    # The previous text asserted the opposite (top-level attr, never `env`) and
+    # cited module.nix:40,170. That was true of an older nixpkgs and is false
+    # for the one this is built against. Verified by reading the pinned source
+    # directly (nixpkgs addf7cf5, pkgs/build-support/go/module.nix:219-226):
+    #
+    #   env = args.env or { } // {
+    #     CGO_ENABLED = args.env.CGO_ENABLED or go.CGO_ENABLED;
+    #   };
+    #
+    # buildGoModule READS the caller's value out of `args.env` and writes it
+    # back into `env`, so `env` is the only supported channel; a top-level attr
+    # is then defined on both sides and eval dies. The merge is `//` with the
+    # caller's set on the left, so passing other `env` keys here stays safe.
+    #
+    # GOFLAGS in that same revision is the reverse — a genuine top-level
+    # argument (`GOFLAGS = GOFLAGS ++ ...`, module.nix:228). The two really do
+    # go opposite ways; the direction is just the other way round from what
+    # this comment used to say. Read the pinned module.nix, never infer from
+    # symmetry, and never trust this comment across a nixpkgs bump.
+    env = { CGO_ENABLED = cgoEnabled; };
 
     tags = hardenedTags;
     ldflags = hardenedLdflags;
