@@ -99,8 +99,31 @@ on:
         description: "ansible-galaxy publish token. Its reusable already declares it required:false, so its absence never blocked the graph — declared here so the ansible arm's `inherit` can actually carry it if the secret is ever added."
         required: false
 
+# A called workflow's GITHUB_TOKEN scopes may only be EQUAL OR MORE RESTRICTIVE
+# than its caller's. GitHub validates that across the whole graph while BUILDING
+# the run — before any job `if:` is evaluated — so one arm asking for a scope
+# this block omits rejects the entire run: zero jobs, `startup_failure`, no
+# annotations, and nothing in `gh run view --log` (the reason is UI-banner-only,
+# which is why this stayed invisible).
+#
+# `packages: write` is here for the helm arm (helm-auto-release.yml:41-43),
+# which pushes the chart to ghcr.io with GITHUB_TOKEN when BOT_PAT is absent.
+# Every consumer of this dispatcher had been failing at startup since the helm
+# arm was added in 4674679 (2026-05-22) — the earliest recorded consumer run,
+# caixa-tlisp-core 26353521870 on 2026-05-24, already startup_failed. It never
+# worked once. 925c4d7 and 6634fa6 both targeted this symptom and neither
+# touched permissions, which is why neither changed anything.
+#
+# Proof it is this and not resolution: the run's `referenced_workflows` lists
+# all ten files at the right sha, so every arm WAS found and parsed. And the
+# bisect probe auto-release-min.yml (87870fc1) — same shape, helm arm omitted,
+# same `contents: write` — succeeded.
+#
+# Adding an arm that needs a NEW scope means widening this block in the same
+# commit, or giving that arm a job-level `permissions:` block.
 permissions:
   contents: write
+  packages: write
 
 # Serialize releases per repository — two pushes to main otherwise race two
 # bump runs from the same base and the second push is rejected non-ff (its
