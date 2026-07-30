@@ -71,8 +71,17 @@ on:
         required: false
         default: ""
     secrets:
+      # required:false, deliberately. GitHub validates the WHOLE reusable call
+      # graph at startup, BEFORE any job `if:` is evaluated, so a
+      # `required: true` here makes every caller of the polymorphic
+      # auto-release.yml fail with startup_failure and zero jobs — including
+      # repos that would never reach this arm. That is the
+      # union-of-required-secrets unsatisfiability this file's sibling comment
+      # already names; ruby-gem was dropped as an arm for it while four arms
+      # kept the same declaration. Absence is caught at publish time instead,
+      # where the error can name the secret and the repo it is missing from.
       CRATES_API_TOKEN:
-        required: true
+        required: false
       BOT_PAT:
         required: false
 

@@ -199,11 +199,24 @@ jobs:
     uses: pleme-io/substrate/.github/workflows/action-release.yml@main
     secrets: inherit
 
+  # caixa — a pure-tatara-lisp library (Biblioteca). Delivery is tag-only: a
+  # consumer INLINES the library's stdlib.tlisp, so the deliverable is the
+  # tagged manifest, whose :files entries carry each shipped file's sha256,
+  # size and body. caixa-bump refreshes those alongside the version, because a
+  # version bump alone would tag a release carrying the previous revision's
+  # content.
+  caixa:
+    name: 'caixa · release'
+    needs: detect
+    if: needs.detect.outputs.repo-type == 'caixa'
+    uses: pleme-io/substrate/.github/workflows/caixa-tlisp-auto-release.yml@main
+    secrets: inherit
+
   # Catch-all. MUST be a NEGATION of the dispatched set, never `== 'unknown'`.
   #
   # detect-repo-type emits TEN types (actions/detect-repo-type/run.tlisp):
   #   rust-workspace rust-single-crate go ansible-collection helm python npm
-  #   ruby-gem github-action unknown
+  #   ruby-gem github-action caixa unknown
   # Before 2026-07-27 this job gated on `== 'unknown'` — an equality test, not a
   # negation — while only SIX arms existed. A repo detected as `ruby-gem`,
   # `ansible-collection` or `github-action` therefore matched no arm AND did not
@@ -228,7 +241,8 @@ jobs:
       needs.detect.outputs.repo-type != 'python' &&
       needs.detect.outputs.repo-type != 'helm' &&
       needs.detect.outputs.repo-type != 'ansible-collection' &&
-      needs.detect.outputs.repo-type != 'github-action'
+      needs.detect.outputs.repo-type != 'github-action' &&
+      needs.detect.outputs.repo-type != 'caixa'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - name: Fail with diagnostic
