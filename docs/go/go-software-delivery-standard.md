@@ -397,6 +397,27 @@ and [SEC-10](#dimension-security-and-supply-chain-sec).
 (reads the consuming `go.mod`'s `go` line via `builtins.compareVersions` against
 `pkgs.go.version`, aborting the Nix evaluation before any build runs); same path
 covers monorepo builds via `modRoot`.
+
+> **Corrected 2026-07-30.** This rule's phrase "the substrate from-source
+> `goToolchain` (`pkgs.go.version`)" described a mechanism that was NOT WIRED. The
+> toolchain existed at `lib/build/go/toolchain.nix` but the overlay that installs
+> it was applied in exactly one place in the repo, so on an un-overlaid consumer
+> `pkgs.go` is the CONSUMER's go — and `goVersionAssert` measured that. On the
+> nixos-24.05 consumer in the incident below the assert therefore read 1.22.8: it
+> **forbade a modern `go.mod` while permitting the old compiler**, which is
+> precisely the pair of failures that occurred (a `go 1.23` directive rejected,
+> and a stdlib with 48 CVEs shipped). Note also that every version assert in
+> `lib/build/go/` was a CEILING — go.mod must not be ahead of the toolchain — and
+> nothing anywhere asserted the toolchain was not BEHIND.
+>
+> Both halves are now real: `substrate.goToolchains.${system}.stable` is built
+> from substrate's own nixpkgs and threaded through `lib`, and
+> `mkHardenedGoBinary` carries a CVE FLOOR asserted against the compiler that
+> actually compiled (`drv.passthru.go.version`, not the `pkgs.go` proxy). The
+> ceiling in this rule still measures `pkgs.go.version` and so is still only as
+> true as the consumer's wiring; see
+> [`go-toolchain.md`](./go-toolchain.md) §4 for which builders are floored and
+> which are not.
 *Demonstrated by:* all eight runtime libs declare `go 1.25`; introducing
 `go 1.25.4` fails Nix evaluation with the `tool.nix` throw.
 
@@ -4463,6 +4484,27 @@ opens an auto-PR; and a `go.mod` `go` directive pinned to the MINOR version only
 (e.g. `go 1.25`), NEVER a patch ahead of the substrate goToolchain. Floating/
 unpinned dependency refs, an uncommitted/stale `go.sum`, or a go.mod ahead of the
 toolchain are build-blocking errors.
+
+**SEC-10a** — The COMPILER is part of dependency hygiene, and dependency pinning
+does not cover it. Every Go artifact MUST be compiled by
+`substrate.goToolchains.${system}.stable` — a from-source Go pinned by explicit
+version + sha256, built from SUBSTRATE's nixpkgs — never by whatever `go` the
+consuming repo's own nixpkgs happens to carry.
+*Why:* a Go binary's stdlib CVE set is decided by the compiler, NOT by the `go`
+directive in `go.mod`. A perfectly pinned `go.sum`, a clean `govulncheck`, and a
+correct minor-pinned directive together say nothing about the stdlib you link.
+Measured 2026-07-30: a hardened distroless image whose every other component
+scanned clean shipped 48 findings (1 CRITICAL) from one 152-line shim, solely
+because the consumer pinned nixos-24.05 (go 1.22.8). Recompiling the identical
+source with go 1.26.5 → 0 findings.
+*Enforcement:* eval-time `throw` — the CVE floor in `mkHardenedGoBinary`, asserted
+against `drv.passthru.go.version` (the compiler that actually compiled) against
+`cveFloor` in `lib/build/go/go-toolchain-pin.json`. **Tier: eval-rejected, and it
+binds only the builders listed in [`go-toolchain.md`](./go-toolchain.md) §4** —
+`mkGoTool`, `mkGoDockerImage` and `private-module.nix` carry the ceiling only.
+*Deviation:* `skip-go-floor: <typed-reason>`. Suppressing the scanner instead
+(`.trivyignore` / VEX / `--ignore-unfixed`) is never permitted.
+*Full record:* [`go-toolchain.md`](./go-toolchain.md).
 
 > See the [vendoring note under LAYOUT-12](#dimension-repo-layout-and-module-layout)
 > for why the GSDS uses proxy + `go.sum` + `vendorHash` rather than a committed

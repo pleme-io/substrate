@@ -689,13 +689,26 @@ in rec {
   # HARDENED GO IMAGE BUILDER — the compile-side half of MINIMAL-PRODUCTION-IMAGE
   # ============================================================================
   # mkGoDockerImage takes an already-built binary on faith. This one builds it
-  # under enforced compile-time hardening (CGO off by default so there is no
-  # libc at all, netgo/osusergo, -trimpath, -s -w, empty build id, PIE) and
-  # wires the result to its own conformance + govulncheck gates. musl is the
-  # CGO escape hatch, glibc is rejected at eval time.
+  # under enforced compile-time hardening — CGO off by default so there is no
+  # libc at all, netgo/osusergo, -trimpath, -s -w — and, since 2026-07-30, under
+  # an enforced COMPILER: `goToolchain` plus an eval-time CVE floor, because
+  # every other flag here constrains how the source compiles and none of them
+  # constrained what compiles it. See build/go/toolchain.nix's header for the
+  # incident (48 findings, 1 CRITICAL, from one 152-line shim) and
+  # docs/go/go-toolchain.md for the operator face. musl is the CGO escape hatch;
+  # glibc is rejected at eval time.
+  #
+  # NOT claimed, deliberately, because the previous wording rounded both up:
+  # PIE is default-OFF on the pure-Go lane (`pie ? (libc == "musl")` — PIE with
+  # CGO off yields a binary wanting ld.so, which a scratch base has none of), and
+  # "empty build id" is asserted by a conformance predicate whose input `-s`
+  # already erased, so it cannot fail. Both are stated as they are, not as they
+  # read best.
   #
   # Usage:
-  #   hardenedGo = import "${substrate}/lib/build/go/hardened-image.nix" { };
+  #   hardenedGo = import "${substrate}/lib/build/go/hardened-image.nix" {
+  #     goToolchain = substrate.goToolchains.${system}.stable;
+  #   };
   #   img = hardenedGo.mkHardenedGoImage pkgs {
   #     name = "svc"; src = ./.; vendorHash = "sha256-..."; version = "1.0.0";
   #   };
