@@ -402,6 +402,10 @@ let
     pie ? true,
     maxStorePaths ? 4,
     execSmoke ? null,
+    # Forwarded to mkMinimalImageCheck. A Rust image passes [ ".dep-v0" ] so
+    # the cargo-auditable dependency document -- the only thing that makes its
+    # crate tree visible to trivy at all -- cannot be stripped away silently.
+    requireSections ? [ ],
     # tatara-script derivation, supplied by the consumer exactly as
     # lib/build/scripting/tatara-script.nix takes `tataraLisp`. substrate does
     # not own the tatara-lisp input; a repo that wants this check passes it in.
@@ -411,7 +415,7 @@ let
   }:
   let
     minimalCheck = (import ./minimal-image-check.nix { }).mkMinimalImageCheck pkgs {
-      inherit name image binary binName maxStorePaths execSmoke;
+      inherit name image binary binName maxStorePaths execSmoke requireSections;
       expectStatic = true;
     };
     binPath = if binary != null then "${binary}/bin/${binName}" else "";
