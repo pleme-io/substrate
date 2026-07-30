@@ -131,9 +131,28 @@ let
     #
     # Side benefit: the entrypoint becomes /bin/<name>, a stable path, instead of
     # a store path that changes on every rebuild.
-    serverBinary = pkgs.runCommand "${name}-server-bin" { } ''
+    # STRIPPED HERE, at the boundary this builder actually owns.
+    #
+    # The conformance check asserts the shipped binary carries no .symtab, and
+    # that is an IMAGE-level promise -- so the image builder has to guarantee it
+    # rather than trust whatever it was handed. Trusting the input is what failed:
+    # hanabi declares `strip = true` in its own Cargo.toml and still arrived
+    # unstripped, because gen/crate2nix drive rustc directly and never read Cargo
+    # profiles. Fixing it upstream in the producer is right and was also done
+    # (tool-release.nix's stripAllList), but it cannot reach a `server` built by a
+    # DIFFERENT flake with its own substrate pin -- which is exactly hanabi's case
+    # here. A promise this builder makes is a promise this builder must keep.
+    #
+    # chmod +w first: the cp lands a read-only store artifact, and strip rewrites
+    # in place. --strip-all rather than the -S default, because .symtab is
+    # precisely what the check looks for.
+    serverBinary = pkgs.runCommand "${name}-server-bin" {
+      nativeBuildInputs = [ pkgs.stdenv.cc.bintools.bintools ];
+    } ''
       mkdir -p "$out/bin"
       cp ${server}/bin/${serverBin} "$out/bin/${serverBin}"
+      chmod +w "$out/bin/${serverBin}"
+      ${pkgs.stdenv.cc.targetPrefix}strip --strip-all "$out/bin/${serverBin}"
     '';
 
     # A shaped /bin/sh: implements the lifecycle-hook vocabulary and nothing
