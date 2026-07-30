@@ -164,33 +164,34 @@ let
     pname = name;
     inherit version src vendorHash;
 
-    # CGO_ENABLED goes in `env`, NOT top-level. CORRECTED 2026-07-30 after this
-    # file failed eval in CI with exactly the error the previous comment here
-    # claimed it was avoiding:
+    # CGO_ENABLED is passed through NEITHER `env` NOR a top-level attr — it is
+    # exported in preBuild below. That looks like a workaround and it is a
+    # deliberate one, because there is no portable attribute channel here.
     #
-    #   error: The 'env' attribute set cannot contain any attributes passed to
-    #   derivation. The following attributes are overlapping: CGO_ENABLED
+    # This repo's consumers pull in more than one nixpkgs, and buildGoModule
+    # moved CGO_ENABLED between revisions, in opposite directions:
     #
-    # The previous text asserted the opposite (top-level attr, never `env`) and
-    # cited module.nix:40,170. That was true of an older nixpkgs and is false
-    # for the one this is built against. Verified by reading the pinned source
-    # directly (nixpkgs addf7cf5, pkgs/build-support/go/module.nix:219-226):
+    #   nixpkgs b134951 (module.nix, 323 lines)
+    #     line  40:  , CGO_ENABLED ? go.CGO_ENABLED      <- top-level argument
+    #     line 170:  inherit CGO_ENABLED ...             <- onto mkDerivation
+    #     => must be TOP-LEVEL; an `env` key collides.
     #
-    #   env = args.env or { } // {
-    #     CGO_ENABLED = args.env.CGO_ENABLED or go.CGO_ENABLED;
-    #   };
+    #   nixpkgs addf7cf5 (module.nix, 411 lines)
+    #     line 225:  CGO_ENABLED = args.env.CGO_ENABLED or go.CGO_ENABLED;
+    #                inside `env = args.env or { } // { ... }`
+    #     => must be in `env`; a top-level attr collides.
     #
-    # buildGoModule READS the caller's value out of `args.env` and writes it
-    # back into `env`, so `env` is the only supported channel; a top-level attr
-    # is then defined on both sides and eval dies. The merge is `//` with the
-    # caller's set on the left, so passing other `env` keys here stays safe.
+    # Either choice therefore breaks the other consumer with
+    # "The 'env' attribute set cannot contain any attributes passed to
+    # derivation. The following attributes are overlapping: CGO_ENABLED".
+    # Both were tried on 2026-07-30 and each failed against the nixpkgs the
+    # other one satisfied, which is the whole reason this note is this long.
     #
-    # GOFLAGS in that same revision is the reverse — a genuine top-level
-    # argument (`GOFLAGS = GOFLAGS ++ ...`, module.nix:228). The two really do
-    # go opposite ways; the direction is just the other way round from what
-    # this comment used to say. Read the pinned module.nix, never infer from
-    # symmetry, and never trust this comment across a nixpkgs bump.
-    env = { CGO_ENABLED = cgoEnabled; };
+    # A shell export in preBuild is version-independent: `go build` reads the
+    # process environment, preBuild runs before buildPhase, and the export
+    # persists into checkPhase, so `doCheck` sees it too. Same mechanism this
+    # file already relies on for -buildmode=pie, for the same reason — the
+    # attribute surface is not stable enough to target.
 
     tags = hardenedTags;
     ldflags = hardenedLdflags;
@@ -204,7 +205,9 @@ let
     # either mechanism. Unlike the -trimpath append that was removed from this
     # file, this flag is NOT something buildGoModule manages, so there is
     # nothing to duplicate.
-    preBuild = lib.optionalString pie ''
+    preBuild = ''
+      export CGO_ENABLED=${cgoEnabled}
+    '' + lib.optionalString pie ''
       export GOFLAGS="''${GOFLAGS:-} -buildmode=pie"
     '';
 
