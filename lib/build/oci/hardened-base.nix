@@ -383,6 +383,19 @@ let
     # consumers stayed on a direct buildLayeredImage call for exactly
     # this reason during the 2026-07-18 hardening pass.
     labels ? {},
+    # Extra fakeroot-stage commands, appended after the writablePaths chown.
+    #
+    # Exists for the same reason writablePaths does: fakeroot-assisted tar
+    # assembly is the ONLY place a mutation survives, because Nix strips write
+    # bits and drops metadata when a store path is registered. The concrete need
+    # is a file capability, e.g. setcap cap_net_bind_service=+ep so a non-root
+    # binary can bind a privileged port without the deployment granting anything.
+    # An in-derivation setcap is a no-op by the time this function runs, exactly
+    # as an in-derivation chmod is.
+    #
+    # Anything passed here runs under fakeroot with no real privilege, so it can
+    # set metadata and cannot escape the build.
+    extraFakeRootCommands ? "",
   }: let
     imageContents = [ package ] ++ extraContents;
   in (dockerTools.buildLayeredImage {
@@ -390,9 +403,11 @@ let
     tag = publishTag;
     fromImage = base;
     contents = imageContents;
-    fakeRootCommands = lib.concatMapStringsSep "\n"
-      (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths;
-    enableFakechroot = writablePaths != [];
+    fakeRootCommands = lib.concatStringsSep "\n" (
+      (map (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths)
+      ++ lib.optional (extraFakeRootCommands != "") extraFakeRootCommands
+    );
+    enableFakechroot = writablePaths != [] || extraFakeRootCommands != "";
     config = {
       Entrypoint = entrypoint;
       Cmd = cmd;
@@ -540,4 +555,9 @@ in {
 
   # Convention: reuse these UIDs across all pleme-io vendor images.
   inherit nonrootUid nonrootGid;
+
+  # The passwd/group stubs, exported so a builder that assembles its own
+  # contents list (lib/build/go/hardened-image.nix) reuses these exact files
+  # rather than writing a second, drifting copy of the same three lines.
+  inherit nonrootPasswd nonrootGroup;
 }

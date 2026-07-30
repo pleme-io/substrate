@@ -651,6 +651,45 @@ in rec {
   goDockerImageBuilder = ./build/go/docker.nix;
 
   # ============================================================================
+  # HARDENED GO IMAGE BUILDER — the compile-side half of MINIMAL-PRODUCTION-IMAGE
+  # ============================================================================
+  # mkGoDockerImage takes an already-built binary on faith. This one builds it
+  # under enforced compile-time hardening (CGO off by default so there is no
+  # libc at all, netgo/osusergo, -trimpath, -s -w, empty build id, PIE) and
+  # wires the result to its own conformance + govulncheck gates. musl is the
+  # CGO escape hatch, glibc is rejected at eval time.
+  #
+  # Usage:
+  #   hardenedGo = import "${substrate}/lib/build/go/hardened-image.nix" { };
+  #   img = hardenedGo.mkHardenedGoImage pkgs {
+  #     name = "svc"; src = ./.; vendorHash = "sha256-..."; version = "1.0.0";
+  #   };
+  goHardenedImageBuilder = ./build/go/hardened-image.nix;
+
+  # ============================================================================
+  # STATIC SPA IMAGE — a distroless OCI image serving a prebuilt SPA, no Dockerfile
+  # ============================================================================
+  # For the lane where the artifact must be auditable end to end: a Dockerfile's
+  # FROM is an opaque blob you inherit, a nix-assembled image's closure is the
+  # enumeration. Composes the consuming service's own static musl binary (e.g.
+  # hanabi's hanabi-x86_64-unknown-linux-musl) with hardened-base.nix's
+  # distroless-static base and mkHardenedGoImageCheck's language-agnostic
+  # conformance assertions. Nothing new is compiled and no second check is
+  # written.
+  #
+  # staticRoot defaults to /usr/share/nginx/html with no nginx in the image
+  # because a chart mounts a ConfigMap subPath there; see the file header.
+  staticSpaImageBuilder = ./build/web/static-spa-image.nix;
+  # pkgs pre-applied so the call site matches its sibling mkPackageImage
+  # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
+  # surface that needs pkgs threaded by hand.
+  mkStaticSpaImage =
+    (import ./build/web/static-spa-image.nix { }).mkStaticSpaImage pkgs;
+  inherit ((import ./build/web/static-spa-image.nix { })) normalizeListenPort;
+  inherit ((import ./build/go/hardened-image.nix { }))
+    mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
+
+  # ============================================================================
   # NODE SERVICE DOCKER IMAGE BUILDER (L2, standalone import path) — registry §4f
   # ============================================================================
   # JS-service OCI wrapper mirroring mkGoDockerImage (node interpreter + built
