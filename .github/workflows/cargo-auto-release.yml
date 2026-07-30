@@ -234,6 +234,7 @@ jobs:
       - uses: pleme-io/actions/cargo-publish-crate@main
         with:
           no-verify: ${{ inputs.no-verify }}
+          crate-path: ${{ inputs.crate-path }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -314,28 +315,26 @@ jobs:
     # pangea-architectures PRIVACY-WAVES.md), so for them there is no
     # registry claim to make and green is already honest.
     #
-    # crate-path: cargo-publish-crate has no crate-path input and reads
-    # ./Cargo.toml, so a non-root crate cannot be verified from here — and
-    # worse, a repo with a root manifest plus `crate-path: cli` would publish
-    # the WRONG package. `ship` above has the identical limitation (this file
-    # threads crate-path into cargo-bump but there is nothing to thread it
-    # into on the publish side), so this is a pre-existing gap in the publish
-    # action, not one drip introduces. Standing down is the safe arm: it
-    # forfeits nothing that works today.
+    # crate-path: threaded into cargo-publish-crate below, so a non-root
+    # crate now publishes and verifies from the directory the caller named.
+    # Drip previously stood down on `inputs.crate-path != '.'` because the
+    # publish action read ./Cargo.toml unconditionally — a repo with a root
+    # manifest plus `crate-path: cli` would have published the WRONG package.
+    # That gap was in the action, and it is closed (pleme-io/actions
+    # cargo-publish-crate gained a crate-path input, same shape cargo-bump
+    # already used); the stand-down clause went with it.
     #
     # Measured 2026-07-30 across all 398 consumer workflow files: exactly ONE
     # sets crate-path — forge (`crate-path: "cli"`), whose crate lives at
-    # cli/ and which therefore has no publishable root manifest at all, so
-    # its ship is equally non-functional (forge run 30553867434: bump
-    # success, ship skipped). The real fix is a crate-path input on
-    # pleme-io/actions/cargo-publish-crate, threaded from here — which is a
-    # change to that repo, not this one. Until then forge is a known,
-    # named exclusion rather than an anonymous silent skip.
+    # cli/ and which therefore had no publishable root manifest at all, so
+    # its ship was equally non-functional (forge run 30553867434: bump
+    # success, ship skipped). Forge is the single consumer this unblocks, and
+    # the first real proof will be its next run — until one lands, "forge can
+    # publish" is a claim this file makes, not one it has demonstrated.
     if: >-
       always()
       && needs.resolve-runner.result == 'success'
       && needs.bump.outputs.bumped != 'true'
-      && inputs.crate-path == '.'
       && !github.event.repository.private
     steps:
       - uses: actions/checkout@v4
@@ -362,6 +361,7 @@ jobs:
       - uses: pleme-io/actions/cargo-publish-crate@main
         with:
           no-verify: ${{ inputs.no-verify }}
+          crate-path: ${{ inputs.crate-path }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
