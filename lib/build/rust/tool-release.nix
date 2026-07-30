@@ -221,6 +221,30 @@ let
           ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
         nativeBuildInputs = (attrs.nativeBuildInputs or [])
           ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
+
+        # STRIP THE SHIPPED EXECUTABLE. Default-on, because the highest
+        # security posture has to be what you get without asking for it.
+        #
+        # Cargo's `[profile.release] strip = true` DOES NOT APPLY on this path.
+        # gen/lockfile-builder and crate2nix both drive rustc directly and never
+        # read Cargo profiles, so a crate can declare strip, be built here, and
+        # ship a full symbol table anyway. hanabi does exactly that: Cargo.toml
+        # :180 sets `strip = true`, and the musl artifact still came out
+        # `ELF 64-bit LSB pie executable, static-pie linked, not stripped`.
+        # substrate's own conformance check names this trap in its failure text.
+        #
+        # stdenv's fixupPhase is already running here; the default
+        # `stripDebugList` strips DEBUG symbols (-S) from bin/ and deliberately
+        # KEEPS .symtab. `stripAllList` is what escalates that same phase to
+        # --strip-all. Using stdenv's machinery rather than a hand-rolled strip
+        # loop keeps it cross-aware: it reaches for the TARGET's binutils, which
+        # a bare `strip` in postInstall would not for a musl/cross triple.
+        #
+        # Scoped to THIS crate's override on purpose. A global rustc
+        # `-Cstrip=symbols` would also strip dependency rlibs, whose symbols the
+        # final link needs — that breaks the build rather than hardening it.
+        # Only the crate that produces bin/ is stripped.
+        stripAllList = (attrs.stripAllList or []) ++ [ "bin" ];
       };
     } // crateOverrides;
 
