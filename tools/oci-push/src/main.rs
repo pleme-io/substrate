@@ -183,6 +183,9 @@ enum PushError {
     NoCandidateTag { reference: String, considered: usize },
     PrefixMismatch { tag: String, prefix: String },
     WriteGithubOutput(std::io::Error),
+    NoPlatformMatch { reference: String, os: String, arch: String },
+    WriteArchive { path: String, source: std::io::Error },
+    Gunzip(std::io::Error),
 }
 
 impl fmt::Display for PushError {
@@ -275,6 +278,14 @@ impl fmt::Display for PushError {
                 f,
                 "oci-push: highest tag '{tag}' does not start with required prefix '{prefix}'"
             ),
+            PushError::NoPlatformMatch { reference, os, arch } => write!(
+                f,
+                "oci-push: '{reference}' has no {os}/{arch} instance in its image index"
+            ),
+            PushError::WriteArchive { path, source } => {
+                write!(f, "oci-push: cannot write archive '{path}': {source}")
+            }
+            PushError::Gunzip(e) => write!(f, "oci-push: cannot gunzip layer: {e}"),
             PushError::WriteGithubOutput(e) => {
                 write!(f, "oci-push: cannot append to GITHUB_OUTPUT: {e}")
             }
@@ -1063,8 +1074,201 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 /// docker-save tarball requires gunzipping each registry layer back to its
 /// `layer.tar` and re-deriving `manifest.json`; a typed seam until built (no
 /// silent stub, per the TYPED-SPEC rule).
-fn cmd_pull<I: Iterator<Item = String>>(_it: I) -> Result<(), PushError> {
-    Err(PushError::NotImplemented("pull (registry -> docker-archive)"))
+/// `pull` — registry -> `docker-archive` tarball. The inverse of the native
+/// push path, and the last thing that forced an external `skopeo` onto a runner.
+///
+/// # The two digest spaces, in reverse
+///
+/// A registry stores layers GZIPPED (the manifest digests the compressed blob).
+/// A `docker-archive` stores them UNCOMPRESSED (`layer.tar`), and the image
+/// config's `rootfs.diff_ids` are digests of those uncompressed bytes. So each
+/// layer is gunzipped on the way out, exactly mirroring the gzip the push path
+/// applies on the way in. Skipping that produces an archive whose `diff_ids` do
+/// not match its own layers -- an archive that loads and then behaves oddly,
+/// rather than one that fails cleanly.
+///
+/// # Platform selection
+///
+/// A multi-arch reference resolves through `ClientConfig::platform_resolver`.
+/// The default picks the HOST platform, which silently makes the output
+/// runner-dependent -- the same trap `--override-arch` exists to close for
+/// skopeo. Here `--arch`/`--os` install an explicit resolver, and an index with
+/// no matching instance is [`PushError::NoPlatformMatch`] rather than a
+/// host-shaped guess.
+fn cmd_pull<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut reference: Option<String> = None;
+    let mut out: Option<String> = None;
+    let mut image_name: Option<String> = None;
+    let mut image_tag: Option<String> = None;
+    let mut arch: Option<String> = None;
+    let mut os_: Option<String> = None;
+    let mut user: Option<String> = None;
+    let mut pass: Option<String> = None;
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
+
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--ref" => reference = Some(next_value(&mut it, "ref")?),
+            "--out" => out = Some(next_value(&mut it, "out")?),
+            "--image-name" => image_name = Some(next_value(&mut it, "image-name")?),
+            "--image-tag" => image_tag = Some(next_value(&mut it, "image-tag")?),
+            "--arch" => arch = Some(next_value(&mut it, "arch")?),
+            "--os" => os_ = Some(next_value(&mut it, "os")?),
+            "--user" => user = Some(next_value(&mut it, "user")?),
+            "--pass" => pass = Some(next_value(&mut it, "pass")?),
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+
+    let raw_ref = reference
+        .or_else(|| env_input("INPUT_REF"))
+        .ok_or(PushError::MissingArg("ref"))?;
+    let r = parse_reference(&raw_ref)?;
+    let out = out
+        .or_else(|| env_input("INPUT_OUT"))
+        .ok_or(PushError::MissingArg("out"))?;
+    let auth = auth_or_anon(
+        user.or_else(|| env_input("INPUT_USER")),
+        pass.or_else(|| env_input("INPUT_PASS")),
+    );
+    let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
+    let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
+    let want_os = os_.or_else(|| env_input("INPUT_OS")).unwrap_or_else(|| "linux".to_string());
+    let want_arch = arch
+        .or_else(|| env_input("INPUT_ARCH"))
+        .unwrap_or_else(|| "amd64".to_string());
+    // RepoTags. A docker-archive without them loads as a dangling image, so the
+    // caller must be able to name what it will `docker load`.
+    let name = image_name
+        .or_else(|| env_input("INPUT_IMAGE_NAME"))
+        .unwrap_or_else(|| r.repository().to_string());
+    let tag = image_tag
+        .or_else(|| env_input("INPUT_IMAGE_TAG"))
+        .unwrap_or_else(|| "latest".to_string());
+
+    let mut cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
+    let ros = want_os.clone();
+    let rarch = want_arch.clone();
+    cfg.platform_resolver = Some(Box::new(move |entries: &[oci_client::manifest::ImageIndexEntry]| {
+        entries
+            .iter()
+            .find(|e| {
+                e.platform
+                    .as_ref()
+                    .map(|p| p.os == ros && p.architecture == rarch)
+                    .unwrap_or(false)
+            })
+            .map(|e| e.digest.clone())
+    }));
+
+    runtime()?.block_on(async {
+        let client = Client::new(cfg);
+        // SEQUENTIAL, IN MANIFEST ORDER, and that is the whole point.
+        //
+        // The obvious implementation is `client.pull()`, which returns an
+        // ImageData carrying every layer. It is WRONG here: pull() fetches the
+        // layers concurrently and hands them back in COMPLETION order, while
+        // `ImageLayer` exposes no digest to reorder by. Caught end-to-end rather
+        // than by inspection -- `docker load` rejected the archive with a digest
+        // mismatch, and comparing each layer against the config's
+        // `rootfs.diff_ids` showed the bytes were right but shuffled: written
+        // layer 4 hashed to the config's layer 2. A container runtime verifies
+        // diff_ids, so a shuffled archive is not "slightly off", it is
+        // unloadable.
+        //
+        // Fetching one layer at a time against `manifest.layers` makes order a
+        // property of the loop instead of a race, needs no digest to sort by, and
+        // adds no hashing dependency. It trades parallelism for correctness, which
+        // is the right trade for an artifact whose whole job is to be byte-exact.
+        let (manifest, _mdigest, config_json) = client
+            .pull_manifest_and_config(&r, &auth)
+            .await
+            .map_err(|e| {
+                let detail = e.to_string();
+                let lowered = detail.to_lowercase();
+                if lowered.contains("platform") || lowered.contains("image index") {
+                    PushError::NoPlatformMatch {
+                        reference: r.to_string(),
+                        os: want_os.clone(),
+                        arch: want_arch.clone(),
+                    }
+                } else {
+                    PushError::OciPull {
+                        reference: r.to_string(),
+                        detail,
+                    }
+                }
+            })?;
+
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut layer_paths: Vec<String> = Vec::new();
+
+        let append = |b: &mut tar::Builder<Vec<u8>>, path: &str, bytes: &[u8]| -> Result<(), PushError> {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(bytes.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, path, bytes).map_err(PushError::Archive)
+        };
+
+        for (i, desc) in manifest.layers.iter().enumerate() {
+            let mut blob: Vec<u8> = Vec::new();
+            client
+                .pull_blob(&r, desc, &mut blob)
+                .await
+                .map_err(|e| PushError::OciPull {
+                    reference: desc.digest.clone(),
+                    detail: e.to_string(),
+                })?;
+
+            // A registry layer is gzipped and a docker-archive layer is not, so
+            // this is the exact inverse of the gzip the push path applies. Guard
+            // on the media type: an already-uncompressed layer must pass through
+            // untouched rather than be handed to a gzip reader.
+            let raw = if desc.media_type.ends_with("gzip") {
+                let mut d = GzDecoder::new(blob.as_slice());
+                let mut v = Vec::new();
+                d.read_to_end(&mut v).map_err(PushError::Gunzip)?;
+                v
+            } else {
+                blob
+            };
+            let mut path = String::new();
+            path.push_str(&i.to_string());
+            path.push_str("/layer.tar");
+            append(&mut builder, &path, &raw)?;
+            layer_paths.push(path);
+        }
+
+        let cfg_name = "config.json";
+        append(&mut builder, cfg_name, config_json.as_bytes())?;
+
+        let mut repo_tag = String::new();
+        repo_tag.push_str(&name);
+        repo_tag.push(':');
+        repo_tag.push_str(&tag);
+        let entry = serde_json::json!([{
+            "Config": cfg_name,
+            "RepoTags": [repo_tag],
+            "Layers": layer_paths,
+        }]);
+        let manifest_bytes = serde_json::to_vec(&entry).map_err(PushError::Json)?;
+        append(&mut builder, "manifest.json", &manifest_bytes)?;
+
+        let tar_bytes = builder.into_inner().map_err(PushError::Archive)?;
+        fs::write(&out, &tar_bytes).map_err(|source| PushError::WriteArchive {
+            path: out.clone(),
+            source,
+        })?;
+
+        println!("wrote {out}");
+        println!("layers={}", layer_paths.len());
+        println!("digest={_mdigest}");
+        Ok::<(), PushError>(())
+    })
 }
 
 /// `list` — list the tags of a repository.
