@@ -113,6 +113,39 @@ fn client_config_for(
     })
 }
 
+/// A ClientConfig pinned to an explicit os/arch.
+///
+/// Without this, resolving a multi-arch index uses the CLIENT's own platform,
+/// so the same command answers differently depending on which runner it lands
+/// on, and fails outright on a host whose platform the index does not carry.
+/// skopeo has always had `--override-os` / `--override-arch` for this reason,
+/// and a promotion pipeline that reads a version off a linux/amd64 index must
+/// say so rather than inherit whatever the runner happens to be.
+fn client_config_for_platform(
+    registry: &str,
+    insecure: bool,
+    ca_cert_path: &Option<String>,
+    os: &str,
+    arch: &str,
+) -> Result<ClientConfig, PushError> {
+    let base = client_config_for(registry, insecure, ca_cert_path)?;
+    let want_os = os.to_string();
+    let want_arch = arch.to_string();
+    Ok(ClientConfig {
+        platform_resolver: Some(Box::new(move |entries| {
+            entries
+                .iter()
+                .find(|e| {
+                    e.platform.as_ref().is_some_and(|p| {
+                        p.os == want_os && p.architecture == want_arch
+                    })
+                })
+                .map(|e| e.digest.clone())
+        })),
+        ..base
+    })
+}
+
 /// Typed failure modes. The `Display` impl is the single render surface.
 #[derive(Debug)]
 enum PushError {
@@ -125,6 +158,7 @@ enum PushError {
     Json(serde_json::Error),
     ConfigParse(serde_yaml::Error),
     OciPull { reference: String, detail: String },
+    LabelAbsent { reference: String, label: String },
     NotImplemented(&'static str),
     ReadTarball { path: String, source: std::io::Error },
     Archive(std::io::Error),
@@ -146,6 +180,9 @@ enum PushError {
     ResolveSymlink { path: String, source: std::io::Error },
     RemoveSymlink { path: String, source: std::io::Error },
     CopyReal { path: String, source: std::io::Error },
+    NoCandidateTag { reference: String, considered: usize },
+    PrefixMismatch { tag: String, prefix: String },
+    WriteGithubOutput(std::io::Error),
 }
 
 impl fmt::Display for PushError {
@@ -159,16 +196,22 @@ impl fmt::Display for PushError {
             }
             PushError::NoSubcommand => write!(
                 f,
-                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | tag | delete | config-show | harden-rootfs)"
+                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs)"
             ),
             PushError::UnknownSubcommand(s) => write!(
                 f,
-                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | tag | delete | config-show | harden-rootfs)"
+                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs)"
             ),
             PushError::Json(e) => write!(f, "oci-push: JSON error: {e}"),
             PushError::ConfigParse(e) => write!(f, "oci-push: config parse error: {e}"),
             PushError::OciPull { reference, detail } => {
                 write!(f, "oci-push: pull failed for '{reference}': {detail}")
+            }
+            PushError::LabelAbsent { reference, label } => {
+                write!(
+                    f,
+                    "oci-push: '{reference}' carries no label '{label}' (absent is an error, not an empty value)"
+                )
             }
             PushError::NotImplemented(what) => {
                 write!(f, "oci-push: {what} is not yet implemented")
@@ -223,6 +266,17 @@ impl fmt::Display for PushError {
             }
             PushError::RemoveSymlink { path, source } => {
                 write!(f, "oci-push: cannot remove symlink {path}: {source}")
+            }
+            PushError::NoCandidateTag { reference, considered } => write!(
+                f,
+                "oci-push: no candidate tag for '{reference}' ({considered} tag(s) listed, none a pure X.Y.Z semver after exclusions)"
+            ),
+            PushError::PrefixMismatch { tag, prefix } => write!(
+                f,
+                "oci-push: highest tag '{tag}' does not start with required prefix '{prefix}'"
+            ),
+            PushError::WriteGithubOutput(e) => {
+                write!(f, "oci-push: cannot append to GITHUB_OUTPUT: {e}")
             }
             PushError::CopyReal { path, source } => {
                 write!(f, "oci-push: cannot materialize {path} as a real file: {source}")
@@ -865,6 +919,9 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut insecure = false;
     let mut ca_cert: Option<String> = None;
     let mut digest_only = false;
+    let mut label: Option<String> = None;
+    let mut os: Option<String> = None;
+    let mut arch: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -893,6 +950,28 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             // motivated this whole change was a rolling tag that quietly stopped
             // tracking while every gate stayed green.
             "--digest-only" => digest_only = true,
+            // --label added 2026-07-30. Prints ONE config label's value to
+            // stdout, nothing else, and exits non-zero when the label is
+            // absent.
+            //
+            // Why it is needed: a label is the other field a promotion pipeline
+            // reads, and until now it was not reachable from this tool at all.
+            // `inspect` renders the MANIFEST, but labels live in the CONFIG
+            // BLOB the manifest merely points at, so no amount of parsing the
+            // existing output could produce one. Callers therefore had to keep
+            // skopeo on the runner purely for `--format '{{ index .Labels ...}}'`,
+            // which is how a promotion job on a runner without skopeo dies at
+            // "command not found" with every other step already correct.
+            //
+            // Absent is an ERROR, not an empty line: a version gate that reads
+            // a missing label as "" and carries on is the failure this exists
+            // to prevent.
+            "--label" => label = Some(next_value(&mut it, "label")?),
+            // Explicit platform, mirroring skopeo's --override-os/--override-arch.
+            // Defaults to linux/amd64 rather than the client's own platform so
+            // the same command gives the same answer on every runner.
+            "--os" => os = Some(next_value(&mut it, "os")?),
+            "--arch" => arch = Some(next_value(&mut it, "arch")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -913,7 +992,14 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     // from a hand-typed argv, which is the exact defect class of a typed option
     // that nothing reads.
     let digest_only = digest_only || env_input("INPUT_DIGEST_ONLY").as_deref() == Some("true");
-    let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
+    let label = label.or_else(|| env_input("INPUT_LABEL"));
+    let os = os
+        .or_else(|| env_input("INPUT_OS"))
+        .unwrap_or_else(|| "linux".to_string());
+    let arch = arch
+        .or_else(|| env_input("INPUT_ARCH"))
+        .unwrap_or_else(|| "amd64".to_string());
+    let cfg = client_config_for_platform(r.registry(), insecure, &ca_cert, &os, &arch)?;
 
     runtime()?.block_on(async {
         let client = Client::new(cfg);
@@ -924,6 +1010,44 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
                 reference: r.to_string(),
                 detail: e.to_string(),
             })?;
+        // A label lives in the config blob, which the manifest only points at,
+        // so it costs one extra fetch. Only paid when asked for.
+        if let Some(key) = label.as_deref() {
+            // pull_manifest_and_config resolves the config blob for us, and on a
+            // multi-arch index it resolves a platform manifest first, which a
+            // hand-rolled pull_blob against `manifest.config` cannot do because
+            // an index has no config field at all.
+            // (manifest, DIGEST, config) — the digest is the middle element, not
+            // the last. Getting that order wrong parses the digest string as
+            // JSON and fails with "expected value at line 1 column 1".
+            let (_m, _digest, cfg_raw) =
+                client
+                    .pull_manifest_and_config(&r, &auth)
+                    .await
+                    .map_err(|e| PushError::OciPull {
+                        reference: r.to_string(),
+                        detail: format!("config: {e}"),
+                    })?;
+            let cfg_json: serde_json::Value =
+                serde_json::from_str(&cfg_raw).map_err(PushError::Json)?;
+            // Both spellings: OCI writes "config", docker-archive writes "Config".
+            let value = cfg_json
+                .get("config")
+                .or_else(|| cfg_json.get("Config"))
+                .and_then(|c| c.get("Labels"))
+                .and_then(|l| l.get(key))
+                .and_then(|v| v.as_str());
+            return match value {
+                Some(v) => {
+                    println!("{v}");
+                    Ok::<(), PushError>(())
+                }
+                None => Err(PushError::LabelAbsent {
+                    reference: r.to_string(),
+                    label: key.to_string(),
+                }),
+            };
+        }
         let rendered = serde_json::to_string_pretty(&manifest).map_err(PushError::Json)?;
         if digest_only {
             println!("{digest}");
@@ -1001,6 +1125,164 @@ fn cmd_list<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             })?;
         for t in resp.tags {
             println!("{t}");
+        }
+        Ok::<(), PushError>(())
+    })
+}
+
+/// Parse a pure `X.Y.Z` tag into comparable numbers. Returns `None` for
+/// anything else, which is what excludes arch-suffixed mirrors (`1.0.53-arm64`),
+/// prereleases, and `latest`-style pointers. Numeric comparison, not string
+/// comparison, so 1.0.9 < 1.0.10 orders correctly -- a lexical sort gets that
+/// backwards and would happily promote the older build.
+fn semver_triple(tag: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = tag.split('.');
+    let a = parts.next()?.parse().ok()?;
+    let b = parts.next()?.parse().ok()?;
+    let c = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((a, b, c))
+}
+
+/// `resolve` — answer "what is the newest thing this registry actually holds,
+/// and what are its exact bytes" in ONE typed call: list the repo's tags, keep
+/// only pure `X.Y.Z` semvers, drop `--exclude-tag` values, take the numerically
+/// highest, resolve it to an immutable digest, and emit both.
+///
+/// # Why this lives in the binary and not in a shell pipeline
+///
+/// This replaces a `list | grep -E | grep -vx | sort -V | tail -1` chain plus a
+/// second call to turn the winner into a digest. That pipeline is four
+/// dependencies and three silent-failure modes wide: `grep -vx` matching
+/// nothing looks identical to matching everything, `sort -V` is GNU-specific
+/// (absent on BSD/macOS runners), an empty pipeline yields empty string rather
+/// than an error, and the whole thing is invisible to any type checker. Here
+/// each step is a typed value, an empty candidate set is
+/// [`PushError::NoCandidateTag`] rather than `""`, and ordering is arithmetic.
+///
+/// # `--require-prefix`
+///
+/// Asserts the winner starts with a given string (e.g. `1.0.`). A promotion
+/// pipeline that publishes into a `1.0.<patch>` line must NOT silently
+/// republish a `2.x` build under a `1.0` tag; this turns that from a
+/// mislabelled artifact into a hard failure.
+///
+/// # Output
+///
+/// `tag=<tag>` and `digest=<digest>` on stdout, one per line. When
+/// `GITHUB_OUTPUT` is set the same pairs are appended there, so a CI caller
+/// consumes them as step outputs with no parsing and no shell.
+fn cmd_resolve<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut reference: Option<String> = None;
+    let mut user: Option<String> = None;
+    let mut pass: Option<String> = None;
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
+    let mut exclude: Vec<String> = Vec::new();
+    let mut require_prefix: Option<String> = None;
+
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--ref" => reference = Some(next_value(&mut it, "ref")?),
+            "--user" => user = Some(next_value(&mut it, "user")?),
+            "--pass" => pass = Some(next_value(&mut it, "pass")?),
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
+            "--exclude-tag" => exclude.push(next_value(&mut it, "exclude-tag")?),
+            "--require-prefix" => require_prefix = Some(next_value(&mut it, "require-prefix")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+
+    let raw_ref = reference
+        .or_else(|| env_input("INPUT_REF"))
+        .ok_or(PushError::MissingArg("ref"))?;
+    let r = parse_reference(&raw_ref)?;
+    let auth = auth_or_anon(
+        user.or_else(|| env_input("INPUT_USER")),
+        pass.or_else(|| env_input("INPUT_PASS")),
+    );
+    let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
+    let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
+    // Comma-separated in the env form, because a GitHub Actions input cannot
+    // repeat. Empty entries are dropped so a trailing comma is harmless.
+    if exclude.is_empty() {
+        if let Some(raw) = env_input("INPUT_EXCLUDE_TAGS") {
+            exclude.extend(
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string),
+            );
+        }
+    }
+    let require_prefix = require_prefix.or_else(|| env_input("INPUT_REQUIRE_PREFIX"));
+    let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
+
+    runtime()?.block_on(async {
+        let client = Client::new(cfg);
+        let listed = client
+            .list_tags(&r, &auth, None, None)
+            .await
+            .map_err(|e| PushError::OciPull {
+                reference: r.to_string(),
+                detail: e.to_string(),
+            })?;
+        let considered = listed.tags.len();
+
+        let winner = listed
+            .tags
+            .iter()
+            .filter(|t| !exclude.iter().any(|x| x == *t))
+            .filter_map(|t| semver_triple(t).map(|v| (v, t)))
+            .max_by_key(|(v, _)| *v)
+            .map(|(_, t)| t.clone())
+            .ok_or_else(|| PushError::NoCandidateTag {
+                reference: r.to_string(),
+                considered,
+            })?;
+
+        if let Some(prefix) = &require_prefix {
+            if !winner.starts_with(prefix.as_str()) {
+                return Err(PushError::PrefixMismatch {
+                    tag: winner.clone(),
+                    prefix: prefix.clone(),
+                });
+            }
+        }
+
+        // Re-parse with the winning tag so the digest belongs to exactly the tag
+        // reported, never to whatever the input reference happened to point at.
+        let mut tagged = String::new();
+        tagged.push_str(r.registry());
+        tagged.push('/');
+        tagged.push_str(r.repository());
+        tagged.push(':');
+        tagged.push_str(&winner);
+        let tr = parse_reference(&tagged)?;
+
+        let (_manifest, digest) =
+            client
+                .pull_manifest(&tr, &auth)
+                .await
+                .map_err(|e| PushError::OciPull {
+                    reference: tr.to_string(),
+                    detail: e.to_string(),
+                })?;
+
+        println!("tag={winner}");
+        println!("digest={digest}");
+        if let Some(path) = env::var_os("GITHUB_OUTPUT") {
+            use std::io::Write as _;
+            let mut f = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+                .map_err(PushError::WriteGithubOutput)?;
+            writeln!(f, "tag={winner}").map_err(PushError::WriteGithubOutput)?;
+            writeln!(f, "digest={digest}").map_err(PushError::WriteGithubOutput)?;
         }
         Ok::<(), PushError>(())
     })
@@ -1199,6 +1481,7 @@ fn run() -> Result<(), PushError> {
         Some("inspect") => cmd_inspect(args),
         Some("pull") => cmd_pull(args),
         Some("list") => cmd_list(args),
+        Some("resolve") => cmd_resolve(args),
         Some("tag") => cmd_tag(args),
         Some("delete") => cmd_delete(args),
         Some("config-show") => cmd_config_show(args),
