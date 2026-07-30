@@ -50,13 +50,56 @@
 # closure and CVE surface, and gives up PIE to do it. Which trade is right is a
 # per-service call, which is why both lanes exist rather than one blessed path.
 #
-# TIER HONESTY. The image build and the conformance check need Linux (they
-# unpack a real tarball and exec the real binary). On darwin these derivations
-# EVALUATE but are built by the Linux CI runner. The musl static-PIE lane is
-# implemented and NOT yet proven on a Linux builder.
+# THE COMPILER IS PART OF THE HARDENING, and until 2026-07-30 this file did not
+# treat it that way. Every flag below constrains HOW the source is compiled;
+# none of them constrained WHAT compiles it, so `buildPkgs.buildGoModule` took
+# whatever `go` the consumer's nixpkgs happened to pin — and a Go binary's
+# stdlib CVE set is decided by the compiler, not by go.mod. A consumer on
+# nixos-24.05 (go 1.22.8) therefore shipped a "hardened distroless" image whose
+# ENTIRE CVE surface was one 152-line Go shim's stdlib: 48 findings, 1 CRITICAL.
+# Read lib/build/go/toolchain.nix's header for the full incident and the measured
+# staleness ledger; read docs/go/go-toolchain.md for the operator face.
+#
+# Two things landed here as a result, and they are deliberately different tiers:
+#
+#   • A TOOLCHAIN SEAM. `goToolchain` is threaded per-derivation and applied as
+#     `buildGoModule.override { go = …; }`, scoped to this build and nothing else
+#     — the exact shape lib/build/oci-push.nix uses for fenix/makeRustPlatform,
+#     for the same reason its header gives: a package-set-wide overlay would
+#     rebuild every Go package in a consumer's closure, which is what
+#     lib/build/rust/overlay.nix explicitly refuses to do for rustc/cargo.
+#     `? null` with graceful fallback, so a caller that passes nothing keeps its
+#     previous compiler.
+#
+#   • A CVE FLOOR. `goFloor` rejects, AT EVAL TIME, a build whose compiler is
+#     older than the version go-toolchain-pin.json declares clean. It is asserted
+#     against `drv.passthru.go.version` — the compiler that ACTUALLY compiled,
+#     read back off the built derivation — and NOT against `pkgs.go.version`,
+#     because nixpkgs aliases buildGoModule to a versioned builder and those two
+#     can disagree. Unlike the seam, the floor is NOT default-off: a floor a
+#     consumer can silently skip is decoration.
+#
+# TIER HONESTY, and do not round these up.
+#   • The floor is EVAL-REJECTED (a Nix throw), not truly-unrepresentable. A Nix
+#     function cannot make an old compiler unrepresentable; it can only refuse to
+#     return a derivation built by one. `goFloor = null` is a real escape hatch
+#     and it is visible in a diff by design.
+#   • The floor asserts "not below the declared floor". It does NOT assert
+#     "0 CVE" — that is a claim about a date, and the vulnerability database moves
+#     while the pin does not.
+#   • The floor binds THIS builder. mkGoTool / mkGoDockerImage / private-module
+#     carry only the opposite assert (a CEILING: go.mod must not be ahead of the
+#     toolchain) and are not floored yet. See docs/go/go-toolchain.md's ledger.
+#   • The image build and the conformance check need Linux (they unpack a real
+#     tarball and exec the real binary). On darwin these derivations EVALUATE but
+#     are built by the Linux CI runner. The musl static-PIE lane is implemented
+#     and NOT yet proven on a Linux builder.
 #
 # Usage:
-#   hardened = import "${substrate}/lib/build/go/hardened-image.nix" { };
+#   # toolchain-injected (the fleet default — see flake.nix's `lib`):
+#   hardened = import "${substrate}/lib/build/go/hardened-image.nix" {
+#     goToolchain = substrate.goToolchains.${system}.stable;
+#   };
 #   img = hardened.mkHardenedGoImage pkgs {
 #     name = "uam";
 #     src = ./.;
@@ -67,8 +110,25 @@
 #   # img            — the OCI tarball
 #   # img.binary     — the hardened binary derivation
 #   # img.checks     — { conformance, vuln }
-{ }:
+{
+  # The fleet Go toolchain, ALREADY BUILT — `substrate.goToolchains.${system}
+  # .stable`. Module-level so it is the DEFAULT for every builder in this file
+  # rather than a per-call opt-in; substrate's own `lib` passes it here (see
+  # lib/default.nix), which is what makes a consumer of `substrate.lib.${system}`
+  # inherit a current compiler with no call-site change at all.
+  #
+  # It must be built from SUBSTRATE's nixpkgs, never the consumer's. Building it
+  # from a nixos-24.05 pkgs does not degrade, it ABORTS uncatchably on the
+  # missing `replaceVars` — measured; see overlay.nix's header.
+  goToolchain ? null,
+}:
 let
+  # The committed fleet pin, read once. Its `cveFloor` is the default floor for
+  # every builder here, so the number lives in ONE place (go-toolchain-pin.json)
+  # and this file never restates it.
+  goPin = builtins.fromJSON (builtins.readFile ./go-toolchain-pin.json);
+  moduleGoToolchain = goToolchain;
+
   # ── compile-time hardening ────────────────────────────────────────────
   #
   # Every flag here has a reason and a cost:
@@ -100,6 +160,17 @@ let
     #   versionPath = "main.version";
     versionPath ? null,
     doCheck ? true,
+    # The compiler. Defaults to whatever this module was imported with, which for
+    # `substrate.lib.${system}` is the pinned fleet toolchain. null falls back to
+    # the consumer's own `pkgs.buildGoModule`, byte-identical to the pre-2026-07-30
+    # behaviour — the floor below is what stops that being a silent regression.
+    goToolchain ? moduleGoToolchain,
+    # The CVE floor: the lowest compiler version this build accepts. Defaults to
+    # the committed pin. Set null to disable — a deviation that wants
+    # `skip-go-floor: <typed-reason>` in the deviating repo's CLAUDE.md. Lowering
+    # it to a concrete older version is the better escape hatch than disabling,
+    # because the number then appears in the diff.
+    goFloor ? goPin.cveFloor,
     extraAttrs ? {},
   }:
   let
@@ -123,6 +194,33 @@ let
     # the ordinary package set is correct — CGO is off, so the stdenv's libc
     # never enters the picture.
     buildPkgs = if libc == "musl" then pkgs.pkgsMusl else pkgs;
+
+    # ── the toolchain seam ────────────────────────────────────────────────
+    #
+    # `.override { go = … }` and NOT `pkgs.callPackage "${pkgs.path}/pkgs/
+    # build-support/go/module.nix" { go = … }`. Both evaluate; `.override` is
+    # strictly better because it does not depend on an internal nixpkgs FILE
+    # PATH, which is a surface that has moved between revisions. Measured
+    # working on BOTH the incident consumer's pin and substrate's own anchor:
+    #
+    #   p24.buildGoModule ? override                                -> true
+    #   (p24.buildGoModule.override { go = tc }) { compat-sh … }
+    #     .passthru.go.version                                       -> 1.26.5
+    #   p24.go.version (untouched)                                   -> 1.22.8
+    #
+    # It is type-compatible across that generation gap because 24.05's
+    # module.nix reads only go.CGO_ENABLED / go.GOOS / go.GOARCH /
+    # go.meta.platforms off the toolchain, and substrate's toolchain exposes all
+    # four as TOP-LEVEL attrs (measured), matching nixpkgs' own `go`.
+    #
+    # For libc = "musl" the compiler is injected into pkgsMusl's builder. Sound
+    # in principle for libc = "none" (the compiler only runs at build time and
+    # the artifact links no libc); for the musl lane the C-toolchain/libc mixing
+    # is UNPROVEN — see the tier note in the header.
+    goBuilder =
+      if goToolchain != null
+      then buildPkgs.buildGoModule.override { go = goToolchain; }
+      else buildPkgs.buildGoModule;
 
     cgoEnabled = if libc == "musl" then "1" else "0";
 
@@ -158,9 +256,8 @@ let
     # argument for asserting properties on the artifact rather than trusting the
     # flags we think we passed.
     hardenedGoflags = lib.optionals pie [ "-buildmode=pie" ];
-  in
-  assert _libcOk;
-  buildPkgs.buildGoModule ({
+
+    built = goBuilder ({
     pname = name;
     inherit version src vendorHash;
 
@@ -226,10 +323,83 @@ let
         tags = hardenedTags;
         ldflags = hardenedLdflags;
         goflags = hardenedGoflags;
+        # The floor this binary was held to, and whether a toolchain was
+        # injected, recorded so an operator or a downstream check can read the
+        # answer off the derivation instead of re-deriving the wiring.
+        #
+        # The compiler VERSION is deliberately NOT restated here: it already
+        # lives at `drv.passthru.go.version`, which is the canonical place and
+        # the one the floor asserts against. Copying it into this attrset would
+        # make passthru refer to itself.
+        goFloor = if goFloor == null then "disabled" else goFloor;
+        goToolchainInjected = goToolchain != null;
       };
     };
-  } // (lib.optionalAttrs (subPackages != null) { inherit subPackages; })
-    // extraAttrs);
+    } // (lib.optionalAttrs (subPackages != null) { inherit subPackages; })
+      // extraAttrs);
+
+    # ── the CVE floor ─────────────────────────────────────────────────────
+    #
+    # Read the compiler version back OFF THE BUILT DERIVATION rather than from
+    # `buildPkgs.go.version`. That is not fussiness: `buildGoModule` closes over
+    # its own `go` (nixpkgs aliases buildGoModule = buildGo1XXModule), so an
+    # overlay that replaced one and not the other makes `pkgs.go.version` a
+    # PROXY that can disagree with the compiler in use. `passthru.go` is the
+    # compiler itself, and it is present on both the incident consumer's pin and
+    # substrate's own anchor (measured: 1.22.8 on 24.05, 1.26.3 on 26.05).
+    #
+    # If a future nixpkgs stops publishing it, that is a loud throw here rather
+    # than a floor that quietly examines nothing — a vacuous guard is worse than
+    # no guard, because it reports PASS.
+    effectiveGoVersion =
+      built.passthru.go.version or (throw ''
+        mkHardenedGoBinary: cannot read the compiler version off the built
+        derivation (`passthru.go.version` is absent on this nixpkgs).
+
+        The CVE floor is asserted against the compiler that actually compiles, so
+        with no way to read it there is nothing to assert and the floor would be
+        vacuous. Either pass `goToolchain` explicitly (its `.version` is then the
+        answer) or set `goFloor = null` with a typed `skip-go-floor:` reason.
+      '');
+
+    _floorOk =
+      if goFloor == null then true
+      else if builtins.compareVersions effectiveGoVersion goFloor < 0
+      then throw ''
+        mkHardenedGoBinary: "${name}" would be compiled by Go ${effectiveGoVersion},
+        below the fleet CVE floor of ${goFloor}.
+
+        A Go binary's stdlib CVE set is decided by the COMPILER, not by the `go`
+        directive in go.mod — so this is not a source problem and no source edit
+        fixes it.
+
+        ${if goToolchain == null
+          then "No `goToolchain` was passed, so this build took the consuming nixpkgs' own `go`. That is exactly what produced the 2026-07-30 incident: 48 findings, 1 CRITICAL, out of one 152-line shim compiled by go 1.22.8."
+          else "A `goToolchain` WAS passed, but it is itself below the floor. Bump lib/build/go/go-toolchain-pin.json."}
+
+        The fix is toolchain provenance. Thread substrate's pinned toolchain:
+
+          # in the consumer's flake outputs
+          hardened = import "''${substrate}/lib/build/go/hardened-image.nix" {
+            goToolchain = substrate.goToolchains.''${system}.stable;
+          };
+
+          # or, going through substrate's own lib, nothing at all — it is the
+          # default there:
+          substrate.lib.''${system}.mkHardenedGoBinary pkgs { ... }
+
+        Deliberately building below the floor is a deviation, not a config knob.
+        It needs `skip-go-floor: <typed-reason>` at the top of the deviating
+        repo's CLAUDE.md, and prefer `goFloor = "<older version>"` over
+        `goFloor = null` so the number you accepted is visible in the diff.
+        Suppressing the SCANNER instead (.trivyignore / VEX / --ignore-unfixed)
+        is never an option — standing operator bar is real 0-CVE.
+      ''
+      else true;
+  in
+  assert _libcOk;
+  assert _floorOk;
+  built;
 
   # ── govulncheck gate ──────────────────────────────────────────────────
   #
@@ -239,15 +409,41 @@ let
   # CVE scanner over the dependency list, and it is the right gate for a Go
   # artifact. grype/trivy over the image remain useful for the OS layer —
   # which, on a scratch base, is nearly empty by construction.
+  #
+  # DO NOT MISTAKE THIS FOR THE STDLIB-CVE GATE. Reachability is exactly why it
+  # cannot be: measured on rio against a program with compat-sh's own import set
+  # (fmt/os/strconv/strings/time), `govulncheck ./...` printed "No
+  # vulnerabilities found" while itself noting the stdlib vulns it declined to
+  # report because "your code doesn't appear to call" them — and
+  # `govulncheck -mode=binary` on the SAME binary reported 28. Trivy's gobinary
+  # analyzer reads the same `.go.buildinfo` field binary-mode falls back to,
+  # which is why the scanner said 48 and this gate would have said 0. Source mode
+  # is the right question for "is my code exploitable"; the CVE floor in
+  # mkHardenedGoBinary is the right answer for "is my stdlib current". Both, not
+  # either.
+  #
+  # It is also NOT strict at defaults (see mkHardenedGoImage's `vulnStrict`) and
+  # a nix sandbox has no network to reach vuln.go.dev, so "could not analyse" and
+  # "clean" are indistinguishable in the derivation's exit status. Treat a green
+  # `img.checks.vuln` as evidence of nothing unless it ran with network AND
+  # strict.
   mkGoVulnCheck = pkgs: {
     name,
     src,
     # Fail the build on a reachable vulnerability. Set false to report only.
     strict ? true,
+    # The compiler govulncheck analyses WITH. Threaded for the same reason the
+    # build toolchain is: on an un-overlaid consumer this used to be `pkgs.go`,
+    # so a 24.05 repo ran a reachability gate against go 1.22.8 even once its
+    # build toolchain had been fixed. A partial fix here reads as complete.
+    goToolchain ? moduleGoToolchain,
   }:
+  let
+    analysisGo = if goToolchain != null then goToolchain else pkgs.go;
+  in
   pkgs.runCommand "govulncheck-${name}"
     {
-      nativeBuildInputs = [ pkgs.govulncheck pkgs.go pkgs.cacert ];
+      nativeBuildInputs = [ pkgs.govulncheck analysisGo pkgs.cacert ];
       inherit src;
       strictMode = if strict then "1" else "0";
     }
@@ -301,6 +497,10 @@ let
     tags ? [],
     ldflagsExtra ? [],
     versionPath ? null,
+    # The compiler + its floor, threaded down to mkHardenedGoBinary and the vuln
+    # gate. Defaults to whatever this module was imported with; see the header.
+    goToolchain ? moduleGoToolchain,
+    goFloor ? goPin.cveFloor,
     # A musl build is a cross-build; its test binaries cannot run on the
     # builder, so checks are off on that lane unless asked for.
     doCheck ? (libc != "musl"),
@@ -333,7 +533,7 @@ let
 
     binary = mkHardenedGoBinary pkgs {
       inherit name src version vendorHash subPackages libc pie tags
-              ldflagsExtra versionPath doCheck;
+              ldflagsExtra versionPath doCheck goToolchain goFloor;
     };
 
     # cacert plus the passwd/group stubs. The stubs are what let a runtime
@@ -390,7 +590,10 @@ let
     };
 
     vuln = lib.optionalAttrs vulnGate {
-      vuln = mkGoVulnCheck pkgs { inherit name src; strict = vulnStrict; };
+      vuln = mkGoVulnCheck pkgs {
+        inherit name src goToolchain;
+        strict = vulnStrict;
+      };
     };
   in
   image // {
