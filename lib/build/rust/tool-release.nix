@@ -221,6 +221,34 @@ let
           ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
         nativeBuildInputs = (attrs.nativeBuildInputs or [])
           ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
+
+        # Strip the shipped executable. Default-on: the highest posture has to be
+        # what you get without asking.
+        #
+        # Cargo's `[profile.release] strip = true` is INERT on this path.
+        # gen/lockfile-builder and crate2nix drive rustc directly and never read
+        # Cargo profiles, so a crate can declare strip, build here, and still ship
+        # a full symbol table. hanabi is the live case: its Cargo.toml sets
+        # strip = true and the musl artifact still came out
+        # "static-pie linked, not stripped", which is what failed the camelot
+        # web-ui image's hardened conformance check once the Go shim was removed
+        # and the check finally looked at the Rust binary.
+        #
+        # stdenv's fixupPhase is already running; its default stripDebugList takes
+        # debug symbols (-S) out of bin/ and deliberately KEEPS .symtab.
+        # stripAllList escalates that same phase to --strip-all, and stays
+        # cross-aware by using the TARGET's binutils — which a bare `strip` in
+        # postInstall would not do for a musl triple.
+        #
+        # Scoped to this crate's override deliberately. A global
+        # `-Cstrip=symbols` would also strip dependency rlibs, whose symbols the
+        # final link needs; that breaks the build instead of hardening it.
+        #
+        # Complements static-spa-image.nix's own strip rather than replacing it:
+        # this fixes the PRODUCER, so every gen-built tool ships stripped, while
+        # that one holds the image-level promise for a `server` built by some
+        # other flake with its own substrate pin.
+        stripAllList = (attrs.stripAllList or []) ++ [ "bin" ];
       };
     } // crateOverrides;
 
