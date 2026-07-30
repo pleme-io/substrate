@@ -2160,7 +2160,14 @@ in rec {
   # repo's own hardened-images sibling wraps `mkVulnixScanApp`. See each
   # module's own header comment for the full argument shape and FedRAMP
   # control mapping.
-  inherit (cveGateModule) mkCveGateApp;
+  # mkScanFloorApp is the same shape as mkCveGateApp with the vacuity removed:
+  # it reads trivy's REPORT instead of trusting `--exit-code 1`, so a scan that
+  # analysed ZERO targets fails instead of passing. mkCveGateApp cannot do this
+  # -- trivy exits 1 only when it FINDS something, so a distroless image it
+  # cannot analyse at all exits 0 and reads as clean. Requires `tataraScript`
+  # (the verdict body is scan-floor.tlisp) and takes a DECLARED expectTargets
+  # list, so losing a target class is red too. No ignore surface by design.
+  inherit (cveGateModule) mkCveGateApp mkScanFloorApp;
   inherit (sbomEmitModule) mkSbomApp mkSbomAttestApp;
   inherit (cosignSignModule) mkCosignSignApp mkCosignVerifyApp;
 
