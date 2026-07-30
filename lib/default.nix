@@ -683,9 +683,14 @@ in rec {
   # pkgs pre-applied so the call site matches its sibling mkPackageImage
   # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
   # surface that needs pkgs threaded by hand.
+  # fenix/system threaded for the same reason ociHardenedModule above gets them:
+  # this builder re-imports hardened-base itself, so without them it instantiates
+  # a SECOND, fenix-less copy and oci-push falls back to a cargo that cannot
+  # build its edition-2024 tree. The omission surfaced as an edition2024 error in
+  # pleme-io-distroless-static-customisation-layer, not here.
   mkStaticSpaImage =
-    (import ./build/web/static-spa-image.nix { }).mkStaticSpaImage pkgs;
-  inherit ((import ./build/web/static-spa-image.nix { })) normalizeListenPort;
+    (import ./build/web/static-spa-image.nix { inherit fenix system; }).mkStaticSpaImage pkgs;
+  inherit ((import ./build/web/static-spa-image.nix { inherit fenix system; })) normalizeListenPort;
   inherit ((import ./build/go/hardened-image.nix { }))
     mkHardenedGoBinary mkGoVulnCheck mkHardenedGoImage mkHardenedGoImageCheck;
 

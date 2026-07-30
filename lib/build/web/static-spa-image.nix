@@ -42,7 +42,13 @@
 #     serverConfig = ./hanabi.yaml; # the scoped profile
 #     listenPort = 8000;
 #   };
-{ }:
+# fenix/system are threaded PURELY to reach oci-push (doca) through
+# hardened-base. doca is `edition = "2024"`, and nixos-24.05's cargo 1.77 cannot
+# build it at all; oci-push.nix silently falls back to `pkgs.rustPlatform` when
+# fenix is absent, so dropping these here turns a modern-toolchain requirement
+# into a build failure inside the customisation layer, several derivations away
+# from the omission. Both default to null so every existing caller is unchanged.
+{ fenix ? null, system ? null }:
 let
   # Privileged ports are the one thing a non-root process cannot simply be
   # configured into. The old infra passes 80 because that is what nginx-as-root
@@ -105,7 +111,7 @@ let
   }:
   let
     lib = pkgs.lib;
-    hardenedBase = import ../oci/hardened-base.nix { inherit pkgs; };
+    hardenedBase = import ../oci/hardened-base.nix { inherit pkgs fenix system; };
     hardenedGo = import ../go/hardened-image.nix { };
 
     actualPort = normalizeListenPort listenPort;
