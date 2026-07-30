@@ -41,15 +41,18 @@
 #     staticDir = ./build;          # the yarn build output
 #     serverConfig = ./hanabi.yaml; # the scoped profile
 #     listenPort = 8000;
+#     serverAudit = {               # REQUIRED: how a CVE scanner sees the tree
+#       kind = "cargo-lock";
+#       lockFile = "${hanabi}/Cargo.lock";
+#       rootCrate = "hanabi-bff";
+#     };
 #   };
 # fenix/system are threaded PURELY to reach oci-push (doca) through
-# hardened-base. doca's dependency tree is `edition = "2024"`, and nixos-24.05's
-# cargo 1.77 cannot parse it at all -- it dies on
-# "failed to parse manifest at .../indexmap-2.14.0/Cargo.toml". oci-push.nix
-# silently falls back to `pkgs.rustPlatform` when fenix is absent, so dropping
-# these here turns a modern-toolchain requirement into a build failure inside
-# the customisation layer, several derivations away from the omission.
-# Both default to null so every existing caller is unchanged.
+# hardened-base. doca is `edition = "2024"`, and nixos-24.05's cargo 1.77 cannot
+# build it at all; oci-push.nix silently falls back to `pkgs.rustPlatform` when
+# fenix is absent, so dropping these here turns a modern-toolchain requirement
+# into a build failure inside the customisation layer, several derivations away
+# from the omission. Both default to null so every existing caller is unchanged.
 { fenix ? null, system ? null }:
 let
   # Privileged ports are the one thing a non-root process cannot simply be
@@ -85,6 +88,36 @@ let
     # conformance check rather than trusted.
     server,
     serverBin ? "hanabi",
+    # HOW THE SHIPPED BINARY'S DEPENDENCY TREE BECOMES VISIBLE TO A CVE
+    # SCANNER. Required, with no "it doesn't" variant — that is the point.
+    #
+    # A distroless image holding one static binary has no OS package DB, so a
+    # scanner's ONLY input is metadata embedded in the binary itself. A musl
+    # Rust binary built through gen/buildRustCrate embeds none, and the
+    # consequence measured on the real web-ui image (2026-07-30) is that trivy
+    # emits no `Results` key at all and exits 0, printing
+    # `Target: - / Type: - / Vulnerabilities: -` under its own legend
+    # `'-': Not scanned`. Every gate downstream read that as green while the
+    # entire crate tree — 457 crates, 8 live advisories including four
+    # rustls-webpki certificate-validation defects — went unscanned at every
+    # stage. The gate passed because it inspected nothing.
+    #
+    # So the builder does not accept an image whose scannability is unstated.
+    # Two variants, each of which comes with a section the conformance check
+    # then ASSERTS is present, so the declaration cannot be a claim on paper:
+    #
+    #   { kind = "cargo-lock"; lockFile = …; rootCrate = "hanabi-bff"; }
+    #       synthesizes the cargo-auditable `.dep-v0` document from the lock
+    #       and injects it after strip. See lib/build/rust/cargo-audit-data.nix.
+    #
+    #   { kind = "go-buildinfo"; }
+    #       a Go binary is already natively scannable — the toolchain embeds
+    #       `.go.buildinfo` and trivy's gobinary analyzer reads it. Nothing to
+    #       inject; the assertion is that it survived the strip.
+    #
+    # There is deliberately no third variant and no default. An unknown kind is
+    # an eval error, not a skipped step.
+    serverAudit,
     # The already-built SPA directory. A path or a derivation. Deliberately an
     # input rather than something this builder produces: packaging an npm
     # dependency tree in Nix to serve files it has already built is a large cost
@@ -115,6 +148,50 @@ let
     lib = pkgs.lib;
     hardenedBase = import ../oci/hardened-base.nix { inherit pkgs fenix system; };
     hardenedGo = import ../go/hardened-image.nix { };
+    cargoAudit = import ../rust/cargo-audit-data.nix { };
+
+    # ── the scan surface, resolved once ──────────────────────────────────
+    #
+    # Both branches produce the same two facts: the section the shipped binary
+    # must carry, and (for Rust) the command that puts it there. Resolving them
+    # together is what keeps a declaration from drifting from its assertion.
+    auditKind = serverAudit.kind or (throw ''
+      mkStaticSpaImage: serverAudit needs a `kind`.
+
+      Say how this image's dependency tree becomes visible to a CVE scanner:
+        { kind = "cargo-lock"; lockFile = …; rootCrate = "…"; }
+        { kind = "go-buildinfo"; }
+    '');
+
+    auditData =
+      if auditKind == "cargo-lock"
+      then cargoAudit.mkCargoAuditData pkgs {
+        inherit name;
+        lockFile = serverAudit.lockFile;
+        rootCrate = serverAudit.rootCrate or null;
+      }
+      else null;
+
+    auditSection =
+      if auditKind == "cargo-lock" then ".dep-v0"
+      else if auditKind == "go-buildinfo" then ".go.buildinfo"
+      else throw ''
+        mkStaticSpaImage: unknown serverAudit.kind "${auditKind}".
+
+        Known kinds are "cargo-lock" and "go-buildinfo". An unrecognised kind
+        is an eval error rather than a skipped injection, because a skipped
+        injection is an image that scans clean having been read by nobody.
+      '';
+
+    # Empty for go-buildinfo: the toolchain already embedded it, so there is
+    # nothing to add — only something to assert survived.
+    auditInject =
+      if auditData == null then ""
+      else cargoAudit.injectCommand {
+        inherit auditData;
+        target = ''"$out/bin/${serverBin}"'';
+        objcopy = "${pkgs.stdenv.cc.targetPrefix}objcopy";
+      };
 
     actualPort = normalizeListenPort listenPort;
 
@@ -133,26 +210,29 @@ let
     #
     # Side benefit: the entrypoint becomes /bin/<name>, a stable path, instead of
     # a store path that changes on every rebuild.
-    # STRIPPED here, not trusted to arrive stripped. hanabi's Cargo.toml does
-    # set `strip = true` under [profile.release], and it is inert: the crate2nix
-    # / gen build path composes its own rustc invocations and never reads
-    # [profile.release], which is visible in its own build log emitting
-    # `-C opt-level=3 -C codegen-units=1` while the manifest asks for
-    # opt-level "z". So the manifest says stripped, the artifact is not, and
-    # the conformance check caught the difference ("binary retains a symbol
-    # table") on the first image that reached it.
+    # STRIPPED HERE, at the boundary this builder actually owns.
     #
-    # An image builder should not take a hardening property on trust from its
-    # input anyway. Doing it here makes the property hold for every server
-    # handed to this function regardless of how upstream was built, and it
-    # costs one command on a binary that is already being copied.
-    serverBinary = pkgs.runCommand "${name}-server-bin"
-      { nativeBuildInputs = [ pkgs.binutils ]; } ''
+    # The conformance check asserts the shipped binary carries no .symtab, and
+    # that is an IMAGE-level promise -- so the image builder has to guarantee it
+    # rather than trust whatever it was handed. Trusting the input is what failed:
+    # hanabi declares `strip = true` in its own Cargo.toml and still arrived
+    # unstripped, because gen/crate2nix drive rustc directly and never read Cargo
+    # profiles. Fixing it upstream in the producer is right and was also done
+    # (tool-release.nix's stripAllList), but it cannot reach a `server` built by a
+    # DIFFERENT flake with its own substrate pin -- which is exactly hanabi's case
+    # here. A promise this builder makes is a promise this builder must keep.
+    #
+    # chmod +w first: the cp lands a read-only store artifact, and strip rewrites
+    # in place. --strip-all rather than the -S default, because .symtab is
+    # precisely what the check looks for.
+    serverBinary = pkgs.runCommand "${name}-server-bin" {
+      nativeBuildInputs = [ pkgs.stdenv.cc.bintools.bintools ];
+    } ''
       mkdir -p "$out/bin"
       cp ${server}/bin/${serverBin} "$out/bin/${serverBin}"
       chmod +w "$out/bin/${serverBin}"
-      strip --strip-all "$out/bin/${serverBin}"
-      chmod a-w,a+x "$out/bin/${serverBin}"
+      ${pkgs.stdenv.cc.targetPrefix}strip --strip-all "$out/bin/${serverBin}"
+      ${auditInject}
     '';
 
     # A shaped /bin/sh: implements the lifecycle-hook vocabulary and nothing
@@ -243,6 +323,11 @@ let
       binName = serverBin;
       expectUser = user;
       pie = false;
+      # The CVE-coverage seal: assert the shipped binary still carries the
+      # cargo-auditable document after the strip. Without this, the inject and
+      # the strip are one line apart and a reorder returns the image to
+      # "Trivy: Target -, Type -, Not scanned" with every gate green.
+      requireSections = [ auditSection ];
       # serverBinary + cacert + passwd + group + tmp stub + assets + config = 7,
       # with one slot of headroom. This ceiling is only meetable because the
       # binary's build closure was severed above.

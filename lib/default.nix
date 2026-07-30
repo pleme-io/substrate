@@ -683,6 +683,11 @@ in rec {
   # pkgs pre-applied so the call site matches its sibling mkPackageImage
   # (`lib.mkStaticSpaImage { ... }`), rather than being the one builder in this
   # surface that needs pkgs threaded by hand.
+  # fenix/system threaded for the same reason ociHardenedModule above gets them:
+  # this builder re-imports hardened-base itself, so without them it instantiates
+  # a SECOND, fenix-less copy and oci-push falls back to a cargo that cannot
+  # build its edition-2024 tree. The omission surfaced as an edition2024 error in
+  # pleme-io-distroless-static-customisation-layer, not here.
   mkStaticSpaImage =
     (import ./build/web/static-spa-image.nix { inherit fenix system; }).mkStaticSpaImage pkgs;
   inherit ((import ./build/web/static-spa-image.nix { inherit fenix system; })) normalizeListenPort;
@@ -2155,7 +2160,14 @@ in rec {
   # repo's own hardened-images sibling wraps `mkVulnixScanApp`. See each
   # module's own header comment for the full argument shape and FedRAMP
   # control mapping.
-  inherit (cveGateModule) mkCveGateApp;
+  # mkScanFloorApp is the same shape as mkCveGateApp with the vacuity removed:
+  # it reads trivy's REPORT instead of trusting `--exit-code 1`, so a scan that
+  # analysed ZERO targets fails instead of passing. mkCveGateApp cannot do this
+  # -- trivy exits 1 only when it FINDS something, so a distroless image it
+  # cannot analyse at all exits 0 and reads as clean. Requires `tataraScript`
+  # (the verdict body is scan-floor.tlisp) and takes a DECLARED expectTargets
+  # list, so losing a target class is red too. No ignore surface by design.
+  inherit (cveGateModule) mkCveGateApp mkScanFloorApp;
   inherit (sbomEmitModule) mkSbomApp mkSbomAttestApp;
   inherit (cosignSignModule) mkCosignSignApp mkCosignVerifyApp;
 
