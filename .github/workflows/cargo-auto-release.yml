@@ -6,6 +6,15 @@ name: cargo-auto-release
 # Use this for non-workspace Rust repos (single library or single
 # binary). For workspace repos use rust-auto-release.yml instead.
 #
+# Three jobs do the work. `bump` writes + tags + pushes the version.
+# `ship` publishes when a bump happened. `drip` runs in ship's
+# complement and re-asserts that main's version is on the registry —
+# it is what stops the bot's own release push (which starts a second
+# run whose bump has nothing to do, so ship is SKIPPED) from
+# concluding green while the registry received nothing. Read drip's
+# header before changing either condition; the two are complementary
+# on purpose.
+#
 # Consumer (.github/workflows/auto-release.yml):
 #
 #   on: { push: { branches: [main] } }
@@ -92,6 +101,12 @@ permissions:
 # bump runs from the same base and the second push is rejected non-ff (its
 # bump lost). Queue rather than cancel; an in-flight release must finish.
 # Only the entry workflow's concurrency is honored by GitHub.
+#
+# The same group is what makes the `drip` job below trustworthy: the bot's
+# own `release: vX` push queues BEHIND the push run that created it, so drip
+# reads the registry only after that run's ship has finished (or failed).
+# Without the queue, drip could race a still-uploading ship and report a
+# false red.
 concurrency:
   group: auto-release-${{ github.repository }}
   cancel-in-progress: false
@@ -126,7 +141,13 @@ jobs:
   bump:
     needs: resolve-runner
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
-    if: github.actor != 'github-actions[bot]'
+    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push
+    # loops) and on a scheduled tick: a schedule is a capacity-ride for the
+    # `drip` job below and must never bump or tag. The schedule clause is
+    # parity with rust-auto-release.yml's bump, which has carried it since
+    # its own drip landed; this file grew a drip without it and a consumer
+    # adding `on: schedule` would have gotten a cron-driven version bump.
+    if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
@@ -210,6 +231,134 @@ jobs:
           bot-pat: ${{ secrets.BOT_PAT }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: pleme-io/actions/cargo-publish-crate@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+  # ── Drip: the registry-truth job. Runs in exactly the complement of
+  # `ship` — every run in which ship did NOT run — and re-asserts the one
+  # invariant a release is supposed to establish: main's package.version
+  # is on crates.io.
+  #
+  # WHY THIS EXISTS (the defect it closes). A release here is two runs, not
+  # one. Run 1 is the human push: bump writes the version, commits
+  # `release: vX`, pushes it, and ship publishes. That push is itself a push
+  # to main, so it starts run 2 — whose bump correctly finds nothing to do
+  # and reports bumped=false, which SKIPS ship. A skipped job is not a
+  # failed job, so run 2 concludes SUCCESS having published nothing. The
+  # newest row in `gh run list` is therefore green whether or not run 1's
+  # ship worked, and the actual error is buried one row down in a run
+  # nobody re-reads.
+  #
+  # Confirmed live, not inferred: garasu run 29610025821
+  # (`release: workspace v0.1.5`, a bot push) — bump success, ship SKIPPED,
+  # run conclusion SUCCESS. forge run 30553867434 is the same shape.
+  #
+  # Measured 2026-07-30 by diffing every public consumer's main
+  # package.version against crates.io (denominator: 95 public repos calling
+  # this workflow, out of 398 consumer workflow files fleet-wide): 44
+  # in-sync, 28 behind, 21 never published at all, 2 with no root manifest.
+  # So 49 of 95 public consumers were reporting green while the registry
+  # held nothing current. The worst: shikumi 0.1.345 on the registry vs
+  # 0.1.437 on main (92 versions), mado 0.0.15 vs 0.1.99. These are counts
+  # on that date, not a standing property — re-measure, do not cite.
+  #
+  # WHY A DRIP JOB RATHER THAN A NO-OP NOTICE. Making run 2 print "nothing
+  # to bump" would document the emptiness without contradicting it — the
+  # row stays green and an operator still has to go looking. What actually
+  # has to change is what green MEANS. With this job, a green run asserts
+  # the registry holds main's version; a repo whose ship failed goes red on
+  # the NEXT run and stays red, which is how the 26 become visible without
+  # anyone auditing anything. It is also the recovery path this file lacked
+  # (its rust-auto-release.yml sibling has had one since the drip landed
+  # there): cargo-publish-crate is idempotent — already-published is an
+  # explicit green — so this job publishes what a failed ship missed rather
+  # than merely complaining about it.
+  #
+  # BLAST RADIUS IS BOUNDED BY CONSTRUCTION. Drip runs the SAME action ship
+  # runs, against the same manifest, with the same token. It therefore
+  # cannot produce a red that a real release would not also have produced —
+  # every new red is a repo whose ship was already failing and being
+  # masked. It never bumps, never tags, never writes to the repo
+  # (permissions: contents: read), and never runs for a private repo.
+  #
+  # It also gives `workflow_dispatch` a meaning it did not have: today a
+  # dispatch with no source change bumps nothing, skips ship and reports
+  # success. With drip it becomes the operator's "publish what's missing
+  # now" handle, needing no consumer-side change and no fake commit.
+  drip:
+    name: Registry catch-up (seals the skipped-ship green)
+    needs: [resolve-runner, bump]
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
+    permissions:
+      contents: read
+    # `always()` is load-bearing, not decoration: `bump` is SKIPPED outright
+    # on a schedule tick and whenever the bot is the actor, and a job that
+    # needs a skipped job is itself skipped by default — which is precisely
+    # the silent-skip failure this whole job exists to end.
+    #
+    # `needs.bump.outputs.bumped != 'true'` is the complement of ship's
+    # condition: '' (bump skipped or failed) and 'false' (nothing to bump)
+    # both select drip; 'true' hands the run to ship and drip stands down so
+    # the two never double-publish.
+    #
+    # resolve-runner is guarded because runs-on reads its output — an
+    # unguarded always() there would fail on an empty runs-on and blame drip
+    # for a resolver outage. A resolver failure already reds the run, so
+    # nothing is masked by standing down.
+    #
+    # Private repos never publish (privacy posture 2026-07-05, see
+    # pangea-architectures PRIVACY-WAVES.md), so for them there is no
+    # registry claim to make and green is already honest.
+    #
+    # crate-path: cargo-publish-crate has no crate-path input and reads
+    # ./Cargo.toml, so a non-root crate cannot be verified from here — and
+    # worse, a repo with a root manifest plus `crate-path: cli` would publish
+    # the WRONG package. `ship` above has the identical limitation (this file
+    # threads crate-path into cargo-bump but there is nothing to thread it
+    # into on the publish side), so this is a pre-existing gap in the publish
+    # action, not one drip introduces. Standing down is the safe arm: it
+    # forfeits nothing that works today.
+    #
+    # Measured 2026-07-30 across all 398 consumer workflow files: exactly ONE
+    # sets crate-path — forge (`crate-path: "cli"`), whose crate lives at
+    # cli/ and which therefore has no publishable root manifest at all, so
+    # its ship is equally non-functional (forge run 30553867434: bump
+    # success, ship skipped). The real fix is a crate-path input on
+    # pleme-io/actions/cargo-publish-crate, threaded from here — which is a
+    # change to that repo, not this one. Until then forge is a known,
+    # named exclusion rather than an anonymous silent skip.
+    if: >-
+      always()
+      && needs.resolve-runner.result == 'success'
+      && needs.bump.outputs.bumped != 'true'
+      && inputs.crate-path == '.'
+      && !github.event.repository.private
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # Same reason as bump and ship: cargo resolves every git dependency
+      # while packaging, and ~20 sibling pleme-io repos went private
+      # 2026-07-23.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Idempotent by contract: already-on-registry is an explicit green
+      # ("skipping '<name>@<version>' — already on registry"), which is the
+      # no-op run stating its verdict out loud instead of inheriting one.
+      # A name owned by someone else (crates.io 403) and a structurally
+      # unpublishable manifest (git dep / versionless path dep) both exit 1
+      # with the remedy named — that is the red the 26 behind repos have
+      # been owed.
       - uses: pleme-io/actions/cargo-publish-crate@main
         with:
           no-verify: ${{ inputs.no-verify }}
