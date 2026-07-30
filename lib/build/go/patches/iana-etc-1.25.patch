@@ -17,7 +17,7 @@ index df73dbabb3..a5dcf2ca1c 100644
 +++ b/src/net/port_unix.go
 @@ -16,7 +16,7 @@ import (
  var onceReadServices sync.Once
-
+ 
  func readServices() {
 -	file, err := open("/etc/services")
 +	file, err := open("@iana@/etc/services")

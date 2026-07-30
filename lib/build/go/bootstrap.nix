@@ -1,20 +1,24 @@
 # Go bootstrap binary — fetched from go.dev
 #
-# Used as the bootstrap compiler to build Go from source.
-# This is the only prebuilt binary in the chain.
-{ lib, stdenv, fetchurl }:
+# Used as the bootstrap compiler to build Go from source. This is the only
+# prebuilt binary in the chain, and toolchain.nix `disallowedReferences` it out
+# of the result, so it is a build-time input that cannot reach a shipped
+# artifact. That is why its own CVE status gates nothing: nothing links it.
+#
+# The version + per-platform sha256 table is NOT here — it lives in
+# go-toolchain-pin.json, alongside the from-source version, so one file is the
+# whole answer to "which Go does the fleet build with". That shape is the
+# literal structural mirror of fenix's data/stable.json + fetchurl: a committed
+# transcription of upstream's own published hashes, never a resolution at eval.
+{ lib, stdenv, fetchurl,
+  # The pin, overridable for the same reason toolchain.nix's is: reproducing an
+  # older artifact byte-for-byte. Defaults to the committed fleet pin.
+  pin ? builtins.fromJSON (builtins.readFile ./go-toolchain-pin.json),
+}:
 
 let
-  version = "1.24.11";
-
-  hashes = {
-    darwin-amd64 = "c45566cf265e2083cd0324e88648a9c28d0edede7b5fd12f8dc6932155a344c5";
-    darwin-arm64 = "a9c90c786e75d5d1da0547de2d1199034df6a4b163af2fa91b9168c65f229c12";
-    linux-386 = "bb702d0b67759724dccee1825828e8bae0b5199e3295cac5a98a81f3098fa64a";
-    linux-amd64 = "bceca00afaac856bc48b4cc33db7cd9eb383c81811379faed3bdbc80edb0af65";
-    linux-arm64 = "beaf0f51cbe0bd71b8289b2b6fa96c0b11cd86aa58672691ef2f1de88eb621de";
-    linux-armv6l = "24d712a7e8ea2f429c05bc67287249e0291f2fe0ea6d6ff268f11b7343ad0f47";
-  };
+  version = pin.bootstrap.version;
+  hashes = pin.bootstrap.hashes;
 
   platform = with stdenv.hostPlatform.go;
     "${GOOS}-${if GOARCH == "arm" then "armv6l" else GOARCH}";
@@ -24,7 +28,14 @@ stdenv.mkDerivation {
 
   src = fetchurl {
     url = "https://go.dev/dl/go${version}.${platform}.tar.gz";
-    sha256 = hashes.${platform} or (throw "Missing Go bootstrap hash for platform ${platform}");
+    sha256 = hashes.${platform} or (throw ''
+      go-toolchain-pin.json carries no Go bootstrap hash for platform "${platform}".
+
+      Add it under bootstrap.hashes, taking the sha256 from go.dev's own
+      published manifest rather than from a local prefetch:
+
+        curl -sS 'https://go.dev/dl/?mode=json&include=all'
+    '');
   };
 
   dontStrip = stdenv.hostPlatform.isDarwin;

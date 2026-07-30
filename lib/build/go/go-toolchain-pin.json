@@ -1,0 +1,23 @@
+{
+  "_comment": "THE fleet Go toolchain pin. See toolchain.nix's header for the whole argument; see docs/go/go-toolchain.md for the incident that produced it. This file is the Go analogue of fenix's data/stable.json: an explicit, committed transcription of upstream's own published hashes, so version selection is a DIFF and never a resolution at eval time. Bumping the fleet's Go compiler is an edit to `version` + `srcHash` here and nothing else. Every hash below is go.dev's own published sha256, taken from https://go.dev/dl/?mode=json&include=all — never computed by a local prefetch, so a wrong hash is a transcription error you can re-check against upstream rather than a laundered local download.",
+
+  "version": "1.26.5",
+  "srcHash": "sha256-SVvkvIcXasVnOS5bQRar2YRm0z17SdQedkzMaXay3EI=",
+
+  "_cveFloor": "The lowest Go version mkHardenedGoBinary will compile with. Not a taste knob: 1.26.5 and 1.25.12 are the ONLY Go versions with zero entries in Go's own stdlib vulnerability database as of 2026-07-30 (measured against all 159 stdlib entries at vuln.go.dev: go1.25.9 -> 13, go1.26.3 -> 5, go1.26.4 -> 2, go1.25.12 -> 0, go1.26.5 -> 0). Raising this is free; lowering it is a deviation that needs `skip-go-floor: <typed-reason>` in the deviating repo's CLAUDE.md. The floor is asserted at eval time in mkHardenedGoBinary against the compiler that ACTUALLY compiles (drv.passthru.go.version), not against pkgs.go.",
+  "cveFloor": "1.26.5",
+  "cveFloorMeasured": "2026-07-30",
+
+  "_bootstrap": "The prebuilt go.dev binary that compiles the from-source toolchain above. It is `disallowedReferences`d out of the result, so it is a build-time input only and never reaches a shipped artifact — which is why its own CVE status does not gate anything. Kept at nixpkgs' own bootstrap version (26.05 ships bootstrap124.nix at 1.24.13) so the two chains agree. This table is the literal structural mirror of fenix's per-target {url,hash} map.",
+  "bootstrap": {
+    "version": "1.24.13",
+    "hashes": {
+      "darwin-amd64": "6cc6549b06725220b342b740497ffd24e0ebdcef75781a77931ca199f46ad781",
+      "darwin-arm64": "f282d882c3353485e2fc6c634606d85caf36e855167d59b996dbeae19fa7629a",
+      "linux-386": "a55cb4587b1face90dc9334d8ad44ccd41fade77dcff645a74927eb0adc52272",
+      "linux-amd64": "1fc94b57134d51669c72173ad5d49fd62afb0f1db9bf3f798fd98ee423f8d730",
+      "linux-arm64": "74d97be1cc3a474129590c67ebf748a96e72d9f3a2b6fef3ed3275de591d49b3",
+      "linux-armv6l": "a26b1e54c0fe7b0babc79716a89b830f1cde54f6c6f914a9995d3f0d0bdd0242"
+    }
+  }
+}
