@@ -213,21 +213,51 @@ jobs:
   drip:
     name: Drip-publish remaining capacity
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
-    # Fires on the consumer's */15 schedule (auto-drain) AND on a manual
-    # workflow_dispatch (operator-forced "publish what's missing now" — the
-    # resume hand-off for a backlog that a cancelled/deferred ship stranded,
-    # without needing a fake source change to re-trigger the ship path). The
-    # reusable sees the caller's triggering event; a plain `push` still never
-    # drips (push bumps+ships fresh source instead).
+    # Three arms, and the third is the one that makes this job trustworthy
+    # rather than opt-in:
+    #
+    #   schedule           — the consumer's */15 auto-drain
+    #   workflow_dispatch  — operator-forced "publish what's missing now",
+    #                        the resume hand-off for a backlog a cancelled or
+    #                        deferred ship stranded, with no fake source
+    #                        change needed to re-trigger the ship path
+    #   push where bump did NOT bump — ship's complement
+    #
+    # The third arm was added 2026-07-30 and reverses this comment's previous
+    # claim that "a plain `push` still never drips (push bumps+ships fresh
+    # source instead)". That is true only when ship RUNS. When the
+    # skip-detector finds no source change, ship is skipped, NOTHING asserts
+    # anything about the registry, and the run reports success — the same
+    # green-by-omission cargo-auto-release's drip was built to remove.
+    #
+    # Measured 2026-07-30 across 204 publishing members in public repos: 61
+    # were never published and 2 were behind, with no red anywhere. `ishou`
+    # is the clean instance — it calls this reusable, carries NO schedule, so
+    # its drip had never once run, and ishou-batente/ishou-pente@0.1.4 are
+    # both absent from crates.io. Requiring each consumer to remember a cron
+    # is what let that sit. `tear` DOES carry the */15 schedule and its
+    # members are still absent, so this arm is necessary, not sufficient —
+    # that case is a separate, still-open defect.
+    #
+    # Safe to run on the complement: rust-workspace-publish is idempotent
+    # (already-published is an explicit green) and converges to a no-op in
+    # seconds. `needs: bump` + always() keeps the schedule arm alive even
+    # though bump itself skips on schedule.
     #
     # privacy posture 2026-07-05: private repos bump+tag only — no public
     # registry publish; see pangea-architectures PRIVACY-WAVES.md. Documented
     # residual (same as the runner-routing edge above): schedule-triggered
     # callers may lack github.event.repository, so `!…private` falls open —
     # private repos should not carry a drip schedule in the first place.
+    needs: bump
     if: >-
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      always()
       && !github.event.repository.private
+      && (
+        github.event_name == 'schedule'
+        || github.event_name == 'workflow_dispatch'
+        || (needs.bump.result == 'success' && needs.bump.outputs.bumped != 'true')
+      )
     permissions:
       contents: read
     steps:
