@@ -42,6 +42,11 @@ let
     version = "0.0.0";
     inherit server staticDir serverConfig tataraScript;
     serverBin = "smoke";
+    # The fixture server is Go, so its dependency tree is already visible to
+    # trivy through the toolchain-embedded .go.buildinfo section. Declaring it
+    # is what makes the conformance check assert that section survived the
+    # strip -- the Go-side twin of the Rust .dep-v0 assertion.
+    serverAudit = { kind = "go-buildinfo"; };
     listenPort = 80;
     extraEnv = [ "PORT=8000" ];
   };
