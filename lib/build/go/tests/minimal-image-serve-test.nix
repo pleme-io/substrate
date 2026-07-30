@@ -21,7 +21,7 @@ let
     version = "0.0.0";
     src = ./fixtures/smoke;
     vendorHash = null;                       # stdlib-only, no deps to vendor
-    env = { CGO_ENABLED = "0"; };
+    CGO_ENABLED = "0";                       # top-level, not env — see hardened-image.nix
     tags = [ "timetzdata" "netgo" "osusergo" ];
     meta.mainProgram = "smoke";
   };

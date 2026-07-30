@@ -140,8 +140,12 @@ let
     binary = goBuild {
       pname = serviceName;
       inherit version src vendorHash subPackages ldflags buildInputs;
-      env = { CGO_ENABLED = "0"; }
-        // (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
+      # CGO_ENABLED is top-level, not an `env` key — buildGoModule inherits it
+      # onto mkDerivation itself, so setting both sides is an eval error. See
+      # hardened-image.nix for the direction of each knob. GOEXPERIMENT/GOFIPS
+      # are NOT buildGoModule arguments, so those do belong in `env`.
+      CGO_ENABLED = "0";
+      env = (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
       doCheck = false;
       meta.mainProgram = serviceName;
       # Skip buildGoModule's strict pre-check; use raw `go install` with

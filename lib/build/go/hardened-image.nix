@@ -164,7 +164,20 @@ let
     pname = name;
     inherit version src vendorHash;
 
-    env = { CGO_ENABLED = cgoEnabled; };
+    # CGO_ENABLED is a top-level attr, NOT an `env` key — the exact mirror of
+    # the GOFLAGS rule documented below. buildGoModule declares
+    # `CGO_ENABLED ? go.CGO_ENABLED` as an argument and then `inherit`s it
+    # straight onto mkDerivation (nixpkgs build-support/go/module.nix:40,170),
+    # so setting it in `env` too makes both sides define it and eval dies with
+    # "the env attribute set cannot contain any attributes passed to
+    # derivation ... overlapping: CGO_ENABLED".
+    #
+    # The two knobs therefore go opposite ways, which is the whole trap:
+    # GOFLAGS is written into `env` BY buildGoModule (so we must never pass it
+    # top-level), CGO_ENABLED is written top-level BY buildGoModule (so we must
+    # never pass it in `env`). Read the nixpkgs source for the direction rather
+    # than guessing from symmetry.
+    CGO_ENABLED = cgoEnabled;
 
     tags = hardenedTags;
     ldflags = hardenedLdflags;
