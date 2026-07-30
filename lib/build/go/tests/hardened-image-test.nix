@@ -18,9 +18,16 @@
 # Linux-only: it execs a linux binary and binds a socket. Wired into
 # checks.{x86_64,aarch64}-linux.go-hardened-image; on darwin it evaluates but
 # is not built.
-{ pkgs, tataraScript ? null }:
+{ pkgs, tataraScript ? null,
+  # The pinned fleet Go compiler. Threaded because the builder under test now
+  # FLOORS its compiler, and substrate's own nixpkgs (go 1.26.3) is itself below
+  # the floor (1.26.5) — measured. So this is not ceremony: without it the check
+  # is eval-rejected, which is exactly the floor doing its job on substrate's own
+  # gate. flake.nix passes goToolchains.${system}.stable.
+  goToolchain ? null,
+}:
 let
-  hardened = import ../hardened-image.nix { };
+  hardened = import ../hardened-image.nix { inherit goToolchain; };
 
   # The whole point: the image comes out of the builder under test, with
   # nothing overridden. If a default is wrong, this test is where it shows.
