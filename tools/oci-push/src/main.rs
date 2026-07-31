@@ -1274,6 +1274,38 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         let rendered = serde_json::to_string_pretty(&manifest).map_err(PushError::Json)?;
         if digest_only {
             println!("{digest}");
+            // ── ALSO WRITE GITHUB_OUTPUT, exactly as `resolve` does. ─────────
+            // Without this, `--digest-only` is unusable through
+            // pleme-io/actions/doca: that action declares a `digest` output but
+            // only `resolve` ever populated it, so an `inspect --digest-only`
+            // step printed the digest to stdout where nothing captured it and
+            // the caller read "".
+            //
+            // MEASURED 2026-07-31, hardened-images run 30668156689: a Zot
+            // readback step logged
+            //   "Zot serves hardened-chproxy:1.0.53 at digest  -- readback
+            //    confirmed"
+            // with the digest field EMPTY. The readback itself was sound (doca
+            // exiting 0 does prove the registry served the manifest), but the
+            // notice asserted a coordinate it could not show, and the
+            // `zot-digest` output built on top of it could never populate.
+            //
+            // This is the flag's whole stated purpose -- its own description
+            // says it "lets a caller resolve a mutable tag to a digest in one
+            // call and then copy by digest, so a tag that moves underneath
+            // cannot silently swap the bytes". That is worth more than usual
+            // here: this repo's release tags DO move (release-version is a
+            // static committed file), so the digest is the only coordinate that
+            // identifies an artifact.
+            if let Some(path) = env::var_os("GITHUB_OUTPUT") {
+                use std::io::Write as _;
+                let mut f = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(path)
+                    .map_err(PushError::WriteGithubOutput)?;
+                writeln!(f, "digest={digest}").map_err(PushError::WriteGithubOutput)?;
+            }
         } else {
             println!("{rendered}");
             eprintln!("digest: {digest}");
