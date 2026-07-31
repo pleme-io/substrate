@@ -334,43 +334,48 @@ let
     #
     # Left null (the default) this is byte-identical to the plain
     # `dockerTools.pullImage` call it replaces.
-    pulled =
-      let
-        base = dockerTools.pullImage {
-          imageName = upstream;
-          imageDigest = upstreamDigest;
-          sha256 = upstreamSha256;
-          os = upstreamOs;
-          arch = upstreamArch;
-          finalImageName = "${service}-upstream";
-          finalImageTag = "extracted";
-        };
-      in
-      if srcCredsEnv == null then base else base.overrideAttrs (old: {
-        impureEnvVars = (old.impureEnvVars or [ ]) ++ [ srcCredsEnv ];
-        # nixpkgs' builder runs `skopeo copy $sourceURL …`. Re-point
-        # `sourceURL` is not enough -- credentials are a separate flag --
-        # so the builder is replaced with the same copy plus `--src-creds`.
-        # `--src-creds` takes user:password; the password is read from the
-        # named variable at build time and never appears in the store.
-        buildCommand = ''
-          if [ -z "''${${srcCredsEnv}:-}" ]; then
-            echo "mkVendorRewrap: ${srcCredsEnv} is empty or unset -- refusing to" >&2
-            echo "  attempt an unauthenticated pull of a private image. Export it" >&2
-            echo "  in the environment invoking nix (and keep it out of the store)." >&2
-            exit 1
-          fi
-          skopeo \
-            --insecure-policy \
-            --tmpdir=$TMPDIR \
-            --override-os ${upstreamOs} \
-            --override-arch ${upstreamArch} \
-            copy \
-            --src-creds "${srcCredsUser}:''${${srcCredsEnv}}" \
-            "docker://${upstream}@${upstreamDigest}" \
-            "docker-archive://$out:${service}-upstream:extracted"
-        '';
-      });
+    # `doca pull` IS the pull. Not skopeo, and not `dockerTools.pullImage`
+    # (which wraps skopeo): doca already implements registry -> docker-archive
+    # natively in Rust, WITH credentials -- `--user`/`--pass`, or `INPUT_PASS`
+    # from the environment, which is the form used here so the secret never
+    # reaches argv where `ps` can read it.
+    #
+    # It is also the more correct implementation, not merely the in-house one.
+    # Its own comment records a bug it fixes that a naive port would
+    # reintroduce: `client.pull()` fetches layers CONCURRENTLY and returns them
+    # in completion order, while `ImageLayer` carries no digest to reorder by,
+    # so the emitted archive has the right bytes in the wrong order and
+    # `docker load` rejects it on a diff_ids mismatch. doca fetches
+    # sequentially against `manifest.layers`, making order a property of the
+    # loop rather than a race. It also gunzips each layer, which a
+    # docker-archive requires and a registry blob does not arrive as.
+    #
+    # Fixed-output: `outputHash` pins the result, which is what makes the
+    # impure credential legal -- an impure input cannot change what the build
+    # is permitted to produce.
+    pulled = pkgs.runCommand "${service}-upstream.tar"
+      {
+        outputHashAlgo = "sha256";
+        outputHashMode = "flat";
+        outputHash = upstreamSha256;
+        # Proxy vars as nixpkgs' own fetchers take them, plus the ONE named
+        # credential variable when the caller declared it. The variable NAME
+        # is what this derivation records; the value never enters the store.
+        impureEnvVars =
+          lib.fetchers.proxyImpureEnvVars
+          ++ lib.optional (srcCredsEnv != null) srcCredsEnv;
+        nativeBuildInputs = [ doca ];
+        SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
+      }
+      ''
+        ${lib.optionalString (srcCredsEnv != null) ''export INPUT_PASS="''${${srcCredsEnv}:?${srcCredsEnv} is unset — refusing an unauthenticated pull of a private image}"''}
+        oci-push pull \
+          --ref "${upstream}@${upstreamDigest}" \
+          --out "$out" \
+          --os "${upstreamOs}" --arch "${upstreamArch}" \
+          --image-name "${service}-upstream" --image-tag "extracted" \
+          ${lib.optionalString (srcCredsEnv != null) ''--user "${srcCredsUser}"''}
+      '';
 
     # Unpack the pulled image and copy the binary out. Uses skopeo+umoci
     # for a deterministic unpack — `tar -xf` over layered images produces
