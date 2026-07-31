@@ -286,17 +286,28 @@ jobs:
           sudo cp /tmp/zot-ca.crt /usr/local/share/ca-certificates/zot-camelot-eks.crt
           sudo update-ca-certificates
 
-      # skopeo's own credential lookup (~/.config/containers/auth.json) is
-      # a DIFFERENT file than docker/login-action authenticates -- same
-      # lesson camelot-hardened-images.yml already carries for oci-image-push.
-      - name: Login to Zot
-        if: steps.pull-scan.outputs.admitted == 'true'
-        uses: pleme-io/actions/skopeo-login@main
-        with:
-          registry: ${{ inputs.zot-registry }}
-          username: ${{ inputs.zot-username }}
-          password: ${{ secrets.ZOT_PASSWORD }}
-
+      # ── The Zot skopeo-login is GONE, and its replacement is not a login ────
+      #
+      # oci-image-push now pushes with doca, which takes credentials as
+      # arguments. So the credential no longer travels through an authfile that
+      # one step writes and another must find -- the same ambient-handshake
+      # shape that made the source-side failure so hard to read.
+      #
+      # ca-cert is REQUIRED here and is the subtle part. Zot serves a
+      # self-signed cert; skopeo honoured the system trust store, so the "Trust
+      # Zot's CA" step above was sufficient for it. doca CANNOT use that store:
+      # its oci-client is built with `rustls-tls`, whose trust anchors are the
+      # COMPILED-IN webpki set (`rustls-native-certs` is not in the lock) --
+      # doca's own source states this. Passing the PEM path is what actually
+      # establishes trust for the push.
+      #
+      # Without this the conversion would have failed TLS at the push with the
+      # step named "Trust Zot's CA" sitting GREEN directly above it: a
+      # preparation step that succeeds while preparing nothing for the tool that
+      # follows it. The CA step is kept -- it is still the thing that fetches and
+      # validates the PEM, and other tooling on the runner does read the system
+      # store.
+      #
       # oci-image-push is composite (runs natively on this runner, not a
       # Docker-mode container) -- the same fix already shipped for the
       # akeylesslabs Harbor pipeline (pleme-io/actions@d1b51db) applies
@@ -310,3 +321,6 @@ jobs:
           image: ${{ inputs.zot-repo }}
           tag: ${{ inputs.zot-tag }}
           tarball: ${{ steps.pull-scan.outputs.local-archive }}
+          username: ${{ inputs.zot-username }}
+          password: ${{ secrets.ZOT_PASSWORD }}
+          ca-cert: /tmp/zot-ca.crt
