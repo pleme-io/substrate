@@ -42,9 +42,24 @@ let
 
   # Shared NixOS-optimized Packer source defaults
   #
-  # shutdown_behavior = "terminate": the builder instance self-terminates on OS
-  # shutdown, preventing orphaned instances if Packer loses connectivity or the
-  # pipeline process is killed.
+  # shutdown_behavior = "terminate": the builder terminates when its OS shuts
+  # down, rather than merely stopping.
+  #
+  # CORRECTED 2026-07-31 — this comment used to claim the setting prevented
+  # orphans "if Packer loses connectivity or the pipeline process is killed".
+  # It does NOT, and believing it is why no TTL existed for so long. The
+  # setting reacts to an OS shutdown; it has no opinion about the orchestrator.
+  # Packer's own "Terminating the source AWS instance" cleanup covers a normal
+  # exit INCLUDING a failed build — which is why four consecutive failed bakes
+  # were each reaped correctly and the gap stayed invisible — but a KILLED
+  # Packer never reaches cleanup, and the instance runs on. Measured: a killed
+  # bake stranded i-04baaa6b486fb7fcd (c7i.4xlarge, ~$0.71/hr) until it was
+  # found by hand.
+  #
+  # What makes the setting actually load-bearing is the `user_data`
+  # self-destruct timer in mkBuildTemplate: the instance powers ITSELF off at
+  # `ttlHours`, and this setting converts that into a termination. The two are
+  # one mechanism — do not remove either half.
   nixosSourceDefaults = {
     ssh_username = "root";
     ssh_timeout = "10m";
@@ -288,6 +303,23 @@ in rec {
     # When true, a Degraded hardening report also fails the build.
     # Default `false` matches `kindling harden`'s exit semantics.
     hardeningStrict ? false,
+    # ── SELF-DESTRUCT TTL — the orphan backstop ──────────────────────
+    # Hours after boot at which the builder powers ITSELF off. Combined
+    # with `shutdown_behavior = "terminate"` (nixosSourceDefaults) that
+    # is a self-termination, so an abandoned builder cannot outlive this
+    # no matter what happened to the orchestrator.
+    #
+    # ONE field drives THREE things — the `TtlHours` FinOps tag, the
+    # `ami-forge:ttl-hours` run tag, and the actual poweroff timer — so
+    # the declared TTL and the enforced TTL are the same number by
+    # construction. They were previously three independent literals, and
+    # the two tags claimed a 4h TTL that nothing implemented.
+    #
+    # 4h is generous against observed build times (~40min for a full
+    # Rust closure on a c7i.4xlarge); it exists to bound abandonment,
+    # not to bound a slow build. Raise it for a genuinely longer bake
+    # rather than removing it.
+    ttlHours ? 4,
   }: let
     hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
     # Resolve a stack name ("base", "hardened", "ami-full",
@@ -354,8 +386,40 @@ in rec {
           Name = "ami-forge-builder";
           ManagedBy = "pangea";
           "ami-forge:purpose" = "ami-build";
-          "ami-forge:ttl-hours" = "4";
-        } // mkFinopsTags { inherit owner purpose environment; ephemeral = true; ttlHours = 4; };
+          "ami-forge:ttl-hours" = toString ttlHours;
+        } // mkFinopsTags { inherit owner purpose environment ttlHours; ephemeral = true; };
+
+        # ── THE SELF-DESTRUCT ────────────────────────────────────────
+        # Arms a one-shot systemd timer at first boot. On expiry the
+        # instance powers itself off, and `shutdown_behavior =
+        # "terminate"` turns that into a termination — so an abandoned
+        # builder reaps itself with no external watcher, no credentials
+        # on the instance, and no dependency on the workstation still
+        # being alive.
+        #
+        # WHY THIS EXISTS (measured 2026-07-31, not theoretical). The
+        # `shutdown_behavior` comment above used to claim it already
+        # prevented orphans "if Packer loses connectivity or the
+        # pipeline process is killed". That was FALSE and is corrected
+        # there now: `shutdown_behavior` fires only when the OS shuts
+        # down, and Packer's own "Terminating the source AWS instance"
+        # cleanup runs only on a normal exit. A KILLED Packer therefore
+        # strands the builder. It happened: i-04baaa6b486fb7fcd, a
+        # c7i.4xlarge, ran unattended at ~$0.71/hr until it was found by
+        # hand. Four earlier bakes that FAILED were all reaped correctly
+        # by Packer — which is exactly why the gap stayed invisible.
+        #
+        # NO SHELL, honestly qualified: this is user_data on a BARE base
+        # AMI, before any of our closure exists — there is no
+        # tatara-script, no kindling, not even git on PATH yet (an
+        # earlier attempt to run `git config` at this stage died with
+        # exit 127). A two-line boot script is the 1-3 line glue the
+        # rule permits, and `systemd-run --on-active` is the platform's
+        # own timer primitive rather than a hand-rolled sleep loop.
+        user_data = ''
+          #!/bin/sh
+          systemd-run --on-active=${toString ttlHours}h --unit=ami-forge-ttl-guard systemctl poweroff
+        '';
       };
 
       build = [{
