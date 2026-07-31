@@ -1780,7 +1780,27 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
                 entry.unpack(&target).map_err(PushError::Archive)?;
             }
         } else {
-            entry.unpack_in(dest).map_err(PushError::Archive)?;
+            // `unpack_in` returns Ok(FALSE) when it REFUSES an entry -- it
+            // does not error. Discarding that bool means a refused file is
+            // silently absent from the rootfs while unpack reports success:
+            // measured on the real ClickHouse keeper, 600 files extracted,
+            // exit 0, and `etc/clickhouse-server/config.d/data-paths.xml`
+            // simply not there. A scan over that rootfs then reports on an
+            // image that is missing files it should have had.
+            //
+            // Silent loss is strictly worse than a hard failure here, so a
+            // refusal is now an error naming the entry.
+            if !entry.unpack_in(dest).map_err(PushError::Archive)? {
+                return Err(PushError::Archive(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "refused to unpack {:?} -- entry rejected as unsafe \
+                         (path escape, or an unsupported entry type). Refusing \
+                         to emit a rootfs that is silently missing a file.",
+                        path
+                    ),
+                )));
+            }
         }
     }
     Ok(())
