@@ -1604,6 +1604,119 @@ fn cmd_config_show<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushErro
 ///
 /// `--root` defaults to `.` — `fakeRootCommands` runs with the assembled
 /// rootfs already as CWD.
+/// `unpack` — flatten a docker-archive into a rootfs directory.
+///
+/// WHY THIS EXISTS. `mkVendorRewrap` (substrate/lib/build/oci/hardened-base.nix)
+/// needs specific files OUT of a vendor image — a binary, a FIPS module, the
+/// config that activates it. It was doing that with `skopeo copy` into an OCI
+/// layout followed by `umoci unpack`: two external tools, in a fleet whose
+/// container-image tool is this one. `pull` already replaced the skopeo half;
+/// this replaces the umoci half, and the pair is the whole extraction path.
+///
+/// WHY NOT `tar -xf` OVER THE LAYERS. Order and deletion both matter. Layers
+/// are applied in manifest order and a later layer legitimately REPLACES an
+/// earlier file, so last-write-wins is required, not incidental. Deletion is
+/// carried out-of-band as AUFS whiteouts — a `.wh.<name>` marker file means
+/// "<name> is deleted from here down", and `.wh..wh..opq` means "ignore
+/// everything this directory inherited". A naive extract keeps the deleted
+/// file AND leaves the marker on disk, so the rootfs contains a file the image
+/// does not have. That is precisely the failure the old comment on the skopeo
+/// path was warning about ("tar -xf over layered images produces whiteouts").
+fn cmd_unpack<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut tarball: Option<String> = None;
+    let mut dest: Option<String> = None;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--tarball" => tarball = Some(next_value(&mut it, "tarball")?),
+            "--dest" => dest = Some(next_value(&mut it, "dest")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    let tarball = tarball
+        .or_else(|| env_input("INPUT_TARBALL"))
+        .ok_or(PushError::MissingArg("tarball"))?;
+    let dest = PathBuf::from(
+        dest.or_else(|| env_input("INPUT_DEST"))
+            .ok_or(PushError::MissingArg("dest"))?,
+    );
+
+    let entries = NativeBackend::read_archive(&tarball)?;
+    let manifest_raw = entries
+        .get("manifest.json")
+        .ok_or(PushError::NoManifestJson)?;
+    let manifest: Vec<DockerManifestEntry> =
+        serde_json::from_slice(manifest_raw).map_err(PushError::ManifestParse)?;
+    let first = manifest.first().ok_or(PushError::EmptyManifest)?;
+
+    fs::create_dir_all(&dest).map_err(PushError::Archive)?;
+
+    for layer_path in &first.layers {
+        let blob = entries
+            .get(layer_path)
+            .ok_or_else(|| PushError::MissingEntry(layer_path.clone()))?;
+        apply_layer(blob, &dest)?;
+    }
+
+    eprintln!(
+        "oci-push[unpack]: {} layer(s) -> {}",
+        first.layers.len(),
+        dest.display()
+    );
+    Ok(())
+}
+
+/// Apply ONE layer tar over `dest`, honouring AUFS whiteouts.
+///
+/// Whiteouts are handled BEFORE the entry is written, and the marker itself is
+/// never materialised — a `.wh.` file left on disk would be a file the image
+/// does not contain.
+fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
+    let mut archive = tar::Archive::new(std::io::Cursor::new(blob));
+    for entry in archive.entries().map_err(PushError::Archive)? {
+        let mut entry = entry.map_err(PushError::Archive)?;
+        let path = entry
+            .path()
+            .map_err(PushError::Archive)?
+            .to_path_buf();
+
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        if name == ".wh..wh..opq" {
+            // Opaque: this directory inherits nothing from lower layers.
+            if let Some(dir) = path.parent() {
+                let target = dest.join(dir);
+                if target.is_dir() {
+                    fs::remove_dir_all(&target).map_err(PushError::Archive)?;
+                    fs::create_dir_all(&target).map_err(PushError::Archive)?;
+                }
+            }
+            continue;
+        }
+
+        if let Some(deleted) = name.strip_prefix(".wh.") {
+            let target = dest.join(path.parent().unwrap_or(Path::new(""))).join(deleted);
+            if target.is_dir() {
+                fs::remove_dir_all(&target).map_err(PushError::Archive)?;
+            } else if target.exists() {
+                fs::remove_file(&target).map_err(PushError::Archive)?;
+            }
+            continue;
+        }
+
+        // Last-write-wins: a later layer replacing a file must overwrite it,
+        // and tar's unpack refuses to clobber some existing kinds.
+        let target = dest.join(&path);
+        if target.is_symlink() || (target.exists() && !target.is_dir()) {
+            fs::remove_file(&target).map_err(PushError::Archive)?;
+        }
+        entry.unpack(&target).map_err(PushError::Archive)?;
+    }
+    Ok(())
+}
+
 fn cmd_harden_rootfs<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut root = PathBuf::from(".");
     while let Some(flag) = it.next() {
@@ -1690,6 +1803,7 @@ fn run() -> Result<(), PushError> {
         Some("delete") => cmd_delete(args),
         Some("config-show") => cmd_config_show(args),
         Some("harden-rootfs") => cmd_harden_rootfs(args),
+        Some("unpack") => cmd_unpack(args),
         // Back-compat: a leading flag means the legacy flat `push` form.
         Some(flag) if flag.starts_with("--") => {
             let rest = std::iter::once(flag.to_string()).chain(args);

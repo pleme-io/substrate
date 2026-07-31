@@ -377,22 +377,26 @@ let
           ${lib.optionalString (srcCredsEnv != null) ''--user "${srcCredsUser}"''}
       '';
 
-    # Unpack the pulled image and copy the binary out. Uses skopeo+umoci
-    # for a deterministic unpack — `tar -xf` over layered images produces
-    # whiteouts.
+    # Flatten the pulled image and copy the wanted paths out. `doca unpack`
+    # replaces the skopeo-into-an-OCI-layout + umoci-unpack pair this used to
+    # run: two external tools for one job the fleet's own container tool now
+    # does directly, and one fewer intermediate format.
+    #
+    # The old comment's warning is still exactly right and is why this is not
+    # `tar -xf`: layers must be applied in manifest ORDER (a later layer
+    # legitimately replaces an earlier file), and deletion is carried
+    # out-of-band as AUFS whiteouts (`.wh.<name>`, `.wh..wh..opq`). A naive
+    # extract keeps the deleted file AND leaves the marker on disk, so the
+    # rootfs ends up containing a file the image does not have. `doca unpack`
+    # honours both, and drops the markers rather than materialising them.
     extractedBinary = pkgs.runCommand "${service}-binary" {
-      nativeBuildInputs = [ pkgs.skopeo pkgs.umoci ];
+      nativeBuildInputs = [ doca ];
     } ''
-      mkdir -p oci rootfs
-      skopeo copy \
-        --src-tls-verify=false \
-        docker-archive:${pulled} \
-        "oci:oci:${service}-latest"
-      umoci unpack --image "oci:${service}-latest" rootfs
+      oci-push unpack --tarball ${pulled} --dest rootfs
       ${lib.concatStringsSep "\n      " (
-          (map (p: ''install -Dm0755 "rootfs/rootfs${p}" "$out/bin/${baseNameOf p}"'')
+          (map (p: ''install -Dm0755 "rootfs${p}" "$out/bin/${baseNameOf p}"'')
                ([ binaryPath ] ++ extraBinaryPaths))
-          ++ (map (e: ''install -Dm0644 "rootfs/rootfs${e.from}" "$out/${e.to}"'')
+          ++ (map (e: ''install -Dm0644 "rootfs${e.from}" "$out/${e.to}"'')
                   extraRootfsPaths)
         )}
     '';
