@@ -992,9 +992,18 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             .or_else(|| env_input("INPUT_DEST"))
             .ok_or(PushError::MissingArg("dest"))?,
     )?;
-    let src_auth = auth_or_anon(
-        src_user.or_else(|| env_input("INPUT_SRC_USER")),
-        src_pass.or_else(|| env_input("INPUT_SRC_PASS")),
+    // The SOURCE of a transfer is the side that can legitimately be ambient:
+    // a promote reads from a registry the job already logged into. The DEST
+    // below stays `RegistryAuth::Basic` with a required --dest-user, because a
+    // silent anonymous WRITE is a different and worse failure than a silent
+    // anonymous read -- it should fail loudly at argument parsing, not at the
+    // registry.
+    let src_auth = auth_resolved(
+        src_user,
+        src_pass,
+        env_input("INPUT_SRC_USER"),
+        env_input("INPUT_SRC_PASS"),
+        src_ref.registry(),
     );
     let dest_auth = RegistryAuth::Basic(
         dest_user
@@ -1112,9 +1121,12 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             .or_else(|| env_input("INPUT_REF"))
             .ok_or(PushError::MissingArg("ref"))?,
     )?;
-    let auth = auth_or_anon(
-        user.or_else(|| env_input("INPUT_USER")),
-        pass.or_else(|| env_input("INPUT_PASS")),
+    let auth = auth_resolved(
+        user,
+        pass,
+        env_input("INPUT_USER"),
+        env_input("INPUT_PASS"),
+        r.registry(),
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
@@ -1438,9 +1450,12 @@ fn cmd_list<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             .or_else(|| env_input("INPUT_REF"))
             .ok_or(PushError::MissingArg("ref"))?,
     )?;
-    let auth = auth_or_anon(
-        user.or_else(|| env_input("INPUT_USER")),
-        pass.or_else(|| env_input("INPUT_PASS")),
+    let auth = auth_resolved(
+        user,
+        pass,
+        env_input("INPUT_USER"),
+        env_input("INPUT_PASS"),
+        r.registry(),
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
@@ -1531,9 +1546,12 @@ fn cmd_resolve<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         .or_else(|| env_input("INPUT_REF"))
         .ok_or(PushError::MissingArg("ref"))?;
     let r = parse_reference(&raw_ref)?;
-    let auth = auth_or_anon(
-        user.or_else(|| env_input("INPUT_USER")),
-        pass.or_else(|| env_input("INPUT_PASS")),
+    let auth = auth_resolved(
+        user,
+        pass,
+        env_input("INPUT_USER"),
+        env_input("INPUT_PASS"),
+        r.registry(),
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
@@ -1643,9 +1661,12 @@ fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let nt = new_tag
         .or_else(|| env_input("INPUT_NEW_TAG"))
         .ok_or(PushError::MissingArg("new-tag"))?;
-    let auth = auth_or_anon(
-        user.or_else(|| env_input("INPUT_USER")),
-        pass.or_else(|| env_input("INPUT_PASS")),
+    let auth = auth_resolved(
+        user,
+        pass,
+        env_input("INPUT_USER"),
+        env_input("INPUT_PASS"),
+        src.registry(),
     );
     // Same registry/repository, new tag.
     let mut dest_str =
@@ -2375,4 +2396,75 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// Every ref-taking subcommand must resolve credentials through
+    /// `auth_resolved`, never `auth_or_anon` directly.
+    ///
+    /// WHY THIS IS A TEST AND NOT A COMMENT. `auth_resolved` was added with a
+    /// doc comment naming the exact defect -- "a census then found SIX
+    /// subcommands on the bare auth_or_anon path ... one resolver so the next
+    /// subcommand cannot be born missing it" -- and then only `pull` was
+    /// converted. The other five kept the bare path for weeks. A doc comment
+    /// stating an invariant does not hold the invariant; the five subcommands
+    /// it described were, at the moment it was written, counter-examples to it.
+    ///
+    /// The failure this prevents is silent by construction: a subcommand on the
+    /// bare path against a private registry does not error at argument parsing,
+    /// it goes ANONYMOUS and fails later as a 401 from the registry -- which
+    /// reads as a credentials problem at the far end rather than a missing
+    /// resolver at this one. That is precisely how the Zot mirror bug consumed
+    /// two rounds of diagnosis.
+    ///
+    /// TIER, honestly: this is CI-caught, NOT unrepresentable. Both functions
+    /// live in one module, so Rust privacy cannot forbid the direct call, and a
+    /// determined author can still edit this test. It is a forcing function,
+    /// not a type. Making it truly-unrepresentable would mean moving
+    /// `auth_or_anon` into a submodule that exposes only `auth_resolved` --
+    /// worth doing, and NOT done here.
+    /// THE NEEDLES ARE ASSEMBLED AT RUNTIME, and that is load-bearing.
+    ///
+    /// Written with the names as plain literals, this test read its OWN source
+    /// and counted them: the first run reported 4 occurrences where grep showed
+    /// 2, because the literal in the search call and the literal in the failure
+    /// message are themselves matches. A source-scanning test is part of the
+    /// corpus it scans -- the instrument contaminated the measurement, and it
+    /// did so in the direction that manufactures a FALSE FAILURE, which is the
+    /// survivable direction. Split the other way (a needle that accidentally
+    /// matched nothing) it would have manufactured a false PASS and this gate
+    /// would have been decorative from birth.
+    ///
+    /// Splitting each name across a `concat!` keeps the literal out of the
+    /// scanned text while the compiler still assembles the exact string.
+    #[test]
+    fn every_auth_path_goes_through_the_resolver() {
+        let src = include_str!("main.rs");
+        let bare = concat!("auth_or_", "anon(");
+        let resolver = concat!("auth_", "resolved(");
+
+        // Exactly two: the definition, and the single delegation inside the
+        // resolver. Anything else is a subcommand that skipped it.
+        let direct = src.matches(bare).count();
+        assert_eq!(
+            direct, 2,
+            "the bare auth helper appears {direct} times, expected 2 (its \
+             definition + the one delegation inside the resolver). A new \
+             occurrence means a subcommand resolves credentials WITHOUT the \
+             ambient-credential fallback -- it will go anonymous against a \
+             private registry and fail as a far-end 401 rather than a near-end \
+             error, which is exactly how the Zot mirror bug hid. Call the \
+             resolver with (user, pass, env_user, env_pass, <ref>.registry())."
+        );
+
+        // Positive control. Without it, a rename of either function would leave
+        // both counts at 0 and the equality check could pass vacuously against
+        // an empty corpus. This asserts the probe can still SEE the thing it is
+        // reasoning about: the resolver's definition plus all six ref-taking
+        // subcommands (transfer/inspect/pull/list/resolve/tag).
+        let resolved = src.matches(resolver).count();
+        assert!(
+            resolved >= 7,
+            "resolver referenced only {resolved} times; expected >= 7 (its \
+             definition + six ref-taking subcommands). Either the probe is \
+             blind or a subcommand lost its credential resolution."
+        );
+    }
 }
