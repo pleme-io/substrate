@@ -113,8 +113,8 @@
 ;;; A nonzero exit is retried; a clean run returning zero results is NOT. That
 ;;; asymmetry is the whole point — retrying an honest empty just burns time and
 ;;; eventually tempts you to treat the last attempt as authoritative.
-(define (tentar oks argv vezes)
-  (let ((r (correr argv)))
+(define (tentar rodar oks argv vezes)
+  (let ((r (rodar argv)))
     (if (or (ok? oks r) (<= vezes 1))
       r
       (begin
@@ -123,15 +123,15 @@
                          " left) after status " (string-format "{}" (estado r))
                          (if (equal? "" (campo r "err")) ""
                              (string-append ": " (campo r "err"))))))
-        (tentar oks argv (- vezes 1))))))
+        (tentar rodar oks argv (- vezes 1))))))
 
 ;;; ── The reading ──────────────────────────────────────────────────────────
 ;;;
 ;;; `alvo` and `controle` are FULL argv lists, measured identically. The
 ;;; control is not a formality: it is the only thing standing between a `vazio`
 ;;; and a lie.
-(define (aferir oks alvo controle vezes)
-  (let* ((a (tentar oks alvo vezes))
+(define (aferir rodar oks alvo controle vezes)
+  (let* ((a (tentar rodar oks alvo vezes))
          (n (contagem a)))
     (cond
       ;; The target run itself failed. Nothing to interpret.
@@ -148,7 +148,7 @@
       ;; Zero hits. This is the ONLY branch where the control decides, and the
       ;; only path to `vazio`.
       (else
-        (let* ((c (tentar oks controle vezes))
+        (let* ((c (tentar rodar oks controle vezes))
                (cn (contagem c)))
           (cond
             ((not (ok? oks c))
@@ -319,7 +319,7 @@
                                    "enum rather than silently coerced."))
             (begin
               (relatar (alist-get fl "rotulo" "medida")
-                       (aferir (oks-de (alist-get fl "ok" "0")) alvo ctrl n)))))))))
+                       (aferir correr (oks-de (alist-get fl "ok" "0")) alvo ctrl n)))))))))
 
 ;;; ── The env face ─────────────────────────────────────────────────────────
 ;;; Kept for embedding (launchd/systemd/Nix), where argv is awkward. Splits on
@@ -341,9 +341,15 @@
           #f)
         (begin
           (relatar rotulo
-                   (aferir (oks-de (env-get "AFERIR_STATUS_OK" "0"))
+                   (aferir correr (oks-de (env-get "AFERIR_STATUS_OK" "0"))
                            (argv-de alvo-s) (argv-de ctrl-s)
                            (if (equal? (env-get "AFERIR_TENTATIVAS" "2") "1") 1 2))))))))
 
 ;;; ── Dispatch ─────────────────────────────────────────────────────────────
-(if (> (length (argv)) 0) (face-cli (argv)) (face-env))
+;;; TLISP_TEST=1 loads the definitions and runs neither face, so the test file
+;;; can drive the real functions with mocked side effects — the same shape the
+;;; 37 tested tools in pleme-io/actions use.
+(cond
+  ((equal? (env-get "TLISP_TEST" "") "1") #t)
+  ((> (length (argv)) 0) (face-cli (argv)))
+  (else (face-env)))

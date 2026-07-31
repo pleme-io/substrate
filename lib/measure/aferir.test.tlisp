@@ -1,0 +1,133 @@
+;;; aferir.test.tlisp — (deftest …) units for the calibration engine.
+;;;
+;;; A tool that refuses uncalibrated measurements had, until this file, no
+;;; measurement proving IT works. That is the same defect it exists to catch,
+;;; one level up, and it is why these tests drive the REAL `aferir` with an
+;;; injected runner rather than asserting on prose.
+;;;
+;;; Run:
+;;;   cat aferir.tlisp aferir.test.tlisp > /tmp/t.tlisp
+;;;   TLISP_TEST=1 tatara-script --test /tmp/t.tlisp
+;;;
+;;; TLISP_TEST=1 makes aferir.tlisp define its functions and run neither face —
+;;; the same shape the 37 tested tools in pleme-io/actions use.
+;;;
+;;; WHAT IS AND IS NOT COVERED, stated so a green run is not over-read: these
+;;; exercise the verdict algebra and the CLI parser, both pure once the runner
+;;; is injected. They do NOT exercise `correr` itself (a real `exec-capture`),
+;;; so a regression in argv handling at the process boundary would pass here.
+;;; That boundary is covered by the live end-to-end matrix in the commit log,
+;;; not by this file.
+
+;;; ── Mock runners ─────────────────────────────────────────────────────────
+;;; Shaped exactly like `correr`'s return: an alist of status / out / err.
+(define (resp status out) (list (list "status" status) (list "out" out) (list "err" "")))
+
+;;; A runner that answers by argv content, so target and control can differ in
+;;; one invocation — which is the whole point of a calibration.
+(define (fake-runner alvo-out ctrl-out alvo-status ctrl-status)
+  (lambda (argv)
+    (if (> (length (filter (lambda (a) (equal? a "TARGET")) argv)) 0)
+      (resp alvo-status alvo-out)
+      (resp ctrl-status ctrl-out))))
+
+(define ALVO (list "cmd" "TARGET"))
+(define CTRL (list "cmd" "CONTROL"))
+(define OKS (list "0"))
+
+(define (veredito r) (alist-get r "veredito" "?"))
+
+;;; ── The three verdicts ───────────────────────────────────────────────────
+
+(deftest "achado — hits need no calibration"
+  ;; A positive reading proves the instrument saw something, so the control is
+  ;; not consulted at all. Pinning this keeps a future refactor from making
+  ;; every successful search pay for a second exec.
+  (let ((r (aferir (fake-runner "a\nb\nc" "" 0 0) OKS ALVO CTRL 1)))
+    (assert (equal? (veredito r) "achado") "hits must read achado")
+    (assert (= (alist-get r "n" 0) 3) "n must count the lines the target returned")))
+
+(deftest "vazio — zero hits WITH a passing control is a real absence"
+  (let ((r (aferir (fake-runner "" "control-saw-this" 0 0) OKS ALVO CTRL 1)))
+    (assert (equal? (veredito r) "vazio") "verified instrument + no hits = vazio")))
+
+(deftest "desconhecido — zero hits with a BLIND control is not an absence"
+  ;; THE LOAD-BEARING CASE. Target and control both return nothing. A
+  ;; two-valued tool reports "not found"; this must refuse, because a control
+  ;; that sees nothing proves the instrument cannot see this corpus.
+  (let ((r (aferir (fake-runner "" "" 0 0) OKS ALVO CTRL 1)))
+    (assert (equal? (veredito r) "desconhecido") "blind control must void the reading")))
+
+(deftest "desconhecido — a target that failed to run yields no verdict"
+  (let ((r (aferir (fake-runner "" "ctrl" 2 0) OKS ALVO CTRL 1)))
+    (assert (equal? (veredito r) "desconhecido") "a failed target is not an absence")))
+
+(deftest "desconhecido — a control that failed to run also voids the reading"
+  (let ((r (aferir (fake-runner "" "ctrl" 0 2) OKS ALVO CTRL 1)))
+    (assert (equal? (veredito r) "desconhecido") "an unusable control cannot certify absence")))
+
+;;; ── The exit-status contract ─────────────────────────────────────────────
+
+(deftest "status 1 is a legitimate empty when the caller declares it ok"
+  ;; grep exits 1 for no-match and 2 for a real error. Declaring "0,1" is what
+  ;; lets an honest empty grep read as vazio instead of desconhecido — the bug
+  ;; this file's own first live run caught.
+  (let ((r (aferir (fake-runner "" "ctrl" 1 0) (list "0" "1") ALVO CTRL 1)))
+    (assert (equal? (veredito r) "vazio") "declared-ok status must not void the reading")))
+
+(deftest "the same status voids the reading when NOT declared ok"
+  (let ((r (aferir (fake-runner "" "ctrl" 1 0) (list "0") ALVO CTRL 1)))
+    (assert (equal? (veredito r) "desconhecido") "undeclared status must void the reading")))
+
+;;; ── Retry asymmetry ──────────────────────────────────────────────────────
+
+(deftest "the retry bound terminates and does not change the verdict"
+  ;; The retry asymmetry — retry a not-ok exit, NEVER an honest empty — is a
+  ;; real property of `tentar`, and this test does NOT fully prove it.
+  ;;
+  ;; Proving it needs a call COUNT, which needs mutable state, and this
+  ;; interpreter has none: set!, set-car!, set-cdr!, vector-set!, hash-set!,
+  ;; atom and swap! are all unbound (probed 2026-07-31, not assumed). The only
+  ;; way to count would be filesystem side effects inside a unit test, which
+  ;; buys the assertion at the cost of the property that makes these tests
+  ;; trustworthy.
+  ;;
+  ;; So this pins what IS provable purely — the recursion terminates at both
+  ;; bounds and the verdict is bound-independent (fixture: an empty target with
+  ;; a SEEING control, i.e. a genuine vazio) — and the un-retried-empty
+  ;; claim rests on reading `tentar`, where the `(or (ok? …) (<= vezes 1))`
+  ;; guard returns before recursing. Stated rather than implied: a green run
+  ;; here is not evidence of the call count.
+  (let ((r1 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 1))
+        (r2 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 2)))
+    (assert (equal? (veredito r1) (veredito r2))
+            "an empty target must read the same at either retry bound")
+    (assert (equal? (veredito r1) "vazio")
+            "a SEEING control certifies the absence at either bound")))
+
+;;; ── CLI parsing: the illegal states the CLI face removes ────────────────
+
+(deftest "sections split on -- and preserve an argument containing a pipe"
+  ;; The env face MUST split on '|' and therefore mangles such an argument
+  ;; (measured: it turned one query into another and returned a confident
+  ;; achado n=396). argv has no such hazard, and this pins it.
+  (let* ((args (list "-l" "x" "--" "grep" "a|b" "--" "grep" "ctrl"))
+         (f0 (colher args 0 (list)))
+         (t0 (colher args (nth 1 f0) (list)))
+         (alvo (nth 0 t0)))
+    (assert (= (length alvo) 2) "target section is exactly two words")
+    (assert (equal? (nth 1 alvo) "a|b") "the pipe-bearing argument survives intact")))
+
+(deftest "an unknown flag is rejected, never ignored"
+  ;; A typo'd --lable that silently used the default would mislabel a
+  ;; measurement in a report someone later trusts.
+  (let ((fl (flags (list "--lable" "x") 0 (list))))
+    (assert (not (equal? "" (alist-get fl "erro" ""))) "unknown flag must produce an error")))
+
+(deftest "--tries is a closed enum, not a silent coercion"
+  ;; This interpreter has no string->number. Coercing an unparseable value to
+  ;; the default would make `--tries 5` mean 2 — a measurement running a
+  ;; different number of times than its operator believes.
+  (assert (= (tries-de "2") 2) "a declared value parses")
+  (assert (= (tries-de "5") -1) "an out-of-range value is rejected, not coerced")
+  (assert (= (tries-de "banana") -1) "a non-numeric value is rejected, not coerced"))
