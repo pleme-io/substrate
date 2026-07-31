@@ -61,6 +61,24 @@ on:
         description: "Path (relative to the repo root) to a .trivyignore-format file of named, tracked exceptions for the scan-before-push gate -- each entry must carry its own justification, never a blanket severity loosening. Empty (default) = no exceptions."
         type: string
         default: ""
+      scan-vex-file:
+        description: >-
+          Path (relative to the repo root) to an OpenVEX document for the
+          scan-before-push gate. DISTINCT FROM scan-ignore-file ON PURPOSE: an
+          ignorefile says "stop telling me", a VEX statement is a published,
+          machine-readable claim WITH a justification that a downstream auditor
+          can read and dispute. Collapsing them would turn a compliance
+          mechanism into a suppression one. Use VEX for a finding that is REAL
+          in the SBOM and assessed not-affected in THIS artifact (no upstream
+          fix exists, or the vulnerable package is provably absent); use the
+          ignorefile only where no defensible claim can be made. Empty (default)
+          = no VEX, byte-identical trivy argv to before this input existed.
+          NOTE trivy matches a pre-publish (--input) statement by COMPONENT
+          purl, so such a document is image-independent BY SHAPE -- its scoping
+          comes from passing ONE document per image here, never from its
+          content. See hardened-images/vex/README-scoping.md.
+        type: string
+        default: ""
       boot-check-cmd:
         description: "Correctness gate, run AFTER the CVE scan and BEFORE the push (a CVE-clean image that crashes at boot is worse than useless -- theory/CAMELOT.md's own hardened-images incident, 2026-07-17: mysql+rabbitmq both passed 0-CVE scans and neither could boot). Health command exec'd inside the started container via pleme-io/actions/container-boot-check (e.g. 'mysqladmin ping --silent', 'rabbitmq-diagnostics -q ping'). Empty (default) = no boot-check -- every existing caller keeps its current behavior unchanged; opt in per consumer, same shape as scan-before-push."
         type: string
@@ -325,6 +343,7 @@ jobs:
           fail-on-severity: ${{ inputs.scan-fail-on-severity }}
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
+          vex: ${{ inputs.scan-vex-file }}
 
       # Second-opinion CVE-database gate (grype) -- sibling to the trivy gate
       # above, same artifact (the app builds `images_.<name>` as an ordinary
