@@ -715,6 +715,136 @@ fn env_input(name: &str) -> Option<String> {
     env::var(name).ok().filter(|s| !s.is_empty())
 }
 
+/// Minimal RFC-4648 base64 decoder. Deliberately hand-rolled rather than adding
+/// a `base64` crate: this file's dependency set is kept C-dependency-light and
+/// small on purpose (see Cargo.toml's rustls comment), and the only input it
+/// ever decodes is the `auth` field of a docker config -- a few dozen bytes.
+/// Returns None on any invalid character or length, so a malformed config is
+/// simply "no ambient credential" rather than a panic.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some(u32::from(c - b'A')),
+            b'a'..=b'z' => Some(u32::from(c - b'a') + 26),
+            b'0'..=b'9' => Some(u32::from(c - b'0') + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let raw: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    let body: &[u8] = raw.strip_suffix(b"==").or_else(|| raw.strip_suffix(b"=")).unwrap_or(&raw);
+    let pad = raw.len().checked_sub(body.len())?;
+    if pad > 2 || (!raw.is_empty() && raw.len() % 4 != 0) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() * 3 / 4);
+    let mut acc: u32 = 0;
+    let mut bits = 0u32;
+    for &c in body {
+        acc = (acc << 6) | val(c)?;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((acc >> bits) & 0xFF).ok()?);
+        }
+    }
+    Some(out)
+}
+
+/// Where a docker/podman-style credential store lives, most specific first.
+fn credential_store_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(f) = env::var_os("REGISTRY_AUTH_FILE") {
+        v.push(PathBuf::from(f));
+    }
+    if let Some(d) = env::var_os("DOCKER_CONFIG") {
+        v.push(PathBuf::from(d).join("config.json"));
+    }
+    if let Some(h) = env::var_os("HOME") {
+        v.push(PathBuf::from(&h).join(".docker").join("config.json"));
+        v.push(
+            PathBuf::from(&h)
+                .join(".config")
+                .join("containers")
+                .join("auth.json"),
+        );
+    }
+    v
+}
+
+/// AMBIENT CREDENTIALS -- the gap that kept `skopeo` in the nix release path.
+///
+/// `oci-push push` required `--dest-user`/`--dest-pass` and had no other source,
+/// while the thing it replaces (`skopeo copy`) reads the docker/podman
+/// credential store written by `docker login` / `gh auth`. Every nix-side
+/// release app therefore could not migrate off skopeo without also rewriting how
+/// it obtains credentials. Reading the same store closes that, so the migration
+/// is a command swap rather than a credential redesign.
+///
+/// Both shapes the stores actually use are handled: `auths.<host>.auth`
+/// (base64 `user:pass`, what `docker login` writes) and a plain
+/// `username`/`password` pair (what some helpers and hand-written configs use).
+/// A `credsStore`/`credHelpers` indirection is deliberately NOT followed -- that
+/// would mean executing an arbitrary helper binary found on PATH, which is a
+/// materially different trust decision than reading a file the user already
+/// owns. When only a helper is configured this returns None and the caller
+/// falls through to the existing MissingArg error, which names the flag.
+fn docker_config_credentials(registry: &str) -> Option<(String, String)> {
+    docker_config_credentials_in(&credential_store_paths(), registry)
+}
+
+/// Path-taking core of [`docker_config_credentials`]. Split out so the lookup is
+/// testable without mutating process-wide env, which would race under the test
+/// harness's parallelism and make failures non-deterministic.
+fn docker_config_credentials_in(paths: &[PathBuf], registry: &str) -> Option<(String, String)> {
+    for path in paths {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let auths = json.get("auths").and_then(serde_json::Value::as_object);
+        let Some(auths) = auths else { continue };
+
+        // Registries appear under several spellings; try the exact host first,
+        // then the schemed forms, then docker-hub's legacy index key.
+        let mut keys: Vec<String> = vec![
+            registry.to_string(),
+            String::from("https://") + registry,
+            String::from("https://") + registry + "/",
+        ];
+        if registry == "docker.io" || registry == "registry-1.docker.io" {
+            keys.push(String::from("https://index.docker.io/v1/"));
+        }
+
+        for k in &keys {
+            let Some(entry) = auths.get(k).and_then(serde_json::Value::as_object) else {
+                continue;
+            };
+            if let (Some(u), Some(p)) = (
+                entry.get("username").and_then(serde_json::Value::as_str),
+                entry.get("password").and_then(serde_json::Value::as_str),
+            ) {
+                if !u.is_empty() && !p.is_empty() {
+                    return Some((u.to_string(), p.to_string()));
+                }
+            }
+            if let Some(b64) = entry.get("auth").and_then(serde_json::Value::as_str) {
+                let decoded = base64_decode(b64)?;
+                let decoded = String::from_utf8(decoded).ok()?;
+                if let Some((u, p)) = decoded.split_once(':') {
+                    if !u.is_empty() && !p.is_empty() {
+                        return Some((u.to_string(), p.to_string()));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Basic auth when both creds are present; anonymous otherwise (public source).
 fn auth_or_anon(user: Option<String>, pass: Option<String>) -> RegistryAuth {
     match (user, pass) {
@@ -810,11 +940,26 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     tags.push(primary);
     tags.extend(additional);
 
+    // Registry resolves FIRST: the ambient credential store is keyed by host, so
+    // it cannot be consulted until we know which host we are pushing to.
+    let resolved_registry = registry
+        .or_else(|| env_input("INPUT_REGISTRY"))
+        .or_else(|| non_empty(cfg.default_registry.clone()))
+        .ok_or(PushError::MissingArg("registry"))?;
+
+    // Explicit flags/env win; the docker/podman credential store is the LAST
+    // resort. Ordered this way so a caller that passes creds explicitly can
+    // never be silently overridden by whatever happens to be in ~/.docker --
+    // and looked up once, so the two fields cannot disagree about which entry
+    // they came from.
+    let ambient = if dest_user.is_none() && env_input("INPUT_DEST_USER").is_none() {
+        docker_config_credentials(&resolved_registry)
+    } else {
+        None
+    };
+
     let spec = PushSpec {
-        registry: registry
-            .or_else(|| env_input("INPUT_REGISTRY"))
-            .or_else(|| non_empty(cfg.default_registry.clone()))
-            .ok_or(PushError::MissingArg("registry"))?,
+        registry: resolved_registry,
         image: image
             .or_else(|| env_input("INPUT_IMAGE"))
             .ok_or(PushError::MissingArg("image"))?,
@@ -824,9 +969,11 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             .unwrap_or_else(|| String::from("./image.tar.gz")),
         dest_user: dest_user
             .or_else(|| env_input("INPUT_DEST_USER"))
+            .or_else(|| ambient.as_ref().map(|(u, _)| u.clone()))
             .ok_or(PushError::MissingArg("dest-user"))?,
         dest_pass: dest_pass
             .or_else(|| env_input("INPUT_DEST_PASS"))
+            .or_else(|| ambient.as_ref().map(|(_, p)| p.clone()))
             .ok_or(PushError::MissingArg("dest-pass"))?,
         insecure: insecure || env_input("INPUT_INSECURE").as_deref() == Some("true"),
         ca_cert: ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT")),
@@ -2134,4 +2281,118 @@ mod tests {
         assert_eq!(tmp_mode, 0o1777);
         fs::remove_dir_all(&root).unwrap();
     }
+
+    // ── ambient docker-credential resolution (added 2026-07-31) ─────────────
+    // These exist because `oci-push push` previously REQUIRED --dest-user /
+    // --dest-pass and had no other source, while the `skopeo copy` it replaces
+    // reads the docker credential store. That gap, not any missing push
+    // capability, is what kept skopeo in the nix release path.
+
+    fn write_cfg(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+        fs::create_dir_all(dir).unwrap();
+        let p = dir.join(name);
+        fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn base64_decodes_a_docker_auth_field() {
+        // "user:pass"
+        assert_eq!(base64_decode("dXNlcjpwYXNz").unwrap(), b"user:pass");
+        // padded forms
+        assert_eq!(base64_decode("YQ==").unwrap(), b"a");
+        assert_eq!(base64_decode("YWI=").unwrap(), b"ab");
+        assert_eq!(base64_decode("").unwrap(), b"");
+    }
+
+    #[test]
+    fn base64_rejects_junk_rather_than_panicking() {
+        assert!(base64_decode("not*valid").is_none());
+        assert!(base64_decode("abc").is_none()); // length not a multiple of 4
+    }
+
+    #[test]
+    fn reads_base64_auth_entry() {
+        let d = std::env::temp_dir().join("ocipush-cred-b64");
+        let _ = fs::remove_dir_all(&d);
+        let p = write_cfg(
+            &d,
+            "config.json",
+            r#"{"auths":{"ghcr.io":{"auth":"dXNlcjpwYXNz"}}}"#,
+        );
+        let got = docker_config_credentials_in(&[p], "ghcr.io");
+        assert_eq!(
+            got,
+            Some((String::from("user"), String::from("pass")))
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn reads_plain_username_password_entry() {
+        let d = std::env::temp_dir().join("ocipush-cred-plain");
+        let _ = fs::remove_dir_all(&d);
+        let p = write_cfg(
+            &d,
+            "config.json",
+            r#"{"auths":{"ghcr.io":{"username":"u2","password":"p2"}}}"#,
+        );
+        assert_eq!(
+            docker_config_credentials_in(&[p], "ghcr.io"),
+            Some((String::from("u2"), String::from("p2")))
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn negative_control_unknown_registry_yields_nothing() {
+        // The positive cases above would pass even if the lookup ignored the
+        // registry argument entirely. This is what makes them mean something.
+        let d = std::env::temp_dir().join("ocipush-cred-neg");
+        let _ = fs::remove_dir_all(&d);
+        let p = write_cfg(
+            &d,
+            "config.json",
+            r#"{"auths":{"ghcr.io":{"auth":"dXNlcjpwYXNz"}}}"#,
+        );
+        assert_eq!(docker_config_credentials_in(&[p], "example.invalid"), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn credshelper_only_config_is_not_followed() {
+        // Deliberate: following credsStore means EXECUTING a helper binary found
+        // on PATH, a materially different trust decision than reading a file the
+        // user already owns. None here means the caller falls through to the
+        // MissingArg error naming the flag, which is the honest outcome.
+        let d = std::env::temp_dir().join("ocipush-cred-helper");
+        let _ = fs::remove_dir_all(&d);
+        let p = write_cfg(
+            &d,
+            "config.json",
+            r#"{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}"#,
+        );
+        assert_eq!(docker_config_credentials_in(&[p], "ghcr.io"), None);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn missing_or_malformed_files_are_skipped_not_fatal() {
+        let d = std::env::temp_dir().join("ocipush-cred-bad");
+        let _ = fs::remove_dir_all(&d);
+        let bad = write_cfg(&d, "config.json", "{ this is not json");
+        let good = write_cfg(
+            &d,
+            "good.json",
+            r#"{"auths":{"ghcr.io":{"auth":"dXNlcjpwYXNz"}}}"#,
+        );
+        let absent = d.join("does-not-exist.json");
+        // first path absent, second malformed, third valid -> still resolves
+        assert_eq!(
+            docker_config_credentials_in(&[absent, bad, good], "ghcr.io"),
+            Some((String::from("user"), String::from("pass")))
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+
 }
