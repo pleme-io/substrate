@@ -56,7 +56,20 @@ on:
         type: string
         default: "UNKNOWN"
       ignore-file:
-        description: "Path (relative to repo root) to a .trivyignore-format file of named, tracked exceptions. Empty = none."
+        description: "Path (relative to repo root) to a .trivyignore-format file of named, tracked exceptions. Empty = none. Requires the caller repo to be checked out, which this workflow now does when this or `vex` is set."
+        type: string
+        default: ""
+      vex:
+        description: >-
+          Path (relative to the CALLER's repo root) to an OpenVEX/CSAF document,
+          forwarded to zot-pull-scan -> image-scan -> trivy --vex. Set this
+          whenever the image's PUBLISHING gate passed because of a VEX
+          statement: this faucet re-scans the pulled bytes, so without the same
+          document it reaches the opposite verdict and the image can never enter
+          Zot -- and therefore can never reach 2F. Measured 2026-07-31 (run
+          30661312791): hardened-chproxy released green with its GO-2026-5932
+          OpenVEX doc and its mirror failed "zot faucet REJECT ... severity=UNKNOWN".
+          Empty = no VEX, unchanged for every existing vendor-* caller.
         type: string
         default: ""
       runner:
@@ -166,12 +179,24 @@ jobs:
       # session, this time the action doesn't exist at the tag rather
       # than just missing an output). The action's own README shows @v1
       # as its usage example -- also stale, fixed alongside this.
+      # A file path input is only meaningful if the file is on the runner. This
+      # workflow had NO checkout, so `ignore-file` -- declared since it was
+      # written -- pointed at a path that could not exist. It was never caught
+      # because no caller ever passed it (measured 2026-07-31: zero callers).
+      # `vex` has real callers from day one, so the checkout is now required
+      # rather than latent. Conditional so the ~14 public vendor-* legs, which
+      # pass neither, keep their exact current step list.
+      - name: Check out the caller's repo (only when a scan file is passed)
+        if: inputs.vex != '' || inputs.ignore-file != ''
+        uses: actions/checkout@v4
+
       - id: pull-scan
         uses: pleme-io/actions/zot-pull-scan@main
         with:
           ref: ${{ inputs.ref }}
           fail-on-severity: ${{ inputs.fail-on-severity }}
           ignore-file: ${{ inputs.ignore-file }}
+          vex: ${{ inputs.vex }}
           # Explicit source credentials, replacing the deleted stage-0 login.
           # Still gated on source-registry, so an empty one (every public
           # vendor-* leg) passes empty strings and doca keeps the anonymous
