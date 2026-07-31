@@ -324,6 +324,8 @@
           # the closed set and the `callShape` sites drifting apart.
           rust-shape =
             (import ./lib/build/rust/tests/shape-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          rust-determinism-flags =
+            (import ./lib/build/rust/tests/determinism-flags-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
