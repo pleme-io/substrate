@@ -296,21 +296,81 @@ let
     # same mechanism as mkPackageImage's option of the same name.
     writablePaths ? [ ],
     user ? "${toString nonrootUid}:${toString nonrootGid}",
+    # Name of an env var holding the source-registry password, for a pull
+    # from a PRIVATE registry. See the `pulled` binding below for why the
+    # name (not the value) is what crosses into the derivation. null = the
+    # unauthenticated path, byte-identical to before this existed.
+    srcCredsEnv ? null,
+    srcCredsUser ? "AWS",
     # Merged OVER the default io.pleme.rewrap.*/org.opencontainers.image.*
     # set below -- see mkPackageImage's own `labels` doc comment.
     labels ? {},
   }: let
-    # Pull upstream. `imageDigest` identifies the remote manifest; `sha256`
-    # is the local tarball hash. Caller pins both.
-    pulled = dockerTools.pullImage {
-      imageName = upstream;
-      imageDigest = upstreamDigest;
-      sha256 = upstreamSha256;
-      os = upstreamOs;
-      arch = upstreamArch;
-      finalImageName = "${service}-upstream";
-      finalImageTag = "extracted";
-    };
+    # ── PULLING FROM A PRIVATE REGISTRY ──────────────────────────────────
+    # `dockerTools.pullImage` cannot do it. Measured against nixpkgs'
+    # own definition (pkgs/build-support/docker/default.nix, `pullImage =`):
+    # it accepts imageName/imageDigest/os/arch/tlsVerify and NOTHING for
+    # credentials, and its `impureEnvVars` is exactly
+    # `lib.fetchers.proxyImpureEnvVars` -- proxy settings only. So there is
+    # no parameter to pass a credential through and no env var that would
+    # survive into the builder. A private-registry pull fails on
+    # authentication with no knob to turn.
+    #
+    # `srcCredsEnv` names an environment variable holding the registry
+    # PASSWORD (username is passed separately). The variable NAME is what
+    # this derivation records; the VALUE is threaded through
+    # `impureEnvVars`, which is legal precisely because this is a
+    # fixed-output derivation -- the output is pinned by `upstreamSha256`,
+    # so an impure input cannot change what the build is allowed to
+    # produce. That is the same mechanism nixpkgs already uses to let proxy
+    # settings reach a fetcher.
+    #
+    # Why a variable name and not the secret itself: a literal credential
+    # in a derivation argument lands in the store, world-readable, and in
+    # every `nix show-derivation`. Passing the NAME keeps the secret in the
+    # runner's environment where it belongs. It also suits a rotating
+    # credential (an ECR token lives 12 hours) -- the FOD only re-runs when
+    # its output is missing, so expiry does not invalidate a cached pull.
+    #
+    # Left null (the default) this is byte-identical to the plain
+    # `dockerTools.pullImage` call it replaces.
+    pulled =
+      let
+        base = dockerTools.pullImage {
+          imageName = upstream;
+          imageDigest = upstreamDigest;
+          sha256 = upstreamSha256;
+          os = upstreamOs;
+          arch = upstreamArch;
+          finalImageName = "${service}-upstream";
+          finalImageTag = "extracted";
+        };
+      in
+      if srcCredsEnv == null then base else base.overrideAttrs (old: {
+        impureEnvVars = (old.impureEnvVars or [ ]) ++ [ srcCredsEnv ];
+        # nixpkgs' builder runs `skopeo copy $sourceURL …`. Re-point
+        # `sourceURL` is not enough -- credentials are a separate flag --
+        # so the builder is replaced with the same copy plus `--src-creds`.
+        # `--src-creds` takes user:password; the password is read from the
+        # named variable at build time and never appears in the store.
+        buildCommand = ''
+          if [ -z "''${${srcCredsEnv}:-}" ]; then
+            echo "mkVendorRewrap: ${srcCredsEnv} is empty or unset -- refusing to" >&2
+            echo "  attempt an unauthenticated pull of a private image. Export it" >&2
+            echo "  in the environment invoking nix (and keep it out of the store)." >&2
+            exit 1
+          fi
+          skopeo \
+            --insecure-policy \
+            --tmpdir=$TMPDIR \
+            --override-os ${upstreamOs} \
+            --override-arch ${upstreamArch} \
+            copy \
+            --src-creds "${srcCredsUser}:''${${srcCredsEnv}}" \
+            "docker://${upstream}@${upstreamDigest}" \
+            "docker-archive://$out:${service}-upstream:extracted"
+        '';
+      });
 
     # Unpack the pulled image and copy the binary out. Uses skopeo+umoci
     # for a deterministic unpack — `tar -xf` over layered images produces
