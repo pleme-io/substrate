@@ -344,6 +344,25 @@ in rec {
     # behaviour described above — correct only for a builder that has nothing
     # to pull from.
     substituterUrl ? "",
+    # RAM budget per concurrent nix job, feeding `nixBuildOptsFor`'s
+    # max-jobs/cores sizing. Default 4 keeps every existing caller identical.
+    #
+    # RAISE IT for a closure containing a memory-hungry C++ build. Measured
+    # 2026-07-31: on a c7i.4xlarge (16 vCPU / 32 GB) the default yields
+    # maxJobs = min(16, 32/4) = 8 with cores = 2 — eight concurrent
+    # derivations against a 4 GB/job budget on a 32 GB box, i.e. ZERO headroom
+    # for the OS and page cache. A `llvm-static-…-musl` build in that closure
+    # died with `ninja: build stopped: subcommand failed` after 1h32m, which is
+    # what an OOM-killed compiler looks like from nix's side: the kernel's
+    # OOM message goes to dmesg, never into the build log, so there is no
+    # "out of memory" string to grep for. LLVM translation units routinely
+    # exceed 4 GB on their own.
+    #
+    # perJobRamGb = 8 on that box gives maxJobs = 4, cores = 4 — half the
+    # concurrency, double the per-job budget, and the same 16 cores in use.
+    # The file's own guidance (see `amiBuilderInstanceSpecs`) is that lowering
+    # this needs a measurement first; raising it is the conservative direction.
+    perJobRamGb ? 4,
   }: let
     hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
     # Resolve a stack name ("base", "hardened", "ami-full",
@@ -468,7 +487,7 @@ in rec {
                 # a hand-typed --option max-jobs/--option cores literal,
                 # so the safe value tracks the instance the template
                 # actually declares rather than drifting per-consumer.
-                "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType; }}"
+                "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType perJobRamGb; }}"
               ] ++ extraEnvironmentVars;
               # `nixos-rebuild switch` (the standard first step of
               # fullProvisioner/provisionerScript for every mkBuildTemplate
