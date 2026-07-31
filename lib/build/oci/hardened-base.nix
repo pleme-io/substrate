@@ -259,6 +259,43 @@ let
     publishTag,                    # e.g. "4.47.0-nix0"
     extraContents ? [],
     env ? [],
+    # ── Upstream CONTRACT preservation ──────────────────────────────────
+    # Added 2026-07-31. `mkPackageImage` has carried these since it was
+    # written, and its doc comment states the reason plainly: a hardened
+    # image "preserves whatever entrypoint/port/volume/env CONTRACT the
+    # upstream vendor image it replaces exposed (so it drops in as a
+    # same-interface substitute)". This function claimed the same job and
+    # could not express half of it -- `ExposedPorts`, `Volumes` and `Cmd`
+    # were simply absent from the emitted config, and `WorkingDir` was
+    # hardcoded to "/". A rewrap that silently drops the upstream's port
+    # and volume declarations is not a same-interface substitute; it is a
+    # substitute whose interface differs in ways nothing checks. The gap
+    # was invisible while the only consumer was a single-binary gateway
+    # whose contract happened to be entrypoint-only.
+    #
+    # Defaults preserve the previous behaviour exactly ({} / [] / "/"),
+    # so every existing caller is byte-unchanged.
+    exposedPorts ? { },            # OCI ExposedPorts, e.g. { "9999/tcp" = {}; }
+    volumes ? { },                 # OCI Volumes -- data dirs upstream declares VOLUME
+    cmd ? [ ],                     # OCI Cmd, appended to entrypoint
+    workingDir ? "/",              # upstream WorkingDir, when it is load-bearing
+    # Additional binaries to lift out of the SAME upstream rootfs. The
+    # single-`binaryPath` shape is why this function was documented as
+    # "the wrong shape for a full runtime" -- but the common real case is
+    # not a full runtime, it is a main binary plus one or two siblings
+    # (a listener, a healthcheck probe) that live in the same image and
+    # must stay version-locked to it. Each entry is a rootfs path; all are
+    # installed into /bin alongside `binaryPath`.
+    extraBinaryPaths ? [ ],
+    # Rootfs FILES (not binaries) the upstream provides and the hardened
+    # base does not -- carried explicitly, by path, so that what is
+    # inherited from the vendor is a declared list rather than whatever
+    # happened to survive. Each entry is { from, to }.
+    extraRootfsPaths ? [ ],
+    # Non-root data dirs needing write access at boot, same meaning and
+    # same mechanism as mkPackageImage's option of the same name.
+    writablePaths ? [ ],
+    user ? "${toString nonrootUid}:${toString nonrootGid}",
     # Merged OVER the default io.pleme.rewrap.*/org.opencontainers.image.*
     # set below -- see mkPackageImage's own `labels` doc comment.
     labels ? {},
@@ -287,20 +324,25 @@ let
         docker-archive:${pulled} \
         "oci:oci:${service}-latest"
       umoci unpack --image "oci:${service}-latest" rootfs
-      install -Dm0755 "rootfs/rootfs${binaryPath}" "$out/bin/${baseNameOf binaryPath}"
+      ${lib.concatStringsSep "\n      " (
+          (map (p: ''install -Dm0755 "rootfs/rootfs${p}" "$out/bin/${baseNameOf p}"'')
+               ([ binaryPath ] ++ extraBinaryPaths))
+          ++ (map (e: ''install -Dm0644 "rootfs/rootfs${e.from}" "$out/${e.to}"'')
+                  extraRootfsPaths)
+        )}
     '';
 
     entrypointBin = "/bin/${baseNameOf binaryPath}";
     imageContents = [ extractedBinary ] ++ extraContents;
-  in (dockerTools.buildLayeredImage {
+  in (dockerTools.buildLayeredImage ({
     name = publishName;
     tag = publishTag;
     fromImage = base;
     contents = imageContents;
     config = {
       Entrypoint = [ entrypointBin ];
-      User = "${toString nonrootUid}:${toString nonrootGid}";
-      WorkingDir = "/";
+      User = user;
+      WorkingDir = workingDir;
       Env = env;
       Labels = {
         "org.opencontainers.image.source" = "https://github.com/pleme-io";
@@ -309,8 +351,31 @@ let
         "io.pleme.rewrap.upstream.digest" = upstreamDigest;
         "io.pleme.rewrap.service" = service;
       } // labels;
-    };
-  }) // {
+    }
+    # EVERY contract field is emitted ONLY when it carries a value, via
+    # `optionalAttrs`. That is not stylistic. Emitting `Cmd = []`,
+    # `ExposedPorts = {}` and `Volumes = {}` unconditionally puts three
+    # keys into the OCI config JSON that were previously ABSENT, which
+    # changes the derivation hash of EVERY existing caller -- measured,
+    # not feared: the same probe call moved ha3nfrqc… -> 8x3lb4cb… on the
+    # first cut of this change. Semantically harmless, byte-wise a rebuild
+    # and a new digest for images nobody asked to move. Conditioning them
+    # keeps the old call shape byte-identical while the new one gains the
+    # capability -- proven by re-evaluating the old shape against this
+    # file's own pre-change revision in a git worktree.
+    // lib.optionalAttrs (cmd != [ ]) { Cmd = cmd; }
+    // lib.optionalAttrs (exposedPorts != { }) { ExposedPorts = exposedPorts; }
+    // lib.optionalAttrs (volumes != { }) { Volumes = volumes; };
+  } // lib.optionalAttrs (writablePaths != [ ]) {
+    # Same mechanism, same reason as mkPackageImage's identically-named
+    # option -- Nix strips write bits from every registered store path, so
+    # the fakeroot-assisted tar assembly is the only stage where a chown/
+    # chmod actually lands in the emitted layer.
+    fakeRootCommands =
+      lib.concatStringsSep "\n"
+        (map (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths);
+    enableFakechroot = true;
+  })) // {
     # See the passthru-chain comment above `mkDistrolessStaticBase` — the
     # extracted upstream binary is opaque (pulled bytes, not a Nix
     # derivation with a package closure of its own), so this closure
