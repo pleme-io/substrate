@@ -957,7 +957,74 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             gzip_level: cfg.gzip_level,
         }),
     };
-    backend.push_all(&spec)
+    push_with_retry(backend.as_ref(), &spec)
+}
+
+/// How many times a push may attempt the registry before giving up.
+/// 5 matches the `--retry-times 5` the skopeo call site this replaces carried.
+const PUSH_ATTEMPTS: u32 = 5;
+
+/// First backoff delay; doubled per attempt (1s, 2s, 4s, 8s).
+const PUSH_BACKOFF_BASE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Retry a push across transient registry failures.
+///
+/// WHY THIS EXISTS. The skopeo invocation doca replaces carried
+/// `--retry-times 5`, and it was not decoration -- it was added against a
+/// MEASURED failure (2026-07-21, Harbor / registry.secondfront.com):
+/// "writing blob: ... read: connection reset by peer" partway through a ~40-blob
+/// rabbitmq image, after most blobs had already uploaded. Large multi-blob
+/// uploads over a real network hit transient resets.
+///
+/// doca had NO retry at all. Converting the call site without this would have
+/// silently regressed resilience on precisely the path that pushes large
+/// hardened images to Harbor -- the 2F endpoint, i.e. the exact registry the
+/// original failure was measured against. A conversion that quietly drops a
+/// property added in response to a real incident is a regression wearing the
+/// costume of a cleanup.
+///
+/// STRICTLY BETTER THAN WHAT IT REPLACES: skopeo retried EVERY failure five
+/// times, so a 401 or a malformed archive burned the whole budget with backoff
+/// before failing anyway. Only `OciPush` -- the error raised from the registry
+/// interaction itself -- is retried here. A parse error, a missing tarball
+/// entry, or a credential error is deterministic: re-running it produces the
+/// same result, so it returns immediately and the operator sees the real reason
+/// without a 15-second delay in front of it.
+fn push_with_retry(backend: &dyn PushBackend, spec: &PushSpec) -> Result<(), PushError> {
+    push_with_retry_inner(backend, spec, PUSH_ATTEMPTS, PUSH_BACKOFF_BASE)
+}
+
+/// Split out so tests can drive it with a zero backoff -- otherwise exercising
+/// the retry path would cost 1+2+4 real seconds of sleeping, which is the kind
+/// of tax that gets a test deleted rather than kept.
+fn push_with_retry_inner(
+    backend: &dyn PushBackend,
+    spec: &PushSpec,
+    attempts: u32,
+    base_delay: std::time::Duration,
+) -> Result<(), PushError> {
+    let mut delay = base_delay;
+    let mut attempt: u32 = 1;
+    loop {
+        match backend.push_all(spec) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                // Only the registry interaction is retryable; everything else
+                // is deterministic and would fail identically.
+                let transient = matches!(e, PushError::OciPush { .. });
+                if !transient || attempt >= attempts {
+                    return Err(e);
+                }
+                eprintln!(
+                    "oci-push: push attempt {attempt}/{attempts} failed ({e}); \
+                     retrying in {delay:?}"
+                );
+                std::thread::sleep(delay);
+                delay = delay.saturating_mul(2);
+                attempt += 1;
+            }
+        }
+    }
 }
 
 /// `transfer` — copy an image from one registry to another (native oci-client:
@@ -2420,6 +2487,99 @@ mod tests {
     /// not a type. Making it truly-unrepresentable would mean moving
     /// `auth_or_anon` into a submodule that exposes only `auth_resolved` --
     /// worth doing, and NOT done here.
+    /// A backend that fails a scripted number of times, then succeeds --
+    /// so the retry loop can be exercised without a registry.
+    struct FlakyBackend {
+        /// Failures to emit before succeeding.
+        fail_times: std::cell::Cell<u32>,
+        /// Total push_all invocations, so a test can assert it did NOT retry.
+        calls: std::cell::Cell<u32>,
+        /// When true, fail with a NON-retryable error instead.
+        permanent: bool,
+    }
+
+    impl PushBackend for FlakyBackend {
+        fn push_all(&self, _spec: &PushSpec) -> Result<(), PushError> {
+            self.calls.set(self.calls.get() + 1);
+            if self.permanent {
+                return Err(PushError::NoManifestJson);
+            }
+            let left = self.fail_times.get();
+            if left == 0 {
+                return Ok(());
+            }
+            self.fail_times.set(left - 1);
+            Err(PushError::OciPush {
+                tag: String::from("1.0.0"),
+                detail: String::from("connection reset by peer"),
+            })
+        }
+    }
+
+    fn spec_fixture() -> PushSpec {
+        PushSpec {
+            registry: String::from("registry.example.com"),
+            image: String::from("pleme-io/thing"),
+            tags: vec![String::from("1.0.0")],
+            tarball: String::from("/nonexistent.tar"),
+            dest_user: String::from("u"),
+            dest_pass: String::from("p"),
+            insecure: false,
+            ca_cert: None,
+        }
+    }
+
+    /// The measured Harbor failure: several blobs upload, the connection
+    /// resets, a retry succeeds. Without the retry loop this is a failed push.
+    #[test]
+    fn push_retries_transient_registry_failures() {
+        let b = FlakyBackend {
+            fail_times: std::cell::Cell::new(2),
+            calls: std::cell::Cell::new(0),
+            permanent: false,
+        };
+        let r = push_with_retry_inner(&b, &spec_fixture(), 5, std::time::Duration::ZERO);
+        assert!(r.is_ok(), "expected success after transient failures: {r:?}");
+        assert_eq!(b.calls.get(), 3, "expected 2 failures then 1 success");
+    }
+
+    /// The budget is finite -- a registry that is genuinely down must still
+    /// terminate, and must surface the registry's own error, not a retry
+    /// wrapper's.
+    #[test]
+    fn push_gives_up_after_the_budget() {
+        let b = FlakyBackend {
+            fail_times: std::cell::Cell::new(99),
+            calls: std::cell::Cell::new(0),
+            permanent: false,
+        };
+        let r = push_with_retry_inner(&b, &spec_fixture(), 4, std::time::Duration::ZERO);
+        assert!(matches!(r, Err(PushError::OciPush { .. })));
+        assert_eq!(b.calls.get(), 4, "expected exactly the attempt budget");
+    }
+
+    /// The improvement over the skopeo call site this replaces: skopeo retried
+    /// EVERY failure 5 times with backoff, so a deterministic error (bad
+    /// credentials, malformed archive) cost ~15s of sleeping before reporting
+    /// the same reason it had on attempt 1. A non-retryable error must return
+    /// immediately -- asserted by call count, which is the only thing that can
+    /// tell "returned fast" from "returned eventually".
+    #[test]
+    fn push_does_not_retry_deterministic_failures() {
+        let b = FlakyBackend {
+            fail_times: std::cell::Cell::new(0),
+            calls: std::cell::Cell::new(0),
+            permanent: true,
+        };
+        let r = push_with_retry_inner(&b, &spec_fixture(), 5, std::time::Duration::ZERO);
+        assert!(matches!(r, Err(PushError::NoManifestJson)));
+        assert_eq!(
+            b.calls.get(),
+            1,
+            "a deterministic error must not consume the retry budget"
+        );
+    }
+
     /// THE NEEDLES ARE ASSEMBLED AT RUNTIME, and that is load-bearing.
     ///
     /// Written with the names as plain literals, this test read its OWN source
