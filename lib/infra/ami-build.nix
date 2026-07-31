@@ -202,7 +202,7 @@ in rec {
   # non-empty token is present so a public-repo fetch never depends on
   # having a working token at all.
   nixosRebuildSwitchStep =
-    ''ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using Attic cache: $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
+    ''ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using binary cache (sui): $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
 
   # ── Shared app wrapper ───────────────────────────────────────────
   #
@@ -320,6 +320,30 @@ in rec {
     # not to bound a slow build. Raise it for a genuinely longer bake
     # rather than removing it.
     ttlHours ? 4,
+    # ── BINARY-CACHE SUBSTITUTER (sui) ────────────────────────────────
+    # A cache URL the builder substitutes from, e.g. an in-VPC sui endpoint.
+    #
+    # WHY THIS EXISTS — measured, not speculative. A bake with NO substituter
+    # substituted 604 paths and BUILT 1304 FROM SOURCE, including
+    # `llvm-static-x86_64-unknown-linux-musl` and `rustc-static-…-musl`: a
+    # whole static Rust toolchain compiled from scratch because nothing serves
+    # it. That LLVM build failed after 1h32m (`ninja: build stopped`, not an
+    # OOM), which cascaded through rustc-static → rustc-wrapper → the entire
+    # system closure. A warm cache is not an optimisation here; it is the
+    # difference between a bake that completes and one that cannot.
+    #
+    # ATTIC IS RETIRED FLEET-WIDE; SUI HAS TAKEN OVER EVERY ATTIC FUNCTION.
+    # The variable that carries this to the provisioner is still named
+    # `attic_url`, deliberately: ami-forge's Rust side and the multi-layer
+    # templates both read that name, and renaming it would be a cross-repo
+    # break for zero behavioural gain. The NAME is legacy; the BACKEND is sui.
+    # (MODULARIZE, DON'T DELETE — the ephemeral-attic bootstrap in
+    # `mkAmiBuildPipeline`'s `atticSsm` stays intact and simply goes unused.)
+    #
+    # Empty (the default) means "no substituter", which is the from-source
+    # behaviour described above — correct only for a builder that has nothing
+    # to pull from.
+    substituterUrl ? "",
   }: let
     hardeningProfiles = import ./hardening-profiles { inherit pkgs; };
     # Resolve a stack name ("base", "hardened", "ami-full",
@@ -350,7 +374,12 @@ in rec {
         volume_size = { type = "number"; default = volumeSize; };
         github_token = { type = "string"; default = ""; sensitive = true; };
         flake_ref = { type = "string"; default = flakeRef; };
-        attic_url = { type = "string"; default = ""; };
+        # The builder's binary-cache substituter. Historically an ephemeral
+        # attic instance (hence the name, kept so ami-forge's Rust side and the
+        # multi-layer templates keep working unchanged); `substituterUrl` now
+        # lets a caller point it at SUI, which has taken over every attic
+        # function fleet-wide.
+        attic_url = { type = "string"; default = substituterUrl; };
       } // extraVariables;
 
       packer.required_plugins = requiredPlugins;
