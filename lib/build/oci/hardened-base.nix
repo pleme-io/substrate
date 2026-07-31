@@ -440,9 +440,38 @@ let
     # option -- Nix strips write bits from every registered store path, so
     # the fakeroot-assisted tar assembly is the only stage where a chown/
     # chmod actually lands in the emitted layer.
+    # ── `mkdir -p` IS LOAD-BEARING, added 2026-07-31 against a real crash ────
+    # Without it this chowns a path that may not exist, which is a silent no-op
+    # for exactly the images that most need it.
+    #
+    # MEASURED. hardened-nats-server passes its CVE gate (severity=none count=0
+    # scanned-targets=1) and CANNOT START:
+    #   [FTL] Can't start JetStream: could not create storage directory
+    #         - mkdir /var/lib/nats/jetstream: permission denied
+    #
+    # WHY IT BIT nats AND NOT rabbitmq, which declares the same shape: the
+    # differentiator is whether the PACKAGE already creates the directory.
+    # rabbitmq's does, so the chown landed, and a container runtime initialises
+    # a fresh volume FROM the image content -- ownership included -- so it boots.
+    # Nothing creates /var/lib/nats, so there was nothing to chown; the runtime
+    # then created the volume itself, root-owned, and a uid-65532 process cannot
+    # write it. The error naming an EXISTING but unwritable dir is the tell: the
+    # runtime made it, we didn't.
+    #
+    # 13 of 31 catalog images declare a path in both `volumes` and
+    # `writablePaths` while running non-root -- including the entire ClickHouse
+    # OLAP stack and both classic FIPS rewraps
+    # (classic-hardened-clickhouse-server /var/lib/clickhouse,
+    # classic-hardened-clickhouse-keeper /var/lib/clickhouse-keeper). Only
+    # nats-server was ever caught, because it is 1 of 2 images with a
+    # boot-check. The rest would ship "0-CVE" and crash-loop.
+    #
+    # Fixed here rather than per-image: the declaration `writablePaths = [ p ]`
+    # now MEANS "p exists and is writable by the image user", which is what
+    # every call site already assumed it meant.
     fakeRootCommands =
       lib.concatStringsSep "\n"
-        (map (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths);
+        (map (p: "mkdir -p ${p} && chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths);
     enableFakechroot = true;
   })) // {
     # See the passthru-chain comment above `mkDistrolessStaticBase` — the
@@ -538,7 +567,7 @@ let
     fromImage = base;
     contents = imageContents;
     fakeRootCommands = lib.concatStringsSep "\n" (
-      (map (p: "chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths)
+      (map (p: "mkdir -p ${p} && chown -R ${user} ${p} && chmod -R u+rwX ${p}") writablePaths)
       ++ lib.optional (extraFakeRootCommands != "") extraFakeRootCommands
     );
     enableFakechroot = writablePaths != [] || extraFakeRootCommands != "";
