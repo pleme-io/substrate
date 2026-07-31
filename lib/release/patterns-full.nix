@@ -74,10 +74,20 @@
       backend = "tatara-lisp";
       role = "Bump the :version field inside a (defcaixa ...) form. Sibling of cargo-bump / npm-bump for the tatara-lisp + caixa SDLC primitive.";
     };
+    "caixa-deps-resolve" = {
+      uses = "pleme-io/actions/caixa-deps-resolve@main";
+      backend = "tatara-lisp";
+      role = "Resolve :depends-on entries in a caixa.lisp to actual git checkouts at the requested ref. Materializes git-as-package-repo for caixa.";
+    };
     "caixa-publish" = {
       uses = "pleme-io/actions/caixa-publish@main";
       backend = "shell";
       role = "Publish caixa-rendered Helm chart to an OCI registry. Wraps helm-publish but consumes the caixa-render output dir.";
+    };
+    "caixa-publish-to-git" = {
+      uses = "pleme-io/actions/caixa-publish-to-git@main";
+      backend = "tatara-lisp";
+      role = "Tag the current commit with the caixa.lisp :version field — turns the repo into a git-as-package-repo that downstream caixas can :depends-on by tag.";
     };
     "caixa-render" = {
       uses = "pleme-io/actions/caixa-render@main";
@@ -96,6 +106,11 @@
       backend = "shell";
       role = "Assume an AWS IAM role via OIDC (no long-lived creds). Exports AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_SESSION_TOKEN to subsequent steps.";
     };
+    "aws-cost-report" = {
+      uses = "pleme-io/actions/aws-cost-report@main";
+      backend = "tatara-lisp";
+      role = "Pull last-month AWS cost via Cost Explorer.";
+    };
     "aws-s3-upload" = {
       uses = "pleme-io/actions/aws-s3-upload@main";
       backend = "tatara-lisp";
@@ -106,10 +121,45 @@
       backend = "tatara-lisp";
       role = "Deploy via Azure CLI (az deployment group create).";
     };
+    "cloudflare-cache-purge" = {
+      uses = "pleme-io/actions/cloudflare-cache-purge@main";
+      backend = "tatara-lisp";
+      role = "Purge Cloudflare cache for zone or URLs.";
+    };
+    "cloudflare-d1-migrate" = {
+      uses = "pleme-io/actions/cloudflare-d1-migrate@main";
+      backend = "tatara-lisp";
+      role = "Run a D1 schema migration via wrangler d1 migrations apply.";
+    };
+    "cloudflare-d1-query" = {
+      uses = "pleme-io/actions/cloudflare-d1-query@main";
+      backend = "tatara-lisp";
+      role = "Execute SQL against a Cloudflare D1 database.";
+    };
+    "cloudflare-do-list" = {
+      uses = "pleme-io/actions/cloudflare-do-list@main";
+      backend = "tatara-lisp";
+      role = "List Durable Object instances by namespace.";
+    };
+    "cloudflare-kv-get" = {
+      uses = "pleme-io/actions/cloudflare-kv-get@main";
+      backend = "tatara-lisp";
+      role = "Get a value from Workers KV.";
+    };
+    "cloudflare-kv-put" = {
+      uses = "pleme-io/actions/cloudflare-kv-put@main";
+      backend = "tatara-lisp";
+      role = "Put a key/value into a Workers KV namespace.";
+    };
     "cloudflare-pages-deploy" = {
       uses = "pleme-io/actions/cloudflare-pages-deploy@main";
       backend = "shell";
       role = "Deploy a static build dir to Cloudflare Pages via wrangler. Universal — works with any output dir (Vite, mkdocs, cargo doc, hand-built static).";
+    };
+    "cloudflare-queue-publish" = {
+      uses = "pleme-io/actions/cloudflare-queue-publish@main";
+      backend = "tatara-lisp";
+      role = "Publish a message to a Cloudflare Queue.";
     };
     "cloudflare-r2-upload" = {
       uses = "pleme-io/actions/cloudflare-r2-upload@main";
@@ -208,6 +258,11 @@
       backend = "tatara-lisp";
       role = "Send an SMS via Twilio.";
     };
+    "twilio-voice-call" = {
+      uses = "pleme-io/actions/twilio-voice-call@main";
+      backend = "tatara-lisp";
+      role = "Trigger a Twilio voice call via API for ops alerts.";
+    };
   };
   container = {
     "buildah-build" = {
@@ -238,7 +293,7 @@
     "oci-image-push" = {
       uses = "pleme-io/actions/oci-image-push@main";
       backend = "tatara-lisp";
-      role = "Push an OCI image tarball (Nix dockerTools output) to a registry — skopeo fallback";
+      role = "Push an OCI image tarball (Nix dockerTools output) to a registry via doca (pure-Rust OCI push, retry-on-transient)";
     };
     "podman-build" = {
       uses = "pleme-io/actions/podman-build@main";
@@ -248,7 +303,12 @@
     "skopeo-copy" = {
       uses = "pleme-io/actions/skopeo-copy@main";
       backend = "tatara-lisp";
-      role = "Copy an OCI image between registries via skopeo copy.";
+      role = "RETIRED 2026-07-31 — zero consumers fleet-wide, measured with a control (actions/oci-image-push@ returns 3 in substrate, so the probe reads these repos correctly; actions/skopeo-copy@ returns 0 everywhere). Use pleme-io/actions/oci-image-push (doca: pure-Rust, per-call auth, retry-on-transient) or doca transfer for registry-to-registry. Kept, not deleted, per MODULARIZE-DON''T-DELETE. Historically: copied an OCI image between registries via skopeo copy.";
+    };
+    "skopeo-login" = {
+      uses = "pleme-io/actions/skopeo-login@main";
+      backend = "tatara-lisp";
+      role = "RETIRED 2026-07-31 — zero consumers remain fleet-wide. doca is per-CALL auth, so there is no login step to perform. Kept, not deleted, per MODULARIZE-DON''T-DELETE. Historically: logged skopeo into a registry (ECR-aware), writing skopeo''s own auth file rather than ~/.docker/config.json.";
     };
   };
   data = {
@@ -316,7 +376,7 @@
     "detect-repo-type" = {
       uses = "pleme-io/actions/detect-repo-type@main";
       backend = "tatara-lisp";
-      role = "Auto-detect the repo type from manifest file presence at the root. Emits a typed identifier (rust-workspace / rust-single-crate / npm / python / helm / ansible-collection / ruby-gem / github-action / unknown) that downstream jobs route on.";
+      role = "Auto-detect the repo type from manifest file presence at the root. Emits a typed identifier (rust-workspace / rust-single-crate / go / npm / python / helm / ansible-collection / ruby-gem / github-action / caixa / unknown) that downstream jobs route on.";
     };
   };
   docs = {
@@ -324,6 +384,11 @@
       uses = "pleme-io/actions/api-spec-diff@main";
       backend = "tatara-lisp";
       role = "Detect breaking changes in an OpenAPI / GraphQL / gRPC spec between base + head refs. Useful PR-time gate for API surface stability.";
+    };
+    "changelog-fragments-merge" = {
+      uses = "pleme-io/actions/changelog-fragments-merge@main";
+      backend = "tatara-lisp";
+      role = "Merge .changelog/ fragments into CHANGELOG.md (Keep a Changelog).";
     };
     "changelog-generate" = {
       uses = "pleme-io/actions/changelog-generate@main";
@@ -411,10 +476,25 @@
     };
   };
   git = {
+    "git-cliff" = {
+      uses = "pleme-io/actions/git-cliff@main";
+      backend = "tatara-lisp";
+      role = "Run git-cliff to generate a changelog from conventional commits.";
+    };
     "git-commit-tag" = {
       uses = "pleme-io/actions/git-commit-tag@main";
       backend = "tatara-lisp";
-      role = "Configure github-actions bot identity, stage typed paths, commit with a typed message template, and create an annotated tag. Composes with git-push-with-token for the push half.";
+      role = "Configure github-actions bot identity, stage typed paths, commit with a typed message template, and create an annotated tag. Refuses to cut a tag that is not ABOVE the highest already-released version (release-monotonicity guard) or that already exists (collision guard). Composes with git-push-with-token for the push half.";
+    };
+    "git-credentials" = {
+      uses = "pleme-io/actions/git-credentials@main";
+      backend = "tatara-lisp";
+      role = "Route github.com fetches through a resolved PAT so a build can clone PRIVATE pleme-io git dependencies. The git twin of registry-login: the BOT_PAT > GITHUB_TOKEN priority order and the load-bearing extraheader-unset live here, ONCE, instead of being hand-repeated in every reusable that builds Rust/Go with private deps. On the Free plan BOT_PAT reaches PUBLIC repos only, so a private caller passes it empty and the fallback lands on the repo-scoped GITHUB_TOKEN — the two approved tracks, expressed once.";
+    };
+    "git-path-commit-count" = {
+      uses = "pleme-io/actions/git-path-commit-count@main";
+      backend = "tatara-lisp";
+      role = "Count commits reachable from a ref that touched a given pathspec — a deterministic, monotonic build/patch number with no counter-state to maintain. Generic — any repo, any path, no secrets. Requires a checkout with real history (fetch-depth: 0); a shallow clone under-counts silently, so this action refuses to guess and errors instead.";
     };
     "git-push-with-token" = {
       uses = "pleme-io/actions/git-push-with-token@main";
@@ -427,6 +507,11 @@
       uses = "pleme-io/actions/helm-bump@main";
       backend = "tatara-lisp";
       role = "Bump a Helm Chart.yaml version field via in-place yaml-edit. Sibling of cargo-bump for the Helm ecosystem.";
+    };
+    "helm-mirror" = {
+      uses = "pleme-io/actions/helm-mirror@main";
+      backend = "tatara-lisp";
+      role = "Mirror a Helm monorepo''s third-party subchart deps into the pleme-io OCI registry (hermetic supply chain)";
     };
     "helm-oci-publish" = {
       uses = "pleme-io/actions/helm-oci-publish@main";
@@ -676,12 +761,22 @@
       backend = "tatara-lisp";
       role = "Push a built nix path to a Cachix binary cache.";
     };
+    "nix-image" = {
+      uses = "pleme-io/actions/nix-image@main";
+      backend = "tatara-lisp";
+      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and akeyless-nix-images (dockerImage:<arch>:<svc>). Fan out over runs-on:[camelot,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
+    };
   };
   npm = {
     "npm-bump" = {
       uses = "pleme-io/actions/npm-bump@main";
       backend = "tatara-lisp";
       role = "Bump an npm package.json version via `npm version --no-git-tag-version <type>`, refresh package-lock.json. Sibling of cargo-bump for the npm ecosystem.";
+    };
+    "npm-mirror-pull" = {
+      uses = "pleme-io/actions/npm-mirror-pull@main";
+      backend = "tatara-lisp";
+      role = "Pull an npm tarball for offline mirroring.";
     };
     "npm-publish" = {
       uses = "pleme-io/actions/npm-publish@main";
@@ -735,7 +830,7 @@
     "rust-workspace-publish" = {
       uses = "pleme-io/actions/rust-workspace-publish@main";
       backend = "tatara-lisp";
-      role = "Ship every workspace member to the Rust registry in topological dependency order. Auto-renames any conflicting crate to pleme-io-<original> + commits the rename back to main + retries. Pure tlisp logic, no shell beyond install glue.";
+      role = "Ship every workspace member to the Rust registry in topological (leaves-first) dependency order, derived from cargo metadata with dev-deps excluded and exact-pinned targets leading their batch. Auto-renames any conflicting crate to pleme-io-<original> + commits the rename back to main + retries. A member that fails permanently costs exactly that member; the rest still ship and the run reports red at the end. Pure tlisp logic, no shell beyond install glue.";
     };
   };
   python = {
@@ -786,7 +881,7 @@
     "release-promote" = {
       uses = "pleme-io/actions/release-promote@main";
       backend = "tatara-lisp";
-      role = "Promote a built artifact between environments (dev → staging → prod). Re-tags an existing image/version rather than rebuilding — ensures bit-identical artifact at each stage.";
+      role = "Promote a built artifact between environments (dev → staging → prod) without rebuilding. kind=image-retag re-tags an existing OCI image (bit-identical artifact per stage); kind=helm-chart-version writes the exact chart/image version into the next environment''s committed values file as a GitOps commit (the AUTOBUMP/eclusa FedRAMP chart-version-promotion leg).";
     };
     "semantic-release" = {
       uses = "pleme-io/actions/semantic-release@main";
@@ -810,7 +905,7 @@
     "tatara-script" = {
       uses = "pleme-io/actions/tatara-script@main";
       backend = "shell";
-      role = "Execute an embedded .tlisp source string with tatara-script (binary-first, cargo-install fallback)";
+      role = "Execute an embedded .tlisp source string with tatara-script (binary-first, nix-install fallback)";
     };
   };
   rust = {
@@ -823,6 +918,11 @@
       uses = "pleme-io/actions/cargo-publish-crate@main";
       backend = "tatara-lisp";
       role = "Publish a single Rust crate to crates.io; skips if (name, version) already exists; sleeps + retries on 429 rate-limit. Sibling of rust-workspace-publish for non-workspace Rust repos.";
+    };
+    "cargo-publish-each-member" = {
+      uses = "pleme-io/actions/cargo-publish-each-member@main";
+      backend = "tatara-lisp";
+      role = "Publish each workspace member to crates.io at its own [package].version. For multi-crate workspaces WITHOUT a shared [workspace.package].version (rust-url / bindgen / dirs-next / ratatui pattern). Bumps each member individually, tags member-name-v-version, publishes per-member; rust-workspace-publish is for the engenho-style shared-version pattern.";
     };
   };
   sdlc = {
@@ -877,6 +977,11 @@
       uses = "pleme-io/actions/conftest@main";
       backend = "tatara-lisp";
       role = "Run conftest OPA-based policy check.";
+    };
+    "cosign-sign" = {
+      uses = "pleme-io/actions/cosign-sign@main";
+      backend = "tatara-lisp";
+      role = ">-";
     };
     "cosign-verify" = {
       uses = "pleme-io/actions/cosign-verify@main";
@@ -984,30 +1089,650 @@
     };
   };
   uncategorized = {
+    "airtable-record-create" = {
+      uses = "pleme-io/actions/airtable-record-create@main";
+      backend = "tatara-lisp";
+      role = "Create a record in an Airtable base.";
+    };
+    "aldrava-dispatch" = {
+      uses = "pleme-io/actions/aldrava-dispatch@main";
+      backend = "tatara-lisp";
+      role = "The typed knock: match a PR comment against a registered command catalog, resolve commenter trust, and dispatch the target (label relabel / workflow_dispatch / repository_dispatch) — never mutates on an untrusted knock.";
+    };
+    "aldrava-lint" = {
+      uses = "pleme-io/actions/aldrava-lint@main";
+      backend = "tatara-lisp";
+      role = "Validate a (defcommentcommand ...) catalog file — catches a typo or malformed command definition at PR time instead of at the next real knock.";
+    };
+    "aldrava-resolve" = {
+      uses = "pleme-io/actions/aldrava-resolve@main";
+      backend = "tatara-lisp";
+      role = "Resolve a uniform run context (checkout ref, branch ref, base ref, PR author, is-develop) from whatever event triggered this job — a label add, workflow_dispatch, schedule, or repository_dispatch — so a downstream pipeline behaves the same regardless of trigger source. No command matching, no trust decision: that already happened upstream in aldrava-dispatch.";
+    };
+    "algolia-index-push" = {
+      uses = "pleme-io/actions/algolia-index-push@main";
+      backend = "tatara-lisp";
+      role = "Push records to an Algolia index.";
+    };
+    "anchor-build" = {
+      uses = "pleme-io/actions/anchor-build@main";
+      backend = "tatara-lisp";
+      role = "Build a Solana Anchor program.";
+    };
+    "anthropic-message" = {
+      uses = "pleme-io/actions/anthropic-message@main";
+      backend = "tatara-lisp";
+      role = "POST a single message to the Anthropic Claude API.";
+    };
+    "apprise-notify" = {
+      uses = "pleme-io/actions/apprise-notify@main";
+      backend = "tatara-lisp";
+      role = "Send via Apprise (any of 100+ services).";
+    };
+    "arduino-cli-build" = {
+      uses = "pleme-io/actions/arduino-cli-build@main";
+      backend = "tatara-lisp";
+      role = "Compile an Arduino sketch via arduino-cli.";
+    };
+    "asana-task-create" = {
+      uses = "pleme-io/actions/asana-task-create@main";
+      backend = "tatara-lisp";
+      role = "Create an Asana task via the API.";
+    };
+    "attestation-gate" = {
+      uses = "pleme-io/actions/attestation-gate@main";
+      backend = "tatara-lisp";
+      role = "FedRAMP provenance GATE — verify a tameshi/cartorio attestation receipt (presence + blake3 algorithm + content-address tamper-evidence + optional chain/digest/SBOM/SLSA pillar checks) and REFUSE to promote an unattested or tampered artifact version. The verify/gate dual of tameshi-attest + cartorio-attest. Cryptographic signature verification is a named LiveTODO (require-signed=true fails honestly).";
+    };
+    "auth0-rule-deploy" = {
+      uses = "pleme-io/actions/auth0-rule-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy an Auth0 Action/Rule.";
+    };
+    "bigorna" = {
+      uses = "pleme-io/actions/bigorna@main";
+      backend = "tatara-lisp";
+      role = "CI ENTRY: set up a buildx builder with NATIVE per-arch nodes (no QEMU) + a sui-store cache front, in one step. An unchanged `docker buildx build` afterward runs native-multi-arch + warm.";
+    };
+    "breathe-band-lint" = {
+      uses = "pleme-io/actions/breathe-band-lint@main";
+      backend = "tatara-lisp";
+      role = "Static coverage gate for breathe bands in a GitOps tree — every bandable workload has a MemoryBand, every band targetRef resolves, no BestEffort on stateful/control-plane, every band declares spec.mode. Parses committed YAML only; never contacts a cluster. The fourth baseline-debt sibling of action-shell-lint / runtime-install-lint / no-cve-suppression.";
+    };
+    "breathe-runner" = {
+      uses = "pleme-io/actions/breathe-runner@main";
+      backend = "tatara-lisp";
+      role = "Preflight posture gate for camelot breathable spot runners — assert the job landed on a 100%-spot, scale-to-zero, taint-isolated in-cluster GHA runner (never rio) and arm the retirada drain->checkpoint hook. First verb of a super-cache-ci build.";
+    };
+    "browserstack-test" = {
+      uses = "pleme-io/actions/browserstack-test@main";
+      backend = "tatara-lisp";
+      role = "Run BrowserStack cross-browser tests.";
+    };
+    "build-matrix" = {
+      uses = "pleme-io/actions/build-matrix@main";
+      backend = "tatara-lisp";
+      role = "Enumerate a flake''s colon-triple image attrs (dockerImage:<arch>:<svc>) and emit the GitHub Actions image×arch build matrix. Step 2 of the super-cache-ci graph job — the single-responsibility sibling of gen-build-spec (which gates spec freshness; this fans the fresh spec across every (service, arch) the flake actually exposes). TIER: SHIPPABLE-NOW — deterministic `nix eval` enumeration, honest per-service arch discovery (an arm64 row appears iff the flake exposes dockerImage:arm64:<svc>), never a hard-coded arch pair. TYPED EMISSION: the matrix JSON is composed by jq, never hand-concatenated.";
+    };
+    "bun-publish" = {
+      uses = "pleme-io/actions/bun-publish@main";
+      backend = "tatara-lisp";
+      role = "Build + publish via bunx.";
+    };
+    "cartorio-attest" = {
+      uses = "pleme-io/actions/cartorio-attest@main";
+      backend = "tatara-lisp";
+      role = "FedRAMP three-pillar compliance receipt for a delivered image digest: a BLAKE3 chain-linked receipt + an SBOM from Nix inputs (CycloneDX from the Nix closure) + SLSA v1.0 provenance. Sibling of tameshi-attest (the build receipt), sharing the BLAKE3 core, adding the SBOM+SLSA pillars.";
+    };
+    "cdk-deploy" = {
+      uses = "pleme-io/actions/cdk-deploy@main";
+      backend = "tatara-lisp";
+      role = "Run cdk deploy for an AWS CDK app.";
+    };
+    "cdktf-deploy" = {
+      uses = "pleme-io/actions/cdktf-deploy@main";
+      backend = "tatara-lisp";
+      role = "Run cdktf deploy for a CDK-for-Terraform app.";
+    };
+    "clickup-task-create" = {
+      uses = "pleme-io/actions/clickup-task-create@main";
+      backend = "tatara-lisp";
+      role = "Create a ClickUp task.";
+    };
+    "codacy-coverage-upload" = {
+      uses = "pleme-io/actions/codacy-coverage-upload@main";
+      backend = "tatara-lisp";
+      role = "Upload coverage to Codacy.";
+    };
     "codeql-scan" = {
       uses = "pleme-io/actions/codeql-scan@main";
       backend = "shell";
       role = "GitHub CodeQL SAST scan. Polymorphic — auto-detects language; uploads SARIF to GitHub Code Scanning.";
+    };
+    "commitlint" = {
+      uses = "pleme-io/actions/commitlint@main";
+      backend = "tatara-lisp";
+      role = "Validate commit messages with commitlint.";
+    };
+    "confluence-page-create" = {
+      uses = "pleme-io/actions/confluence-page-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Confluence page via REST API.";
+    };
+    "container-boot-check" = {
+      uses = "pleme-io/actions/container-boot-check@main";
+      backend = "tatara-lisp";
+      role = "Start a container and poll a health command until it responds or a bounded attempt count is exhausted. Generic — any image, any health command, no secrets. Dumps container logs on timeout so a boot failure is never silent.";
+    };
+    "conventional-commit-lint" = {
+      uses = "pleme-io/actions/conventional-commit-lint@main";
+      backend = "tatara-lisp";
+      role = "Enforce conventional-commit format on the latest commits.";
     };
     "coverage-upload" = {
       uses = "pleme-io/actions/coverage-upload@main";
       backend = "tatara-lisp";
       role = "Generate test coverage + upload to Codecov. Polymorphic — detects ecosystem (rust uses cargo-tarpaulin, npm uses jest --coverage, python uses pytest --cov).";
     };
+    "crates-mirror-pull" = {
+      uses = "pleme-io/actions/crates-mirror-pull@main";
+      backend = "tatara-lisp";
+      role = "Pull a crate from crates.io for offline mirroring.";
+    };
+    "crossplane-apply" = {
+      uses = "pleme-io/actions/crossplane-apply@main";
+      backend = "tatara-lisp";
+      role = "Apply Crossplane Composition + claims to a cluster.";
+    };
+    "dagster-materialize" = {
+      uses = "pleme-io/actions/dagster-materialize@main";
+      backend = "tatara-lisp";
+      role = "Materialize a Dagster asset via dagster CLI.";
+    };
+    "darwin-zig-build" = {
+      uses = "pleme-io/actions/darwin-zig-build@main";
+      backend = "tatara-lisp";
+      role = "cargo zigbuild --release for an apple-darwin target (cross-compiles from Linux), stage binary + sha256 into ./dist";
+    };
+    "dbt-build" = {
+      uses = "pleme-io/actions/dbt-build@main";
+      backend = "tatara-lisp";
+      role = "Run dbt build for a data warehouse model project.";
+    };
+    "deno-deploy" = {
+      uses = "pleme-io/actions/deno-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy to Deno Deploy via deployctl.";
+    };
+    "doca" = {
+      uses = "pleme-io/actions/doca@main";
+      backend = "shell";
+      role = "Typed OCI artifact manager (push / transfer / inspect / tag / list) via nix run github:pleme-io/substrate#oci-push. Inputs surfaced as INPUT_* env; the binary reads them as flag fallbacks — no shell flag-mapping.";
+    };
+    "elasticsearch-snapshot" = {
+      uses = "pleme-io/actions/elasticsearch-snapshot@main";
+      backend = "tatara-lisp";
+      role = "Trigger an Elasticsearch snapshot.";
+    };
+    "envoy-config-validate" = {
+      uses = "pleme-io/actions/envoy-config-validate@main";
+      backend = "tatara-lisp";
+      role = "Validate an Envoy proxy config.";
+    };
+    "esp-idf-build" = {
+      uses = "pleme-io/actions/esp-idf-build@main";
+      backend = "tatara-lisp";
+      role = "Build an ESP-IDF project.";
+    };
+    "fastly-cache-purge" = {
+      uses = "pleme-io/actions/fastly-cache-purge@main";
+      backend = "tatara-lisp";
+      role = "Purge Fastly cache.";
+    };
+    "ferrite-check" = {
+      uses = "pleme-io/actions/ferrite-check@main";
+      backend = "tatara-lisp";
+      role = "Per-package MATERIALIZABILITY gate of the camelot image pipeline: for ONE package (a flake image attr) verify it can be materialized (its attr resolves to a derivation via a cheap `nix eval`, NOT a derive) BEFORE the expensive build, content-address its SOURCE, and emit a PoMS — a Proof-of-Materialization-Spec receipt — cached by that source hash so a re-run over unchanged source is a pure cache hit (no re-eval, no derive). Single-responsibility sibling of build-matrix (the fan) + gen-build-spec (the freshness gate); it gates one fan cell's materializability. TYPED EMISSION: the PoMS JSON is composed by jq, never hand-concatenated; the receipt hash is a real BLAKE3 (the action FAILS rather than emit a receipt that lies about its algorithm). Sibling of tameshi-attest (build receipt) + cartorio-attest (delivery receipt) on ONE chain (carries chain.prev, shares the BLAKE3 core).";
+    };
+    "ffmpeg-transcode" = {
+      uses = "pleme-io/actions/ffmpeg-transcode@main";
+      backend = "tatara-lisp";
+      role = "Run ffmpeg transcode on input file(s).";
+    };
+    "flake-input-preseed" = {
+      uses = "pleme-io/actions/flake-input-preseed@main";
+      backend = "tatara-lisp";
+      role = "WARM flake-input lever — pull a heavy flake input''s SOURCE FOD out of the super-cache into the local store BEFORE the build, so the in-flake locked eval reuses the content-addressed path and SKIPS the ~40s eval-time git clone. nix''s git/tarball fetcher never substitutes a source tree, so `substituters=<sui>` alone is a no-op for source — this explicit `nix copy --from` is the load-bearing form of the lever. Pairs with super-cache-save''s flake-inputs push. TIER-HONEST: a miss (endpoint down / source not yet pushed / path unresolvable) degrades to the clone and is reported, never faked; require=true fails loud.";
+    };
+    "foundry-test" = {
+      uses = "pleme-io/actions/foundry-test@main";
+      backend = "tatara-lisp";
+      role = "Run forge test.";
+    };
+    "gen-build-spec" = {
+      uses = "pleme-io/actions/gen-build-spec@main";
+      backend = "tatara-lisp";
+      role = "Emit the typed *.build-spec.json for a repo via `gen build .` and enforce the GEN-TYPED-SPEC-CONTRACT stale gate (a committed spec that drifts from the regen is a CI FAILURE, never a runtime fetch). Step 3 of the super-cache-ci pipeline — produces the spec-path + spec-hash the tiered cache verbs key on. TIER-HONEST: lang=cargo is the NOW path (gen-cargo conquered, ledger row 9); npm/pip/gomod are a named LiveTODO (row 10); an absent `gen` reports an honest gen-absent-livetodo branch unless require-gen=true.";
+    };
+    "ghcr-publish" = {
+      uses = "pleme-io/actions/ghcr-publish@main";
+      backend = "tatara-lisp";
+      role = "Push a nix OCI image tarball to a private registry (ghcr.io/pleme-io/<svc>) under the AUTOBUMP exact tag <arch>-r<run>-<sha>, plus an optional moving <arch>-latest human pointer (never a deploy source). Auth is a pre-condition (docker/login-action first).";
+    };
+    "gitea-mirror-push" = {
+      uses = "pleme-io/actions/gitea-mirror-push@main";
+      backend = "tatara-lisp";
+      role = "Mirror push the repo to a Gitea instance.";
+    };
+    "gitlab-mirror-push" = {
+      uses = "pleme-io/actions/gitlab-mirror-push@main";
+      backend = "tatara-lisp";
+      role = "Mirror push the repo to a GitLab remote.";
+    };
+    "godot-export" = {
+      uses = "pleme-io/actions/godot-export@main";
+      backend = "tatara-lisp";
+      role = "Export a Godot project for a target preset.";
+    };
+    "google-calendar-event-create" = {
+      uses = "pleme-io/actions/google-calendar-event-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Google Calendar event via service account.";
+    };
+    "hardhat-deploy" = {
+      uses = "pleme-io/actions/hardhat-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy contracts via Hardhat.";
+    };
+    "hf-hub-upload" = {
+      uses = "pleme-io/actions/hf-hub-upload@main";
+      backend = "tatara-lisp";
+      role = "Upload a model/dataset to Hugging Face Hub.";
+    };
+    "hubspot-contact-upsert" = {
+      uses = "pleme-io/actions/hubspot-contact-upsert@main";
+      backend = "tatara-lisp";
+      role = "Upsert a HubSpot contact.";
+    };
+    "influxdb-write" = {
+      uses = "pleme-io/actions/influxdb-write@main";
+      backend = "tatara-lisp";
+      role = "Write line-protocol points to InfluxDB.";
+    };
+    "infracost-comment" = {
+      uses = "pleme-io/actions/infracost-comment@main";
+      backend = "tatara-lisp";
+      role = "Run infracost on a Terraform plan + comment cost diff on PR.";
+    };
+    "istio-apply" = {
+      uses = "pleme-io/actions/istio-apply@main";
+      backend = "tatara-lisp";
+      role = "Apply Istio config (Gateway, VirtualService, etc).";
+    };
+    "jira-issue-create" = {
+      uses = "pleme-io/actions/jira-issue-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Jira issue via REST API.";
+    };
+    "jupyter-notebook-render" = {
+      uses = "pleme-io/actions/jupyter-notebook-render@main";
+      backend = "tatara-lisp";
+      role = "Execute + export a Jupyter notebook to HTML.";
+    };
     "k6-load-test" = {
       uses = "pleme-io/actions/k6-load-test@main";
       backend = "tatara-lisp";
       role = "Run a k6 load test script + emit summary JSON. Pairs with thresholds for PR-time perf regression gating.";
+    };
+    "keycloak-realm-import" = {
+      uses = "pleme-io/actions/keycloak-realm-import@main";
+      backend = "tatara-lisp";
+      role = "Import a Keycloak realm via kc.sh.";
+    };
+    "linear-issue-create" = {
+      uses = "pleme-io/actions/linear-issue-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Linear issue via GraphQL API.";
+    };
+    "linear-issue-update" = {
+      uses = "pleme-io/actions/linear-issue-update@main";
+      backend = "tatara-lisp";
+      role = "Update a Linear issue's state/labels/etc.";
+    };
+    "linkerd-inject" = {
+      uses = "pleme-io/actions/linkerd-inject@main";
+      backend = "tatara-lisp";
+      role = "Inject Linkerd sidecars into k8s manifests.";
+    };
+    "make-scenario-run" = {
+      uses = "pleme-io/actions/make-scenario-run@main";
+      backend = "tatara-lisp";
+      role = "Run a Make.com scenario via webhook.";
+    };
+    "manifest-list-join" = {
+      uses = "pleme-io/actions/manifest-list-join@main";
+      backend = "tatara-lisp";
+      role = "Compose separately-pushed per-arch images (amd64=<ref>,arm64=<ref>) into one multi-arch OCI image index and push it under the multi-arch deploy coordinate r<run>-<sha>; report the index digest — the single exact coordinate an environment pins.";
+    };
+    "meilisearch-index" = {
+      uses = "pleme-io/actions/meilisearch-index@main";
+      backend = "tatara-lisp";
+      role = "Index documents to Meilisearch.";
+    };
+    "modal-deploy" = {
+      uses = "pleme-io/actions/modal-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy a Modal function/app.";
+    };
+    "n8n-trigger-workflow" = {
+      uses = "pleme-io/actions/n8n-trigger-workflow@main";
+      backend = "tatara-lisp";
+      role = "Trigger an n8n workflow via webhook.";
+    };
+    "newrelic-deploy-marker" = {
+      uses = "pleme-io/actions/newrelic-deploy-marker@main";
+      backend = "tatara-lisp";
+      role = "Send a New Relic deployment marker.";
+    };
+    "no-cve-suppression" = {
+      uses = "pleme-io/actions/no-cve-suppression@main";
+      backend = "tatara-lisp";
+      role = "Fail on ANY CVE-suppression surface — .trivyignore / vulnix whitelist / grype ignore / VEX not_affected entries AND the workflow-YAML gate-weakeners (*-advisory-only:true, ignore-unfixed:true, scan-ignore-file). A CVE is remediated at cause, never suppressed — see theory/NIX-HARDENING.md §VII.6. The third baseline-debt sibling of action-shell-lint / runtime-install-lint.";
+    };
+    "notion-db-row-add" = {
+      uses = "pleme-io/actions/notion-db-row-add@main";
+      backend = "tatara-lisp";
+      role = "Add a row to a Notion database.";
+    };
+    "notion-page-create" = {
+      uses = "pleme-io/actions/notion-page-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Notion page via the API.";
+    };
+    "ntfy-push" = {
+      uses = "pleme-io/actions/ntfy-push@main";
+      backend = "tatara-lisp";
+      role = "Push a notification to ntfy.sh (mobile/ops alert).";
+    };
+    "nx-affected-test" = {
+      uses = "pleme-io/actions/nx-affected-test@main";
+      backend = "tatara-lisp";
+      role = "Run nx affected:test for incremental CI.";
+    };
+    "nx-cloud-distribute" = {
+      uses = "pleme-io/actions/nx-cloud-distribute@main";
+      backend = "tatara-lisp";
+      role = "Distribute Nx tasks to Nx Cloud agents.";
+    };
+    "okta-app-sync" = {
+      uses = "pleme-io/actions/okta-app-sync@main";
+      backend = "tatara-lisp";
+      role = "Sync Okta apps from a YAML catalog.";
+    };
+    "ollama-pull" = {
+      uses = "pleme-io/actions/ollama-pull@main";
+      backend = "tatara-lisp";
+      role = "Pull an Ollama model.";
     };
     "onepassword-fetch" = {
       uses = "pleme-io/actions/onepassword-fetch@main";
       backend = "shell";
       role = "Fetch a secret from 1Password via Service Account token. Sibling of akeyless-secret-fetch.";
     };
+    "openai-embeddings-batch" = {
+      uses = "pleme-io/actions/openai-embeddings-batch@main";
+      backend = "tatara-lisp";
+      role = "Compute embeddings via OpenAI batch API.";
+    };
+    "openai-fine-tune-trigger" = {
+      uses = "pleme-io/actions/openai-fine-tune-trigger@main";
+      backend = "tatara-lisp";
+      role = "Trigger an OpenAI fine-tune job.";
+    };
+    "opentelemetry-trace-emit" = {
+      uses = "pleme-io/actions/opentelemetry-trace-emit@main";
+      backend = "tatara-lisp";
+      role = "Emit an OTLP trace span for this workflow run.";
+    };
+    "output-contract-sync" = {
+      uses = "pleme-io/actions/output-contract-sync@main";
+      backend = "tatara-lisp";
+      role = "Generate the two-boundary output contract for pleme-io/actions and gate it — byte-diffs the generated tatara-script outputs block + catalog against what is committed, and catches the wrapper-side gap the runtime gate cannot see.";
+    };
+    "pangea-grafana-converge" = {
+      uses = "pleme-io/actions/pangea-grafana-converge@main";
+      backend = "tatara-lisp";
+      role = "MODEL-2 (remote-reconcile) FedRAMP observability executor — health-probe a remote Grafana REST endpoint (inbound-only + scoped SA token) then drive the shipped pangea rio-observability workspace + deployment-agnostic pangea-grafana provider + magma runner against it, converging 2F Grafana from our side. Reports the runner''s real status; the exact flake app attr is a named LiveTODO, never faked.";
+    };
+    "pinecone-upsert" = {
+      uses = "pleme-io/actions/pinecone-upsert@main";
+      backend = "tatara-lisp";
+      role = "Upsert vectors to Pinecone.";
+    };
+    "platformio-build" = {
+      uses = "pleme-io/actions/platformio-build@main";
+      backend = "tatara-lisp";
+      role = "Build a PlatformIO embedded project.";
+    };
+    "posthog-event" = {
+      uses = "pleme-io/actions/posthog-event@main";
+      backend = "tatara-lisp";
+      role = "POST an event to PostHog for product analytics.";
+    };
+    "pull-request-gate" = {
+      uses = "pleme-io/actions/pull-request-gate@main";
+      backend = "tatara-lisp";
+      role = "Gate pull_request_target events: allow approved authors, label bots, auto-close+lock external drive-by PRs that only modify documentation. Defends against vendor badge-trojan spam.";
+    };
+    "puppeteer-screenshot" = {
+      uses = "pleme-io/actions/puppeteer-screenshot@main";
+      backend = "tatara-lisp";
+      role = "Capture page screenshots via puppeteer.";
+    };
+    "qdrant-collection-create" = {
+      uses = "pleme-io/actions/qdrant-collection-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Qdrant collection.";
+    };
+    "qiskit-job-submit" = {
+      uses = "pleme-io/actions/qiskit-job-submit@main";
+      backend = "tatara-lisp";
+      role = "Submit a Qiskit circuit job to IBM Quantum.";
+    };
+    "readme-sync" = {
+      uses = "pleme-io/actions/readme-sync@main";
+      backend = "tatara-lisp";
+      role = "Sync ReadMe.io docs from a repo.";
+    };
+    "redis-flush" = {
+      uses = "pleme-io/actions/redis-flush@main";
+      backend = "tatara-lisp";
+      role = "Flush a Redis DB (use with extreme care).";
+    };
+    "registry-login" = {
+      uses = "pleme-io/actions/registry-login@main";
+      backend = "tatara-lisp";
+      role = "Resolve an OCI-registry credential from the typed fallback (BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN) and log the chosen client (helm | docker) into the registry. The single overlay every publish reusable calls in place of a hand-repeated `secrets.BOT_PAT || secrets.GHCR_TOKEN || ...` expression — the priority order lives here, once. BOT_PAT carries write:packages on the org-shared ghcr.io/pleme-io/* namespace (a repo-scoped GITHUB_TOKEN 403s on cross-namespace push); on the Free plan it reaches public repos only, so a private caller passes it empty and the fallback lands on GITHUB_TOKEN — the two approved tracks, expressed once.";
+    };
+    "renovate-trigger" = {
+      uses = "pleme-io/actions/renovate-trigger@main";
+      backend = "tatara-lisp";
+      role = "Force Renovate to rerun on a repo.";
+    };
+    "replicate-run" = {
+      uses = "pleme-io/actions/replicate-run@main";
+      backend = "tatara-lisp";
+      role = "Run a model on Replicate via the API.";
+    };
+    "retool-workflow-run" = {
+      uses = "pleme-io/actions/retool-workflow-run@main";
+      backend = "tatara-lisp";
+      role = "Trigger a Retool workflow.";
+    };
+    "runner-resolve" = {
+      uses = "pleme-io/actions/runner-resolve@main";
+      backend = "tatara-lisp";
+      role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> Camelot self-hosted, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or Camelot self-hosted, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
+    };
+    "runtime-install-lint" = {
+      uses = "pleme-io/actions/runtime-install-lint@main";
+      backend = "tatara-lisp";
+      role = "Fail on runtime tool installation (curl|tar, curl|sh, apt-get/apt/pip/npm/go/cargo install) in any action.yml or run.tlisp, AND per-job Nix installation (nix-installer-action / `nix shell nixpkgs#…`) in any .github/workflows/*.yml. The tool must ship as a Nix-hardened image / baked runner image instead — see theory/NIX-HARDENING.md §VI, §VI.1.";
+    };
+    "salesforce-record-create" = {
+      uses = "pleme-io/actions/salesforce-record-create@main";
+      backend = "tatara-lisp";
+      role = "Create a Salesforce record via REST API.";
+    };
+    "selenium-grid-test" = {
+      uses = "pleme-io/actions/selenium-grid-test@main";
+      backend = "tatara-lisp";
+      role = "Run Selenium tests against a Grid endpoint.";
+    };
     "semgrep-scan" = {
       uses = "pleme-io/actions/semgrep-scan@main";
       backend = "tatara-lisp";
       role = "Semgrep SAST scan with configurable rule set.";
+    };
+    "ses-email-send" = {
+      uses = "pleme-io/actions/ses-email-send@main";
+      backend = "tatara-lisp";
+      role = "Send transactional email via AWS SES.";
+    };
+    "shopify-theme-deploy" = {
+      uses = "pleme-io/actions/shopify-theme-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy a Shopify theme via theme CLI.";
+    };
+    "sonarcloud-quality-gate" = {
+      uses = "pleme-io/actions/sonarcloud-quality-gate@main";
+      backend = "tatara-lisp";
+      role = "Wait for SonarCloud quality gate decision.";
+    };
+    "spin-deploy" = {
+      uses = "pleme-io/actions/spin-deploy@main";
+      backend = "tatara-lisp";
+      role = "Deploy a Fermyon Spin app to Fermyon Cloud.";
+    };
+    "step-summary-publish" = {
+      uses = "pleme-io/actions/step-summary-publish@main";
+      backend = "tatara-lisp";
+      role = "Render a templated markdown to $GITHUB_STEP_SUMMARY.";
+    };
+    "stripe-product-sync" = {
+      uses = "pleme-io/actions/stripe-product-sync@main";
+      backend = "tatara-lisp";
+      role = "Sync products from a typed YAML to Stripe.";
+    };
+    "stripe-webhook-test" = {
+      uses = "pleme-io/actions/stripe-webhook-test@main";
+      backend = "tatara-lisp";
+      role = "Send a Stripe webhook event from CLI for integration tests.";
+    };
+    "sui-dockerfile-node-cache" = {
+      uses = "pleme-io/actions/sui-dockerfile-node-cache@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "sui-remote-build" = {
+      uses = "pleme-io/actions/sui-remote-build@main";
+      backend = "tatara-lisp";
+      role = "BUILD-job remote-execution verb — dispatch a derivation to a REAPI spot worker over the sui daemon (RAM eval, tmpfs sandbox, DB store), keyed by the gen build-spec. DEGRADED-UNTIL-STORE: the REAPI worker binary + TieredBackend are a named LiveTODO — gracefully falls back to the correct LOCAL daemon-node build (worker=local, built=false honest, never a faked build); require-build=true fails loud.";
+    };
+    "sui-service-up" = {
+      uses = "pleme-io/actions/sui-service-up@main";
+      backend = "tatara-lisp";
+      role = "Resolve, health-check, and export the sui service (sui-daemon-graph) endpoint + selected store/cache/sandbox tiers for a super-cache-ci build. Does not own daemon lifecycle — the daemon is an external rio cluster app or a job-scoped sidecar. TIER-HONEST: the live Postgres/Redis (never-touch-disk) connect is a named LiveTODO.";
+    };
+    "sui-warm-hydrate" = {
+      uses = "pleme-io/actions/sui-warm-hydrate@main";
+      backend = "tatara-lisp";
+      role = "GRAPH-job warm verb — pre-load the sui daemon''s tiered super-cache (Redis L1 → Postgres L2 → object L3) with the fan-out''s content keys BEFORE the build matrix explodes, so every parallel build job starts warm. DEGRADED-UNTIL-STORE: the warm-set RPC + TieredBackend are a named LiveTODO — today an HONEST no-op (warmed=false, warm-count=0, never a faked warm); require-warm=true fails loud.";
+    };
+    "super-cache-build" = {
+      uses = "pleme-io/actions/super-cache-build@main";
+      backend = "tatara-lisp";
+      role = "THE CORE super-cache-ci verb — build a derivation via the sui service against the tiered super-cache, keyed by the gen build-spec (RAM eval, tmpfs sandbox, DB store). Skips the derive on a restore cache hit. TIER-HONEST: the pure derive decision + the cache-hit short-circuit are shipped + unit-tested; the live derive (sui-graph build RPC/CLI) is a named LiveTODO — sui-daemon-client is a library not a binary — reported honestly, never a faked green (require-build=true fails loud).";
+    };
+    "super-cache-restore" = {
+      uses = "pleme-io/actions/super-cache-restore@main";
+      backend = "tatara-lisp";
+      role = "Probe the tiered super-cache (Redis L1 -> Postgres L2 -> object L3) for a build''s outputs and report the hit + tier (the warm path). TIER-HONEST: the Redis/Pg tiers via the sui service are a named LiveTODO behind sui''s shipped StorageBackend/Store traits; the now-path resolves a local content-addressed object tier and reports an honest miss otherwise.";
+    };
+    "super-cache-save" = {
+      uses = "pleme-io/actions/super-cache-save@main";
+      backend = "tatara-lisp";
+      role = "Persist a build''s outputs to the durable super-cache tiers, write-if-absent, content-addressed, no lock (the eliminate-the-shared-cell pattern; concurrent-runner coherence is free). TIER-HONEST: the durable Postgres/object tiers are a named LiveTODO behind sui''s shipped Store/StorageBackend traits; the now-path persists to a local content-addressed object tier and is an honest no-op when no tier is configured.";
+    };
+    "syft-attest" = {
+      uses = "pleme-io/actions/syft-attest@main";
+      backend = "tatara-lisp";
+      role = "Generate an in-toto attestation containing an SBOM via syft.";
+    };
+    "tameshi-attest" = {
+      uses = "pleme-io/actions/tameshi-attest@main";
+      backend = "tatara-lisp";
+      role = "Assemble + BLAKE3-hash a typed super-cache-ci build receipt (spec-hash + output-hashes + cache tier + timings + image digests) into a content-addressed, independently-verifiable JSON. The final verb of a super-cache-ci build. Requires a BLAKE3 provider on the runner (b3sum on PATH, else nix).";
+    };
+    "tlisp-test" = {
+      uses = "pleme-io/actions/tlisp-test@main";
+      backend = "tatara-lisp";
+      role = "Discover + run every *.test.tlisp via tatara-script --test. Each test runs as the stdlib + the sibling unit (<base>.tlisp) + the test, with TLISP_TEST=1 so the unit defines its functions but skips its main. Fails if any (deftest ...) fails.";
+    };
+    "trivy-fs-scan" = {
+      uses = "pleme-io/actions/trivy-fs-scan@main";
+      backend = "tatara-lisp";
+      role = "Run trivy fs scan on the repo source tree.";
+    };
+    "turbo-build" = {
+      uses = "pleme-io/actions/turbo-build@main";
+      backend = "tatara-lisp";
+      role = "Run turbo build across a monorepo.";
+    };
+    "typesense-import" = {
+      uses = "pleme-io/actions/typesense-import@main";
+      backend = "tatara-lisp";
+      role = "Import documents to Typesense.";
+    };
+    "unity-build" = {
+      uses = "pleme-io/actions/unity-build@main";
+      backend = "tatara-lisp";
+      role = "Build a Unity project for a target platform.";
+    };
+    "vex-attest" = {
+      uses = "pleme-io/actions/vex-attest@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
+    "wasmer-publish" = {
+      uses = "pleme-io/actions/wasmer-publish@main";
+      backend = "tatara-lisp";
+      role = "Publish a wasm package to Wasmer registry.";
+    };
+    "weaviate-schema-apply" = {
+      uses = "pleme-io/actions/weaviate-schema-apply@main";
+      backend = "tatara-lisp";
+      role = "Apply a Weaviate schema definition.";
+    };
+    "woocommerce-product-sync" = {
+      uses = "pleme-io/actions/woocommerce-product-sync@main";
+      backend = "tatara-lisp";
+      role = "Sync products to WooCommerce REST API.";
+    };
+    "zapier-webhook-trigger" = {
+      uses = "pleme-io/actions/zapier-webhook-trigger@main";
+      backend = "tatara-lisp";
+      role = "Trigger a Zapier webhook.";
+    };
+    "zot-pull-scan" = {
+      uses = "pleme-io/actions/zot-pull-scan@main";
+      backend = "shell";
+      role = "The zot faucet gate: pull an image from a private zot registry, then gate admission through image-scan -- the fleet''s ONE canonical Trivy severity implementation -- scanning the PULLED bytes, never a re-resolved tag. Nothing enters the trusted zone unscanned, and nothing enters on a scan failure, a parse failure, or a misconfigured override either.";
+    };
+    "zot-push" = {
+      uses = "pleme-io/actions/zot-push@main";
+      backend = "tatara-lisp";
+      role = "Push a nix OCI image tarball to the PRIVATE in-cluster Zot registry (zot.zot-system.svc.cluster.local:5000/akeyless-<svc>) under the AUTOBUMP exact tag <arch>-r<run>-<sha>, and report the pushed repository digest (the exact deploy coordinate). FedRAMP-sensitive images NEVER go to ghcr.io.";
     };
   };
   validation = {
