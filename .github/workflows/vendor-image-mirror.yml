@@ -108,6 +108,25 @@ on:
       result:
         description: "'admitted' | 'rejected' | 'pull-failed'"
         value: ${{ jobs.mirror.outputs.result }}
+      zot-digest:
+        description: >-
+          The digest Zot actually serves for the mirrored tag, read back AFTER
+          the push. Empty when the readback did not run or could not resolve --
+          an honest empty, never a synthesised value.
+
+          DECLARED HERE, not just on the job. A job-level `outputs:` entry does
+          NOT cross the workflow_call boundary; only this block does. Without it
+          the caller reads "" while the job log plainly shows `Set output
+          'zot-digest'` -- which is exactly what happened on hardened-images run
+          30669854126, where the digest was resolved correctly
+          (sha256:6e891d92...) and the consuming promote job still received
+          nothing, then failed on the empty value.
+
+          This is the identical defect pleme-io/actions/doca's own outputs block
+          warns about one layer down: "a composite action must DECLARE them or
+          they stop at the action boundary and the caller sees nothing." Same
+          shape, same silence, one level up.
+        value: ${{ jobs.mirror.outputs.zot-digest }}
 
 permissions:
   contents: read
