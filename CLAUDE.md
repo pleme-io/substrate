@@ -117,6 +117,50 @@ on what actually executes.
 **Skill:** `caixa-author` — for authoring or migrating any caixa,
 this is the first reference.
 
+## ★★ A job output is NOT a workflow output — 13 values computed and dropped
+
+A reusable workflow exposes a value to its caller ONLY through
+`on.workflow_call.outputs`. A `jobs.<j>.outputs` entry is visible to other jobs
+in the SAME workflow and to nobody else. Declare it in the wrong block and the
+value is computed correctly, logged as `Set output '<name>'`, and silently
+unreachable.
+
+**Measured 2026-07-31, and the denominator matters because the raw count is
+misleading.** Over 75 workflows, 69 of which are `workflow_call`:
+
+| | count | verdict |
+|---|---|---|
+| job outputs not in `workflow_call.outputs`, but consumed by another job in the same file | **24** | CORRECT — internal wiring, must NOT be exposed |
+| job outputs not exposed AND not referenced anywhere in the file | **13** | dead, or lost at the boundary |
+
+Reporting the 37 together would be the exact rounding this file's standing rule
+forbids: most are right. The 13 are the signal. The one with the clearest
+consequence is `container-stack.yml` `build.digest` — a caller of a
+container-build reusable plainly wants the digest, and it is computed and
+dropped.
+
+**actionlint does NOT catch this class.** It validates expression syntax and
+context availability; it has no opinion on whether a job output was meant to
+cross the boundary. So the linter wired in hardened-images (66d9b91) is green on
+every one of the 13.
+
+**Receipt for why this is worth a section.** hardened-images run 30669854126:
+`vendor-image-mirror.yml` resolved a Zot digest correctly and logged both
+`Zot serves … at digest sha256:6e891d92…` and `Set output 'zot-digest'`, while
+the consuming promote job read `""` and failed on the empty value two jobs later.
+Every symptom pointed away from the cause — the producer was green, the value
+was right there in the log, and the only red was elsewhere on an empty input.
+Fixed in `ae5c3c3` by declaring it in `on.workflow_call.outputs`.
+
+This is the same defect `pleme-io/actions/doca`'s outputs block already warns
+about one layer down — "a composite action must DECLARE them or they stop at the
+action boundary and the caller sees nothing" — so the shape is now documented at
+both layers it occurs on.
+
+`pending-workflow-output-boundary: 13 job outputs unexposed and unreferenced.`
+Each needs a per-case judgement (expose, or delete as dead); a blanket sweep
+would expose values no caller asked for.
+
 ## ★★ `nix flake check` BUILDS ONLY `checks.<system>.*` — a builder that emits none hands out a green lie
 
 **The single most load-bearing fact about this repo's verification
