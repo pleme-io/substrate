@@ -113,20 +113,46 @@ jobs:
       severity: ${{ steps.pull-scan.outputs.severity }}
       result: ${{ steps.pull-scan.outputs.result }}
     steps:
-      # Stage 0 (optional): authenticate skopeo to a PRIVATE source registry
-      # before the pull. zot-pull-scan's stage-1 `skopeo copy` reads skopeo's
-      # own auth file (~/.config/containers/auth.json), so a private source
-      # (e.g. a private pleme-io/hardened-* GHCR package) needs this login
-      # first -- the existing vendor-* legs pull PUBLIC upstream images and
-      # leave source-registry empty, so this step is skipped for them (no
-      # behavior change). Same skopeo-login the Zot push below already uses.
-      - name: Login to source registry (private source)
-        if: inputs.source-registry != ''
-        uses: pleme-io/actions/skopeo-login@main
-        with:
-          registry: ${{ inputs.source-registry }}
-          username: ${{ inputs.source-username }}
-          password: ${{ secrets.SOURCE_PASSWORD || secrets.GITHUB_TOKEN }}
+      # ── Stage 0 REMOVED 2026-07-31: the source login was a step that could
+      # only ever skip. ────────────────────────────────────────────────────────
+      #
+      # It was `uses: pleme-io/actions/skopeo-login`, gated on
+      # `inputs.source-registry != ''`, writing skopeo's authfile for stage 1 to
+      # pick up ambiently. Every hardened-images mirror leg failed on it for
+      # days with:
+      #
+      #   oci-push: pull failed for 'ghcr.io/pleme-io/hardened-chproxy:1.0.53':
+      #     Not authorized: url https://ghcr.io/v2/.../manifests/1.0.53
+      #
+      # THE CALLER NEVER PASSED `source-registry`. It passed ref/zot-repo/zot-tag
+      # and nothing else, so the condition was false, the login SKIPPED, and the
+      # pull ran anonymous against a private package. A skipped step is green.
+      # Nothing anywhere said "this image needs credentials and has none" — the
+      # only symptom was a generic 401 two steps later, attributed for two
+      # rounds to the puller rather than to a login that never ran.
+      #
+      # That is the failure-indistinguishable-from-success shape: an `if:` on an
+      # input the caller doesn't know to set fails OPEN and reports success.
+      #
+      # THE FIX IS NOT TO RESTORE THE LOGIN. Credentials now go to the puller
+      # EXPLICITLY, as typed inputs (below) rather than through a shared file
+      # one step writes and another hopes to find. Explicit beats ambient here
+      # for a reason worth stating: with `src-user`/`src-pass` the pull either
+      # has credentials or provably does not, and doca reports which — whereas
+      # an authfile handshake has a silent third state, "written somewhere the
+      # reader doesn't look", which is precisely what stage 1 becoming doca
+      # rather than skopeo would have introduced the moment anyone DID set
+      # source-registry. Deleting this step closes the live bug and forecloses
+      # that one.
+      #
+      # It also retires a skopeo call site, per the fleet-wide doca conversion.
+      # doca does read ~/.config/containers/auth.json (verified in
+      # credential_store_paths), so this is a swap for the better mechanism, not
+      # a workaround for a missing one.
+      #
+      # The `source-registry` / `source-username` / `SOURCE_PASSWORD` inputs are
+      # KEPT and still mean exactly what they meant — empty leaves every
+      # public-source vendor-* leg on the anonymous path, unchanged.
 
       # Stage 1+2: pull the vendor image + gate it through the fleet's one
       # canonical Trivy severity implementation. Scans the PULLED bytes,
@@ -146,6 +172,15 @@ jobs:
           ref: ${{ inputs.ref }}
           fail-on-severity: ${{ inputs.fail-on-severity }}
           ignore-file: ${{ inputs.ignore-file }}
+          # Explicit source credentials, replacing the deleted stage-0 login.
+          # Still gated on source-registry, so an empty one (every public
+          # vendor-* leg) passes empty strings and doca keeps the anonymous
+          # path -- identical behavior to before for those callers. What
+          # changed is that a caller which DOES declare a private source now
+          # gets its credentials handed to the puller directly instead of left
+          # in a file the puller may or may not read.
+          src-user: ${{ inputs.source-registry != '' && inputs.source-username || '' }}
+          src-pass: ${{ inputs.source-registry != '' && (secrets.SOURCE_PASSWORD || secrets.GITHUB_TOKEN) || '' }}
 
       # A rejected or pull-failed image is a genuinely informative CI
       # failure (the severity + vuln-count are already in the job
