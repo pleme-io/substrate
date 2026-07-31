@@ -1728,6 +1728,30 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         //
         // Found against a real busybox pull; the synthetic fixture had no
         // hard links and passed happily without this.
+        // A nix store path arrives mode 0555 -- read-only DIRECTORY -- and a
+        // layer lists the directory before its children. tar then cannot
+        // create the child inside the parent it just made:
+        //   failed to unpack `…/nss-cacert-3.107/etc`
+        // Every image built by dockerTools hits this, so `unpack` was broken
+        // for exactly the images this repo produces while working fine on a
+        // vendor image. Re-open the parent for writing before each entry;
+        // the final mode is whatever the LAST entry for that path sets, and
+        // a directory listed after its children re-applies its own mode.
+        if let Some(parent) = target.parent() {
+            if parent.is_dir() {
+                if let Ok(md) = fs::metadata(parent) {
+                    let mut perm = md.permissions();
+                    if perm.readonly() {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            perm.set_mode(perm.mode() | 0o700);
+                        }
+                        let _ = fs::set_permissions(parent, perm);
+                    }
+                }
+            }
+        }
         entry.unpack_in(dest).map_err(PushError::Archive)?;
     }
     Ok(())
