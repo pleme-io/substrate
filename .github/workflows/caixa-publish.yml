@@ -184,29 +184,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
 
-      - name: Push image (versioned + optional :latest)
-        env:
-          REGISTRY: ${{ inputs.registry }}
-          NAME: ${{ steps.meta.outputs.name }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          PUSH_LATEST: ${{ inputs.pushLatest }}
-        run: |
-          set -euo pipefail
-          versioned="${REGISTRY}/${NAME}:${TAG}"
-          echo "::notice::pushing $versioned"
-          nix shell nixpkgs#skopeo --command \
-            skopeo --insecure-policy copy \
-              "docker-archive:./result" \
-              "docker://${versioned}"
+      # ── skopeo -> doca, and a hermetic-supply-chain fix in the same move ────
+      # WAS: 18 lines of shell running `nix shell nixpkgs#skopeo --command
+      # skopeo --insecure-policy copy` twice. Three separate violations in one
+      # block:
+      #   1. skopeo, on the fleet-wide doca conversion list;
+      #   2. `nix shell nixpkgs#skopeo` RESOLVES AND FETCHES A THIRD-PARTY
+      #      BINARY AT JOB TIME -- a hermetic-supply-chain violation on the
+      #      PUBLISH path, i.e. the one path where provenance matters most;
+      #   3. embedded shell doing real branching, where a typed action exists.
+      #
+      # oci-image-push is composite and reads the ambient ~/.docker/config.json
+      # that `docker/login-action` wrote directly above -- the same file skopeo
+      # read -- so this is behaviour-preserving, not a re-authentication. It
+      # also gains doca's retry-on-transient-registry-failure, which the skopeo
+      # call here never had (`--retry-times` was never passed on this path,
+      # unlike the hardened-images push that measured a real Harbor reset).
+      #
+      # Two calls rather than one because the tags are independently gated;
+      # `:latest` keeps its exact prior condition.
+      - name: Push image (versioned)
+        uses: pleme-io/actions/oci-image-push@main
+        with:
+          registry: ${{ inputs.registry }}
+          image: ${{ steps.meta.outputs.name }}
+          tag: ${{ steps.meta.outputs.tag }}
+          tarball: ./result
 
-          if [ "$PUSH_LATEST" = "true" ]; then
-            latest="${REGISTRY}/${NAME}:latest"
-            echo "::notice::pushing $latest"
-            nix shell nixpkgs#skopeo --command \
-              skopeo --insecure-policy copy \
-                "docker-archive:./result" \
-                "docker://${latest}"
-          fi
+      - name: Push image (:latest)
+        if: inputs.pushLatest
+        uses: pleme-io/actions/oci-image-push@main
+        with:
+          registry: ${{ inputs.registry }}
+          image: ${{ steps.meta.outputs.name }}
+          tag: latest
+          tarball: ./result
 
       - name: Tag + push v<versao>
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
