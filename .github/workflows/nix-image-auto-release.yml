@@ -298,6 +298,29 @@ jobs:
           sudo docker image prune -af 2>/dev/null || true
           df -h /
 
+      # ── A CACHE MUST DEGRADE, NOT DECIDE. ──────────────────────────────────
+      # `fallback` and `connect-timeout` are set ONLY when extraSubstituters is,
+      # so a caller without an extra cache is byte-identical to before.
+      #
+      # WHY, measured: hardened-images run 30665557380 (release-clickhouse-keeper)
+      # died with
+      #   error: unable to download 'http://sui.camelot-build.svc/....narinfo':
+      #          Timeout was reached (28) Connection timed out after 15001 ms
+      # after ~20 retries across four store paths. The build never reached its
+      # compile step, let alone its CVE gate or boot-check.
+      #
+      # nix's `fallback` DEFAULTS TO FALSE, so a substituter that cannot be
+      # reached is not skipped -- it fails the build. That inverts what a binary
+      # cache is for: sui exists to make heavy builds cheap, and instead its
+      # absence made them impossible. An optimization whose outage is fatal is
+      # not an optimization, it is an undeclared hard dependency on a
+      # cluster-internal service.
+      #
+      # `fallback = true` restores the intended semantics (substitute if you can,
+      # otherwise build it), and `connect-timeout = 5` stops each unreachable
+      # path burning 15s before nix concludes the obvious. Neither weakens
+      # anything: signature policy is untouched, and a REACHABLE sui is used
+      # exactly as before.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
@@ -308,6 +331,8 @@ jobs:
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
+            ${{ inputs.extraSubstituters && 'fallback = true' || '' }}
+            ${{ inputs.extraSubstituters && 'connect-timeout = 5' || '' }}
 
       # scan-before-push mode: build the raw image derivation LOCALLY first
       # (no push) so the CVE gate below scans it before it has ever touched
