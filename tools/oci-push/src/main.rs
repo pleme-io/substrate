@@ -1708,7 +1708,13 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
 
         // Last-write-wins: a later layer replacing a file must overwrite it,
         // and tar's unpack refuses to clobber some existing kinds.
-        let target = dest.join(&path);
+        // `Path::join` with an ABSOLUTE argument REPLACES the base rather
+        // than appending -- `dest.join("/nix/store/x")` is `/nix/store/x`,
+        // the host's real store, not a path inside the rootfs. Strip the
+        // root first so an absolute entry lands under `dest` like every
+        // other one.
+        let rel = path.strip_prefix("/").unwrap_or(&path);
+        let target = dest.join(rel);
         if target.is_symlink() || (target.exists() && !target.is_dir()) {
             fs::remove_file(&target).map_err(PushError::Archive)?;
         }
@@ -1752,7 +1758,30 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
                 }
             }
         }
-        entry.unpack_in(dest).map_err(PushError::Archive)?;
+        // dockerTools emits its customisation layer with ABSOLUTE paths
+        // (`/nix/store/…`) alongside the usual `./`-prefixed ones.
+        // `unpack_in` REFUSES an absolute path -- that is its safety
+        // property and why it is used for everything else -- so every store
+        // path failed and the rootfs came out EMPTY. Working on a vendor
+        // image (busybox has no absolute entries), broken on every image
+        // this repo produces.
+        //
+        // An absolute entry is rootfs-relative by intent: `/nix/store/x` in
+        // a layer means `<rootfs>/nix/store/x`, never the host's real /nix.
+        // So strip the leading separator and place it under `dest`
+        // explicitly. `..` is still refused below, so stripping the root
+        // does not weaken the escape guard -- it only stops treating "this
+        // path starts at the image root" as an attack.
+        if path.is_absolute() {
+            if target.starts_with(dest) {
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(PushError::Archive)?;
+                }
+                entry.unpack(&target).map_err(PushError::Archive)?;
+            }
+        } else {
+            entry.unpack_in(dest).map_err(PushError::Archive)?;
+        }
     }
     Ok(())
 }
