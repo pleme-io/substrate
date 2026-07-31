@@ -675,6 +675,26 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Where a docker/podman-style credential store lives, most specific first.
+///
+/// VERIFIED AGAINST THE REAL RUNNER, 2026-07-31, because this path is the whole
+/// reason the nix release push can authenticate. Every link measured, not assumed:
+///
+///   * the release job logs `docker registry login ghcr.io`, so the exact key
+///     `ghcr.io` (tried first below) is what lands in the file;
+///   * it warns "credentials are stored unencrypted in
+///     /home/runner/.docker/config.json" -- which is precisely the absence of a
+///     credsStore helper, the one shape this function deliberately does NOT
+///     follow. On this runner that choice costs nothing;
+///   * that path is `$HOME/.docker/config.json`, the third entry here;
+///   * `nix run` PRESERVES `HOME` into the executed app (measured: HOME inside
+///     `nix run` equals the caller's, and `$HOME/.docker` is readable from
+///     inside), so the release app -- a writeShellScript invoked via
+///     `nix run .#release:<svc>` -- resolves the same file. `nix run` does not
+///     sandbox, which is why this holds and a `nix build` equivalent would not.
+///
+/// If an authenticated push ever fails with `missing required --dest-user`
+/// again, those four are eliminated; look instead at whether the job logged in
+/// at all, or logged into a DIFFERENT registry than it pushes to.
 fn credential_store_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(f) = env::var_os("REGISTRY_AUTH_FILE") {
