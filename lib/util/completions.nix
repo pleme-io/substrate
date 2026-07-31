@@ -34,11 +34,18 @@
       if completions == null || !(completions.install or false) then ""
       else if completions ? command then let
         cmd = completions.command;
+        # Which shells the CLI can actually emit. Not every cobra binary
+        # supports all three: kubeadm 1.34 answers `completion fish` with
+        #   error: unsupported shell type "fish", the supported shell
+        #   types are [zsh bash]
+        # and the empty file then fails installShellCompletion. Declaring
+        # the set per-consumer keeps that a build-time fact instead of a
+        # runtime surprise.
+        shells = completions.shells or [ "bash" "zsh" "fish" ];
       in ''
         installShellCompletion --cmd ${cmd} \
-          --bash <($out/bin/${cmd} completion bash) \
-          --zsh <($out/bin/${cmd} completion zsh) \
-          --fish <($out/bin/${cmd} completion fish)
+          ${lib.concatMapStringsSep " \\\n          "
+            (sh: "--${sh} <($out/bin/${cmd} completion ${sh})") shells}
       ''
       else if completions ? fromSource then ''
         installShellCompletion --cmd ${pname} \
