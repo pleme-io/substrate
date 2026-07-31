@@ -43,9 +43,31 @@ jobs:
 
       - shell: bash
         run: |
+          # ── THIS LOOP USED TO DISCARD EVERY FAILURE BUT THE LAST ──────────
+          # Was:
+          #   ansible-doc ... && echo "OK $m" || (echo "FAIL $m" && exit 1)
+          # `exit 1` inside `( )` leaves the SUBSHELL, not the script, and this
+          # block had no `set -e`. So a failing module printed FAIL, the loop
+          # carried on, and the step's exit status was whatever the LAST
+          # iteration returned. Module 1 broken + module 4 fine reported SUCCESS
+          # -- a verification loop that verifies and then throws the answer away.
+          # Found by actionlint's SC2015 (it flags the A && B || C shape; the
+          # subshell exit is the sharper defect underneath it).
+          #
+          # Now: every module is still checked (so one break does not mask the
+          # rest), failures accumulate into rc, and the step fails if ANY failed.
+          set -uo pipefail
           mods="${{ inputs.modules }}"
-          [ -z "$mods" ] && mods="role auth_method_api_key uid_generate_token secret_value_info"
+          if [ -z "$mods" ]; then
+            mods="role auth_method_api_key uid_generate_token secret_value_info"
+          fi
+          rc=0
           for m in $mods; do
-            ansible-doc -t module "${{ inputs.collection }}.$m" >/dev/null \
-              && echo "OK $m" || (echo "FAIL $m" && exit 1)
+            if ansible-doc -t module "${{ inputs.collection }}.$m" >/dev/null; then
+              echo "OK $m"
+            else
+              echo "FAIL $m"
+              rc=1
+            fi
           done
+          exit "$rc"
