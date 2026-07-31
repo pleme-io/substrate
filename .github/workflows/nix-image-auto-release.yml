@@ -185,6 +185,15 @@ jobs:
   # every image build, fleet-wide, zero per-repo footprint. A consumer graduates to
   # hard-fail by shipping its own cve-suppression-gate.yml with fail-on-violation:
   # true once its no-cve-suppression/baseline.txt is validated.
+  # ★ TRIAGE HAZARD, measured 2026-07-31: a `continue-on-error` job still reports
+  # `conclusion: failure` in the GitHub API. `gh run view --json jobs` cannot
+  # distinguish it from a job that genuinely blocked the release — I queried
+  # `[.jobs[]|select(.conclusion=="failure")]` on a real run, got these two, and
+  # only knew they were non-blocking by reading this file. Any automated triage
+  # (a dashboard, a bot, an agent) will miscount them, in BOTH directions: it
+  # reads a healthy run as broken, and — worse — a genuine blocker sitting in the
+  # same list gets dismissed along with the noise once people learn to ignore it.
+  # Read `.conclusion` of the RUN, or check this flag, before calling a run red.
   cve-suppression-visibility:
     name: CVE-suppression visibility (report-only)
     # Visibility-routed, NOT a bare ubuntu-latest (corrected 2026-07-24): this
