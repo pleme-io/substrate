@@ -1007,6 +1007,56 @@ let
           buildInputs = (overrideExtras.buildInputs or [])
             ++ ownPropagated
             ++ depPropagated;
+
+          # ── darwin crate-metadata determinism (partial — see the boundary) ──
+          #
+          # On macOS nix has no build sandbox, so rustc bakes build-environment
+          # entropy into a crate's `.rustc` metadata. A consumer resolves a
+          # dependency by that metadata, so two builds of the SAME derivation can
+          # produce artifacts that do not load against each other — surfacing as
+          # `error[E0463]: can't find crate`. That has poisoned a shared cache
+          # twice (2026-06-02, 2026-07-31).
+          #
+          # A controlled rustc experiment MEASURED that three inputs account for
+          # it: the source path, the cwd, and OUT_DIR. Pinning all three gave
+          # byte-identical metadata for a build.rs-bearing proc-macro crate even
+          # with HOME/TMPDIR/locale/TZ varied. Of those:
+          #
+          #   source path — ALREADY FIXED by nixpkgs. Reading a real build log
+          #     (`nix log` on any resident rust_* drv) shows buildRustCrate emits
+          #     a properly expanded `--remap-path-prefix=/nix/var/nix/builds/...`.
+          #     A long-standing note claiming that flag was a silent no-op on
+          #     darwin because `$NIX_BUILD_TOP` passed through unexpanded is
+          #     WRONG: the variable never touches lib.sh, and bash expands it
+          #     when the phase runs.
+          #   cwd — what this fixes, below.
+          #   OUT_DIR — NOT fixed here. See the boundary.
+          #
+          # `extraRustcOpts` (not `extraRustcOptsForBuildRs`) is deliberate: the
+          # latter decorates only the throwaway build_script_build compile, whose
+          # metadata nothing resolves against, so setting it there would change
+          # nothing observable. `-Z` needs RUSTC_BOOTSTRAP, which rides the
+          # generic derivation-attr passthrough since buildRustCrate exposes no
+          # env parameter.
+          #
+          # THE BOUNDARY, stated so nobody reads this as "determinism is solved":
+          # OUT_DIR is exported inside nixpkgs' generated configure script as
+          # `$(pwd)/target/build/<crate>.out`, consumed by build.rs, and folded
+          # into the `-L` flag before any hook we can reach runs. preConfigure
+          # fires before it exists; postConfigure fires after build.rs has
+          # already written files against it. Closing that leg means physically
+          # relocating the build tree — which is exactly the earlier attempt that
+          # made divergence WORSE (16 bytes to 95). It needs a nixpkgs override,
+          # not an argument, and is deliberately not attempted here.
+          #
+          # So: expect divergence to shrink, not vanish. Verify with two builds
+          # of rust_derive-deftly-macros (it has a build.rs, so it exercises the
+          # OUT_DIR leg that remains open) and diff the extracted `.rustc`
+          # section, not whole outputs — object-code drift on darwin is harmless
+          # and comparing whole files conflates it with real divergence.
+          extraRustcOpts = (overrideExtras.extraRustcOpts or [])
+            ++ [ "-Z" "remap-cwd-prefix=." ];
+          RUSTC_BOOTSTRAP = "1";
         };
         # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
         # (the multi-target universe). Restricts `built` to crates actually
