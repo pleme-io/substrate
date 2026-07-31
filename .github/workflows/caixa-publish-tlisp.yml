@@ -97,12 +97,26 @@ jobs:
           # softness it would then have to be argued out of.
           nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" --strict
 
+      # Dialect gate — see caixa-validate.yml's header for the measurement.
+      # `defcaixa` was spoken by two unrelated declarations; 249 of 270
+      # manifests across the org checkout were the foreign one on
+      # 2026-07-31, and no gate anywhere said so.
+      - name: feira dialeto
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.caixaPath }}"
+          nix run github:pleme-io/caixa#feira -- dialeto .
+
+      # HARD as of 2026-07-31, for the same reason the cse-lint step above
+      # was hardened three days earlier: the `|| echo "::warning::"` it
+      # replaces reported "unavailable" for BOTH a missing app and a real
+      # violation, so a genuine failure rendered as an infrastructure
+      # excuse on the path that pushes a git tag.
       - name: feira lint
         run: |
           set -euo pipefail
           cd "${{ inputs.caixaPath }}"
-          nix run github:pleme-io/caixa#feira -- lint || \
-            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
+          nix run github:pleme-io/caixa#feira -- lint
 
       - name: Tag + push v<versao>
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)

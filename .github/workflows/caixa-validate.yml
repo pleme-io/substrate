@@ -34,10 +34,38 @@
 #      one that ran and passed. Do not read a `✓ 0` on
 #      manifest-membership or deployment-coverage here as evidence they
 #      were checked.
-#   2. feira lint — manifest + Lisp parse for every declared
+#   2. feira dialeto — classify every caixa manifest in the tree by
+#      DIALECT, and fail on one that classifies as neither. See the
+#      "Dialect gate" note below; this step is default-on and hard.
+#   3. feira lint — manifest + Lisp parse for every declared
 #      :bibliotecas / :servicos / :exe entry
-#   3. (optional) feira build — typed structural validation of the
+#   4. (optional) feira build — typed structural validation of the
 #      caixa's content
+#
+# ── Dialect gate (added 2026-07-31) ──────────────────────────────────
+#
+# `defcaixa` was spoken by TWO unrelated declarations: caixa-core's
+# package manifest (`:nome :versao :kind :deps …`, read by feira) and
+# pleme-doc-gen's repo-surface declaration (`:name :ecosystem
+# :package {…} :files […]`, read by pleme-doc-gen). They share no
+# required slot. Measured over the org checkout on 2026-07-31: of 270
+# caixa manifests, 20 were package manifests and 249 were the other
+# declaration wearing the same keyword — so "a .caixa.lisp is a Caixa"
+# was false for 92% of the corpus.
+#
+# Nothing caught it, and the reason is visible in this very file's
+# history: `feira build`, the only step that would have called the real
+# parser, was `build: default: false`, and `feira lint` was
+# `|| echo "::warning"`. An opt-in check and a soft check are the same
+# thing as no check. Both are corrected below.
+#
+# The repo-surface declaration now has its own keyword, `defmolde`, and
+# pleme-doc-gen's scaffolder emits it. The legacy spelling is still
+# READ (249 live files in repos that migrate on their own schedule),
+# which is why `strictPalavra` defaults to false — but a manifest that
+# classifies as NEITHER dialect fails hard, unconditionally, and that
+# is what stops a third dialect appearing. Turn `strictPalavra` on for
+# any repo whose manifests are already migrated.
 #
 # Consumer:
 #   jobs:
@@ -62,6 +90,13 @@ on:
         default: true
       build:
         description: "Also run `feira build` for structural validation"
+        type: boolean
+        default: true
+      strictPalavra:
+        description: >-
+          Also fail a repo-surface manifest still written as `(defcaixa …)`
+          rather than `(defmolde …)`. Default false ONLY because the legacy
+          corpus is live; set true once this repo's manifests are migrated.
         type: boolean
         default: false
       caixaPath:
@@ -91,14 +126,36 @@ jobs:
           fi
           nix run github:pleme-io/cse-lint -- repo "${{ inputs.caixaPath }}" $STRICT_FLAG
 
+      # Default-on and HARD. `feira dialeto` refuses to report a clean
+      # census over a tree it found no manifests in, so a mis-pointed
+      # caixaPath fails loudly instead of greening on nothing — the
+      # vacuous-pass shape that made the previous two steps worthless.
+      - name: feira dialeto
+        run: |
+          set -euo pipefail
+          cd "${{ inputs.caixaPath }}"
+          STRICT=""
+          if [ "${{ inputs.strictPalavra }}" = "true" ]; then
+            STRICT="--strict-palavra"
+          fi
+          nix run github:pleme-io/caixa#feira -- dialeto $STRICT .
+
+      # Was `|| echo "::warning::feira lint unavailable; skipping"`. That
+      # branch reported "unavailable" for BOTH causes — the app genuinely
+      # missing, and the lint genuinely failing — so a real violation
+      # rendered as an infrastructure excuse and the job stayed green.
+      # If the app is missing, that is a broken pipeline and should fail.
       - name: feira lint
         run: |
           set -euo pipefail
           cd "${{ inputs.caixaPath }}"
-          nix run github:pleme-io/caixa#feira -- lint || \
-            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
+          nix run github:pleme-io/caixa#feira -- lint
 
-      - name: feira build (optional structural check)
+      # Default TRUE since 2026-07-31. This is the only step that runs the
+      # real `Caixa::from_lisp`, and it defaulted to false — which is
+      # precisely why two incompatible dialects grew to 92% of the corpus
+      # without a single red build.
+      - name: feira build (structural check)
         if: ${{ inputs.build }}
         run: |
           set -euo pipefail

@@ -152,18 +152,27 @@ jobs:
           # asserted an adherence nobody had checked.
           nix run github:pleme-io/cse-lint -- repo . --strict
 
+      # Dialect gate — see caixa-validate.yml's header for the full
+      # measurement. Short version: `defcaixa` was spoken by two
+      # unrelated declarations, 249 of 270 manifests were the foreign
+      # one, and nothing caught it. This is the publish path, so it runs
+      # here too: an image and a git tag should not ship off a manifest
+      # nobody could classify.
+      - name: Dialect gate (feira dialeto)
+        run: |
+          set -euo pipefail
+          nix run github:pleme-io/caixa#feira -- dialeto .
+
+      # The `if … else echo "::warning::…"` this replaces collapsed two
+      # different facts into one green log line: "feira is unavailable"
+      # and "feira found violations" both printed a warning and exited 0.
+      # On the PUBLISH path — the one that pushes an OCI image and a git
+      # tag. A computed-then-discarded verdict is not a gate; the step's
+      # presence in a green log asserted a check nobody had run.
       - name: Lint manifest (feira lint)
         run: |
           set -euo pipefail
-          # `nix run github:pleme-io/caixa#feira` ships the canonical CLI.
-          # If it's not yet wired (caixa flake hasn't exposed feira as a
-          # bare app), fall back to the typecheck inside Cargo.lock-based
-          # Rust deps already exercised at build time.
-          if nix run github:pleme-io/caixa#feira -- lint 2>&1; then
-            echo "::notice::feira lint passed"
-          else
-            echo "::warning::feira lint unavailable; skipping (caixa flake not yet exposing #feira app)"
-          fi
+          nix run github:pleme-io/caixa#feira -- lint
 
       - name: Build image with Nix
         run: nix build .#dockerImage --print-out-paths
