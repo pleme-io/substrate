@@ -222,8 +222,21 @@ in rec {
     type = "app";
     program = toString (writeShellScript "gem-bump-${name}" ''
       set -euo pipefail
+      # A BUMP MUTATES SOURCE, so it must target the working tree — never
+      # `srcDir`, which is the flake's source COPY in /nix/store and is
+      # read-only by construction. Passing it produced, on every one of 16
+      # pangea-* repos:
+      #   Error: Failed to write /nix/store/<hash>-source/lib/<gem>/version.rb
+      #           Permission denied (os error 13)
+      # The store path is correct for the READ-only apps in this file (test),
+      # which is why only this one changed — the neighbours are not
+      # speculatively touched.
+      #
+      # Resolved from git rather than bare $PWD so a run from a subdirectory
+      # still finds the repo root; falls back to $PWD outside a work tree.
+      root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
       exec ${forgeCmd} gem bump \
-        --working-dir "${srcDir}" \
+        --working-dir "$root" \
         --name "${name}" \
         --level "${level}"
     '');
