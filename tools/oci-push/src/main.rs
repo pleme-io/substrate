@@ -1712,7 +1712,23 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         if target.is_symlink() || (target.exists() && !target.is_dir()) {
             fs::remove_file(&target).map_err(PushError::Archive)?;
         }
-        entry.unpack(&target).map_err(PushError::Archive)?;
+
+        // `unpack_in(dest)`, NOT `unpack(target)`. A real image layer
+        // contains HARD LINKS -- busybox ships ~400 of them, every applet
+        // linked to the one binary -- and a hardlink entry's target is
+        // recorded RELATIVE TO THE ARCHIVE ROOT. `unpack` resolves it
+        // against the process CWD instead, so it looks for the link target
+        // outside the rootfs and fails:
+        //   No such file or directory when hard linking bin/[ to …/bin/[[
+        // `unpack_in` resolves relative to the destination, which is the
+        // only interpretation that can be correct here. It also refuses
+        // paths that would escape the destination (`..`, absolute), so a
+        // malicious layer cannot write outside the rootfs -- a property
+        // worth having when the input is a third-party vendor image.
+        //
+        // Found against a real busybox pull; the synthetic fixture had no
+        // hard links and passed happily without this.
+        entry.unpack_in(dest).map_err(PushError::Archive)?;
     }
     Ok(())
 }
