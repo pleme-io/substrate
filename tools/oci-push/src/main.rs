@@ -18,8 +18,21 @@
 //!   wasm-platform uses). Reads the docker-archive, gzips each layer, hands the
 //!   gzipped layers + verbatim config to `oci-client`, which uploads the blobs
 //!   and PUTs the manifest. No external binary.
-//! * [`SkopeoBackend`] (`--backend skopeo`): shells out to `skopeo copy`.
-//!   Fallback / escape hatch; supplied on `PATH` by the flake wrapper.
+//!
+//! There is no second backend. A `SkopeoBackend` (`--backend skopeo`) once
+//! existed as a fallback and was REMOVED, along with skopeo itself from this
+//! tool's closure. This doc block outlived it and still advertised it, which is
+//! its own small instance of the defect this tool's history is full of: a
+//! description that no longer matches the thing it describes. A reader trusting
+//! it would have reached for `--backend skopeo` and received
+//! `UnknownSubcommand`-shaped confusion instead of a working escape hatch.
+//!
+//! Keeping a shell-out fallback was also the wrong shape: it let a caller
+//! silently get different behaviour (different auth resolution, different retry
+//! semantics, different TLS trust) from the same command line. Where doca fell
+//! short of skopeo the answer has been to fix doca — retry on transient registry
+//! failure, ambient credential resolution on every subcommand — not to keep a
+//! second implementation whose divergences nobody was tracking.
 //!
 //! ## The two digest spaces (why native is correct)
 //!
