@@ -100,12 +100,12 @@
 ;;; a legitimate empty reading, not a failure — and exits 2 for a real error.
 ;;; Guessing that nonzero means broken misreports every honest empty grep as
 ;;; DESCONHECIDO (caught by this file's own first test run). So the CALLER
-;;; declares the contract; nothing here infers it.
-(define ok-statuses
-  (let ((raw (env-get "AFERIR_STATUS_OK" "0")))
-    (map (lambda (x) (string-trim x)) (nonempty (string-split raw ",")))))
-(define (ok? rec)
-  (> (length (filter (lambda (s) (equal? s (string-format "{}" (estado rec)))) ok-statuses)) 0))
+;;; declares the contract and it is THREADED, never a global: both faces supply
+;;; it from their own surface, and no face can silently inherit the other's.
+(define (oks-de raw)
+  (map (lambda (x) (string-trim x)) (nonempty (string-split raw ","))))
+(define (ok? oks rec)
+  (> (length (filter (lambda (s) (equal? s (string-format "{}" (estado rec)))) oks)) 0))
 (define (contagem rec) (length (lines (campo rec "out"))))
 
 ;;; ── Retry, and ONLY for the failures that deserve it ─────────────────────
@@ -113,9 +113,9 @@
 ;;; A nonzero exit is retried; a clean run returning zero results is NOT. That
 ;;; asymmetry is the whole point — retrying an honest empty just burns time and
 ;;; eventually tempts you to treat the last attempt as authoritative.
-(define (tentar argv vezes)
+(define (tentar oks argv vezes)
   (let ((r (correr argv)))
-    (if (or (ok? r) (<= vezes 1))
+    (if (or (ok? oks r) (<= vezes 1))
       r
       (begin
         (print-line (paint "235;203;139"
@@ -123,19 +123,19 @@
                          " left) after status " (string-format "{}" (estado r))
                          (if (equal? "" (campo r "err")) ""
                              (string-append ": " (campo r "err"))))))
-        (tentar argv (- vezes 1))))))
+        (tentar oks argv (- vezes 1))))))
 
 ;;; ── The reading ──────────────────────────────────────────────────────────
 ;;;
 ;;; `alvo` and `controle` are FULL argv lists, measured identically. The
 ;;; control is not a formality: it is the only thing standing between a `vazio`
 ;;; and a lie.
-(define (aferir alvo controle vezes)
-  (let* ((a (tentar alvo vezes))
+(define (aferir oks alvo controle vezes)
+  (let* ((a (tentar oks alvo vezes))
          (n (contagem a)))
     (cond
       ;; The target run itself failed. Nothing to interpret.
-      ((not (ok? a))
+      ((not (ok? oks a))
        (list (list "veredito" "desconhecido")
              (list "n" 0)
              (list "motivo" (string-append "target exited " (string-format "{}" (estado a))
@@ -148,10 +148,10 @@
       ;; Zero hits. This is the ONLY branch where the control decides, and the
       ;; only path to `vazio`.
       (else
-        (let* ((c (tentar controle vezes))
+        (let* ((c (tentar oks controle vezes))
                (cn (contagem c)))
           (cond
-            ((not (ok? c))
+            ((not (ok? oks c))
              (list (list "veredito" "desconhecido") (list "n" 0)
                    (list "motivo" (string-append "control exited "
                                                  (string-format "{}" (estado c))
@@ -179,51 +179,171 @@
         (if (equal? m "") "" (string-append "  — " m))))
     v))
 
-;;; ── Driver ───────────────────────────────────────────────────────────────
+
+;;; ═══ FACES ═══════════════════════════════════════════════════════════════
 ;;;
-;;; Self-contained and env-driven, matching this repo's other .tlisp tools
-;;; (ensure-dirs, home-records). `require` is NOT used: it does not inject a
-;;; module's top-level defines into the caller's scope (verified against the
-;;; running interpreter 0.3.12, not assumed), so a library split would have
-;;; needed a namespacing story this does not yet need.
+;;; ONE engine, TWO renderings, and they are not equivalent — the asymmetry is
+;;; the point and is stated here rather than discovered:
 ;;;
-;;; INPUTS — argv fields separated by '|', records by whitespace, the same
-;;; encoding ensure-dirs.tlisp uses and for the same reason: a parallel-list
-;;; encoding makes a length mismatch representable.
+;;;   CLI face (argv)  — for humans and agents. A command is a LIST OF WORDS, so
+;;;                      an argument containing '|' or a space is just an
+;;;                      argument. The mis-split has NO CODE PATH.
+;;;   env face (vars)  — for embedding where argv is awkward (a launchd plist's
+;;;                      EnvironmentVariables, a systemd Environment=, a Nix
+;;;                      derivation's env attrset). Env values are strings, so
+;;;                      this face MUST split on a delimiter and a target
+;;;                      containing '|' silently mis-splits. That is
+;;;                      only-mitigated, and it is why the CLI face exists.
 ;;;
-;;;   AFERIR_ALVO       argv of the measurement you actually want
-;;;   AFERIR_CONTROLE   argv of a measurement whose result you already KNOW is
-;;;                     non-empty, over the SAME corpus, by the SAME mechanism
-;;;   AFERIR_ROTULO     label for the report line          (default "medida")
-;;;   AFERIR_TENTATIVAS retries on a NOT-ok exit           (default "2")
-;;;   AFERIR_STATUS_OK  comma-separated exit statuses that mean the tool RAN
-;;;                     correctly, whatever it found       (default "0";
-;;;                     use "0,1" for grep, whose 1 means no-match and whose
-;;;                     2 means a real error)
-;;;
-;;; The control is the whole contract. Pick one that is non-empty for a reason
-;;; you can state — "mkDerivation exists in every nix repo" — not one you
-;;; hope holds. A control chosen carelessly converts this from a seal into
-;;; ceremony.
+;;; Reach for the CLI face unless you are embedding. `(argv)` non-empty selects
+;;; it; otherwise the env face runs, so every existing caller keeps working.
+
+;;; ── Section splitting ────────────────────────────────────────────────────
+;;; Index recursion rather than cdr: `nth` and `length` are the two list
+;;; accessors this interpreter is known to have (verified against 0.3.12, not
+;;; assumed — there is no `cdr`, and there is no `string->number` either, which
+;;; is why --tries below is a closed enum).
+(define (colher args i acc)
+  (if (>= i (length args))
+    (list (reverse acc) i)
+    (let ((h (nth i args)))
+      (if (equal? h "--")
+        (list (reverse acc) (+ i 1))
+        (colher args (+ i 1) (cons h acc))))))
+
+(define (secao r) (nth 0 r))
+(define (resto r) (nth 1 r))
+
+;;; ── Flag parsing ─────────────────────────────────────────────────────────
+;;; Returns an alist. An unknown flag is REJECTED, never ignored: a typo'd
+;;; --lable that silently used the default would be a measurement mislabelled
+;;; in a report someone later trusts.
+(define (flags xs i acc)
+  (if (>= i (length xs))
+    acc
+    (let ((k (nth i xs)))
+      (cond
+        ((or (equal? k "-h") (equal? k "--help"))
+         (flags xs (+ i 1) (cons (list "help" "1") acc)))
+        ((>= (+ i 1) (length xs))
+         (cons (list "erro" (string-append "flag " k " needs a value")) acc))
+        (else
+          (let ((v (nth (+ i 1) xs)))
+            (cond
+              ((or (equal? k "-l") (equal? k "--label"))
+               (flags xs (+ i 2) (cons (list "rotulo" v) acc)))
+              ((equal? k "--ok-status")
+               (flags xs (+ i 2) (cons (list "ok" v) acc)))
+              ((equal? k "--tries")
+               (flags xs (+ i 2) (cons (list "tries" v) acc)))
+              (else
+                (cons (list "erro" (string-append "unknown flag: " k)) acc)))))))))
+
+;;; --tries is a CLOSED ENUM because this interpreter has no string->number.
+;;; The alternative — coercing an unparseable value to the default — would make
+;;; `--tries 5` silently mean 2: a measurement running a different number of
+;;; times than its operator believes. Rejecting it is parse-time-rejected;
+;;; coercing it would be only-mitigated. Take the stronger tier when the
+;;; language hands you the choice.
+(define (tries-de v)
+  (cond ((equal? v "1") 1)
+        ((equal? v "2") 2)
+        ((equal? v "3") 3)
+        (else -1)))
+
+(define ajuda (string-join "\n" (list
+  "aferir — a measurement that refuses to report an uncalibrated zero"
+  ""
+  "USAGE"
+  "  aferir [options] -- <target-cmd> [args...] -- <control-cmd> [args...]"
+  ""
+  "OPTIONS"
+  "  -l, --label <text>     label for the report line (default: medida)"
+  "      --ok-status <csv>  exit statuses meaning THE TOOL RAN (default: 0)."
+  "                         Use 0,1 for grep: 1 is no-match, 2 is a real error."
+  "      --tries <1|2|3>    attempts on a not-ok exit (default: 2). Never"
+  "                         retries an honest empty."
+  "  -h, --help             this text"
+  ""
+  "BOTH -- SECTIONS ARE REQUIRED. The control is a command you already know"
+  "returns output, over the same corpus, by the same mechanism. Without it a"
+  "zero cannot be told apart from a blind instrument, so no verdict is issued."
+  ""
+  "Name binaries by ABSOLUTE PATH. In some shells `grep` is a function that"
+  "execs something else with different ignore-file semantics — the substituted"
+  "instrument this tool exists to catch."
+  ""
+  "EXAMPLE"
+  "  aferir --label sweep --ok-status 0,1 \\"
+  "    -- /usr/bin/grep -rl mkServiceUnit --include=*.nix /path/to/repo \\"
+  "    -- /usr/bin/grep -rl mkDerivation  --include=*.nix /path/to/repo"
+  ""
+  "VERDICTS"
+  "  achado        the instrument saw the thing"
+  "  vazio         the instrument WORKS and the thing is genuinely absent"
+  "  desconhecido  the control failed; the reading means nothing")))
+
+(define (falhar msg)
+  (begin
+    (print-line (paint "191;97;106" (string-append "  aferir: " msg)))
+    (print-line "  try: aferir --help")
+    #f))
+
+;;; ── The CLI face ─────────────────────────────────────────────────────────
+(define (face-cli args)
+  (let* ((f0 (colher args 0 (list)))
+         (fl (flags (secao f0) 0 (list)))
+         (erro (alist-get fl "erro" ""))
+         (t0 (colher args (resto f0) (list)))
+         (alvo (secao t0))
+         (ctrl (secao (colher args (resto t0) (list)))))
+    (cond
+      ((not (equal? "" (alist-get fl "help" ""))) (begin (print-line ajuda) #t))
+      ((not (equal? "" erro)) (falhar erro))
+      ((= 0 (length alvo))
+       (falhar "no target command — everything after the first `--` is the target"))
+      ;; The refusal that defines the tool. A missing control is not a
+      ;; defaultable option; without it there is no honest verdict to print.
+      ((= 0 (length ctrl))
+       (falhar (string-append
+         "no control command. A zero from the target cannot be distinguished "
+         "from a blind instrument without one, so no verdict is issued. Give a "
+         "second `--` section running a search you already know returns output "
+         "over the same corpus.")))
+      (else
+        (let ((n (tries-de (alist-get fl "tries" "2"))))
+          (if (= n -1)
+            (falhar (string-append "--tries must be 1, 2 or 3 (got: "
+                                   (alist-get fl "tries" "") "). This interpreter "
+                                   "has no string->number, so the value is a closed "
+                                   "enum rather than silently coerced."))
+            (begin
+              (relatar (alist-get fl "rotulo" "medida")
+                       (aferir (oks-de (alist-get fl "ok" "0")) alvo ctrl n)))))))))
+
+;;; ── The env face ─────────────────────────────────────────────────────────
+;;; Kept for embedding (launchd/systemd/Nix), where argv is awkward. Splits on
+;;; '|' and therefore carries the mis-split hazard the CLI face does not.
 (define (argv-de s) (nonempty (string-split s "|")))
 
-(define alvo-s (env-get "AFERIR_ALVO" ""))
-(define ctrl-s (env-get "AFERIR_CONTROLE" ""))
+(define (face-env)
+  (let ((alvo-s (env-get "AFERIR_ALVO" ""))
+        (ctrl-s (env-get "AFERIR_CONTROLE" ""))
+        (rotulo (env-get "AFERIR_ROTULO" "medida")))
+    (if (equal? "" alvo-s)
+      #t                                  ; loaded for its definitions: say nothing
+      (if (equal? "" ctrl-s)
+        (begin
+          (print-line (paint "191;97;106"
+            (string-append "  DESCONHECIDO " rotulo
+              "  — AFERIR_CONTROLE is unset. A zero result cannot be distinguished "
+              "from a blind instrument, so no verdict is issued.")))
+          #f)
+        (begin
+          (relatar rotulo
+                   (aferir (oks-de (env-get "AFERIR_STATUS_OK" "0"))
+                           (argv-de alvo-s) (argv-de ctrl-s)
+                           (if (equal? (env-get "AFERIR_TENTATIVAS" "2") "1") 1 2))))))))
 
-(if (equal? "" alvo-s)
-  ;; Loaded for its definitions rather than run: say nothing, do nothing.
-  #t
-  (let* ((tentativas-s (env-get "AFERIR_TENTATIVAS" "2"))
-         (tentativas (if (equal? tentativas-s "1") 1 2))
-         (rotulo (env-get "AFERIR_ROTULO" "medida")))
-    (if (equal? "" ctrl-s)
-      ;; NO CONTROL, NO `vazio`. Refusing here is the point: without a
-      ;; calibration there is no honest way to distinguish "not there" from
-      ;; "could not look", so the tool declines to render one.
-      (begin
-        (print-line (paint "191;97;106"
-          (string-append "  DESCONHECIDO " rotulo
-            "  — AFERIR_CONTROLE is unset. A zero result cannot be distinguished "
-            "from a blind instrument, so no verdict is issued.")))
-        #f)
-      (relatar rotulo (aferir (argv-de alvo-s) (argv-de ctrl-s) tentativas)))))
+;;; ── Dispatch ─────────────────────────────────────────────────────────────
+(if (> (length (argv)) 0) (face-cli (argv)) (face-env))
