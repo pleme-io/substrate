@@ -1054,7 +1054,21 @@ let
           # OUT_DIR leg that remains open) and diff the extracted `.rustc`
           # section, not whole outputs — object-code drift on darwin is harmless
           # and comparing whole files conflates it with real divergence.
-          extraRustcOpts = (overrideExtras.extraRustcOpts or [])
+          # THREE contributors, and all three must survive — `args // mergedExtras`
+          # makes this key win outright, so anything omitted here is DROPPED, not
+          # merged. That is a real regression this line already shipped once:
+          # `args.extraRustcOpts` is where `quirk-apply.nix:31` puts a ForceCfg
+          # quirk's `--cfg <cfg>` pair, and `overrideFor` returns only the
+          # override's own new attrs (crate-override-compose.nix:44), so for any
+          # crate carrying BOTH a ForceCfg quirk and an override entry the
+          # previous form silently discarded the `--cfg` — a compile that then
+          # takes the wrong cfg branch, with nothing in the log naming why.
+          #
+          # Order is deliberate: quirk cfgs first (they are semantic, and a
+          # later `--cfg` never cancels an earlier one), then override opts,
+          # then the determinism flag last so it is visibly the tail.
+          extraRustcOpts = (args.extraRustcOpts or [])
+            ++ (overrideExtras.extraRustcOpts or [])
             ++ [ "-Z" "remap-cwd-prefix=." ];
           RUSTC_BOOTSTRAP = "1";
         };
