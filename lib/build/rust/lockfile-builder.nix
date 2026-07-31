@@ -1049,11 +1049,38 @@ let
           # made divergence WORSE (16 bytes to 95). It needs a nixpkgs override,
           # not an argument, and is deliberately not attempted here.
           #
-          # So: expect divergence to shrink, not vanish. Verify with two builds
-          # of rust_derive-deftly-macros (it has a build.rs, so it exercises the
-          # OUT_DIR leg that remains open) and diff the extracted `.rustc`
-          # section, not whole outputs — object-code drift on darwin is harmless
-          # and comparing whole files conflates it with real divergence.
+          # So: expect divergence to shrink, not vanish.
+          #
+          # ── MEASURED 2026-07-31 (aarch64-darwin) ──────────────────────────
+          # `nix-store --realise --check --keep-failed` on three already-built
+          # crates, which rebuilds and byte-compares against the existing
+          # output. `--keep-failed` is load-bearing: without it nix produces no
+          # `<out>.check` path and the whole check silently proves nothing.
+          #
+          #   rust_strsim-0.11.1        (no build.rs)  -> IDENTICAL
+          #   rust_proc-macro2          (has build.rs) -> IDENTICAL
+          #   rust_libc                 (has build.rs) -> IDENTICAL
+          #
+          # 3/3 byte-identical, INCLUDING two that exercise the OUT_DIR leg the
+          # boundary note above says is still open. Whole outputs matched, so
+          # extracting the `.rustc` section was unnecessary — that finer-grained
+          # comparison only matters once whole outputs differ.
+          #
+          # WHAT THIS DOES **NOT** PROVE, and the distinction is the whole point.
+          # `--check` rebuilds on THE SAME MACHINE with THE SAME nix, the same
+          # store paths and the same env. It measures same-environment
+          # reproducibility, which is necessary but NOT sufficient: the failure
+          # that actually broke a workstation was a cache serving an artifact
+          # built SOMEWHERE ELSE, whose SVH disagreed with what the local
+          # dependent was compiled against. Cross-machine determinism is the
+          # open question and this cannot answer it — a second builder (rio is
+          # x86_64-linux, so a darwin peer is needed) would.
+          #
+          # Read the result as: no same-environment divergence remains on these
+          # three, so the remaining risk is concentrated in cross-environment
+          # inputs (HOME, TMPDIR, locale, TZ, OUT_DIR's absolute path), none of
+          # which this repo controls yet — see the seam ledger in
+          # tests/determinism-flags-test.nix's header.
           # THREE contributors, and all three must survive — `args // mergedExtras`
           # makes this key win outright, so anything omitted here is DROPPED, not
           # merged. That is a real regression this line already shipped once:
