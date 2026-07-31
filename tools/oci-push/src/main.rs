@@ -787,6 +787,38 @@ fn docker_config_credentials_in(paths: &[PathBuf], registry: &str) -> Option<(St
     None
 }
 
+/// Explicit -> INPUT_* env -> AMBIENT docker/podman store -> anonymous.
+///
+/// WHY THIS EXISTS AS ONE FUNCTION. Ambient-credential support was added to
+/// `push` alone (2026-07-31), and the asymmetry immediately broke the Zot
+/// mirror: `pull` fell through to ANONYMOUS against a PRIVATE
+/// ghcr.io/pleme-io/hardened-* image, retried for ~2 minutes, and failed with
+/// its reason buried under `nix run`'s warnings. A census then found SIX
+/// subcommands on the bare `auth_or_anon` path -- transfer, inspect, pull, list,
+/// resolve, tag -- i.e. the capability existed on one of seven code paths.
+///
+/// One resolver so the next subcommand cannot be born missing it. `registry` is
+/// the store key: for a ref-taking command that is the ref's host (everything
+/// before the first '/').
+fn auth_resolved(
+    user: Option<String>,
+    pass: Option<String>,
+    env_user: Option<String>,
+    env_pass: Option<String>,
+    registry: &str,
+) -> RegistryAuth {
+    let have_explicit = user.is_some() || env_user.is_some();
+    let ambient = if have_explicit {
+        None
+    } else {
+        docker_config_credentials(registry)
+    };
+    auth_or_anon(
+        user.or(env_user).or_else(|| ambient.as_ref().map(|(u, _)| u.clone())),
+        pass.or(env_pass).or_else(|| ambient.as_ref().map(|(_, p)| p.clone())),
+    )
+}
+
 /// Basic auth when both creds are present; anonymous otherwise (public source).
 fn auth_or_anon(user: Option<String>, pass: Option<String>) -> RegistryAuth {
     match (user, pass) {
@@ -1218,9 +1250,16 @@ fn cmd_pull<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let out = out
         .or_else(|| env_input("INPUT_OUT"))
         .ok_or(PushError::MissingArg("out"))?;
-    let auth = auth_or_anon(
-        user.or_else(|| env_input("INPUT_USER")),
-        pass.or_else(|| env_input("INPUT_PASS")),
+    // Ambient creds via the shared resolver. Without this a pull of a PRIVATE
+    // package went anonymous and could never succeed -- the Zot mirror bug.
+    let auth = auth_resolved(
+        user,
+        pass,
+        env_input("INPUT_USER"),
+        env_input("INPUT_PASS"),
+        // `r` is the PARSED reference, so this is the registry oci-client will
+        // actually contact -- not a hand-split of the raw string.
+        r.registry(),
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
