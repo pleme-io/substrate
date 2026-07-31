@@ -122,9 +122,29 @@ jobs:
     name: pull + scan + mirror ${{ inputs.zot-repo }}:${{ inputs.zot-tag }}
     runs-on: ${{ inputs.runner != '' && inputs.runner || 'camelot-builder-pleme-eks' }}
     outputs:
-      admitted: ${{ steps.pull-scan.outputs.admitted }}
+      # ── `admitted` NOW MEANS WHAT ITS NAME SAYS, and it did not before ──────
+      # This was `steps.pull-scan.outputs.admitted` alone -- i.e. "cleared the
+      # CVE gate", computed BEFORE the push, while this workflow's own docstring
+      # promised "cleared the CVE gate AND was mirrored into Zot". The seven 2F
+      # promote jobs in hardened-images gate on exactly this value.
+      #
+      # The hole that opens: a push that returns 0 without writing is
+      # indistinguishable from a real mirror. Nothing anywhere read Zot back, so
+      # "the artifact is in Zot" was inferred from an exit code rather than
+      # observed. Zot is the gate the whole flow rests on -- nothing may reach 2F
+      # before it is really in Zot -- so this is the one place an unverified
+      # success is least affordable.
+      #
+      # Now it is the CONJUNCTION of the scan verdict and a readback that proves
+      # the bytes are retrievable from Zot by the tag 2F will resolve. Reading
+      # the destination is the only evidence that distinguishes "pushed" from
+      # "push reported success".
+      admitted: ${{ steps.pull-scan.outputs.admitted == 'true' && steps.zot-readback.outcome == 'success' }}
       severity: ${{ steps.pull-scan.outputs.severity }}
       result: ${{ steps.pull-scan.outputs.result }}
+      # The digest Zot actually serves. Empty when the readback did not run or
+      # could not resolve -- an honest empty, never a synthesised value.
+      zot-digest: ${{ steps.zot-readback.outputs.digest }}
     steps:
       # ── Stage 0 REMOVED 2026-07-31: the source login was a step that could
       # only ever skip. ────────────────────────────────────────────────────────
@@ -211,8 +231,17 @@ jobs:
       # failure (the severity + vuln-count are already in the job
       # summary via zot-pull-scan's own outputs) -- never silently
       # continue past a non-admitted verdict.
+      # `always() &&` is load-bearing: without it this step NEVER RUNS.
+      # `pull-scan` carries no continue-on-error, so verdict.tlisp's exit 1
+      # fails the step and GitHub skips every later step by default -- measured
+      # on run 30661312791, where this step's conclusion was `skipped` on a real
+      # rejection. So the one step whose entire job is to explain WHY an image
+      # was refused was dead code on exactly the path it exists for, and a
+      # rejection surfaced as a bare composite failure with no severity and no
+      # vuln-count. A diagnostic that cannot run during the failure it describes
+      # is not a diagnostic.
       - name: Report non-admission
-        if: steps.pull-scan.outputs.admitted != 'true'
+        if: always() && steps.pull-scan.outputs.admitted != 'true'
         run: |
           echo "::error::vendor-image-mirror: ${{ inputs.ref }} was NOT admitted (result=${{ steps.pull-scan.outputs.result }}, severity=${{ steps.pull-scan.outputs.severity }}, vuln-count=${{ steps.pull-scan.outputs.vuln-count }}) -- refusing to mirror into Zot."
           exit 1
@@ -349,3 +378,35 @@ jobs:
           username: ${{ inputs.zot-username }}
           password: ${{ secrets.ZOT_PASSWORD }}
           ca-cert: /tmp/zot-ca.crt
+
+      # ── READ THE DESTINATION BACK. This is the step that makes `admitted`
+      # honest, and it is deliberately NOT continue-on-error. ─────────────────
+      #
+      # A push exit code says the client believed it succeeded. It does not say
+      # the registry serves the bytes. Those differ on a silently-rejected
+      # layer, a namespace the credential cannot actually write, a proxy that
+      # swallowed the PUT, or a tag that resolves to something else. Every one
+      # of those renders as a green mirror and a 2F promotion of an artifact Zot
+      # does not have.
+      #
+      # Resolving the tag to a digest THROUGH Zot, with the same CA and
+      # credential a consumer would use, is the cheapest evidence that the
+      # artifact is really there and really addressable by the tag 2F resolves.
+      # Failing here fails the job, which is correct: a mirror that cannot be
+      # read back has not mirrored, and must not be reported as admitted.
+      - name: Verify the artifact is really IN Zot (readback)
+        id: zot-readback
+        if: steps.pull-scan.outputs.admitted == 'true'
+        uses: pleme-io/actions/doca@main
+        with:
+          operation: inspect
+          ref: "${{ inputs.zot-registry }}/${{ inputs.zot-repo }}:${{ inputs.zot-tag }}"
+          user: ${{ inputs.zot-username }}
+          pass: ${{ secrets.ZOT_PASSWORD }}
+          dest-ca-cert: /tmp/zot-ca.crt
+          digest-only: "true"
+
+      - name: Mirror verified
+        if: steps.zot-readback.outcome == 'success'
+        run: |
+          echo "::notice::Zot serves ${{ inputs.zot-repo }}:${{ inputs.zot-tag }} at digest ${{ steps.zot-readback.outputs.digest }} -- readback confirmed, not inferred from an exit code."
