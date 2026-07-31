@@ -85,13 +85,18 @@ rustPlatform.buildRustPackage {
   # disabling it is the correct, narrow fix rather than pinning yet
   # another toolchain component.
   auditable = false;
-  nativeBuildInputs = [ pkgs.makeWrapper ];
-  postInstall = ''
-    wrapProgram $out/bin/oci-push \
-      --prefix PATH : ${lib.makeBinPath [ pkgs.skopeo ]}
-  '';
+  # NO WRAPPER, and that is the point (2026-07-31). This used to be
+  # `wrapProgram $out/bin/oci-push --prefix PATH : ${pkgs.skopeo}`, existing
+  # solely to feed the `--backend skopeo` fallback. That single line -- not
+  # anything in the Rust, where `Command::new("skopeo")` is a bare PATH lookup
+  # creating no store reference -- is what put skopeo into the closure of EVERY
+  # doca consumer, and transitively into every hardened-images release closure.
+  #
+  # Measured on the realized release app before removal: 81 closure paths,
+  # skopeo present, and its sole referrer was `oci-push` itself. Deleting the
+  # backend without deleting this wrapper would have changed nothing observable.
   meta = {
-    description = "Typed OCI manager — native (pure-Rust oci-client) + skopeo backends";
+    description = "Typed OCI manager — native, pure-Rust oci-client";
     mainProgram = "oci-push";
   };
 }

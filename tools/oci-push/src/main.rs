@@ -42,7 +42,7 @@ use std::fmt;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -171,9 +171,6 @@ enum PushError {
     Runtime(std::io::Error),
     Reference { reference: String, detail: String },
     OciPush { tag: String, detail: String },
-    SkopeoSpawn { tag: String, source: std::io::Error },
-    SkopeoFailed { tag: String, code: Option<i32> },
-    WriteRegistriesConf(std::io::Error),
     ReadCaCert { path: String, source: std::io::Error },
     Chmod { path: String, source: std::io::Error },
     ReadDir { path: String, source: std::io::Error },
@@ -195,7 +192,7 @@ impl fmt::Display for PushError {
             PushError::MissingValue(n) => write!(f, "oci-push: --{n} requires a value"),
             PushError::UnknownFlag(x) => write!(f, "oci-push: unknown flag {x}"),
             PushError::UnknownBackend(b) => {
-                write!(f, "oci-push: unknown --backend '{b}' (expected: native, skopeo)")
+                write!(f, "oci-push: unknown --backend '{b}' (expected: native)")
             }
             PushError::NoSubcommand => write!(
                 f,
@@ -244,16 +241,6 @@ impl fmt::Display for PushError {
             }
             PushError::OciPush { tag, detail } => {
                 write!(f, "oci-push: native push failed for tag '{tag}': {detail}")
-            }
-            PushError::SkopeoSpawn { tag, source } => {
-                write!(f, "oci-push: failed to spawn skopeo for tag '{tag}': {source}")
-            }
-            PushError::SkopeoFailed { tag, code } => match code {
-                Some(c) => write!(f, "oci-push: skopeo copy failed for tag '{tag}' (exit {c})"),
-                None => write!(f, "oci-push: skopeo copy killed by signal for tag '{tag}'"),
-            },
-            PushError::WriteRegistriesConf(e) => {
-                write!(f, "oci-push: could not write registries.conf: {e}")
             }
             PushError::ReadCaCert { path, source } => {
                 write!(f, "oci-push: cannot read CA cert {path}: {source}")
@@ -306,14 +293,12 @@ impl std::error::Error for PushError {}
 enum Backend {
     #[default]
     Native,
-    Skopeo,
 }
 
 impl Backend {
     fn parse(s: &str) -> Result<Backend, PushError> {
         match s {
             "native" => Ok(Backend::Native),
-            "skopeo" => Ok(Backend::Skopeo),
             other => Err(PushError::UnknownBackend(other.to_string())),
         }
     }
@@ -512,76 +497,13 @@ impl PushBackend for NativeBackend {
     }
 }
 
-// ===================== skopeo backend (fallback) ===================== //
-
-struct SkopeoBackend;
-
-impl SkopeoBackend {
-    /// The ubuntu runner ships a v1 `/etc/containers/registries.conf` which
-    /// nixpkgs skopeo rejects; write a minimal v2 config (we push only
-    /// fully-qualified `docker://` refs, so no search registries are needed).
-    fn registries_conf() -> Result<PathBuf, PushError> {
-        let dir = env::var_os("RUNNER_TEMP")
-            .map(PathBuf::from)
-            .unwrap_or_else(env::temp_dir);
-        let path = dir.join("oci-push-registries.conf");
-        fs::write(&path, b"unqualified-search-registries = []\n")
-            .map_err(PushError::WriteRegistriesConf)?;
-        Ok(path)
-    }
-
-    fn push_one(spec: &PushSpec, tag: &str, conf: &Path) -> Result<(), PushError> {
-        let target = spec.reference(tag);
-        let source = {
-            let mut s = String::from("docker-archive:");
-            s.push_str(&spec.tarball);
-            s
-        };
-        let dest = {
-            let mut d = String::from("docker://");
-            d.push_str(&target);
-            d
-        };
-        let creds = {
-            let mut c = String::with_capacity(spec.dest_user.len() + spec.dest_pass.len() + 1);
-            c.push_str(&spec.dest_user);
-            c.push(':');
-            c.push_str(&spec.dest_pass);
-            c
-        };
-        eprintln!("oci-push[skopeo]: copying {source} -> {target}");
-        let status = Command::new("skopeo")
-            .arg("--insecure-policy")
-            .arg("copy")
-            .arg("--dest-creds")
-            .arg(&creds)
-            .arg(&source)
-            .arg(&dest)
-            .env("CONTAINERS_REGISTRIES_CONF", conf)
-            .status()
-            .map_err(|source| PushError::SkopeoSpawn {
-                tag: tag.to_string(),
-                source,
-            })?;
-        if !status.success() {
-            return Err(PushError::SkopeoFailed {
-                tag: tag.to_string(),
-                code: status.code(),
-            });
-        }
-        Ok(())
-    }
-}
-
-impl PushBackend for SkopeoBackend {
-    fn push_all(&self, spec: &PushSpec) -> Result<(), PushError> {
-        let conf = Self::registries_conf()?;
-        for tag in &spec.tags {
-            Self::push_one(spec, tag, &conf)?;
-        }
-        Ok(())
-    }
-}
+// The `skopeo` backend was DELETED 2026-07-31. It was the last thing putting
+// skopeo into the closure of every doca consumer -- not `Command::new("skopeo")`
+// (a bare PATH lookup creates no store reference) but oci-push.nix's
+// `wrapProgram --prefix PATH : ${pkgs.skopeo}`, which existed solely to feed it.
+// Measured before removal: nothing selected it. Every default is Native, and the
+// only remaining mentions fleet-wide were option DESCRIPTIONS advertising it and
+// this error message listing it as valid.
 
 // ===================== typed config (DocaConfig) ===================== //
 //
@@ -982,7 +904,6 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         Backend::Native => Box::new(NativeBackend {
             gzip_level: cfg.gzip_level,
         }),
-        Backend::Skopeo => Box::new(SkopeoBackend),
     };
     backend.push_all(&spec)
 }
