@@ -1,0 +1,229 @@
+;;; aferir.tlisp — no reading without a calibration
+;;;
+;;; FLEET PRIMITIVE. This is the ONE copy. Two faces, one source:
+;;;
+;;;   fleet  — tatara-script github:pleme-io/substrate/lib/measure/aferir.tlisp
+;;;            (the loader takes owner/repo/path and supports ?ref=<tag> plus a
+;;;            #blake3= pin; the tatara-script cache keys on BLAKE3)
+;;;   local  — `nix run .#aferir` in pleme-io/nix, which resolves through the
+;;;            substrate flake INPUT to this same file
+;;;
+;;; There is deliberately NO second copy and therefore no parity gate to keep
+;;; green: the nix repo consumes this path rather than vendoring it, so
+;;; divergence has no representation. (The kata farm-out pattern in nix/CLAUDE.md
+;;; freezes a local oracle and parity-checks it — correct when production still
+;;; reads the local copy during a cutover. Here nothing did, so the stronger
+;;; move was available: solve once, in one place.)
+;;;
+;;; `aferir` (pt.): to gauge an instrument against a known standard. The gloss
+;;; IS the rule: a measurement is worthless until you have shown the instrument
+;;; can see anything at all.
+;;;
+;;; ── THE CLASS THIS CLOSES ────────────────────────────────────────────────
+;;;
+;;; A tool whose failure mode is indistinguishable from success cannot be used
+;;; to verify anything. Four instances hit in ONE session, 2026-07-30/31:
+;;;
+;;;   1. `grep -rl <term> .` at the pleme-io ORG ROOT returns ZERO with exit 0
+;;;      for terms with hundreds of hits. ROOT CAUSE, run to ground 2026-07-31
+;;;      after TWO wrong diagnoses: bare `grep` in the Claude Code harness is a
+;;;      SHELL FUNCTION (see ~/.claude/shell-snapshots/*.sh) that execs ugrep
+;;;      with `--ignore-files`, so it honours .gitignore — and
+;;;      ~/code/github/pleme-io/.gitignore is `*` with four `!` exceptions.
+;;;      Every bare `grep -r … .` from the org root therefore searches FOUR
+;;;      FILES. Scoped to `nix/` it reads that repo's own ignore rules instead
+;;;      and works, which is what makes the trap so convincing: the same
+;;;      command "works" one directory down.
+;;;        bare grep @ org root   0
+;;;        /usr/bin/grep @ same   133
+;;;        zoekt                  70 matches / 18 files (different term)
+;;;      COROLLARY, and it is why this file takes FULL ARGV: name the binary by
+;;;      ABSOLUTE PATH. `/usr/bin/grep` is not the `grep` your shell resolves.
+;;;      My first two explanations — "suppressed stderr" and "the judge was
+;;;      wrong" — were both false; the instrument was substituted, not noisy.
+;;;   2. `K="sudo -n kubectl --kubeconfig=..."; $K get ns | wc -l` — in zsh the
+;;;      variable is one word, so it is a missing FILE, and the error line got
+;;;      counted as output. Reported "1 namespace" for a 19-namespace cluster.
+;;;   3. `skill-lint check` on a corpus whose dominant path convention silently
+;;;      hit an unknowable gate: 138 of ~460 pointers were never examined, and
+;;;      the check passed on them without looking.
+;;;   4. `| tail` before an exit-code check, and zsh's `pipestatus` (a silent
+;;;      empty string where `PIPESTATUS` was meant) — both manufacture greens.
+;;;
+;;; Every one has the same shape: ZERO RESULTS and CANNOT SEE are the same
+;;; observation, and nothing in the tooling distinguishes them.
+;;;
+;;; ── THE SEAL ─────────────────────────────────────────────────────────────
+;;;
+;;; A reading is TRI-STATE, never boolean-empty. This is the same law already
+;;; welded into skill-lint's path resolver (present / absent / unknowable) —
+;;; one law, two surfaces:
+;;;
+;;;   achado        found      — the instrument saw the thing
+;;;   vazio         empty      — the instrument WORKS and the thing is not there
+;;;   desconhecido  unknowable — the control failed; the reading means nothing
+;;;
+;;; `vazio` is only reachable by passing a CALIBRATION: a control term the
+;;; caller asserts exists in the same corpus, measured the same way, in the
+;;; same invocation. No control ⇒ no `vazio` ⇒ an honest `desconhecido`.
+;;;
+;;; The point is not that a human could not check by hand. It is that the
+;;; instrument now REPORTS its own blindness instead of rendering it as a
+;;; clean result.
+
+(define esc (hex-decode "1b"))
+(define color? (equal? (env-get "NO_COLOR" "") ""))
+(define (paint rgb text)
+  (if color? (string-append esc "[38;2;" rgb "m" text esc "[0m") text))
+
+(define (nonempty xs)
+  (filter (lambda (x) (not (equal? (string-trim x) ""))) xs))
+
+(define (lines s) (nonempty (string-split s "\n")))
+
+;;; ── The instrument ───────────────────────────────────────────────────────
+;;;
+;;; One exec, three facts kept SEPARATE and never collapsed: the exit status,
+;;; what went to stdout, and what went to stderr. The shell habit this replaces
+;;; is `cmd 2>/dev/null || true`, which fuses all three into "" and throws away
+;;; the only evidence that would have told you the run failed.
+(define (correr argv)
+  (let ((r (apply exec-capture argv)))
+    (list
+      (list "status" (alist-get r "status" -1))
+      (list "out"    (alist-get r "stdout" ""))
+      (list "err"    (string-trim (alist-get r "stderr" ""))))))
+
+(define (campo rec k) (alist-get rec k ""))
+(define (estado rec) (alist-get rec "status" -1))
+;;; "Ran fine" is per-tool, not universally zero. grep exits 1 for NO MATCH —
+;;; a legitimate empty reading, not a failure — and exits 2 for a real error.
+;;; Guessing that nonzero means broken misreports every honest empty grep as
+;;; DESCONHECIDO (caught by this file's own first test run). So the CALLER
+;;; declares the contract; nothing here infers it.
+(define ok-statuses
+  (let ((raw (env-get "AFERIR_STATUS_OK" "0")))
+    (map (lambda (x) (string-trim x)) (nonempty (string-split raw ",")))))
+(define (ok? rec)
+  (> (length (filter (lambda (s) (equal? s (string-format "{}" (estado rec)))) ok-statuses)) 0))
+(define (contagem rec) (length (lines (campo rec "out"))))
+
+;;; ── Retry, and ONLY for the failures that deserve it ─────────────────────
+;;;
+;;; A nonzero exit is retried; a clean run returning zero results is NOT. That
+;;; asymmetry is the whole point — retrying an honest empty just burns time and
+;;; eventually tempts you to treat the last attempt as authoritative.
+(define (tentar argv vezes)
+  (let ((r (correr argv)))
+    (if (or (ok? r) (<= vezes 1))
+      r
+      (begin
+        (print-line (paint "235;203;139"
+          (string-append "  [aferir] retry (" (string-format "{}" (- vezes 1))
+                         " left) after status " (string-format "{}" (estado r))
+                         (if (equal? "" (campo r "err")) ""
+                             (string-append ": " (campo r "err"))))))
+        (tentar argv (- vezes 1))))))
+
+;;; ── The reading ──────────────────────────────────────────────────────────
+;;;
+;;; `alvo` and `controle` are FULL argv lists, measured identically. The
+;;; control is not a formality: it is the only thing standing between a `vazio`
+;;; and a lie.
+(define (aferir alvo controle vezes)
+  (let* ((a (tentar alvo vezes))
+         (n (contagem a)))
+    (cond
+      ;; The target run itself failed. Nothing to interpret.
+      ((not (ok? a))
+       (list (list "veredito" "desconhecido")
+             (list "n" 0)
+             (list "motivo" (string-append "target exited " (string-format "{}" (estado a))
+                                           (if (equal? "" (campo a "err")) ""
+                                               (string-append ": " (campo a "err")))))))
+      ;; Hits. A positive reading needs no calibration — the instrument
+      ;; demonstrably saw something. Calibrating anyway would only cost time.
+      ((> n 0)
+       (list (list "veredito" "achado") (list "n" n) (list "motivo" "")))
+      ;; Zero hits. This is the ONLY branch where the control decides, and the
+      ;; only path to `vazio`.
+      (else
+        (let* ((c (tentar controle vezes))
+               (cn (contagem c)))
+          (cond
+            ((not (ok? c))
+             (list (list "veredito" "desconhecido") (list "n" 0)
+                   (list "motivo" (string-append "control exited "
+                                                 (string-format "{}" (estado c))
+                                                 " — instrument unusable, reading discarded"))))
+            ((= 0 cn)
+             (list (list "veredito" "desconhecido") (list "n" 0)
+                   (list "motivo" "control found ZERO — the instrument cannot see this corpus, so the target's zero means nothing")))
+            (else
+             (list (list "veredito" "vazio") (list "n" 0)
+                   (list "motivo" (string-append "control saw "
+                                                 (string-format "{}" cn)
+                                                 " — instrument verified, target genuinely absent"))))))))))
+
+(define (relatar rotulo r)
+  (let ((v (alist-get r "veredito" "?"))
+        (n (alist-get r "n" 0))
+        (m (alist-get r "motivo" "")))
+    (print-line
+      (string-append
+        (cond ((equal? v "achado")       (paint "163;190;140" "  achado      "))
+              ((equal? v "vazio")        (paint "136;192;208" "  vazio       "))
+              (else                      (paint "191;97;106"  "  DESCONHECIDO")))
+        " " rotulo
+        (if (equal? v "achado") (string-append "  n=" (string-format "{}" n)) "")
+        (if (equal? m "") "" (string-append "  — " m))))
+    v))
+
+;;; ── Driver ───────────────────────────────────────────────────────────────
+;;;
+;;; Self-contained and env-driven, matching this repo's other .tlisp tools
+;;; (ensure-dirs, home-records). `require` is NOT used: it does not inject a
+;;; module's top-level defines into the caller's scope (verified against the
+;;; running interpreter 0.3.12, not assumed), so a library split would have
+;;; needed a namespacing story this does not yet need.
+;;;
+;;; INPUTS — argv fields separated by '|', records by whitespace, the same
+;;; encoding ensure-dirs.tlisp uses and for the same reason: a parallel-list
+;;; encoding makes a length mismatch representable.
+;;;
+;;;   AFERIR_ALVO       argv of the measurement you actually want
+;;;   AFERIR_CONTROLE   argv of a measurement whose result you already KNOW is
+;;;                     non-empty, over the SAME corpus, by the SAME mechanism
+;;;   AFERIR_ROTULO     label for the report line          (default "medida")
+;;;   AFERIR_TENTATIVAS retries on a NOT-ok exit           (default "2")
+;;;   AFERIR_STATUS_OK  comma-separated exit statuses that mean the tool RAN
+;;;                     correctly, whatever it found       (default "0";
+;;;                     use "0,1" for grep, whose 1 means no-match and whose
+;;;                     2 means a real error)
+;;;
+;;; The control is the whole contract. Pick one that is non-empty for a reason
+;;; you can state — "mkDerivation exists in every nix repo" — not one you
+;;; hope holds. A control chosen carelessly converts this from a seal into
+;;; ceremony.
+(define (argv-de s) (nonempty (string-split s "|")))
+
+(define alvo-s (env-get "AFERIR_ALVO" ""))
+(define ctrl-s (env-get "AFERIR_CONTROLE" ""))
+
+(if (equal? "" alvo-s)
+  ;; Loaded for its definitions rather than run: say nothing, do nothing.
+  #t
+  (let* ((tentativas-s (env-get "AFERIR_TENTATIVAS" "2"))
+         (tentativas (if (equal? tentativas-s "1") 1 2))
+         (rotulo (env-get "AFERIR_ROTULO" "medida")))
+    (if (equal? "" ctrl-s)
+      ;; NO CONTROL, NO `vazio`. Refusing here is the point: without a
+      ;; calibration there is no honest way to distinguish "not there" from
+      ;; "could not look", so the tool declines to render one.
+      (begin
+        (print-line (paint "191;97;106"
+          (string-append "  DESCONHECIDO " rotulo
+            "  — AFERIR_CONTROLE is unset. A zero result cannot be distinguished "
+            "from a blind instrument, so no verdict is issued.")))
+        #f)
+      (relatar rotulo (aferir (argv-de alvo-s) (argv-de ctrl-s) tentativas)))))
