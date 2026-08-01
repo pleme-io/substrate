@@ -527,7 +527,21 @@ jobs:
       # load, not a registry pull -- the same local tarball the scan step
       # above just cleared, never touched a registry yet.
       - name: Load image into Docker for boot-check
-        if: inputs.boot-check-cmd != '' || inputs.boot-check-still-running
+        # boot-check-expect-log MUST be in this predicate. It was not when the
+        # third mode landed (2026-08-01), and the consequence was measured on
+        # hardened-images run 30708771205: FIVE jobs red with
+        #   docker run failed: Unable to find image '...' locally
+        # The new check step fired correctly; the image it needed was never
+        # loaded, because this LOAD step's condition still listed only the two
+        # original modes.
+        #
+        # I made the two CHECK steps mutually exclusive with the new one and
+        # never looked at the step that FEEDS them -- the exact "every control I
+        # add is also a refactor" failure I had written down one tick earlier.
+        # A three-way predicate here and a two-way predicate there is invisible
+        # to actionlint, to yq, and to any local render test; only a real run
+        # shows it.
+        if: inputs.boot-check-cmd != '' || inputs.boot-check-still-running || inputs.boot-check-expect-log != ''
         run: docker load -i result
 
       # Two mutually-exclusive boot-check steps rather than one with a
