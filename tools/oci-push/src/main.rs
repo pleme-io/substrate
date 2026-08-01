@@ -2333,7 +2333,12 @@ fn scan_layer_for_openssl(
     const CHUNK: usize = 1 << 22; // 4 MiB
     const OVERLAP: usize = 64;
 
-    let mut archive = tar::Archive::new(GzDecoder::new(std::io::Cursor::new(blob)));
+    // RAW TAR, not gzip. `apply_layer` above reads layers exactly this way and
+    // this file's own line ~470 says layers "are always raw tar and are never
+    // double-decompressed". Wrapping this in GzDecoder — the plausible guess —
+    // fails every layer with `invalid gzip header`, i.e. it would have reported
+    // a scan over ZERO bytes had the error been swallowed.
+    let mut archive = tar::Archive::new(std::io::Cursor::new(blob));
     for entry in archive.entries().map_err(PushError::Archive)? {
         let mut entry = entry.map_err(PushError::Archive)?;
         if entry.header().entry_type() != tar::EntryType::Regular {
