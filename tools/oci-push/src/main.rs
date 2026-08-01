@@ -745,6 +745,46 @@ fn credential_store_paths() -> Vec<PathBuf> {
 /// materially different trust decision than reading a file the user already
 /// owns. When only a helper is configured this returns None and the caller
 /// falls through to the existing MissingArg error, which names the flag.
+///
+/// ── ★ POSTURE COVERAGE IS A GAP, AND THE REFUSAL ABOVE IS ONLY HALF RIGHT ───
+/// (2026-08-01, operator directive: doca must support every security posture,
+/// configuration and tool -- it is the fleet's one container tool.)
+///
+/// The trust argument is sound and must survive any fix: doca should not exec
+/// an arbitrary PATH binary just because a JSON file named one. But the
+/// conclusion drawn from it -- support NO helper at all -- fails a legitimate
+/// and often STRONGER posture. `credsStore`/`credHelpers` is how the macOS
+/// keychain, `docker-credential-ecr-login`, and gcloud keep credentials OUT of
+/// a plaintext file. Refusing them pushes an operator toward writing the
+/// password in cleartext, which is the weaker outcome.
+///
+/// WORSE, THE FAILURE IS SILENT-BY-SHAPE. A helper-only config parses fine,
+/// `auths.<host>` exists, and this returns None -- so the call degrades to
+/// ANONYMOUS and the operator sees a 401 from deep inside a blob upload, naming
+/// the registry rather than the credential. Measured on rio 2026-08-01: an
+/// expired credential produced exactly that shape, and the 401 arrived two
+/// layers below the thing that was actually wrong. It also reads as "no
+/// credentials configured" when the truth is "credentials configured in a form
+/// I declined to read".
+///
+/// THE FIX, so both properties hold -- make the posture TYPED and EXPLICIT:
+///   * an `--auth-source` selector (`argv | env | docker-config | helper |
+///     anonymous`), defaulting to today's behaviour, so a helper is used only
+///     when the caller ASKS for it -- the trust decision becomes the operator's,
+///     stated at the call site, instead of implicit in what happens to be on
+///     PATH;
+///   * when a helper is selected, resolve it by ABSOLUTE PATH (or a configured
+///     allowlist), never a bare PATH lookup -- that is what actually answers the
+///     objection above;
+///   * and when a helper is configured but not selected, SAY SO in the error
+///     ("credentials for <host> are stored in helper <name>; re-run with
+///     --auth-source helper") instead of falling through to a MissingArg that
+///     names a flag the operator already has a working alternative to.
+///
+/// The last bullet is worth landing even alone: it converts a silent anonymous
+/// downgrade into an accurate, actionable message, and costs nothing in trust.
+/// `pending-doca-postures: typed --auth-source + absolute-path helper exec +
+///  helper-configured-but-unselected diagnostic.`
 fn docker_config_credentials(registry: &str) -> Option<(String, String)> {
     docker_config_credentials_in(&credential_store_paths(), registry)
 }
