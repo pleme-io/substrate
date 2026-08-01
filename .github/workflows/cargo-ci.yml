@@ -208,6 +208,58 @@ jobs:
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
+
+      # ── THE THIRD CREDENTIAL PATH (wired 2026-08-01) ──────────────────
+      #
+      # There are three, not two, and the step below only covers one of
+      # them. nix-flake-check's own header lays out the first two:
+      #
+      #   pkgs.fetchgit        git clone inside a FOD — no token reaches it
+      #   builtins.fetchTree   nix's GitHub fetcher — honors `access-tokens`
+      #
+      # The third is CARGO ITSELF, running inside gen's
+      # `cargo-build-spec-ifd`. Resolving a workspace makes cargo load the
+      # source of EVERY declared dependency — including optional ones whose
+      # feature is off — so a private `git =` dep is fetched even on a
+      # default-feature build, by cargo's own git, which honors neither
+      # `access-tokens` nor the nix fetcher's token.
+      #
+      # Measured on magma (run 30719121344): flake-check died with
+      #   failed to get `pangea-ruby-eval` as a dependency of `magma-pangea`
+      #   Unable to update https://github.com/pleme-io/pangea-operator#3bdf9b74
+      #   revision 3bdf9b74… not found
+      #   failed to authenticate … via git's `credential.helper`
+      # The "revision not found" is a LIE produced by the auth failure — that
+      # commit exists (verified via the API). Don't chase a stale pin.
+      #
+      # `--system`, not `--global`, and that distinction is the whole fix.
+      # `cargo-build-spec-ifd` sets `__noChroot`, so it sees the host
+      # filesystem — but it runs as a build user with its own HOME, so a
+      # `~/.gitconfig` written here is invisible to it. `/etc/gitconfig` is
+      # read by every git process regardless of HOME, which is why the
+      # sibling cargo-test leg's `--global` form works there (same user) and
+      # would silently do nothing here.
+      #
+      # Scoped to the job: ARC runners are ephemeral pods, so this file dies
+      # with the pod. Skipped entirely when BOT_PAT is absent, leaving a
+      # public-dep-only repo byte-identical to before.
+      # The absent-token guard is in the SHELL, not in `if:`. The `secrets`
+      # context is not available in a step-level `if:` — it renders empty, so
+      # `if: secrets.BOT_PAT != ''` would be permanently false and this step
+      # would never run, on any repo, while looking correct.
+      - name: Configure system git credentials for private cargo git deps
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          if [ -z "${GIT_AUTH_TOKEN}" ]; then
+            echo "BOT_PAT not set — skipping; a repo with private cargo git deps will fail in flake-check."
+            exit 0
+          fi
+          sudo git config --system \
+            url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          echo "system git credential rewrite configured"
+
       - uses: pleme-io/actions/nix-flake-check@main
         with:
           flake-args: ${{ inputs.flake-args }}
