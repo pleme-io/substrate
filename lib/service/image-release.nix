@@ -16,7 +16,22 @@
 #     k8s   = { registry = "ghcr.io/myorg/my-k8s";   mkImage = system: mkProfile "k8s" system; };
 #   };
 #   # Produces: release:debug, release:k8s, release (all)
-{ pkgs, forgeCmd ? "forge" }:
+# `ociPush`: substrate's oci-push (doca) derivation, exported to forge as
+# DOCA_BIN. REQUIRED IN PRACTICE since forge's image-release path moved off
+# skopeo -- forge resolves DOCA_BIN, else a bare `oci-push` on PATH, and nothing
+# put one there. Threading it closes a live break: converting forge's
+# image_release.rs to doca without also updating this provider left
+# `nix run .#<release-app>` looking for a binary no caller supplied.
+#
+# Optional (`? null`) so an existing consumer that has no fenix to build it with
+# still evaluates. When it IS null the app runs without DOCA_BIN and forge fails
+# LOUDLY, naming both the env var and the substrate attr that provides it -- an
+# honest miss, not a silent one.
+#
+# SKOPEO_BIN below is retained per MODULARIZE-DON'T-DELETE: forge's image-release
+# no longer reads it, but other forge subcommands still resolve it, and this app
+# is not the right place to decide that for them.
+{ pkgs, forgeCmd ? "forge", ociPush ? null }:
 
 let
   linuxSystems = ["x86_64-linux" "aarch64-linux"];
@@ -64,6 +79,7 @@ in rec {
     type = "app";
     program = toString (pkgs.writeShellScript "release-${name}" ''
       set -euo pipefail
+      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
       export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
       export REGCTL_BIN="${pkgs.regclient}/bin/regctl"
       exec ${forgeCmd} image-release \

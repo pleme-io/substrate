@@ -118,7 +118,18 @@
   };
 
   # Generic multi-arch image release (uses forge CLI for push orchestration)
-  imageReleaseModule = import ./service/image-release.nix { inherit pkgs forgeCmd; };
+  # oci-push (doca) is threaded in so the release app can export DOCA_BIN.
+  # Built only when fenix is available (it is a Rust derivation); a consumer
+  # without fenix gets null and forge fails loudly naming DOCA_BIN rather than
+  # silently looking for a binary nobody supplied.
+  ociPushPkg =
+    if fenix == null || system == null then null
+    else import ./build/oci-push.nix { inherit pkgs fenix system; };
+
+  imageReleaseModule = import ./service/image-release.nix {
+    inherit pkgs forgeCmd;
+    ociPush = ociPushPkg;
+  };
 
   # Generic Crossplane-package release (Function / Configuration xpkg + push,
   # over the typed `forge crossplane` verbs)
