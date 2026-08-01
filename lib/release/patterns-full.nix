@@ -334,11 +334,39 @@
     #   3. runner, w/ retry   github-runner (x3)         --dest-creds --retry-times
     #   4. Zot, OCI media     pangea-architectures (5x2) --dest-authfile --format oci
     #
-    # Only class 1 is a drop-in for mkImageReleaseApp. Class 2 and 3 pass
-    # credentials, class 3 wants retry semantics, and class 4 targets a
-    # SELF-SIGNED Zot with `--format oci` — an OCI-media-type push, not a
-    # docker-manifest push. Converting class 4 as if it were class 1 would
-    # change the media types of five live images.
+    # ── AND THAT CLASS ANALYSIS WAS ALSO WRONG (measured 2026-08-01) ────────
+    # The paragraph above said only class 1 was convertible, that class 4's
+    # `--format oci` had no doca equivalent, and that converting it "would
+    # change the media types of five live images". EVERY PART OF THAT IS FALSE.
+    # Read from `tools/oci-push/src/main.rs`, not inferred:
+    #
+    #   --format oci    doca emits OCI media types UNCONDITIONALLY. Lines 74-76:
+    #                   MT_CONFIG/MT_LAYER_GZIP/MT_MANIFEST are all
+    #                   application/vnd.oci.image.*, and there are ZERO
+    #                   `vnd.docker.distribution.manifest` emission sites — doca
+    #                   has no docker-manifest push path to accidentally take.
+    #                   skopeo's `--format oci` is therefore a NO-OP equivalent,
+    #                   not a missing feature.
+    #   --dest-creds    dest-user / dest-pass inputs.
+    #   self-signed     dest-ca-cert + insecure (wired through `with:` 2026-07-29).
+    #   --retry-times   push_with_retry: 5 attempts, backoff 1s/2s/4s/8s, and the
+    #                   source says 5 was chosen to MATCH the skopeo call site it
+    #                   replaces. Strictly better than skopeo's: it retries only
+    #                   TRANSIENT failures, so a 401 or a malformed archive fails
+    #                   fast instead of burning the budget with backoff.
+    #
+    # So all four classes are covered by doca TODAY. The remaining work is
+    # mechanical conversion of 16 call sites, not a doca enhancement, and the
+    # `Backend::Skopeo` fallback was already deleted 2026-07-31.
+    #
+    # THREE CONSECUTIVE REVISIONS OF THIS NOTE WERE WRONG, and the direction
+    # flipped each time: under-count (11 for 16), then over-generalise (one
+    # class for four), then over-caution (four blockers for zero). The constant
+    # was reasoning about a tool from the SHAPE OF THE CALL SITE rather than
+    # from the tool's source. A skopeo flag existing does not imply doca needs
+    # a matching flag — it may already do that thing unconditionally, which is
+    # exactly what `--format oci` turned out to be. Read the replacement's
+    # source before pricing the replacement.
     #
     # WHY THE FIRST COUNT WAS WRONG, because the mechanism recurs: the original
     # figure came from counting matching grep LINES, then reading two files and
@@ -348,8 +376,9 @@
     # under-count, over-generalise — and neither would have been caught by
     # re-running the grep, only by opening every file.
     #
-    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes.
-    #  Class 1 (2 sites) is the only drop-in; 2-4 need per-class work.`
+    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes — ALL
+    #  four covered by doca today; the work is mechanical conversion, NOT a
+    #  doca enhancement.`
     #
     # THE DESTINATION ALREADY EXISTS AND IS ALREADY CONVERTED. `lib/service/
     # image-release.nix` (`mkImageReleaseApp`) threads `ociPush` → `DOCA_BIN`;
