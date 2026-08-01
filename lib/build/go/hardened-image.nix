@@ -702,10 +702,23 @@ let
     # Without it the check cannot run, and that is a hard error rather than a
     # silent fallback to shell.
     tataraScript ? null,
+    # ELF sections the shipped binary must still carry, forwarded verbatim to
+    # mkMinimalImageCheck (which has accepted it since it was written).
+    #
+    # This wrapper simply never re-exported it, so a consumer that needed it
+    # got `called with unexpected argument 'requireSections'` and the whole
+    # check suite went red — substrate's own web-static-spa-image, which asks
+    # for `.dep-v0` to prove the cargo-auditable document survives the strip.
+    # Dropping the argument instead would have been worse than the error: the
+    # check would go green while the CVE-coverage seal it exists to enforce
+    # silently stopped being asserted.
+    #
+    # Default `[ ]` keeps every existing caller byte-identical.
+    requireSections ? [ ],
   }:
   let
     minimalCheck = (import ./minimal-image-check.nix { }).mkMinimalImageCheck pkgs {
-      inherit name image binary binName maxStorePaths execSmoke;
+      inherit name image binary binName maxStorePaths execSmoke requireSections;
       expectStatic = true;
     };
     binPath = if binary != null then "${binary}/bin/${binName}" else "";
