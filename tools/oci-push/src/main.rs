@@ -1259,6 +1259,26 @@ fn push_with_retry_inner(
 /// `transfer` — copy an image from one registry to another (native oci-client:
 /// pull the manifest + blobs from `--src`, push them to `--dest`). The pulled
 /// layers are already registry-format (gzipped), so they re-push verbatim.
+/// ── ★ MEASURED GAP, 2026-08-02: `transfer` cannot skip TLS verification ─────
+/// `pull` accepts `--insecure` and `--dest-ca-cert`; `transfer` accepts neither
+/// (its whole flag set is --src/--dest/--src-user/--src-pass/--dest-user/
+/// --dest-pass). That blocks a real skopeo→doca conversion: `image-sync`'s
+/// copy path (src/main.rs:315) passes `--dest-tls-verify=false`, so it cannot
+/// move to `doca transfer` as it stands.
+///
+/// This is the case ★★ ADVANCE-2 names explicitly — "enhance doca where it
+/// falls short rather than keeping a fallback" — so the fix is `--src-insecure`
+/// / `--dest-insecure` here, NOT leaving image-sync on skopeo.
+/// `pending-doca-transfer-insecure:` add both, mirroring `pull`'s handling,
+/// with a per-side flag rather than one global `--insecure`: a mirror commonly
+/// pulls from a trusted public registry and pushes to a self-signed internal
+/// one, and a single switch would silently relax the trusted side too.
+///
+/// NOTE while converting image-sync: its inspect path swallows the failure.
+/// `let result = Command::new("skopeo")…; if let Ok(output) = result` means a
+/// MISSING BINARY takes the else path and reads as "this image has no digest",
+/// not as "the tool is absent" — the same indistinguishable-failure shape this
+/// crate's crypto-version refuses. Fix that in the same change, not after.
 fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut src: Option<String> = None;
     let mut dest: Option<String> = None;
