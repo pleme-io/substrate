@@ -14,7 +14,14 @@
 #     githubOrg = "myorg";
 #     ports = { health = 8080; };
 #   }
-{ pkgs, crate2nix, forgeCmd, defaultGhcrToken }:
+# `ociPush`: substrate's oci-push (doca) derivation, exported to forge as
+# DOCA_BIN. forge's `push` path resolves DOCA_BIN, else a bare `oci-push` on
+# PATH. Before the doca conversion it resolved SKOPEO_BIN else bare `skopeo`,
+# which is commonly ambient; `oci-push` is a pleme-io tool and is ambient
+# NOWHERE, so leaving this unthreaded silently broke every consumer of this
+# app. Optional (`? null`) so a caller without fenix still evaluates -- forge
+# then fails LOUDLY naming DOCA_BIN rather than silently.
+{ pkgs, crate2nix, forgeCmd, defaultGhcrToken, ociPush ? null }:
 
 let
   # Hardened by default (Pillar 8 / oci/hardened-base.nix). `mkDockerImage`
@@ -89,7 +96,9 @@ in rec {
         ${if defaultGhcrToken != "" then ''export GITHUB_TOKEN="${defaultGhcrToken}"
         export GHCR_TOKEN="${defaultGhcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"
         export GHCR_TOKEN="$GITHUB_TOKEN"''}
-        exec ${forgeCmd} push \
+        ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
+''}
+      exec ${forgeCmd} push \
           --image-path "${image}" \
           --registry "${registry}" \
           --auto-tags \

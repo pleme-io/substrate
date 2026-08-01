@@ -1,6 +1,8 @@
 # Crate2nix Service Apps - Build, Push, Deploy, Release Apps
 # Deployment workflows for crate2nix-based Rust services
-{ pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken, mkRuntimeToolsEnv, deploymentTools, kubernetesTools }:
+# `ociPush`: substrate's oci-push (doca), exported to forge as DOCA_BIN.
+# REQUIRED -- see the note at the push site below.
+{ pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken, mkRuntimeToolsEnv, deploymentTools, kubernetesTools, ociPush ? null }:
 
 let check = import ../../types/assertions.nix;
 in rec {
@@ -31,6 +33,19 @@ in rec {
       export GHCR_TOKEN="$GITHUB_TOKEN"''}
       # skopeo dropped 2026-08-01: SKOPEO_BIN had zero consumers (measured
       # with a control). doca is the fleet container tool; see lib/util/config.nix.
+      #
+      # ── AND THE HALF THAT WAS MISSING UNTIL 2026-08-01 ────────────────────
+      # That measurement was RIGHT and the removal was RIGHT: forge stopped
+      # reading SKOPEO_BIN when its push path moved to doca. But the COUNTERPART
+      # never landed -- DOCA_BIN was not exported in its place, so this app ran
+      # `forge push` with an empty tool env and no container tool at all. forge
+      # then resolves a bare `oci-push` on PATH, which is a pleme-io binary and
+      # is ambient NOWHERE.
+      #
+      # A correct measurement plus a correct removal, minus the addition they
+      # implied, reads as a finished change in review. Exporting DOCA_BIN is
+      # that addition.
+      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
       ${mkRuntimeToolsEnv { tools = []; }}
 
       exec ${forge}/bin/forge push \

@@ -7,7 +7,14 @@
 #   mkRubyPushApp { ... }      - Create push app using forge
 #   mkRubyServiceApps { ... }  - Create full regen/push/release app set
 #
-{ pkgs, forgeCmd, defaultGhcrToken }:
+# `ociPush`: substrate's oci-push (doca) derivation, exported to forge as
+# DOCA_BIN. forge's `push` path resolves DOCA_BIN, else a bare `oci-push` on
+# PATH. Before the doca conversion it resolved SKOPEO_BIN else bare `skopeo`,
+# which is commonly ambient; `oci-push` is a pleme-io tool and is ambient
+# NOWHERE, so leaving this unthreaded silently broke every consumer of this
+# app. Optional (`? null`) so a caller without fenix still evaluates -- forge
+# then fails LOUDLY naming DOCA_BIN rather than silently.
+{ pkgs, forgeCmd, defaultGhcrToken, ociPush ? null }:
 
 let
   inherit (pkgs) writeShellScript bundler bundix;
@@ -191,6 +198,8 @@ in rec {
 
       # Step 2: Push with forge
       echo "Step 2/2: Pushing to GitHub Packages..."
+      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
+''}
       exec ${forgeCmd} push \
         --image-path "$IMAGE_PATH" \
         --registry "${registry}" \

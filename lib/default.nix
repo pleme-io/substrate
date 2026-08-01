@@ -90,6 +90,7 @@
   webDockerModule = import ./build/web/docker.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken;
+    ociPush = ociPushPkg;
   };
 
   # Crate2nix builders
@@ -101,6 +102,7 @@
   crate2nixAppsModule = import ./build/rust/crate2nix-apps.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken mkRuntimeToolsEnv deploymentTools kubernetesTools;
+    ociPush = ociPushPkg;
   };
 
   # Service helpers (docker compose, test runners, etc.)
@@ -139,6 +141,7 @@
   rubyBuildModule = import ./build/ruby/build.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultGhcrToken;
+    ociPush = ociPushPkg;
   };
 
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
@@ -146,7 +149,10 @@
 
   # Shared cross-cutting middleware (typed, language-agnostic)
   sharedDockerModule = import ./build/shared/docker-image.nix { inherit pkgs; };
-  sharedReleaseModule = import ./build/shared/release-app.nix { inherit pkgs forgeCmd; };
+  sharedReleaseModule = import ./build/shared/release-app.nix {
+    inherit pkgs forgeCmd;
+    ociPush = ociPushPkg;
+  };
   sharedDevShellModule = import ./build/shared/devshell.nix { inherit pkgs; };
 
   # Hardened OCI bases + vendor rewrap (Path 2 — pleme-io owns Akeyless
