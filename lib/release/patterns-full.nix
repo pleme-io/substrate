@@ -1574,6 +1574,11 @@
       backend = "tatara-lisp";
       role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> Camelot self-hosted, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or Camelot self-hosted, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
     };
+    "banned-tool-lint" = {
+      uses = "pleme-io/actions/banned-tool-lint@main";
+      backend = "tatara-lisp";
+      role = "Fail on a NEW call site of a banned external tool — today skopeo, replaced fleet-wide by doca (substrate#oci-push). Matches INVOCATIONS only (a quoted exec argument, `command -v <tool>`, `<tool> copy|inspect|login|delete|list-tags|sync`, a `#<tool>` nix attr), never a mention in prose or a comment: 299 files in the fleet mention skopeo and only a fraction execute it, so a mention-based rule would be nearly all false positives and would teach people to ignore the gate. A RATCHET like its siblings — existing call sites live in a baseline with a stated reason each and are reported every run, never silently accepted; only a new one fails, so the count can only go down. The banned set is one TAB-separated table (banned-tools.txt), so banning the next tool is a row, not code. A missing or empty table FAILS rather than passing vacuously. SCOPE: pleme-io-owned repos; akeylesslabs/* and akeyless-community/* are deliberately excluded (operator decision, 2026-08-01). The fifth baseline-debt sibling of action-shell-lint / runtime-install-lint / no-cve-suppression / breathe-band-lint.";
+    };
     "runtime-install-lint" = {
       uses = "pleme-io/actions/runtime-install-lint@main";
       backend = "tatara-lisp";
