@@ -73,11 +73,32 @@ let
           else emptyGoSumSha256;
         d2ok =
           if (delta.go_sum_sha256 or null) == goSumSha then true
-          else throw ''
+          else
+            # NAME THE WORKSPACE — same fix as the Rust sibling, same reason.
+            # A throw carrying only hashes surfaces inside an unrelated
+            # consumer's module trace, leaving the operator to find which of
+            # ~600 workspaces is at fault by hashing all of them. `src` is
+            # already in scope here; spending it costs nothing.
+            let
+              srcHint = let r = builtins.tryEval (toString src);
+                        in if r.success then r.value else "<unprintable src>";
+            in throw ''
             lockfile-delta(go): Go.gen.lock is STALE (D2 freshness tie failed).
-              committed go_sum_sha256       = ${toString (delta.go_sum_sha256 or "<missing>")}
-              hashFile "sha256" go.sum      = ${goSumSha}
-            Re-run `gen build` to regenerate Go.gen.lock from the current go.sum.
+              workspace                = ${srcHint}
+              committed go_sum_sha256  = ${toString (delta.go_sum_sha256 or "<missing>")}
+              hashFile "sha256" go.sum = ${goSumSha}
+
+            go.sum moved without a matching `gen build`, so the committed delta
+            no longer describes it. This is a HARD EVAL FAILURE for every
+            consumer of this workspace, not a warning.
+
+            Fix at the source, in the workspace named above:
+              cd <that workspace> && gen build && git commit Go.gen.lock
+
+            Do NOT pin the consumer back to an older revision — that hides a
+            real break behind a stale pin. To find every drifted workspace at
+            once:
+              gen fleet-check ~/code/github/pleme-io
           '';
 
         # Reconstruct one PackageSpec (full build-spec shape) from the slim
