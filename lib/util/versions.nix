@@ -113,6 +113,38 @@
   };
 
   docker = {
+  # ── SCOPE OF THIS WHOLE MODULE, counted 2026-08-02 ───────────────────────
+  # The maxLayers note below is a symptom; this is the shape. `versions.nix` is
+  # imported by exactly TWO files in the repo:
+  #
+  #   lib/build/rust/leptos-build.nix   (uses versions.docker.maxLayers, x2)
+  #   lib/build/wasm/wasi-service.nix
+  #
+  # and reference counts for its nine top-level groups, across all of lib/:
+  #
+  #   versions.docker      3      versions.nixpkgs     1
+  #   versions.crane       0      versions.crate2nix   0
+  #   versions.fenix       0      versions.forge       0
+  #   versions.mkInputs    0      versions.rust        0
+  #   versions.substrate   0
+  #
+  # SEVEN OF NINE GROUPS ARE REFERENCED NOWHERE. Fleet-wide the picture is the
+  # same: one file outside this module mentions any of the unused groups.
+  #
+  # So this is not "a default that one builder forgot to use" -- it is a
+  # centralised version-pin module that centralises almost nothing, and the
+  # maxLayers gap is what that looks like when one unwired constant finally
+  # costs an image (cnpg-postgresql, never published, 101 > dockerTools' 100).
+  #
+  # The header above documents `let versions = import ../util/versions.nix;` as
+  # THE usage pattern. Two files do it. Every other builder pins its own values
+  # inline, and nothing detects the divergence -- an unimported Nix file is not
+  # dead code the evaluator can see, it simply never participates.
+  #
+  # `pending-versions-adoption: 7 of 9 groups have zero consumers. Either wire
+  #  them or delete the ones that were never real, but do not leave a module
+  #  whose name promises fleet-wide pins and delivers two files.`
+  #
     # ── "Default" REACHES 1 OF 5 BUILDERS (counted 2026-08-02) ──────────────
     # This says "Default maxLayers for buildLayeredImage" and it is not the
     # default of anything except leptos-build.nix. Every buildLayeredImage call
