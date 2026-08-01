@@ -304,18 +304,52 @@
     # The two entries below are honestly measured and honestly worded, and put
     # together they still mislead: they retire the two *actions*, and a reader
     # scanning this catalog reasonably concludes skopeo is gone from the fleet.
-    # It is not. Measured 2026-08-01 across 951 pleme-io repos: ELEVEN live
-    # `${pkgs.skopeo}/bin/skopeo copy` call sites in five repos, none of which
-    # is an action and none of which this catalog can see —
+    # It is not. Measured 2026-08-01 across 951 pleme-io repos: SIXTEEN live
+    # `${pkgs.skopeo}/bin/skopeo copy` invocations in NINE files across five
+    # repos, none an action and none visible to this catalog —
     #
-    #   aresta/flake.nix:134 · blackmatter-akeyless/flake.nix:135 ·
-    #   enxerto/flake.nix:102 · infrastructure/github-runner/…/flake.nix:914,916,918 ·
+    #   aresta/flake.nix (1) · blackmatter-akeyless/flake.nix (1) ·
+    #   enxerto/flake.nix (1) · infrastructure/github-runner/…/flake.nix (3) ·
     #   pangea-architectures/services/akeyless-{sra,csi-provider,ztwa,gateway,
-    #     secrets-injection}-image/flake.nix:98 (five, byte-identical)
+    #     secrets-injection}-image/flake.nix (2 each = 10)
     #
-    # All eleven are ONE class, not eleven tasks: `nix build --print-out-paths`
-    # → `skopeo copy docker-archive:… docker://…`, hand-rolled in a flake's
-    # release app.
+    # An earlier revision of this paragraph said ELEVEN and called the five
+    # pangea files "byte-identical". Both were wrong — they carry two copies
+    # each, not one. Left visible rather than silently rewritten, because the
+    # correction below is about exactly this failure mode.
+    #
+    # ── CORRECTED 2026-08-01, SAME DAY: "eleven, ONE class" was wrong twice ──
+    # The real figures, from reading all nine files rather than two: SIXTEEN
+    # executable `skopeo copy` invocations across NINE files in FIVE repos.
+    # (28 raw occurrences fleet-wide; the other 12 are prose in this catalog,
+    # hardened-images, substrate and tatara-infra. Control: `doca` returns 270
+    # on the same probe, so the count is real and not a dead grep.)
+    #
+    # And they are FOUR conversion classes, not one. This matters because the
+    # original note said "just use the primitive", and that is false for three
+    # of the four:
+    #
+    #   1. GHCR, no auth      aresta, enxerto            --insecure-policy
+    #   2. private + creds    blackmatter-akeyless       --dest-creds
+    #   3. runner, w/ retry   github-runner (x3)         --dest-creds --retry-times
+    #   4. Zot, OCI media     pangea-architectures (5x2) --dest-authfile --format oci
+    #
+    # Only class 1 is a drop-in for mkImageReleaseApp. Class 2 and 3 pass
+    # credentials, class 3 wants retry semantics, and class 4 targets a
+    # SELF-SIGNED Zot with `--format oci` — an OCI-media-type push, not a
+    # docker-manifest push. Converting class 4 as if it were class 1 would
+    # change the media types of five live images.
+    #
+    # WHY THE FIRST COUNT WAS WRONG, because the mechanism recurs: the original
+    # figure came from counting matching grep LINES, then reading two files and
+    # generalising the shape to the rest. Grouping by SYMPTOM ("they all call
+    # skopeo copy") silently asserts a shared FIX, which is a different and much
+    # stronger claim than a shared symptom. Both errors ran the same direction —
+    # under-count, over-generalise — and neither would have been caught by
+    # re-running the grep, only by opening every file.
+    #
+    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes.
+    #  Class 1 (2 sites) is the only drop-in; 2-4 need per-class work.`
     #
     # THE DESTINATION ALREADY EXISTS AND IS ALREADY CONVERTED. `lib/service/
     # image-release.nix` (`mkImageReleaseApp`) threads `ociPush` → `DOCA_BIN`;
