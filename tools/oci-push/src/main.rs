@@ -1269,6 +1269,24 @@ fn push_with_retry_inner(
 /// This is the case ★★ ADVANCE-2 names explicitly — "enhance doca where it
 /// falls short rather than keeping a fallback" — so the fix is `--src-insecure`
 /// / `--dest-insecure` here, NOT leaving image-sync on skopeo.
+/// ── ★★ PARITY AUDIT, 2026-08-02 — measured, not asserted ──────────────────
+/// Live `ClientConfig { … }` literals in this crate: exactly TWO, both inside
+/// `client_config_for` / `client_config_for_platform`, where they belong.
+/// Every subcommand — pull, push, transfer, tag, inspect, resolve — now
+/// exposes `--insecure` (or `--src-insecure`) and reaches it through a helper.
+/// 6 of 6.
+///
+/// THE FINDING is not any one missing flag. Three capability gaps (transfer's
+/// insecure/CA, transfer's platform, tag's insecure/CA) were ONE fact with
+/// three symptoms: a site that builds `ClientConfig` by hand freezes at the
+/// capabilities the struct had the day it was written, and
+/// `..Default::default()` guarantees it keeps compiling as the struct grows.
+/// Nothing fails; the capability is absent, with no error to notice.
+///
+/// The durable invariant is structural, not a checklist: NO subcommand
+/// constructs `ClientConfig` directly. Grep `ClientConfig {` — anything
+/// outside the two helpers will silently miss the next field added.
+///
 /// ── CLOSED 2026-08-02. `--src-insecure` / `--dest-insecure` / `--src-ca-cert`
 /// / `--dest-ca-cert` now exist, per-side as argued below, and `transfer`
 /// routes both clients through `client_config_for` — the SAME helper `pull`
@@ -2171,6 +2189,8 @@ fn cmd_resolve<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 /// `tag` — add a new tag to an existing manifest with NO blob re-upload: pull
 /// the manifest from `--ref`, push it back to the same repo under `--new-tag`.
 fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut insecure = false;
+    let mut ca_cert: Option<String> = None;
     let mut reference: Option<String> = None;
     let mut new_tag: Option<String> = None;
     let mut user: Option<String> = None;
@@ -2181,6 +2201,21 @@ fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             "--new-tag" => new_tag = Some(next_value(&mut it, "new-tag")?),
             "--user" => user = Some(next_value(&mut it, "user")?),
             "--pass" => pass = Some(next_value(&mut it, "pass")?),
+            // ── THIRD instance of the same divergence, 2026-08-02 ───────────
+            // `tag` hand-rolled `ClientConfig { protocol, ..Default }` exactly
+            // as `transfer` did, so it silently had no way to say "this
+            // registry is self-signed" — while `pull`, which delegates to
+            // `client_config_for`, has had --insecure/--dest-ca-cert all along.
+            // This is NOT a third bug; it is the third symptom of one fact:
+            // every site that builds the struct by hand freezes at the
+            // capabilities the struct had on the day it was written, and
+            // `..Default::default()` guarantees it still compiles.
+            //
+            // It matters concretely here: the fleet Zot serves a self-signed
+            // cert (see actions/zot-pull-scan's CA plumbing), so `doca tag`
+            // against it could not have worked.
+            "--insecure" => insecure = true,
+            "--dest-ca-cert" => ca_cert = Some(next_value(&mut it, "dest-ca-cert")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -2208,12 +2243,12 @@ fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     dest_str.push(':');
     dest_str.push_str(&nt);
     let dest = parse_reference(&dest_str)?;
-    let proto = protocol_for(src.registry());
+    let _ = protocol_for(src.registry());
+    // Built BEFORE block_on so a bad CA path names the file instead of failing
+    // inside an async call, same as `pull` and `transfer`.
+    let cfg = client_config_for(src.registry(), insecure, &ca_cert)?;
     runtime()?.block_on(async {
-        let client = Client::new(ClientConfig {
-            protocol: proto,
-            ..Default::default()
-        });
+        let client = Client::new(cfg);
         let (manifest, _digest) =
             client
                 .pull_manifest(&src, &auth)
