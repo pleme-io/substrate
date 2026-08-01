@@ -422,11 +422,13 @@ let
   # mkHardenedGoBinary is the right answer for "is my stdlib current". Both, not
   # either.
   #
-  # It is also NOT strict at defaults (see mkHardenedGoImage's `vulnStrict`) and
-  # a nix sandbox has no network to reach vuln.go.dev, so "could not analyse" and
-  # "clean" are indistinguishable in the derivation's exit status. Treat a green
-  # `img.checks.vuln` as evidence of nothing unless it ran with network AND
-  # strict.
+  # "Could not analyse" and "clean" USED to be indistinguishable in this
+  # derivation's exit status, and the honest advice was to treat a green
+  # `img.checks.vuln` as evidence of nothing. That is no longer the trade: an
+  # analysis that did not complete is now fatal regardless of `strict`, so a
+  # green states that govulncheck actually ran. What a green still does NOT
+  # state is that the database was current — that is `vulnDb`'s freshness, and
+  # it is the caller's to keep, exactly as cve-gate.nix says of trivy.
   mkGoVulnCheck = pkgs: {
     name,
     src,
@@ -437,6 +439,17 @@ let
     # so a 24.05 repo ran a reachability gate against go 1.22.8 even once its
     # build toolchain had been fixed. A partial fix here reads as complete.
     goToolchain ? moduleGoToolchain,
+    # An OFFLINE vulnerability database (a store path laid out like vuln.go.dev).
+    # This is the ONLY way this gate can ever decide anything: the derivation is
+    # a plain `runCommand`, so it is sandboxed and has no network, and
+    # govulncheck without a reachable database exits 1 before analysing.
+    # Measured on rio 2026-08-01, govulncheck 1.1.4:
+    #   with a database   -> rc=0, "Your code is affected by 0 vulnerabilities."
+    #   -db file:///absent -> rc=1, "creating client: stat …: no such file …"
+    # Supplying this is also what ★★ HERMETIC SUPPLY CHAIN requires — the
+    # database is mirrored once as a fixed-output derivation, never fetched at
+    # build time.
+    vulnDb ? null,
   }:
   let
     analysisGo = if goToolchain != null then goToolchain else pkgs.go;
@@ -446,6 +459,7 @@ let
       nativeBuildInputs = [ pkgs.govulncheck analysisGo pkgs.cacert ];
       inherit src;
       strictMode = if strict then "1" else "0";
+      dbFlag = if vulnDb == null then "" else "-db file://${vulnDb}";
     }
     ''
       set -uo pipefail
@@ -457,18 +471,51 @@ let
       cd ./source
 
       echo "== govulncheck: ${name} =="
-      # govulncheck needs the module graph. In a sandbox with no network the
-      # honest outcome is "could not analyse", which must not masquerade as a
-      # clean result; it is reported and, under strict, fails.
-      if govulncheck ./... > "$TMPDIR/vuln.txt" 2>&1; then
-        echo "  no reachable vulnerabilities"
+
+      # THREE outcomes, not two. The previous version had two branches, so
+      # "could not analyse" fell into the findings branch and — at the default
+      # strict=false — wrote a $out and exited 0. A run that never opened the
+      # vulnerability database reported "findings present" and went green.
+      #
+      # `rc` alone cannot separate them: govulncheck exits 1 both for "database
+      # unreachable" and for other errors. The discriminator is the COMPLETION
+      # MARKER, which only a finished analysis prints (measured on rio, above).
+      # Grepping for it means an un-run gate cannot be mistaken for a clean one.
+      # `|| rc=$?`, NOT a bare call. stdenv runs this builder under `set -e`, and
+      # the version this replaced hid inside `if govulncheck …; then`, which is
+      # exempt. A bare call aborts the script the moment govulncheck exits
+      # non-zero — which is ALWAYS here — so the derivation failed before
+      # reaching the verdict below and reported exit 1 for the wrong reason.
+      # Measured: it did, and the differential that "proved" the fix was itself
+      # a false proof until the failure REASON was read rather than the code.
+      rc=0
+      govulncheck $dbFlag ./... > "$TMPDIR/vuln.txt" 2>&1 || rc=$?
+
+      if ! grep -q "Your code is affected by" "$TMPDIR/vuln.txt"; then
+        echo "== ${name}: govulncheck COULD NOT ANALYSE =="
+        sed 's/^/    /' "$TMPDIR/vuln.txt" | head -n 40
+        echo ""
+        echo "  This is FATAL regardless of \`strict\`, and deliberately so: a"
+        echo "  gate that did not run must never produce a green artifact. It"
+        echo "  is not evidence of a clean tree, it is the absence of evidence."
+        echo ""
+        echo "  This derivation is a sandboxed runCommand and has NO network,"
+        echo "  so govulncheck cannot reach vuln.go.dev. Pass an offline"
+        echo "  database via mkHardenedGoImage's \`vulnDb\` (a mirrored"
+        echo "  fixed-output derivation), or set \`vulnGate = false\` and say"
+        echo "  in the call site that this image has no reachability gate."
+        exit 1
+      fi
+
+      if [ "$rc" -eq 0 ]; then
+        echo "  analysis completed: no reachable vulnerabilities"
         mkdir -p "$out"
         cp "$TMPDIR/vuln.txt" "$out/govulncheck.txt"
         echo "${name}: govulncheck PASS" > "$out/result"
         exit 0
       fi
 
-      echo "  govulncheck reported findings or could not complete:"
+      echo "  analysis completed and reported findings:"
       sed 's/^/    /' "$TMPDIR/vuln.txt" | head -n 60
       if [ "$strictMode" = "1" ]; then
         echo "== ${name}: govulncheck FAILED =="
@@ -515,11 +562,19 @@ let
     entrypoint ? null,
     workDir ? "/",
     vulnGate ? true,
-    # NOT strict by default: govulncheck needs the vulnerability database, and
-    # a nix build sandbox has no network. Strict-by-default would fail every
-    # build for a reason that has nothing to do with the code. Turn it on where
-    # the gate runs with network, which is CI.
+    # `strict` governs FINDINGS ONLY. It does NOT govern whether the gate ran:
+    # a govulncheck that could not open its database is fatal either way, so
+    # there is no setting of this flag under which an un-run gate goes green.
+    #
+    # This comment used to say "turn it on where the gate runs with network,
+    # which is CI". That remedy was inapplicable as written — the check is a
+    # sandboxed `runCommand`, so no CI arrangement gives it network — and it
+    # papered over the real defect, which was that the non-strict path exited 0
+    # after failing to analyse anything at all. The fix is `vulnDb`, not this.
     vulnStrict ? false,
+    # Offline vulnerability database; see mkGoVulnCheck. Without it this gate
+    # cannot decide, and now says so instead of passing.
+    vulnDb ? null,
     # CEILING 5 -> 7, 2026-08-01. This check has NEVER passed: it was added
     # 2026-07-29 (e7197d1) and substrate's nix-tests has been red from that day
     # to this one -- because the ceiling contradicts the posture the SAME check
@@ -611,7 +666,7 @@ let
 
     vuln = lib.optionalAttrs vulnGate {
       vuln = mkGoVulnCheck pkgs {
-        inherit name src goToolchain;
+        inherit name src goToolchain vulnDb;
         strict = vulnStrict;
       };
     };
