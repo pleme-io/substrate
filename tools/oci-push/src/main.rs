@@ -203,9 +203,9 @@ fn client_config_for_platform(
             entries
                 .iter()
                 .find(|e| {
-                    e.platform.as_ref().is_some_and(|p| {
-                        p.os == want_os && p.architecture == want_arch
-                    })
+                    e.platform
+                        .as_ref()
+                        .is_some_and(|p| p.os == want_os && p.architecture == want_arch)
                 })
                 .map(|e| e.digest.clone())
         })),
@@ -224,8 +224,14 @@ enum PushError {
     UnknownSubcommand(String),
     Json(serde_json::Error),
     ConfigParse(serde_yaml::Error),
-    OciPull { reference: String, detail: String },
-    LabelAbsent { reference: String, label: String },
+    OciPull {
+        reference: String,
+        detail: String,
+    },
+    LabelAbsent {
+        reference: String,
+        label: String,
+    },
     NotImplemented(&'static str),
     /// `--digest-only` asked of a LOCAL archive. Not a missing feature: a
     /// docker-archive has no registry digest at all — the manifest digest a
@@ -239,28 +245,78 @@ enum PushError {
     /// malformed archive when the real fault is an image config that never
     /// declared its platform.
     ArchiveNoArchitecture(String),
-    ReadTarball { path: String, source: std::io::Error },
+    ReadTarball {
+        path: String,
+        source: std::io::Error,
+    },
     Archive(std::io::Error),
     NoManifestJson,
+    /// `crypto-version` found no `OpenSSL X.Y.Z` string in any layer. NOT a
+    /// pass: a probe that cannot find its subject must never report coverage.
+    CryptoVersionAbsent {
+        tarball: String,
+    },
+    /// `crypto-version --min` was given and the highest version found is below it.
+    CryptoVersionBelowFloor {
+        found: String,
+        floor: String,
+    },
     UnsupportedCompressor(&'static str),
     ManifestParse(serde_json::Error),
     EmptyManifest,
     MissingEntry(String),
     Gzip(std::io::Error),
     Runtime(std::io::Error),
-    Reference { reference: String, detail: String },
-    OciPush { tag: String, detail: String },
-    ReadCaCert { path: String, source: std::io::Error },
-    Chmod { path: String, source: std::io::Error },
-    ReadDir { path: String, source: std::io::Error },
-    ResolveSymlink { path: String, source: std::io::Error },
-    RemoveSymlink { path: String, source: std::io::Error },
-    CopyReal { path: String, source: std::io::Error },
-    NoCandidateTag { reference: String, considered: usize },
-    PrefixMismatch { tag: String, prefix: String },
+    Reference {
+        reference: String,
+        detail: String,
+    },
+    OciPush {
+        tag: String,
+        detail: String,
+    },
+    ReadCaCert {
+        path: String,
+        source: std::io::Error,
+    },
+    Chmod {
+        path: String,
+        source: std::io::Error,
+    },
+    ReadDir {
+        path: String,
+        source: std::io::Error,
+    },
+    ResolveSymlink {
+        path: String,
+        source: std::io::Error,
+    },
+    RemoveSymlink {
+        path: String,
+        source: std::io::Error,
+    },
+    CopyReal {
+        path: String,
+        source: std::io::Error,
+    },
+    NoCandidateTag {
+        reference: String,
+        considered: usize,
+    },
+    PrefixMismatch {
+        tag: String,
+        prefix: String,
+    },
     WriteGithubOutput(std::io::Error),
-    NoPlatformMatch { reference: String, os: String, arch: String },
-    WriteArchive { path: String, source: std::io::Error },
+    NoPlatformMatch {
+        reference: String,
+        os: String,
+        arch: String,
+    },
+    WriteArchive {
+        path: String,
+        source: std::io::Error,
+    },
     Gunzip(std::io::Error),
 }
 
@@ -275,11 +331,11 @@ impl fmt::Display for PushError {
             }
             PushError::NoSubcommand => write!(
                 f,
-                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs)"
+                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version)"
             ),
             PushError::UnknownSubcommand(s) => write!(
                 f,
-                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs)"
+                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version)"
             ),
             PushError::Json(e) => write!(f, "oci-push: JSON error: {e}"),
             PushError::ConfigParse(e) => write!(f, "oci-push: config parse error: {e}"),
@@ -312,6 +368,17 @@ impl fmt::Display for PushError {
                 write!(f, "oci-push: cannot read tarball {path}: {source}")
             }
             PushError::Archive(e) => write!(f, "oci-push: error reading docker-archive: {e}"),
+            PushError::CryptoVersionAbsent { tarball } => write!(
+                f,
+                "oci-push[crypto-version]: no 'OpenSSL X.Y.Z' string found in any layer of {tarball}. \
+Refusing rather than reporting a version: a probe that cannot find its subject must not report coverage. \
+Either this image bundles no OpenSSL, or the scan stopped working."
+            ),
+            PushError::CryptoVersionBelowFloor { found, floor } => write!(
+                f,
+                "oci-push[crypto-version]: bundled OpenSSL {found} is BELOW the required floor {floor}. \
+A statically linked crypto library has no store path, so a downgrade here is invisible to a closure scanner."
+            ),
             PushError::NoManifestJson => {
                 write!(f, "oci-push: docker-archive has no manifest.json")
             }
@@ -422,8 +489,7 @@ struct PushSpec {
 impl PushSpec {
     /// `<registry>/<image>:<tag>` for a given tag.
     fn reference(&self, tag: &str) -> String {
-        let mut r =
-            String::with_capacity(self.registry.len() + self.image.len() + tag.len() + 2);
+        let mut r = String::with_capacity(self.registry.len() + self.image.len() + tag.len() + 2);
         r.push_str(&self.registry);
         r.push('/');
         r.push_str(&self.image);
@@ -773,7 +839,10 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     let raw: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    let body: &[u8] = raw.strip_suffix(b"==").or_else(|| raw.strip_suffix(b"=")).unwrap_or(&raw);
+    let body: &[u8] = raw
+        .strip_suffix(b"==")
+        .or_else(|| raw.strip_suffix(b"="))
+        .unwrap_or(&raw);
     let pad = raw.len().checked_sub(body.len())?;
     if pad > 2 || (!raw.is_empty() && raw.len() % 4 != 0) {
         return None;
@@ -972,8 +1041,10 @@ fn auth_resolved(
         docker_config_credentials(registry)
     };
     auth_or_anon(
-        user.or(env_user).or_else(|| ambient.as_ref().map(|(u, _)| u.clone())),
-        pass.or(env_pass).or_else(|| ambient.as_ref().map(|(_, p)| p.clone())),
+        user.or(env_user)
+            .or_else(|| ambient.as_ref().map(|(u, _)| u.clone())),
+        pass.or(env_pass)
+            .or_else(|| ambient.as_ref().map(|(_, p)| p.clone())),
     )
 }
 
@@ -1286,7 +1357,13 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             .unwrap_or_else(|| OciImageManifest::build(&data.layers, &data.config, None));
         eprintln!("oci-push[transfer]: pushing {dest_ref}");
         dest_client
-            .push(&dest_ref, &data.layers, data.config, &dest_auth, Some(manifest))
+            .push(
+                &dest_ref,
+                &data.layers,
+                data.config,
+                &dest_auth,
+                Some(manifest),
+            )
             .await
             .map_err(|e| PushError::OciPush {
                 tag: dest_ref.to_string(),
@@ -1479,13 +1556,14 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 
     runtime()?.block_on(async {
         let client = Client::new(cfg);
-        let (manifest, digest) = client
-            .pull_manifest(&r, &auth)
-            .await
-            .map_err(|e| PushError::OciPull {
-                reference: r.to_string(),
-                detail: e.to_string(),
-            })?;
+        let (manifest, digest) =
+            client
+                .pull_manifest(&r, &auth)
+                .await
+                .map_err(|e| PushError::OciPull {
+                    reference: r.to_string(),
+                    detail: e.to_string(),
+                })?;
         // A label lives in the config blob, which the manifest only points at,
         // so it costs one extra fetch. Only paid when asked for.
         if let Some(key) = label.as_deref() {
@@ -1640,7 +1718,9 @@ fn cmd_pull<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     );
     let insecure = insecure || env_input("INPUT_INSECURE").as_deref() == Some("true");
     let ca_cert = ca_cert.or_else(|| env_input("INPUT_DEST_CA_CERT"));
-    let want_os = os_.or_else(|| env_input("INPUT_OS")).unwrap_or_else(|| "linux".to_string());
+    let want_os = os_
+        .or_else(|| env_input("INPUT_OS"))
+        .unwrap_or_else(|| "linux".to_string());
     let want_arch = arch
         .or_else(|| env_input("INPUT_ARCH"))
         .unwrap_or_else(|| "amd64".to_string());
@@ -1656,17 +1736,19 @@ fn cmd_pull<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
     let ros = want_os.clone();
     let rarch = want_arch.clone();
-    cfg.platform_resolver = Some(Box::new(move |entries: &[oci_client::manifest::ImageIndexEntry]| {
-        entries
-            .iter()
-            .find(|e| {
-                e.platform
-                    .as_ref()
-                    .map(|p| p.os == ros && p.architecture == rarch)
-                    .unwrap_or(false)
-            })
-            .map(|e| e.digest.clone())
-    }));
+    cfg.platform_resolver = Some(Box::new(
+        move |entries: &[oci_client::manifest::ImageIndexEntry]| {
+            entries
+                .iter()
+                .find(|e| {
+                    e.platform
+                        .as_ref()
+                        .map(|p| p.os == ros && p.architecture == rarch)
+                        .unwrap_or(false)
+                })
+                .map(|e| e.digest.clone())
+        },
+    ));
 
     runtime()?.block_on(async {
         let client = Client::new(cfg);
@@ -1710,13 +1792,15 @@ fn cmd_pull<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         let mut builder = tar::Builder::new(Vec::new());
         let mut layer_paths: Vec<String> = Vec::new();
 
-        let append = |b: &mut tar::Builder<Vec<u8>>, path: &str, bytes: &[u8]| -> Result<(), PushError> {
-            let mut h = tar::Header::new_gnu();
-            h.set_size(bytes.len() as u64);
-            h.set_mode(0o644);
-            h.set_cksum();
-            b.append_data(&mut h, path, bytes).map_err(PushError::Archive)
-        };
+        let append =
+            |b: &mut tar::Builder<Vec<u8>>, path: &str, bytes: &[u8]| -> Result<(), PushError> {
+                let mut h = tar::Header::new_gnu();
+                h.set_size(bytes.len() as u64);
+                h.set_mode(0o644);
+                h.set_cksum();
+                b.append_data(&mut h, path, bytes)
+                    .map_err(PushError::Archive)
+            };
 
         for (i, desc) in manifest.layers.iter().enumerate() {
             let mut blob: Vec<u8> = Vec::new();
@@ -1827,13 +1911,14 @@ fn cmd_list<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let cfg = client_config_for(r.registry(), insecure, &ca_cert)?;
     runtime()?.block_on(async {
         let client = Client::new(cfg);
-        let resp = client
-            .list_tags(&r, &auth, None, None)
-            .await
-            .map_err(|e| PushError::OciPull {
-                reference: r.to_string(),
-                detail: e.to_string(),
-            })?;
+        let resp =
+            client
+                .list_tags(&r, &auth, None, None)
+                .await
+                .map_err(|e| PushError::OciPull {
+                    reference: r.to_string(),
+                    detail: e.to_string(),
+                })?;
         for t in resp.tags {
             println!("{t}");
         }
@@ -1937,13 +2022,14 @@ fn cmd_resolve<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 
     runtime()?.block_on(async {
         let client = Client::new(cfg);
-        let listed = client
-            .list_tags(&r, &auth, None, None)
-            .await
-            .map_err(|e| PushError::OciPull {
-                reference: r.to_string(),
-                detail: e.to_string(),
-            })?;
+        let listed =
+            client
+                .list_tags(&r, &auth, None, None)
+                .await
+                .map_err(|e| PushError::OciPull {
+                    reference: r.to_string(),
+                    detail: e.to_string(),
+                })?;
         let considered = listed.tags.len();
 
         let winner = listed
@@ -2056,13 +2142,14 @@ fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
                     reference: src.to_string(),
                     detail: e.to_string(),
                 })?;
-        let digest = client
-            .push_manifest(&dest, &manifest)
-            .await
-            .map_err(|e| PushError::OciPush {
-                tag: dest.to_string(),
-                detail: e.to_string(),
-            })?;
+        let digest =
+            client
+                .push_manifest(&dest, &manifest)
+                .await
+                .map_err(|e| PushError::OciPush {
+                    tag: dest.to_string(),
+                    detail: e.to_string(),
+                })?;
         eprintln!("oci-push[tag]: {src} -> {dest} ({digest})");
         Ok::<(), PushError>(())
     })
@@ -2135,6 +2222,150 @@ fn cmd_config_show<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushErro
 /// file AND leaves the marker on disk, so the rootfs contains a file the image
 /// does not have. That is precisely the failure the old comment on the skopeo
 /// path was warning about ("tar -xf over layered images produces whiteouts").
+/// `crypto-version` — report the STATICALLY LINKED OpenSSL version inside an
+/// image, the one thing a closure/package scanner structurally cannot see.
+///
+/// WHY THIS IS A doca SUBCOMMAND AND NOT A SHELL PIPELINE. ClickHouse (and any
+/// vendor rewrap) links its TLS stack in-tree, so it has no store path and no
+/// package record. Measured over all 20 layers of hardened-clickhouse:1.0.53 —
+/// 3,873 entries — there are 14 store-path packages and ZERO matches for
+/// openssl/boringssl/libssl/libcrypto. vulnix therefore reports clean over a
+/// crypto denominator of zero, on the lane whose green is justified by "the
+/// closure IS the SBOM". The version string is the only handle, and reading it
+/// with `curl | tar | strings` is exactly the shell this fleet forbids.
+///
+/// Scans layer blobs IN MEMORY, in bounded chunks with an overlap, so a 3 GB
+/// image never lands on disk and no single entry is buffered whole.
+///
+/// `--min` makes it a gate. Absent a match it ERRORS — a probe that cannot find
+/// its subject must not report coverage.
+fn cmd_crypto_version<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut tarball: Option<String> = None;
+    let mut min: Option<String> = None;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--tarball" => tarball = Some(next_value(&mut it, "tarball")?),
+            "--min" => min = Some(next_value(&mut it, "min")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    let tarball = tarball
+        .or_else(|| env_input("INPUT_TARBALL"))
+        .ok_or(PushError::MissingArg("tarball"))?;
+    let min = min.or_else(|| env_input("INPUT_MIN"));
+
+    let entries = NativeBackend::read_archive(&tarball)?;
+    let manifest_raw = entries
+        .get("manifest.json")
+        .ok_or(PushError::NoManifestJson)?;
+    let manifest: Vec<DockerManifestEntry> =
+        serde_json::from_slice(manifest_raw).map_err(PushError::ManifestParse)?;
+    let first = manifest.first().ok_or(PushError::EmptyManifest)?;
+
+    let mut best: Option<(u64, u64, u64)> = None;
+    for layer_path in &first.layers {
+        let blob = entries
+            .get(layer_path)
+            .ok_or_else(|| PushError::MissingEntry(layer_path.clone()))?;
+        scan_layer_for_openssl(blob, &mut best)?;
+    }
+
+    let Some((a, b, c)) = best else {
+        return Err(PushError::CryptoVersionAbsent { tarball });
+    };
+    let found = format_version(a, b, c);
+
+    if let Some(floor) = min {
+        let f = parse_version(floor.as_bytes())
+            .ok_or_else(|| PushError::MissingValue("min (expected X.Y.Z)"))?;
+        if (a, b, c) < f {
+            return Err(PushError::CryptoVersionBelowFloor { found, floor });
+        }
+    }
+    println!("{found}");
+    Ok(())
+}
+
+/// Parse `X.Y.Z` from the head of `b`, returning the triple and nothing else.
+fn parse_version(b: &[u8]) -> Option<(u64, u64, u64)> {
+    let mut parts = [0u64; 3];
+    let mut i = 0usize;
+    for slot in 0..3 {
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            parts[slot] = parts[slot].saturating_mul(10) + u64::from(b[i] - b'0');
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+        if slot < 2 {
+            if i >= b.len() || b[i] != b'.' {
+                return None;
+            }
+            i += 1;
+        }
+    }
+    Some((parts[0], parts[1], parts[2]))
+}
+
+fn format_version(a: u64, b: u64, c: u64) -> String {
+    let mut s = String::new();
+    for (i, n) in [a, b, c].into_iter().enumerate() {
+        if i > 0 {
+            s.push('.');
+        }
+        s.push_str(&n.to_string());
+    }
+    s
+}
+
+/// Scan one (gzipped) layer for `OpenSSL X.Y.Z`, keeping the HIGHEST version.
+///
+/// Chunked with a 64-byte overlap so a version string straddling a chunk
+/// boundary is still found — the obvious bug in a naive chunked scan, and the
+/// one that would make this silently under-report rather than fail.
+fn scan_layer_for_openssl(
+    blob: &[u8],
+    best: &mut Option<(u64, u64, u64)>,
+) -> Result<(), PushError> {
+    const NEEDLE: &[u8] = b"OpenSSL ";
+    const CHUNK: usize = 1 << 22; // 4 MiB
+    const OVERLAP: usize = 64;
+
+    let mut archive = tar::Archive::new(GzDecoder::new(std::io::Cursor::new(blob)));
+    for entry in archive.entries().map_err(PushError::Archive)? {
+        let mut entry = entry.map_err(PushError::Archive)?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let mut carry: Vec<u8> = Vec::new();
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            let n = std::io::Read::read(&mut entry, &mut buf).map_err(PushError::Archive)?;
+            if n == 0 {
+                break;
+            }
+            let mut window = carry.clone();
+            window.extend_from_slice(&buf[..n]);
+            let mut i = 0usize;
+            while i + NEEDLE.len() < window.len() {
+                if &window[i..i + NEEDLE.len()] == NEEDLE {
+                    if let Some(v) = parse_version(&window[i + NEEDLE.len()..]) {
+                        if best.is_none() || Some(v) > *best {
+                            *best = Some(v);
+                        }
+                    }
+                }
+                i += 1;
+            }
+            let keep = window.len().saturating_sub(OVERLAP);
+            carry = window[keep..].to_vec();
+        }
+    }
+    Ok(())
+}
+
 fn cmd_unpack<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut tarball: Option<String> = None;
     let mut dest: Option<String> = None;
@@ -2187,10 +2418,7 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
     let mut archive = tar::Archive::new(std::io::Cursor::new(blob));
     for entry in archive.entries().map_err(PushError::Archive)? {
         let mut entry = entry.map_err(PushError::Archive)?;
-        let path = entry
-            .path()
-            .map_err(PushError::Archive)?
-            .to_path_buf();
+        let path = entry.path().map_err(PushError::Archive)?.to_path_buf();
 
         let name = path
             .file_name()
@@ -2210,7 +2438,9 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         }
 
         if let Some(deleted) = name.strip_prefix(".wh.") {
-            let target = dest.join(path.parent().unwrap_or(Path::new(""))).join(deleted);
+            let target = dest
+                .join(path.parent().unwrap_or(Path::new("")))
+                .join(deleted);
             if target.is_dir() {
                 fs::remove_dir_all(&target).map_err(PushError::Archive)?;
             } else if target.exists() {
@@ -2344,7 +2574,10 @@ fn cmd_harden_rootfs<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushEr
 fn chmod_recursive(path: &Path, mode: u32) -> Result<(), PushError> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|source| {
-        PushError::Chmod { path: path.display().to_string(), source }
+        PushError::Chmod {
+            path: path.display().to_string(),
+            source,
+        }
     })?;
     if path.is_dir() {
         let entries = fs::read_dir(path).map_err(|source| PushError::ReadDir {
@@ -2406,6 +2639,7 @@ fn run() -> Result<(), PushError> {
         Some("config-show") => cmd_config_show(args),
         Some("harden-rootfs") => cmd_harden_rootfs(args),
         Some("unpack") => cmd_unpack(args),
+        Some("crypto-version") => cmd_crypto_version(args),
         // Back-compat: a leading flag means the legacy flat `push` form.
         Some(flag) if flag.starts_with("--") => {
             let rest = std::iter::once(flag.to_string()).chain(args);
@@ -2549,9 +2783,18 @@ mod tests {
     #[test]
     fn protocol_detection() {
         assert!(matches!(protocol_for("ghcr.io"), ClientProtocol::Https));
-        assert!(matches!(protocol_for("ghcr.io/pleme-io/x"), ClientProtocol::Https));
-        assert!(matches!(protocol_for("localhost:5000"), ClientProtocol::Http));
-        assert!(matches!(protocol_for("127.0.0.1:5000"), ClientProtocol::Http));
+        assert!(matches!(
+            protocol_for("ghcr.io/pleme-io/x"),
+            ClientProtocol::Https
+        ));
+        assert!(matches!(
+            protocol_for("localhost:5000"),
+            ClientProtocol::Http
+        ));
+        assert!(matches!(
+            protocol_for("127.0.0.1:5000"),
+            ClientProtocol::Http
+        ));
     }
 
     #[test]
@@ -2652,7 +2895,10 @@ mod tests {
         materialize_if_symlink(&link).unwrap();
 
         let meta = fs::symlink_metadata(&link).unwrap();
-        assert!(!meta.file_type().is_symlink(), "should no longer be a symlink");
+        assert!(
+            !meta.file_type().is_symlink(),
+            "should no longer be a symlink"
+        );
         assert_eq!(fs::read(&link).unwrap(), b"root:x:0:0::/root:/bin/sh\n");
         fs::remove_dir_all(&root).unwrap();
     }
@@ -2758,7 +3004,10 @@ mod tests {
         let p = write_archive(&d, r#"{"architecture":"arm64","os":"linux"}"#);
         let v = archive_platform(&p).unwrap();
         // The exact accessor forge uses.
-        assert_eq!(v.get("Architecture").and_then(|a| a.as_str()), Some("arm64"));
+        assert_eq!(
+            v.get("Architecture").and_then(|a| a.as_str()),
+            Some("arm64")
+        );
         assert_eq!(v.get("Os").and_then(|a| a.as_str()), Some("linux"));
         // NEGATIVE CONTROL: the OCI lowercase spelling must NOT be what we emit,
         // or forge would read MissingArchitecture on a perfectly good image.
@@ -2797,7 +3046,11 @@ mod tests {
         fs::create_dir_all(root.join("etc")).unwrap();
         fs::create_dir_all(root.join("tmp")).unwrap();
         let real_passwd = root.join("real-passwd");
-        fs::write(&real_passwd, b"nonroot:x:65532:65532::/home/nonroot:/sbin/nologin\n").unwrap();
+        fs::write(
+            &real_passwd,
+            b"nonroot:x:65532:65532::/home/nonroot:/sbin/nologin\n",
+        )
+        .unwrap();
         symlink(&real_passwd, root.join("etc/passwd")).unwrap();
         let real_group = root.join("real-group");
         fs::write(&real_group, b"nonroot:x:65532:\n").unwrap();
@@ -2859,10 +3112,7 @@ mod tests {
             r#"{"auths":{"ghcr.io":{"auth":"dXNlcjpwYXNz"}}}"#,
         );
         let got = docker_config_credentials_in(&[p], "ghcr.io");
-        assert_eq!(
-            got,
-            Some((String::from("user"), String::from("pass")))
-        );
+        assert_eq!(got, Some((String::from("user"), String::from("pass"))));
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -3009,7 +3259,10 @@ mod tests {
             permanent: false,
         };
         let r = push_with_retry_inner(&b, &spec_fixture(), 5, std::time::Duration::ZERO);
-        assert!(r.is_ok(), "expected success after transient failures: {r:?}");
+        assert!(
+            r.is_ok(),
+            "expected success after transient failures: {r:?}"
+        );
         assert_eq!(b.calls.get(), 3, "expected 2 failures then 1 success");
     }
 
