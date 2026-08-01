@@ -1260,6 +1260,27 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             protocol: dest_proto,
             ..Default::default()
         });
+        // PASSES THE SOURCE MANIFEST THROUGH AS-IS when the source had one.
+        //
+        // NAMED GAP, found 2026-08-01 while trying to retire skopeo from
+        // pleme-io/image-sync: that repo keeps a `skopeo copy --format oci`
+        // fallback with a measured reason -- "Zot rejects some Docker v2
+        // manifests with MANIFEST_INVALID; converting to OCI format during copy
+        // always works". doca cannot yet serve that call site, because this line
+        // preserves a Docker v2 manifest verbatim rather than re-emitting it as
+        // OCI. Converting image-sync today would reintroduce the exact bug its
+        // comment documents.
+        //
+        // The fix is small and the shape is known: a `--format oci` flag that
+        // ignores `data.manifest` and takes the `OciImageManifest::build(...)`
+        // branch unconditionally, so the pushed manifest carries OCI media
+        // types regardless of what the source served. It is NOT implemented
+        // here because proving it needs a real Docker-v2 source and a Zot to
+        // push at, and shipping an unverified replacement for a documented
+        // workaround would be worse than leaving the workaround in place.
+        //
+        // `pending-doca-transfer-oci-format: --format oci on transfer, then
+        //  retire image-sync's skopeo copy fallback.`
         let manifest = data
             .manifest
             .unwrap_or_else(|| OciImageManifest::build(&data.layers, &data.config, None));
