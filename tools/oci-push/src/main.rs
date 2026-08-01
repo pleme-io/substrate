@@ -453,6 +453,14 @@ struct DockerManifestEntry {
     config: String,
     #[serde(rename = "Layers")]
     layers: Vec<String>,
+    /// The tags baked into the archive by whatever produced it. OPTIONAL and
+    /// defaulted: `docker save` always writes `RepoTags`, but a Nix
+    /// `buildLayeredImage` archive can carry `null` there, and an image built
+    /// with no tag at all omits it. Making this a hard field would turn a
+    /// legitimately untagged archive into a parse error for every OTHER
+    /// consumer of this struct — push included, which does not read tags.
+    #[serde(rename = "RepoTags", default)]
+    repo_tags: Option<Vec<String>>,
 }
 
 impl NativeBackend {
@@ -1322,9 +1330,16 @@ fn archive_platform(path: &str) -> Result<serde_json::Value, PushError> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("linux");
 
+    // RepoTags: skopeo's field name and skopeo's shape (an array, possibly
+    // empty), so `--format '{{(index .RepoTags 0)}}'` consumers port directly.
+    // A `null` RepoTags in the archive becomes `[]` here rather than `null`,
+    // because a consumer indexing element 0 should find an EMPTY LIST and say
+    // "this archive carries no tag" — not trip over a null and report a
+    // malformed archive.
     Ok(serde_json::json!({
         "Architecture": architecture,
         "Os": os_field,
+        "RepoTags": entry.repo_tags.clone().unwrap_or_default(),
     }))
 }
 
@@ -2660,6 +2675,60 @@ mod tests {
         b.append_path_with_name(&man, "manifest.json").unwrap();
         b.finish().unwrap();
         tar_path.display().to_string()
+    }
+
+    /// RepoTags: skopeo's field name AND skopeo's shape, so a
+    /// `--format '{{(index .RepoTags 0)}}'` consumer ports directly.
+    ///
+    /// The null/absent cases are the load-bearing ones. `docker save` always
+    /// writes RepoTags, but a Nix buildLayeredImage archive can carry `null`
+    /// and an untagged image omits the key entirely. Both must surface as an
+    /// EMPTY LIST: a consumer indexing element 0 should learn "this archive
+    /// carries no tag", not trip over a null and report a malformed archive.
+    #[test]
+    fn archive_platform_reports_repo_tags_normalising_null_and_absent_to_empty() {
+        let d = scratch_dir("inspect-tarball-repotags");
+        let cfg = d.join("config.json");
+        fs::write(&cfg, r#"{"architecture":"amd64","os":"linux"}"#).unwrap();
+
+        let build = |name: &str, manifest: &str| -> String {
+            let man = d.join(format!("{name}-manifest.json"));
+            fs::write(&man, manifest).unwrap();
+            let tar_path = d.join(format!("{name}.tar"));
+            let f = fs::File::create(&tar_path).unwrap();
+            let mut b = tar::Builder::new(f);
+            b.append_path_with_name(&cfg, "config.json").unwrap();
+            b.append_path_with_name(&man, "manifest.json").unwrap();
+            b.finish().unwrap();
+            tar_path.display().to_string()
+        };
+
+        let tagged = build(
+            "tagged",
+            r#"[{"Config":"config.json","Layers":[],"RepoTags":["myimg:1.2.3"]}]"#,
+        );
+        let nulled = build(
+            "nulled",
+            r#"[{"Config":"config.json","Layers":[],"RepoTags":null}]"#,
+        );
+        let absent = build("absent", r#"[{"Config":"config.json","Layers":[]}]"#);
+
+        let tags = |p: &str| -> Vec<String> {
+            archive_platform(p).unwrap()["RepoTags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        };
+
+        assert_eq!(tags(&tagged), vec!["myimg:1.2.3".to_string()]);
+        // Both degenerate cases: an empty ARRAY, never null, never absent.
+        assert!(tags(&nulled).is_empty());
+        assert!(tags(&absent).is_empty());
+        // And the key is always present, so a consumer never has to distinguish
+        // "no tags" from "field missing".
+        assert!(archive_platform(&absent).unwrap().get("RepoTags").is_some());
     }
 
     #[test]
