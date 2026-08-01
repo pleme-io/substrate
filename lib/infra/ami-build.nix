@@ -143,8 +143,45 @@ in rec {
   # "assume 2GB/job" division would predict was safe. Defaulting to
   # 4GB/job here is deliberately conservative given that lesson; pass
   # a lower value only once a specific crate graph's real peak RSS has
-  # actually been measured (`/usr/bin/time -v` around a cold build),
-  # not by guessing tighter.
+  # actually been measured, not by guessing tighter.
+  #
+  # ── HOW TO MEASURE IT, and how NOT to (corrected 2026-07-31) ────────
+  # This used to advise `/usr/bin/time -v` around a cold build. That
+  # measures NOTHING here. `nixos-rebuild` talks to nix-daemon, so every
+  # builder process is a child of the DAEMON, not of the timed client —
+  # `getrusage(RUSAGE_CHILDREN)` on the `nix` client returns the client's
+  # own footprint, which is a few hundred MB regardless of how much a
+  # compile actually used. Anyone following that advice would have
+  # measured a number that looks plausible and means nothing.
+  #
+  # Worse, it measures the wrong STATISTIC even in principle. Sizing
+  # max-jobs needs the per-DERIVATION peak, specifically the top-N
+  # concurrent sum; a whole-invocation peak cannot be divided back into
+  # one.
+  #
+  # There is currently no supported way to get per-derivation peak RSS
+  # out of nix: `nix build --json` carries store paths and cache status,
+  # `nix log` is builder stdout, and the post-build-hook contract is
+  # exactly DRV_PATH + OUT_PATHS + NIX_CONFIG (the hook also runs AFTER
+  # the builder is reaped, so getrusage is unavailable to it). nix's
+  # per-build cgroup would expose memory.peak, but it needs the `cgroups`
+  # experimental feature — not enabled on these builders — and nix reads
+  # only cpu.stat from it, then destroys the cgroup before the hook runs.
+  #
+  # So the honest status is: this number is UNMEASURED, and the tooling
+  # to measure it does not exist yet. Building that sampler is the
+  # prerequisite for turning perJobRamGb into a lookup against real data
+  # instead of a judgement call. Until then, raising it is the safe
+  # direction and lowering it needs evidence this file cannot yet give
+  # you.
+  #
+  # ── AND IT IS NOT max-jobs ALONE ───────────────────────────────────
+  # Peak memory tracks maxJobs * cores, not maxJobs. Measured the hard
+  # way 2026-07-31: an AMI bake was "fixed" by moving 8 jobs x 2 cores to
+  # 4 jobs x 4 cores. Both products are 16, so total concurrent compilers
+  # — and peak memory — were IDENTICAL, and the same translation unit
+  # died at the same point on the retry. When sizing for memory, reason
+  # about the product.
   amiBuilderInstanceSpecs = {
     "t3.small"    = { vcpu = 2;  ramGb = 2;  };
     "t3.medium"   = { vcpu = 2;  ramGb = 4;  };
@@ -598,6 +635,18 @@ in rec {
     instanceType ? "c7i.4xlarge",
     volumeSize ? 30,
     region ? "us-east-1",
+    # ── Two parameters mkBuildTemplate has and this did NOT ──────────────
+    # A multi-layer caller that passed either got it silently ignored: the
+    # rendered template used the hardcoded defaults regardless, so raising
+    # perJobRamGb for a memory-hungry layer did nothing and pointing a layer at
+    # a substituter did nothing. Silent, because an unused argument in a Nix
+    # function signature is not an error — the caller looks correct and the
+    # output is unchanged.
+    #
+    # Defaults match the sibling exactly, so every existing caller renders
+    # byte-identically. What changes is that passing them now has an effect.
+    perJobRamGb ? 4,
+    substituterUrl ? "",
     iops ? 8000,
     throughput ? 500,
     extraVariables ? {},
@@ -617,7 +666,10 @@ in rec {
         instance_type = { type = "string"; default = instanceType; };
         volume_size = { type = "number"; default = volumeSize; };
         github_token = { type = "string"; default = ""; sensitive = true; };
-        attic_url = { type = "string"; default = ""; };
+        # Named attic_url for ami-forge wire compatibility; the VALUE is now
+        # whatever substituterUrl supplies (sui, per the fleet-wide attic
+        # retirement) rather than a hardcoded empty string.
+        attic_url = { type = "string"; default = substituterUrl; };
       } // (if sourceAmiVariable then {
         source_ami = { type = "string"; };
       } else {}) // extraVariables;
@@ -674,7 +726,7 @@ in rec {
               # See mkBuildTemplate's identical field — same nixosRebuildSwitchStep
               # is usable here for any layer whose provisionerScript runs its own
               # `nixos-rebuild switch`.
-              "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType; }}"
+              "NIX_BUILD_OPTS=${nixBuildOptsFor { inherit instanceType perJobRamGb; }}"
             ] ++ extraEnvironmentVars;
             # See mkBuildTemplate's identical field for why: a caller-supplied
             # provisionerScript that runs `nixos-rebuild switch` can
