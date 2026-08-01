@@ -355,6 +355,42 @@
     #                   TRANSIENT failures, so a 401 or a malformed archive fails
     #                   fast instead of burning the budget with backoff.
     #
+    # ── CLASS 4 IS NOT A DROP-IN — TLS TRUST DIFFERS (measured 2026-08-02) ──
+    # "Covered by doca" is true at the FEATURE level and still not a
+    # copy-paste conversion, because skopeo and doca trust different roots.
+    #
+    #   skopeo  uses the SYSTEM trust store. The five pangea-architectures
+    #           call sites pass NO ca flag at all, so the Zot's self-signed CA
+    #           must already be installed on the host — and it works.
+    #   doca    is oci-client with `default-features = false, features =
+    #           ["rustls-tls"]` (Cargo.toml) — webpki COMPILED-IN roots. Its
+    #           `ca_cert_path` builds `extra_root_certificates`, EXTRA on top
+    #           of that set, and the code comment says so explicitly: "pinning
+    #           a self-signed in-cluster cert". There is no system-store read.
+    #
+    # So converting class 4 by deleting the skopeo flags would leave doca
+    # unable to verify the Zot at all — five LIVE images failing on TLS, from
+    # a change that looks like pure simplification. `--dest-authfile` genuinely
+    # does map to nothing (doca reads $HOME/.docker/config.json ambiently,
+    # runner-verified), and `--format oci` genuinely maps to nothing (doca is
+    # OCI-only). Two of the three flags vanish and the third is load-bearing —
+    # which is the worst possible mix, because the first two teach you the
+    # pattern that breaks on the third.
+    #
+    # The correct conversion threads a CA path, exactly as the already-working
+    # doca consumers do: camelot-hardened-images.yml passes
+    # `dest-ca-cert: /usr/local/share/ca-certificates/zot-camelot.crt`, and
+    # actions/zot-pull-scan exposes src-ca-cert/dest-ca-cert for this reason.
+    # pangea-architectures' flakes have no such path today; supplying one is
+    # real work, not a flag rename.
+    #
+    # GENERAL RULE this is the second instance of: a flag that exists on the
+    # OLD tool and not the NEW one means one of two OPPOSITE things — the new
+    # tool does it unconditionally (--format oci), or the new tool does not do
+    # it at all (--dest-authfile's system-store cousin). Absence of a knob is
+    # not evidence either way. Read the source; the two look identical from the
+    # call site.
+    #
     # So all four classes are covered by doca TODAY. The remaining work is
     # mechanical conversion of 16 call sites, not a doca enhancement, and the
     # `Backend::Skopeo` fallback was already deleted 2026-07-31.
@@ -376,9 +412,11 @@
     # under-count, over-generalise — and neither would have been caught by
     # re-running the grep, only by opening every file.
     #
-    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes — ALL
-    #  four covered by doca today; the work is mechanical conversion, NOT a
-    #  doca enhancement.`
+    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes.
+    #  1 CONVERTED (aresta, class 1, 2026-08-02). No doca enhancement needed,
+    #  but conversion is NOT uniformly mechanical: class 4 (10 sites) must
+    #  thread a --dest-ca-cert path it does not have today, or five live
+    #  images lose the ability to verify the Zot's self-signed cert.`
     #
     # THE DESTINATION ALREADY EXISTS AND IS ALREADY CONVERTED. `lib/service/
     # image-release.nix` (`mkImageReleaseApp`) threads `ociPush` → `DOCA_BIN`;
