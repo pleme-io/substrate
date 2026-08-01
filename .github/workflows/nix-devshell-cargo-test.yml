@@ -45,6 +45,31 @@ on:
         description: "Args appended to `cargo test` inside the devShell"
         type: string
         default: "--workspace --no-fail-fast"
+      fmt-check:
+        description: >-
+          Run `cargo fmt --all -- --check` in the same devShell, before the
+          tests.
+
+          This gate exists because its absence was measured. magma had
+          `cargo fmt --all -- --check` in a hand-written job; adopting this
+          reusable (2026-08-01) DROPPED it, because nothing here replaced
+          it. Thirty-four files had already drifted out of format during the
+          repo's Actions blackout, and nothing would have caught the next
+          thirty-four. A gate that exists in a workflow nobody runs, then
+          vanishes in the migration to one that does, is a silent net loss.
+
+          Runs BEFORE `cargo test` on purpose: it is seconds, needs no
+          network, and a red fmt on a green suite is a clearer signal than
+          the reverse ordering gives. It is a separate step, not `&&`-joined
+          to the test command, so the two failures stay distinguishable in
+          the Actions UI.
+
+          Default `true` — this is the fleet standard, and a repo that fails
+          it is carrying real debt that one `cargo fmt --all` clears. Set
+          `false` only for a vendor mirror whose formatting is upstream's to
+          own.
+        type: boolean
+        default: true
       devshell-args:
         description: >-
           Extra arguments passed to `nix develop` itself (NOT to `cargo
@@ -167,6 +192,12 @@ jobs:
              devshell  = "${{ inputs.devshell }}";
              devShells = (builtins.getFlake (toString ./.)).devShells or {};
            }'
+
+      - name: cargo fmt --check (inside .#${{ inputs.devshell }})
+        if: ${{ inputs.fmt-check }}
+        run: >-
+          nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}"
+          -c cargo fmt --all -- --check
 
       - name: cargo test (inside .#${{ inputs.devshell }})
         env:

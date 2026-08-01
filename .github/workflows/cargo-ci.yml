@@ -123,6 +123,16 @@ on:
         required: false
         type: string
         default: "--workspace --all-features --no-fail-fast"
+      fmt-check:
+        description: >-
+          Run `cargo fmt --all -- --check` in the devShell before the tests.
+          Forwarded to nix-devshell-cargo-test.yml, where the rationale
+          lives. Default `true`: this workflow REPLACED hand-written jobs
+          that carried a fmt gate, and dropping it in the migration was a
+          measured net loss (magma, 2026-08-01, 34 drifted files).
+        required: false
+        type: boolean
+        default: true
       devshell-args:
         description: >-
           Extra arguments for `nix develop` itself, forwarded to the
@@ -228,5 +238,6 @@ jobs:
     with:
       devshell: ${{ inputs.devshell }}
       test-args: ${{ inputs.test-args }}
+      fmt-check: ${{ inputs.fmt-check }}
       devshell-args: ${{ inputs.devshell-args }}
     secrets: inherit
