@@ -1304,6 +1304,13 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
     let mut dest_insecure = false;
     let mut src_ca: Option<String> = None;
     let mut dest_ca: Option<String> = None;
+    // Platform selection for the SOURCE pull. A multi-arch index has no single
+    // manifest, so something must choose; `pull` already exposes --arch/--os and
+    // routes through `client_config_for_platform`, while `transfer` did not — the
+    // helper sat one function away, unused, exactly like the insecure/ca fields
+    // did before 2026-08-02. Same shape of absence, same file, found twice.
+    let mut arch: Option<String> = None;
+    let mut os_: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -1322,6 +1329,8 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             "--dest-insecure" => dest_insecure = true,
             "--src-ca-cert" => src_ca = Some(next_value(&mut it, "src-ca-cert")?),
             "--dest-ca-cert" => dest_ca = Some(next_value(&mut it, "dest-ca-cert")?),
+            "--arch" => arch = Some(next_value(&mut it, "arch")?),
+            "--os" => os_ = Some(next_value(&mut it, "os")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -1366,7 +1375,27 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
     // self-signed": it dropped the two fields that carry that intent. Built
     // BEFORE block_on so a bad CA path fails with a read error naming the file,
     // not somewhere inside an async pull.
-    let src_cfg = client_config_for(src_ref.registry(), src_insecure, &src_ca)?;
+    // SOURCE side is platform-aware; DEST is not. The destination receives
+    // whatever single manifest the source pull selected, so a platform filter
+    // there would be meaningless at best and would silently drop the image at
+    // worst.
+    let src_cfg = match (&arch, &os_) {
+        (Some(a), Some(o)) => {
+            client_config_for_platform(src_ref.registry(), src_insecure, &src_ca, o, a)?
+        }
+        (None, None) => client_config_for(src_ref.registry(), src_insecure, &src_ca)?,
+        // Half a platform is not a platform. Refuse rather than silently
+        // defaulting the missing half — a wrong-arch copy that succeeds is the
+        // expensive failure here.
+        _ => {
+            // Worded to read correctly through MissingArg's own "--" prefix,
+            // which turned "both --arch and --os" into the nonsense
+            // "missing required --both --arch and --os".
+            return Err(PushError::MissingArg(
+                "arch AND --os together (a platform needs both, or neither)",
+            ))
+        }
+    };
     let dest_cfg = client_config_for(dest_ref.registry(), dest_insecure, &dest_ca)?;
     let _ = (src_proto, dest_proto);
 
