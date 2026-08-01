@@ -123,6 +123,27 @@ on:
         required: false
         type: string
         default: "--workspace --all-features --no-fail-fast"
+      build-targets:
+        description: >-
+          Space-separated flake outputs to `nix build` after the flake check,
+          e.g. `.#default`. Empty by default — no build.
+
+          This input exists because migrating a hand-written job to this
+          reusable can SILENTLY DROP coverage. `nix flake check` builds
+          `checks.<system>.*` and nothing else; a repo whose old job ran an
+          explicit `nix build '.#default'` was compiling its actual package,
+          and the shim does not do that unless the flake happens to expose a
+          check covering it. Seven repos (arnes, promessa, remessa,
+          repo-forge, tansa, zuihitsu, engenho-promessa-controllers) carry
+          exactly that step in a hand-written job as of 2026-08-01.
+
+          The same trap as `fmt-check` directly below, found the same way:
+          the migration reads as pure progress while quietly buying less.
+          Pass the targets the old job built rather than assuming flake
+          check subsumes them.
+        required: false
+        type: string
+        default: ""
       fmt-check:
         description: >-
           Run `cargo fmt --all -- --check` in the devShell before the tests.
@@ -207,6 +228,15 @@ jobs:
           # with private deps needs BOT_PAT to be present; if flake-check 404s
           # with this wired, that missing org secret is the thing to check.
           github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: nix build ${{ inputs.build-targets }}
+        if: ${{ inputs.build-targets != '' }}
+        env:
+          # Same private-dep credential path as the flake-check step above:
+          # nix's GitHub fetcher is separate from cargo's git, and runs
+          # anonymous (404 on a private dep) without its own token.
+          GITHUB_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+        run: nix build ${{ inputs.build-targets }}
 
       # A green `nix flake check` is only as strong as the check set it had
       # to build. Zero checks is a pass over an unbuilt crate, so it fails
