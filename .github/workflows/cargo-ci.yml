@@ -140,8 +140,41 @@ on:
         default: ""
 
 jobs:
+  # ── Runner resolution — the leg this workflow never had ────────────────
+  #
+  # `flake-check` used a bare `runs-on: ubuntu-latest`. On a PUBLIC repo that
+  # is free and correct. On a PRIVATE one it is a GitHub-HOSTED runner billed
+  # against org minutes, so when those are unavailable the job does not fail —
+  # it QUEUES, indefinitely, with no error to read.
+  #
+  # Measured on magma 2026-08-01: with Actions freshly re-enabled, the
+  # dispatched run sat `queued` for 6+ minutes and never started, while the
+  # sibling `cargo-test` leg (which delegates to nix-devshell-cargo-test.yml)
+  # was unaffected. A private consumer of this workflow could not run CI at
+  # all, and the symptom was silence rather than a failure.
+  #
+  # cargo-auto-release.yml has routed by visibility since it was written, and
+  # its own comment names the duplication problem: the identical logic had
+  # been re-derived in three places before `pleme-io/actions/runner-resolve`
+  # was extracted to hold it. This workflow was the fourth site and never
+  # adopted it — so the fix is the resolver, not a fourth copy of the ternary.
+  #
+  # This job's OWN `runs-on` is the one place a visibility-only ternary stays
+  # correct: bootstrapping the resolver cannot call the resolver.
+  resolve-runner:
+    name: resolve build runner
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+    steps:
+      - id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          public-runner-default: "ubuntu-latest"
+
   flake-check:
-    runs-on: ubuntu-latest
+    needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
