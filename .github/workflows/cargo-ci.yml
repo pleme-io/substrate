@@ -147,6 +147,23 @@ jobs:
       - uses: pleme-io/actions/nix-flake-check@main
         with:
           flake-args: ${{ inputs.flake-args }}
+          # Without this, a repo with a PRIVATE pleme-io git-crate dep fails
+          # here on an HTTP 404 from api.github.com — nix's own GitHub fetcher
+          # running anonymous. The sibling `cargo-test` leg never had this
+          # problem because nix-devshell-cargo-test carries git-credentials for
+          # CARGO's git; nix's fetcher is a separate credential path and needed
+          # its own wiring. Measured on mado 2026-08-01 (run 30681539821),
+          # where cargo-test cloned private hayai fine and flake-check 404'd on
+          # the same rev in the same run — which is the clearest possible
+          # evidence the two are unrelated mechanisms.
+          #
+          # BOT_PAT first, and the fallback is a courtesy rather than a fix:
+          # the auto-provided GITHUB_TOKEN is scoped to the RUNNING repo, so it
+          # cannot read a different private repo and will still 404. It only
+          # buys the higher authenticated rate limit for public deps. A repo
+          # with private deps needs BOT_PAT to be present; if flake-check 404s
+          # with this wired, that missing org secret is the thing to check.
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # A green `nix flake check` is only as strong as the check set it had
       # to build. Zero checks is a pass over an unbuilt crate, so it fails
