@@ -80,7 +80,21 @@ in rec {
     program = toString (pkgs.writeShellScript "release-${name}" ''
       set -euo pipefail
       ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
-      export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
+      # SKOPEO_BIN export REMOVED 2026-08-01: dead, and it cost a closure.
+      # forge's only SKOPEO_BIN reader is `cli/src/tools.rs::get_tool_path`,
+      # which derives `{TOOL}_BIN` from a tool name — and that function has
+      # ZERO production callers: `mod tools;` is declared (main.rs:68) but
+      # every `tools::` reference in the crate is `commands::developer_tools::`,
+      # a DIFFERENT module that merely shares the substring. The live push
+      # paths (commands/push.rs, commands/image_release.rs) resolve DOCA_BIN
+      # and fall back to `oci-push` on PATH; every remaining `skopeo` in them
+      # is a migration comment, not a call. So this line interpolated
+      # `pkgs.skopeo` into the closure of EVERY mkImageReleaseApp consumer to
+      # set a variable nothing reads. Same measurement, and same conclusion,
+      # as lib/util/config.nix's 2026-08-01 removal of skopeo from the default
+      # runtime tool set. `runtimeTools.skopeo` stays declared there
+      # (★★ MODULARIZE, DON'T DELETE); what is removed here is the unread
+      # export, not the ability to opt back in.
       export REGCTL_BIN="${pkgs.regclient}/bin/regctl"
       exec ${forgeCmd} image-release \
         --name "${name}" \

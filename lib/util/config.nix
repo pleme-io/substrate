@@ -92,11 +92,34 @@ rec {
   # ── skopeo RETIRED from the default set 2026-08-01 ─────────────────────────
   # MEASURED, not assumed: `SKOPEO_BIN` — the only thing listing skopeo here
   # produces — has ZERO consumers across substrate, hardened-images and actions.
-  # So did REGCTL_BIN and BUN_BIN. The probe was validated with a control first:
-  # searching for `$VAR` found nothing even for TRIVY_BIN, which IS consumed —
-  # tatara-script reads env vars via `(env-get "NAME")`, not `$NAME`. With the
-  # correct pattern the control returns 4 real consumers (TRIVY/GRYPE/GZIP/CP),
-  # so the zeros above are genuine absence rather than a broken search.
+  # The probe was validated with a control first: searching for `$VAR` found
+  # nothing even for TRIVY_BIN, which IS consumed — tatara-script reads env vars
+  # via `(env-get "NAME")`, not `$NAME`. With the correct pattern the control
+  # returns 4 real consumers (TRIVY/GRYPE/GZIP/CP), so the zero above is genuine
+  # absence rather than a broken search — for SKOPEO_BIN, independently
+  # reconfirmed 2026-08-01 in forge itself (its sole reader,
+  # cli/src/tools.rs::get_tool_path, has zero production callers).
+  #
+  # ★ CORRECTION 2026-08-01 — this comment previously added "So did REGCTL_BIN
+  # and BUN_BIN", and that was FALSE and dangerous. `BUN_BIN` has at least SIX
+  # live readers, all in forge: commands/frontend_validation.rs (5 sites) and
+  # commands/codegen.rs. Removing bun by analogy with skopeo — which the
+  # sentence invited — would have broken frontend validation and codegen with
+  # the exact signature forge-tool-env-tests.nix was built to prevent (a
+  # provider stops exporting a var; the tool is ambient in a devshell, so it
+  # keeps working locally and fails only in a clean CI closure).
+  #
+  # WHY A VALIDATED CONTROL STILL MISSED IT — worth more than the correction.
+  # The control (TRIVY_BIN → 4 hits) proved the search PATTERN was right. It
+  # could not prove the search POPULATION was right, because the control was
+  # drawn from inside that same population. These vars are exported FOR FORGE
+  # to read; measuring their consumption across substrate + hardened-images +
+  # actions searched every repo except the one consumer that exists. A control
+  # sampled from within the surveyed set can only falsify "my regex is broken",
+  # never "I am surveying the wrong repos" — and the second failure mode is
+  # invisible precisely because the first one is being checked so visibly.
+  # For an env var, the population is whoever READS it, which is the binary
+  # being handed the environment, not the code handing it over.
   #
   # Listing it therefore put skopeo into every deployment closure to export a
   # variable nothing read — cost with no consumer, and a standing invitation to

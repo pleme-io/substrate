@@ -74,7 +74,13 @@ in rec {
   release = mkForgeApp "product-release" ''
     set -euo pipefail
     export BUN_BIN="${pkgs.bun}/bin/bun"
-    export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
+    # SKOPEO_BIN export REMOVED 2026-08-01 — dead, and it cost a closure.
+    # Measurement in lib/service/image-release.nix: forge's only SKOPEO_BIN
+    # reader (cli/src/tools.rs::get_tool_path) has ZERO production callers, so
+    # this pulled pkgs.skopeo into every product-sdlc consumer's closure to set
+    # a variable nothing reads. BUN_BIN above is NOT in that category — forge
+    # reads it in 6+ live sites (commands/frontend_validation.rs ×5,
+    # commands/codegen.rs) — so do not remove it by analogy.
     ${repoRootExpr}
     export RELEASE_GIT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
     exec ${forgeCmd} product-release \
@@ -86,7 +92,13 @@ in rec {
   build = mkForgeApp "product-build" ''
     set -euo pipefail
     export BUN_BIN="${pkgs.bun}/bin/bun"
-    export SKOPEO_BIN="${pkgs.skopeo}/bin/skopeo"
+    # SKOPEO_BIN export REMOVED 2026-08-01 — dead, and it cost a closure.
+    # Measurement in lib/service/image-release.nix: forge's only SKOPEO_BIN
+    # reader (cli/src/tools.rs::get_tool_path) has ZERO production callers, so
+    # this pulled pkgs.skopeo into every product-sdlc consumer's closure to set
+    # a variable nothing reads. BUN_BIN above is NOT in that category — forge
+    # reads it in 6+ live sites (commands/frontend_validation.rs ×5,
+    # commands/codegen.rs) — so do not remove it by analogy.
     ${repoRootExpr}
     export RELEASE_GIT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
     exec ${forgeCmd} product-release \
