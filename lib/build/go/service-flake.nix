@@ -140,12 +140,20 @@ let
     binary = goBuild {
       pname = serviceName;
       inherit version src vendorHash subPackages ldflags buildInputs;
-      # CGO_ENABLED is top-level, not an `env` key — buildGoModule inherits it
-      # onto mkDerivation itself, so setting both sides is an eval error. See
-      # hardened-image.nix for the direction of each knob. GOEXPERIMENT/GOFIPS
-      # are NOT buildGoModule arguments, so those do belong in `env`.
-      CGO_ENABLED = "0";
-      env = (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
+      # ── CGO_ENABLED BELONGS IN `env`, NOT TOP-LEVEL (corrected 2026-08-01) ──
+      # This comment previously said the opposite, and was right when written.
+      # nixpkgs' buildGoModule now reads
+      #     CGO_ENABLED = args.env.CGO_ENABLED or go.CGO_ENABLED;
+      # and sets the RESULT as a top-level derivation attr. So a top-level
+      # `CGO_ENABLED = "0"` is never consulted, buildGoModule falls back to
+      # go.CGO_ENABLED (= 1) into `env`, and the two sides disagree:
+      #     error: The `env` attribute set cannot contain ...
+      #            CGO_ENABLED: in `env`: 1; in derivation: 0
+      # That eval error has been failing checks.go-minimal-image-serves --
+      # substrate's ONLY red nix-tests job -- on every run measured today.
+      # GOEXPERIMENT/GOFIPS were already correct here; only CGO moved.
+      env = { CGO_ENABLED = "0"; }
+        // (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
       doCheck = false;
       meta.mainProgram = serviceName;
       # Skip buildGoModule's strict pre-check; use raw `go install` with

@@ -46,7 +46,9 @@
       pname = name;
       inherit version src vendorHash subPackages ldflags;
       inherit buildInputs nativeBuildInputs;
-      CGO_ENABLED = 0;
+      # In `env`, and a STRING: buildGoModule reads args.env.CGO_ENABLED, and
+      # derivation env values must be strings. Corrected 2026-08-01.
+      env.CGO_ENABLED = "0";
       meta = {
         description = "${name} gRPC service";
         mainProgram = name;

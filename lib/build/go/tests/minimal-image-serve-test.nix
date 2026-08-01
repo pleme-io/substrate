@@ -21,7 +21,10 @@ let
     version = "0.0.0";
     src = ./fixtures/smoke;
     vendorHash = null;                       # stdlib-only, no deps to vendor
-    CGO_ENABLED = "0";                       # top-level, not env — see hardened-image.nix
+    # In `env`, not top-level: buildGoModule reads args.env.CGO_ENABLED and
+    # sets the result as a derivation attr, so a top-level value is ignored and
+    # the go default (1) collides with it. Corrected 2026-08-01.
+    env.CGO_ENABLED = "0";
     tags = [ "timetzdata" "netgo" "osusergo" ];
     meta.mainProgram = "smoke";
   };
