@@ -428,15 +428,29 @@ let
     clippy
     rustfmt
   ]);
+  # `nix run .#<toolName>` needs to know WHICH binary to exec. With no
+  # `apps.<toolName>` (this builder's apps are the SDLC verbs), nix falls back
+  # to the package and guesses the program from the derivation's pname — which
+  # is `rust_<packageName>`. That guess is wrong for exactly the pattern this
+  # builder documents: `toolName = "mamorigami"`, `packageName =
+  # "mamorigami-cli"`, `[[bin]] name = "mamorigami"`. The guess produced
+  # `bin/mamorigami-cli`, which does not exist, and `nix run` failed with
+  # "unable to execute … No such file or directory".
+  #
+  # `meta.mainProgram` is the answer nix looks for first, and `toolName` is by
+  # definition the binary name. Applied to every package variant so
+  # `nix run .#<toolName>-<target>` works too.
+  withMainProgram = drv:
+    drv // { meta = (drv.meta or {}) // { mainProgram = toolName; }; };
 in {
   packages = builtins.listToAttrs (
     builtins.map (targetName: {
       name = "${toolName}-${targetName}";
-      value = binaries.${targetName};
+      value = withMainProgram binaries.${targetName};
     }) (builtins.attrNames targets)
   ) // {
-    default = wrappedNativeBinary;
-    ${toolName} = wrappedNativeBinary;
+    default = withMainProgram wrappedNativeBinary;
+    ${toolName} = withMainProgram wrappedNativeBinary;
     # SDLC-tool variant: built against host's regular nixpkgs (no
     # pkgsStatic). Consumed by substrate's gen-IFD wire and by any
     # other "I just need this binary to run on this system" use case.
