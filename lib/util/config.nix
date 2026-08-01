@@ -89,7 +89,24 @@ rec {
       pkgs.lib.concatMapStringsSep "\n" mkExport tools;
 
   # Common tool sets for different use cases
-  deploymentTools = ["skopeo" "attic" "git" "regctl"];
+  # ── skopeo RETIRED from the default set 2026-08-01 ─────────────────────────
+  # MEASURED, not assumed: `SKOPEO_BIN` — the only thing listing skopeo here
+  # produces — has ZERO consumers across substrate, hardened-images and actions.
+  # So did REGCTL_BIN and BUN_BIN. The probe was validated with a control first:
+  # searching for `$VAR` found nothing even for TRIVY_BIN, which IS consumed —
+  # tatara-script reads env vars via `(env-get "NAME")`, not `$NAME`. With the
+  # correct pattern the control returns 4 real consumers (TRIVY/GRYPE/GZIP/CP),
+  # so the zeros above are genuine absence rather than a broken search.
+  #
+  # Listing it therefore put skopeo into every deployment closure to export a
+  # variable nothing read — cost with no consumer, and a standing invitation to
+  # start using skopeo again after the fleet-wide move to doca.
+  #
+  # The `runtimeTools.skopeo` entry itself is KEPT (MODULARIZE, DON'T DELETE):
+  # it stays valid, buildable and one list-entry away. What changed is that it is
+  # no longer a DEFAULT. Anything that genuinely needs skopeo can name it
+  # explicitly and say why.
+  deploymentTools = ["attic" "git" "regctl"];
   kubernetesTools = ["kubectl" "flux"];
   allRuntimeTools = builtins.attrNames runtimeTools;
 }

@@ -29,7 +29,9 @@ in rec {
       ${if ghcrToken != "" then ''export GITHUB_TOKEN="${ghcrToken}"
       export GHCR_TOKEN="${ghcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"
       export GHCR_TOKEN="$GITHUB_TOKEN"''}
-      ${mkRuntimeToolsEnv { tools = ["skopeo"]; }}
+      # skopeo dropped 2026-08-01: SKOPEO_BIN had zero consumers (measured
+      # with a control). doca is the fleet container tool; see lib/util/config.nix.
+      ${mkRuntimeToolsEnv { tools = []; }}
 
       exec ${forge}/bin/forge push \
         --image-path "${imagePath}" \
@@ -130,7 +132,7 @@ in rec {
         ${if atticToken != "" then ''export ATTIC_TOKEN="${atticToken}"'' else ''export ATTIC_TOKEN="''${ATTIC_TOKEN:-$(cat "$HOME/.config/attic/token" 2>/dev/null || true)}"''}
         ${if ghcrToken != "" then ''export GITHUB_TOKEN="${ghcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"''}
 
-        ${mkRuntimeToolsEnv { tools = ["skopeo" "attic"]; }}
+        ${mkRuntimeToolsEnv { tools = ["attic"]; }}
 
         exec ${localForgeCmd} push-rust-service \
           --service ${serviceName} \
@@ -233,7 +235,9 @@ in rec {
         ${if ghcrToken != "" then ''export GITHUB_TOKEN="${ghcrToken}"
         export GHCR_TOKEN="${ghcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"
         export GHCR_TOKEN="$GITHUB_TOKEN"''}
-        ${mkRuntimeToolsEnv { tools = ["skopeo"]; }}
+        # skopeo dropped 2026-08-01: SKOPEO_BIN had zero consumers (measured
+      # with a control). doca is the fleet container tool; see lib/util/config.nix.
+      ${mkRuntimeToolsEnv { tools = []; }}
 
         echo ""
         echo "📦 Simple release for ${serviceName}"
