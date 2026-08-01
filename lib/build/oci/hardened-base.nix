@@ -481,6 +481,36 @@ let
     # strict improvement over the image tarball's own (near-empty,
     # compression-blinded) references.
     closureInfo = pkgs.closureInfo { rootPaths = (base.contents or []) ++ imageContents; };
+
+    # ── ★★ THE HANDLE THAT MAKES THE OPAQUE PAYLOAD INSPECTABLE ─────────────
+    # The comment directly above states the problem and stops there: the
+    # extracted upstream binary is opaque, so `closureInfo` covers the hardened
+    # base only. True — and it is exactly why every scanner this fleet runs
+    # reports over a payload denominator of ZERO for a vendor rewrap: vulnix
+    # matches store paths, and a pulled blob has none.
+    #
+    # "Opaque to a store-path scanner" is NOT "unmeasurable", and treating the
+    # two as identical is what kept this payload unexamined. Measured
+    # 2026-08-02 on the published classic-hardened-clickhouse-server: `strings`
+    # over this exact derivation's binary yields `ClickHouse 25.12.1.1651`
+    # (which EQUALS the upstreamImage tag — a real provenance check, the only
+    # evidence to date that the preserved payload is the named upstream) and
+    # `OpenSSL 3.5.0 8 Apr 2025` — 35 floor-corrected NVD records against that
+    # version, four of them HIGH, versus 0 for the nix lane's bundled 3.5.7.
+    #
+    # None of that was reachable from a consumer, because `extractedBinary` was
+    # a `let` binding used once in `imageContents` and never exposed. A
+    # downstream gate could not inspect the one artifact carrying the risk, and
+    # that absence reads as "nothing to inspect" rather than "no handle" —
+    # which is the more expensive of the two mistakes, because it closes the
+    # question instead of opening it.
+    #
+    # Free: same derivation, already built, already in `imageContents`.
+    #
+    # DELIBERATELY NOT a scanner or a policy. This hands over the artifact and
+    # asserts nothing about it; the floor, the feed and the controls belong to
+    # the consumer that declares them.
+    inherit extractedBinary;
   };
 
   # ═══════════════════════════════════════════════════════════════════
