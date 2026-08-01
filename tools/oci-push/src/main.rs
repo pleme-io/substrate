@@ -126,6 +126,60 @@ fn client_config_for(
     })
 }
 
+/// Bytes we allow to be in flight across all concurrent layer uploads.
+///
+/// oci-client's default is `max_concurrent_upload: 16` — a constant, applied
+/// with no reference to how big the layers are. That makes BYTES IN FLIGHT an
+/// unbounded function of the workload, which is the wrong invariant: a
+/// registry cares about concurrent bytes, not concurrent futures.
+///
+/// 256 MiB is chosen to sit above any single realistic layer (so a big layer is
+/// never blocked, only serialised) while staying well under what a modest
+/// in-cluster registry will accept at once.
+const UPLOAD_INFLIGHT_BUDGET: usize = 256 * 1024 * 1024;
+
+/// Choose upload concurrency FROM THE WORKLOAD instead of a constant.
+///
+/// ── WHY THIS EXISTS (measured 2026-08-01, hardened-images → cluster Zot) ────
+/// Four images mirrored cleanly and two failed, and the split was purely size:
+///
+///   admitted  chproxy 8 layers / 6 MB max · backup 7 / 20 MB
+///             operator 7 / 28 MB · metrics-exporter 7 / 28 MB
+///   FAILED    clickhouse AND clickhouse-keeper — 20 layers, 198 MB largest,
+///             390 MB total
+///
+/// Failure shape: `error sending request for url (…/blobs/uploads/)`, five
+/// retries, no HTTP status — a connection-level drop, not a timeout (both
+/// `read_timeout` and `connect_timeout` default to `None`, so nothing was
+/// timing out). With 16 concurrent uploads a 20-layer image puts essentially
+/// the whole 390 MB on the wire simultaneously; the registry drops it.
+///
+/// The bug is not the number 16. It is that concurrency was a CONSTANT while
+/// the thing that has to stay bounded is bytes. Same 16 is correct for eight
+/// 6 MB layers and catastrophic for a 198 MB one.
+///
+/// So: pick the largest concurrency whose worst-case in-flight bytes
+/// (`concurrency × largest_layer`, the honest bound — uploads are not
+/// size-sorted, so the worst case is the biggest layer repeated) fits the
+/// budget. Clamped to ≥1 (progress is always possible) and ≤ oci-client's
+/// default (never MORE aggressive than upstream).
+///
+/// Worked: 198 MB largest → 1 (serialised, the big layers stop colliding).
+///          28 MB largest → 9.   6 MB largest → 16 (capped, unchanged).
+///
+/// Deliberately a PURE FUNCTION of the layer sizes: no clock, no network, no
+/// global state, so it is exhaustively testable and its decision is
+/// reproducible from the manifest alone.
+fn plan_upload_concurrency(layer_sizes: &[usize]) -> usize {
+    const UPSTREAM_DEFAULT: usize = 16;
+    let largest = layer_sizes.iter().copied().max().unwrap_or(0);
+    if largest == 0 {
+        return UPSTREAM_DEFAULT;
+    }
+    let fits = UPLOAD_INFLIGHT_BUDGET / largest;
+    fits.clamp(1, UPSTREAM_DEFAULT)
+}
+
 /// A ClientConfig pinned to an explicit os/arch.
 ///
 /// Without this, resolving a multi-arch index uses the CLIENT's own platform,
@@ -476,11 +530,29 @@ impl PushBackend for NativeBackend {
             .build()
             .map_err(PushError::Runtime)?;
         let auth = RegistryAuth::Basic(spec.dest_user.clone(), spec.dest_pass.clone());
-        let client = Client::new(client_config_for(
-            &spec.registry,
-            spec.insecure,
-            &spec.ca_cert,
-        )?);
+
+        // ── analyse the workload, THEN transfer ────────────────────────────
+        // Concurrency is derived from the layers actually being pushed, so a
+        // 20-layer/390 MB image and an 8-layer/7 MB image do not get the same
+        // fan-out. See `plan_upload_concurrency` for the measurement that
+        // forced this. The plan is logged because a silently-adaptive tool is
+        // undebuggable: when a push behaves differently between two images the
+        // operator must be able to see WHY without instrumenting the binary.
+        let layer_sizes: Vec<usize> = layers.iter().map(|l| l.data.len()).collect();
+        let concurrency = plan_upload_concurrency(&layer_sizes);
+        let largest_mb = layer_sizes.iter().copied().max().unwrap_or(0) / (1024 * 1024);
+        let total_mb: usize = layer_sizes.iter().sum::<usize>() / (1024 * 1024);
+        eprintln!(
+            "oci-push[plan]: {} layer(s), {} MB total, largest {} MB -> upload concurrency {}",
+            layer_sizes.len(),
+            total_mb,
+            largest_mb,
+            concurrency
+        );
+
+        let mut cfg = client_config_for(&spec.registry, spec.insecure, &spec.ca_cert)?;
+        cfg.max_concurrent_upload = concurrency;
+        let client = Client::new(cfg);
 
         rt.block_on(async {
             for tag in &spec.tags {
@@ -2210,6 +2282,65 @@ fn main() -> ExitCode {
             eprintln!("{e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod upload_plan_tests {
+    use super::*;
+
+    const MB: usize = 1024 * 1024;
+
+    /// The exact workload that FAILED against the cluster Zot on 2026-08-01:
+    /// hardened-clickhouse, 20 layers, 198 MB largest. Under the old constant
+    /// 16 this put ~390 MB on the wire at once and the registry dropped the
+    /// connection. It must now serialise.
+    #[test]
+    fn the_image_that_failed_is_serialised() {
+        let mut layers = vec![4 * MB; 19];
+        layers.push(198 * MB);
+        assert_eq!(plan_upload_concurrency(&layers), 1);
+    }
+
+    /// The workloads that SUCCEEDED must be unchanged — a fix that also slows
+    /// the working cases down is a regression, not a fix.
+    #[test]
+    fn small_layer_images_keep_full_concurrency() {
+        // chproxy: 8 layers, 6 MB largest.
+        assert_eq!(plan_upload_concurrency(&[6 * MB; 8]), 16);
+        // clickhouse-backup: 7 layers, 20 MB largest.
+        assert_eq!(plan_upload_concurrency(&[20 * MB; 7]), 12);
+    }
+
+    /// The bound is on BYTES, so it must hold for every input, not just the
+    /// two measured ones. This is the actual invariant; the cases above are
+    /// only its witnesses.
+    #[test]
+    fn worst_case_inflight_never_exceeds_budget_unless_one_layer_already_does() {
+        for largest in [1usize, MB, 7 * MB, 28 * MB, 100 * MB, 198 * MB, 512 * MB] {
+            let c = plan_upload_concurrency(&[largest; 24]);
+            assert!(c >= 1, "must always make progress");
+            assert!(c <= 16, "never more aggressive than upstream default");
+            if largest <= UPLOAD_INFLIGHT_BUDGET {
+                assert!(
+                    c * largest <= UPLOAD_INFLIGHT_BUDGET,
+                    "in-flight {} exceeds budget for largest={largest}",
+                    c * largest
+                );
+            } else {
+                // A single layer bigger than the whole budget cannot be split
+                // by concurrency control -- serialising is the most we can do,
+                // and refusing to push would be worse than trying.
+                assert_eq!(c, 1);
+            }
+        }
+    }
+
+    /// Degenerate inputs must not panic or divide by zero.
+    #[test]
+    fn empty_and_zero_sized_inputs_fall_back_to_the_default() {
+        assert_eq!(plan_upload_concurrency(&[]), 16);
+        assert_eq!(plan_upload_concurrency(&[0, 0]), 16);
     }
 }
 
