@@ -355,6 +355,36 @@
     #                   TRANSIENT failures, so a 401 or a malformed archive fails
     #                   fast instead of burning the budget with backoff.
     #
+    # ── CLASS 4's TARGET DOES NOT SERVE A REGISTRY TODAY (2026-08-02) ──────
+    # Before threading a CA path, probe the endpoint. All 10 class-4
+    # invocations push to ONE host -- `zot.alpha.1.k8s.quero.lol`, 15 textual
+    # references across the five flakes -- and it does not answer as a registry:
+    #
+    #   DNS      CNAME -> pixie.porkbun.com -> 207.207.210.229
+    #   TLS      curl: (60) SSL: no alternative certificate subject name
+    #            matches target hostname 'zot.alpha.1.k8s.quero.lol'
+    #   -k       HTTP 301 from openresty -- a generic ingress redirect, not a
+    #            /v2/ registry response
+    #
+    # CONTROL, AND IT CHANGED THE CONCLUSION: `grafana.quero.cloud` -- known
+    # live -- resolves to the SAME CNAME and the SAME IP. So pixie.porkbun.com
+    # is this fleet's shared ingress, NOT a parking page, and "the domain is
+    # dead" would have been wrong. What is true is narrower: the ingress has no
+    # cert covering this hostname and returns a generic 301 rather than a
+    # registry, so nothing is serving a Zot there right now.
+    #
+    # CONSEQUENCE FOR THE MIGRATION: the class-4 TLS question is unanswerable
+    # while the endpoint does not serve TLS for its own name. Whether doca needs
+    # --dest-ca-cert depends on what cert a RESTORED Zot presents, and that is
+    # not knowable from a 301. Converting these ten now would be writing
+    # untestable code against a host that cannot accept a push from skopeo
+    # either.
+    #
+    # So class 4 is not blocked on doca and not blocked on a CA path -- it is
+    # blocked on an endpoint. `pending-class4-endpoint: zot.alpha.1.k8s.quero.lol
+    #  serves a 301, not /v2/. Establish whether it is retired, moved, or
+    #  unprovisioned before converting the ten call sites that target it.`
+    #
     # ── CLASS 4 IS NOT A DROP-IN — TLS TRUST DIFFERS (measured 2026-08-02) ──
     # "Covered by doca" is true at the FEATURE level and still not a
     # copy-paste conversion, because skopeo and doca trust different roots.
