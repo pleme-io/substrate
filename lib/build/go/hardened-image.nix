@@ -520,7 +520,27 @@ let
     # build for a reason that has nothing to do with the code. Turn it on where
     # the gate runs with network, which is CI.
     vulnStrict ? false,
-    maxStorePaths ? 5,
+    # CEILING 5 -> 7, 2026-08-01. This check has NEVER passed: it was added
+    # 2026-07-29 (e7197d1) and substrate's nix-tests has been red from that day
+    # to this one -- because the ceiling contradicts the posture the SAME check
+    # asserts.
+    #
+    # MEASURED closure of the hardened smoke image (from the CI log):
+    #   smoke-0.0.0  nss-cacert  mailcap  iana-etc  tzdata   <- the minimal five
+    #   passwd  group                                        <- the extra two
+    #
+    # The extra two are exactly what NON-ROOT requires. This check's own
+    # description is "PIE, stripped, NON-ROOT, serves", and a container running
+    # as a non-root uid needs /etc/passwd and /etc/group entries to resolve it.
+    # So the check demanded non-root AND a ceiling that non-root cannot satisfy
+    # -- internally contradictory from the day it landed, which is why it never
+    # went green rather than "regressed".
+    #
+    # NOT A WEAKENING, and this is measured on the very image that failed: the
+    # forbidden-pattern scan (busybox|/bin/sh|libc.so|coreutils|apk|apt) PASSED
+    # on it -- "no shell/coreutils/init/libc/pkg-mgr in any layer ✓". The
+    # ceiling bounds bloat; that scan bounds the threat, and it is untouched.
+    maxStorePaths ? 7,
     execSmoke ? null,
     created ? "1970-01-01T00:00:01Z",
     # Threaded to the conformance check, whose body is tlisp. Required there,
