@@ -541,7 +541,10 @@ jobs:
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
-      # the standard keychain forge image-release's skopeo/regctl push reads).
+      # the standard keychain forge image-release's DOCA push reads via doca's
+      # `docker_config_credentials`). Said "skopeo/regctl" until 2026-08-01; both
+      # forge push paths are doca now (push.rs and image_release.rs carry ZERO
+      # executable skopeo references, measured).
       - name: Registry login
         uses: pleme-io/actions/registry-login@main
         with:
@@ -552,19 +555,29 @@ jobs:
           ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: skopeo registries.conf (runner ships v1; nixpkgs skopeo needs v2)
-        # The ubuntu runner's /etc/containers/registries.conf is v1; the nixpkgs
-        # skopeo forge uses rejects it ("must be in v2 format"). Point skopeo at a
-        # minimal v2 file via CONTAINERS_REGISTRIES_CONF.
-        run: |
-          set -euo pipefail
-          conf="$RUNNER_TEMP/registries.conf"
-          printf 'unqualified-search-registries = []\n' > "$conf"
-          echo "CONTAINERS_REGISTRIES_CONF=$conf" >> "$GITHUB_ENV"
+      # RETIRED 2026-08-01 — the `skopeo registries.conf` step lived here.
+      #
+      # It wrote a minimal v2 registries.conf and exported
+      # CONTAINERS_REGISTRIES_CONF, because the nixpkgs skopeo forge used to
+      # shell out to rejects the ubuntu runner's v1 file. Nothing reads that
+      # variable any more:
+      #   * forge's push.rs and image_release.rs carry ZERO executable skopeo
+      #     references (both are doca -- 4 and 23 oci-push references)
+      #   * substrate's own mkPushApp exports DOCA_BIN, not SKOPEO_BIN
+      #     (lib/service/platform-service.nix)
+      #   * CONTAINERS_REGISTRIES_CONF had no other consumer in this workflow
+      # so the step configured a tool that is no longer in the path, in the
+      # release lane of EVERY hardened image. Vestigial setup is not free: it
+      # is the load-bearing evidence a reader uses to conclude "the push uses
+      # skopeo", which is how the two stale comments above and below it
+      # survived the conversion.
+      #
+      # Registry login stays: `client: docker` writes ~/.docker/config.json,
+      # which doca reads through its own `docker_config_credentials` path.
 
       # In scan-before-push mode the image derivation is already realized
       # from the build step above, so this is a fast no-rebuild push (a
-      # cache-hit resolve + the mkPushApp skopeo copy), not a second build.
+      # cache-hit resolve + the mkPushApp DOCA copy), not a second build.
       - name: Build + push image (idempotent — <arch>-<sha> + <arch>-latest tags)
         env:
           RELEASE_APP: ${{ inputs.release-app }}
