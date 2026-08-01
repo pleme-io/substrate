@@ -446,12 +446,42 @@ jobs:
       # not once per CI run. `result` is the standard `nix build` output
       # symlink the step above just created; resolved to its real store path
       # since super-cache-save's `outputs` wants store paths, not symlinks.
+      # THE RESOLUTION THE COMMENT ABOVE CLAIMED, NOW ACTUALLY PERFORMED.
+      # Measured 2026-08-02 on hardened-images run 30708771205: the push step
+      # reported SUCCESS in 30 of 33 build jobs while logging
+      #   "super-cache-save: 0 store paths pushed"
+      # in 6 of 6 sampled jobs. Cause: `outputs` was passed
+      # `${{ github.workspace }}/result` -- the workspace SYMLINK. super-cache-
+      # save extracts a store path by splitting the token on the literal
+      # "/nix/store/"; a workspace path contains no such substring, so
+      # token->store-path returns "" (its documented behaviour, correct), the
+      # push list is empty, and the step exits 0 having done nothing.
+      #
+      # The requirement was never unknown -- the comment above states it exactly
+      # ("wants store paths, not symlinks") and describes the resolution in the
+      # PAST TENSE, above the line that omitted it. A `with:` expression cannot
+      # call readlink, so the resolution needs its own step; that step was never
+      # written.
+      - name: Resolve the built store path (super-cache-save wants a store path)
+        id: built-store-path
+        if: inputs.scan-before-push && inputs.superCacheSaveEndpoint != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          p="$(readlink -f result)"
+          case "$p" in
+            /nix/store/*) ;;
+            *) echo "::error::resolved path is not a store path: $p"; exit 1;;
+          esac
+          echo "path=$p" >> "$GITHUB_OUTPUT"
+          echo "resolved result -> $p"
+
       - name: Push built image to super-cache (sui)
         if: inputs.scan-before-push && inputs.superCacheSaveEndpoint != ''
         uses: pleme-io/actions/super-cache-save@main
         with:
           endpoint: ${{ inputs.superCacheSaveEndpoint }}
-          outputs: ${{ github.workspace }}/result
+          outputs: ${{ steps.built-store-path.outputs.path }}
           # super-cache-save's first guard clause is `key == "" -> no-op`,
           # unconditionally, even on the sui-endpoint-push branch where key
           # is otherwise only used as an output label (the actual push is
