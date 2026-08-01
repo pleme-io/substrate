@@ -227,6 +227,18 @@ enum PushError {
     OciPull { reference: String, detail: String },
     LabelAbsent { reference: String, label: String },
     NotImplemented(&'static str),
+    /// `--digest-only` asked of a LOCAL archive. Not a missing feature: a
+    /// docker-archive has no registry digest at all — the manifest digest a
+    /// consumer means is assigned at push time. Kept distinct from
+    /// `NotImplemented`, whose message ("is not yet implemented") would promise
+    /// a future that cannot arrive and invite someone to fabricate a value.
+    ArchiveHasNoRegistryDigest,
+    /// A docker-archive's image config parsed, but carries no `architecture`.
+    /// Distinct from `MissingEntry`: the config entry IS present and IS valid
+    /// JSON — the field inside it is absent. Collapsing the two would report a
+    /// malformed archive when the real fault is an image config that never
+    /// declared its platform.
+    ArchiveNoArchitecture(String),
     ReadTarball { path: String, source: std::io::Error },
     Archive(std::io::Error),
     NoManifestJson,
@@ -283,6 +295,19 @@ impl fmt::Display for PushError {
             PushError::NotImplemented(what) => {
                 write!(f, "oci-push: {what} is not yet implemented")
             }
+            PushError::ArchiveHasNoRegistryDigest => write!(
+                f,
+                "oci-push: inspect --digest-only --tarball: a local docker-archive has no \
+                 registry digest -- it is assigned at push time. Push the archive, then \
+                 inspect the resulting ref."
+            ),
+            PushError::ArchiveNoArchitecture(path) => write!(
+                f,
+                "oci-push: docker-archive {path}: image config declares no `architecture`. \
+                 Absent is an error here, not an empty value -- an architecture gate that \
+                 reads a missing field as \"\" and continues is the defect this check exists \
+                 to prevent."
+            ),
             PushError::ReadTarball { path, source } => {
                 write!(f, "oci-push: cannot read tarball {path}: {source}")
             }
@@ -1243,6 +1268,66 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
     })
 }
 
+/// `inspect --tarball` — answer from a LOCAL docker-archive, no registry.
+///
+/// Emits skopeo's FIELD NAMES, not OCI's. An OCI image config spells these
+/// `architecture` / `os` (lowercase); `skopeo inspect` re-cases them to
+/// `Architecture` / `Os`, and consumers parse skopeo's spelling — forge's
+/// `check_inspect_arch` reads `v.get("Architecture")` and returns
+/// `MissingArchitecture` on anything else. Emitting the OCI casing would parse
+/// as valid JSON and then fail as "missing architecture", which reads like a
+/// broken image rather than a mismatched contract. So the re-casing is the
+/// point of this function, not an incidental detail.
+fn inspect_tarball(path: &str, digest_only: bool) -> Result<(), PushError> {
+    // `--digest-only` REFUSES here rather than inventing a value. See
+    // ArchiveHasNoRegistryDigest for why this is not a missing feature.
+    if digest_only {
+        return Err(PushError::ArchiveHasNoRegistryDigest);
+    }
+    let out = archive_platform(path)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&out).map_err(PushError::Json)?
+    );
+    Ok(())
+}
+
+/// The pure core of [`inspect_tarball`]: docker-archive path -> the platform
+/// JSON, with no printing. Split out so the field CASING (the whole reason this
+/// exists) is asserted by a test rather than by reading stdout.
+fn archive_platform(path: &str) -> Result<serde_json::Value, PushError> {
+    let entries = NativeBackend::read_archive(path)?;
+    let manifest_bytes = entries
+        .get("manifest.json")
+        .ok_or(PushError::NoManifestJson)?;
+    let parsed: Vec<DockerManifestEntry> =
+        serde_json::from_slice(manifest_bytes).map_err(PushError::ManifestParse)?;
+    let entry = parsed.into_iter().next().ok_or(PushError::EmptyManifest)?;
+
+    let config_bytes = entries
+        .get(&entry.config)
+        .ok_or_else(|| PushError::MissingEntry(entry.config.clone()))?;
+    let config: serde_json::Value =
+        serde_json::from_slice(config_bytes).map_err(PushError::Json)?;
+
+    // ABSENT IS AN ERROR, never an empty string. An arch gate that reads a
+    // missing field as "" and carries on is the defect this whole call site
+    // exists to prevent.
+    let architecture = config
+        .get("architecture")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| PushError::ArchiveNoArchitecture(path.to_string()))?;
+    let os_field = config
+        .get("os")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("linux");
+
+    Ok(serde_json::json!({
+        "Architecture": architecture,
+        "Os": os_field,
+    }))
+}
+
 /// `inspect` — fetch + print a manifest (+ its digest) from a registry.
 fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut reference: Option<String> = None;
@@ -1254,6 +1339,7 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut label: Option<String> = None;
     let mut os: Option<String> = None;
     let mut arch: Option<String> = None;
+    let mut tarball: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -1304,8 +1390,27 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             // the same command gives the same answer on every runner.
             "--os" => os = Some(next_value(&mut it, "os")?),
             "--arch" => arch = Some(next_value(&mut it, "arch")?),
+            // LOCAL docker-archive, no registry involved. Added 2026-08-01 to
+            // close the last thing skopeo could do here that doca could not:
+            // `skopeo inspect docker-archive:<path>`, which forge's
+            // verify_image_arch uses to refuse a wrong-architecture image
+            // BEFORE it is pushed. Without this, that one call site would have
+            // had to keep skopeo -- i.e. a fallback, which is exactly what the
+            // fleet-wide replacement is meant to remove.
+            //
+            // The archive reader is NOT new: push already parses docker-archive
+            // (NativeBackend::read_archive + DockerManifestEntry). This exposes
+            // the existing reader on inspect rather than adding a second one.
+            "--tarball" => tarball = Some(next_value(&mut it, "tarball")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
+    }
+
+    // ── local-archive path: answer from the tarball, never touch a registry ──
+    // Deliberately BEFORE the `--ref` requirement, because a local inspect has
+    // no reference to resolve and demanding one would make the flag unusable.
+    if let Some(path) = tarball.or_else(|| env_input("INPUT_TARBALL")) {
+        return inspect_tarball(&path, digest_only);
     }
 
     let r = parse_reference(
@@ -2534,6 +2639,65 @@ mod tests {
         let missing = root.join("does-not-exist");
         assert!(materialize_if_symlink(&missing).is_ok());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ── inspect --tarball: the last thing skopeo could do that doca could not ──
+    // forge's verify_image_arch runs `skopeo inspect docker-archive:<path>` to
+    // refuse a wrong-architecture image BEFORE it is pushed, and parses
+    // v.get("Architecture"). These pin the CASING contract: an OCI image config
+    // spells the field `architecture` (lowercase), skopeo re-cases it, and
+    // emitting the OCI spelling would parse as valid JSON and then fail as
+    // "missing architecture" -- a broken-image report for a contract mismatch.
+    fn write_archive(dir: &std::path::Path, config_json: &str) -> String {
+        let cfg = dir.join("config.json");
+        fs::write(&cfg, config_json).unwrap();
+        let man = dir.join("manifest.json");
+        fs::write(&man, br#"[{"Config":"config.json","Layers":[]}]"#).unwrap();
+        let tar_path = dir.join("image.tar");
+        let f = fs::File::create(&tar_path).unwrap();
+        let mut b = tar::Builder::new(f);
+        b.append_path_with_name(&cfg, "config.json").unwrap();
+        b.append_path_with_name(&man, "manifest.json").unwrap();
+        b.finish().unwrap();
+        tar_path.display().to_string()
+    }
+
+    #[test]
+    fn archive_platform_emits_skopeo_field_casing_not_oci() {
+        let d = scratch_dir("inspect-tarball-casing");
+        let p = write_archive(&d, r#"{"architecture":"arm64","os":"linux"}"#);
+        let v = archive_platform(&p).unwrap();
+        // The exact accessor forge uses.
+        assert_eq!(v.get("Architecture").and_then(|a| a.as_str()), Some("arm64"));
+        assert_eq!(v.get("Os").and_then(|a| a.as_str()), Some("linux"));
+        // NEGATIVE CONTROL: the OCI lowercase spelling must NOT be what we emit,
+        // or forge would read MissingArchitecture on a perfectly good image.
+        assert!(v.get("architecture").is_none());
+    }
+
+    #[test]
+    fn archive_platform_refuses_a_config_with_no_architecture() {
+        let d = scratch_dir("inspect-tarball-noarch");
+        let p = write_archive(&d, r#"{"os":"linux"}"#);
+        match archive_platform(&p) {
+            Err(PushError::ArchiveNoArchitecture(path)) => assert!(path.contains("image.tar")),
+            other => panic!("absent architecture must be a typed error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn inspect_tarball_refuses_digest_only_rather_than_inventing_one() {
+        let d = scratch_dir("inspect-tarball-digest");
+        let p = write_archive(&d, r#"{"architecture":"amd64","os":"linux"}"#);
+        // A local archive has no registry digest; fabricating one would be
+        // silently used as a pin.
+        assert!(matches!(
+            inspect_tarball(&p, true),
+            Err(PushError::ArchiveHasNoRegistryDigest)
+        ));
+        // ...and the non-digest path on the same fixture still works, so the
+        // refusal above is specific rather than the whole function being broken.
+        assert!(inspect_tarball(&p, false).is_ok());
     }
 
     #[test]
