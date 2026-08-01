@@ -79,7 +79,14 @@ in rec {
     type = "app";
     program = toString (pkgs.writeShellScript "release-${name}" ''
       set -euo pipefail
-      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
+      ${if ociPush == null
+        then throw ("mkImageReleaseApp (${name}): ociPush is null, so DOCA_BIN cannot be exported. "
+                  + "forge's image-release path resolves DOCA_BIN, else a bare `oci-push` on PATH, and "
+                  + "oci-push is a pleme-io binary that is ambient NOWHERE -- so this app would have "
+                  + "built cleanly and failed at push time with a bare `oci-push: not found`. "
+                  + "Construct this module the way lib/default.nix does: "
+                  + "import ./service/image-release.nix { inherit pkgs forgeCmd; ociPush = <substrate oci-push drv>; }.")
+        else ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
       # SKOPEO_BIN export REMOVED 2026-08-01: dead, and it cost a closure.
       # forge's only SKOPEO_BIN reader is `cli/src/tools.rs::get_tool_path`,
       # which derives `{TOOL}_BIN` from a tool name — and that function has

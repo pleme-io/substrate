@@ -89,7 +89,27 @@ let
           ])
       (codeLines text);
 
-  providesDoca = text: lib.hasInfix "DOCA_BIN" text;
+  # ★ TIGHTENED 2026-08-01. Was `lib.hasInfix "DOCA_BIN" text` — a substring
+  # test over the WHOLE file, comments included. The detector above was
+  # deliberately hardened against comment lines (`codeLines`); this assertion
+  # was not, and that asymmetry is the whole defect: a suite that reads code to
+  # decide WHO must be checked, then reads prose to decide whether they PASS.
+  #
+  # Measured on the tree that introduced this fix: 11 files under lib/ contain
+  # the string `DOCA_BIN`, but only 7 contain an actual `DOCA_BIN=` assignment.
+  # So 4 files satisfied the old predicate on prose alone — and the worst case
+  # was lib/service/image-release.nix, whose header paragraph EXPLAINS that
+  # when `ociPush` is null the app runs without DOCA_BIN and forge fails. The
+  # gate was satisfied by the documentation of its own violation. (Sharper
+  # still: a comment naming DOCA_BIN added while documenting the REMOVAL of a
+  # neighbouring export would have kept this green after deleting the real one.)
+  #
+  # Requiring `DOCA_BIN=` rather than `DOCA_BIN` is what makes prose unable to
+  # pass: every real site is `export DOCA_BIN="…"`, while every prose mention
+  # measured names the bare variable. Checked against all 7 exporters — no
+  # legitimate spelling is excluded.
+  providesDoca = text:
+    lib.any (l: lib.hasInfix "DOCA_BIN=" l) (codeLines text);
 
   read = f: builtins.readFile f.path;
 
