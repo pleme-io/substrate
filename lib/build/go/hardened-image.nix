@@ -715,12 +715,31 @@ let
     #
     # Default `[ ]` keeps every existing caller byte-identical.
     requireSections ? [ ],
+    # Forbidden-substring list, forwarded to mkMinimalImageCheck. Same story
+    # as requireSections: a documented parameter the delegate has always
+    # accepted and this wrapper never re-exported.
+    #
+    # `null` means "use the delegate's default" so this stays byte-identical
+    # for every caller that does not set it — an empty list would silently
+    # DISABLE the check, which is the failure mode this whole file exists to
+    # prevent, so it must not be the default.
+    #
+    # Narrowing it is a real loosening of a security gate. The one sanctioned
+    # reason so far is `lib/build/web/static-spa-image.nix`, whose `/bin/sh`
+    # is not a shell at all: it is `compat-sh`, a static Go binary built
+    # through mkHardenedGoBinary that answers the lifecycle-hook vocabulary
+    # and cannot execute anything. See that file for why the closure ceiling
+    # still pins the result.
+    forbidden ? null,
   }:
   let
-    minimalCheck = (import ./minimal-image-check.nix { }).mkMinimalImageCheck pkgs {
+    minimalCheck = (import ./minimal-image-check.nix { }).mkMinimalImageCheck pkgs ({
       inherit name image binary binName maxStorePaths execSmoke requireSections;
       expectStatic = true;
-    };
+    }
+    # Only pass `forbidden` when the caller actually set it, so an unset
+    # caller gets the delegate's own default list rather than a null.
+    // (if forbidden == null then { } else { inherit forbidden; }));
     binPath = if binary != null then "${binary}/bin/${binName}" else "";
     _ = if tataraScript == null
         then throw ''

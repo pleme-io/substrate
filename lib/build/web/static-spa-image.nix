@@ -349,6 +349,45 @@ let
       # the strip are one line apart and a reorder returns the image to
       # "Trivy: Target -, Type -, Not scanned" with every gate green.
       requireSections = [ auditSection ];
+      # The default list forbids the substring `/bin/sh` outright, and this
+      # image ships one ON PURPOSE — so with the check finally running (it
+      # could not even evaluate until `requireSections` was re-exported) it
+      # failed with:
+      #
+      #   FAIL: forbidden runtime component present in a layer:
+      #       ./bin/sh
+      #       /nix/store/…-compat-sh-bin-sh/bin/sh
+      #
+      # That `/bin/sh` is NOT a shell. It is `compat-sh` (see the shim built
+      # above): a static Go binary produced by mkHardenedGoBinary that
+      # implements the lifecycle-hook vocabulary and cannot execute anything.
+      # It exists so a hook naming /bin/sh does not fail on every image.
+      # Pillar 8 forbids shipping a SHELL; this ships a typed binary that
+      # answers to the path a shell would occupy, which is the opposite.
+      #
+      # Every other signature stays forbidden — busybox, bash, coreutils,
+      # tini, ld-linux, libc.so, and every package manager — so this narrows
+      # exactly one entry rather than weakening the gate.
+      #
+      # And the narrowing cannot be used to smuggle a real shell in: the
+      # closure ceiling below is EXACT (8 distinct runtime store paths, and
+      # the image currently has exactly 8, compat-sh among them). Adding a
+      # genuine shell would push it past the ceiling and fail there instead.
+      forbidden = [
+        "busybox"
+        "/bin/bash"
+        "-bash-"
+        "coreutils"
+        "/tini"
+        "tini-"
+        "ld-linux"
+        "libc.so"
+        "/apk"
+        "apk-tools"
+        "/apt"
+        "/dnf"
+        "/yum"
+      ];
       # serverBinary + cacert + passwd + group + tmp stub + assets + config = 7,
       # with one slot of headroom. This ceiling is only meetable because the
       # binary's build closure was severed above.
