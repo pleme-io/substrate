@@ -45,7 +45,7 @@ in rec {
       # A correct measurement plus a correct removal, minus the addition they
       # implied, reads as a finished change in review. Exporting DOCA_BIN is
       # that addition.
-      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
+      ${(import ../../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "crate2nix-apps"; }}
       ${mkRuntimeToolsEnv { tools = []; }}
 
       exec ${forge}/bin/forge push \

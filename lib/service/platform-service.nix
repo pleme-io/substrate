@@ -96,8 +96,7 @@ in rec {
         ${if defaultGhcrToken != "" then ''export GITHUB_TOKEN="${defaultGhcrToken}"
         export GHCR_TOKEN="${defaultGhcrToken}"'' else ''export GITHUB_TOKEN="''${GITHUB_TOKEN:-''${GHCR_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"
         export GHCR_TOKEN="$GITHUB_TOKEN"''}
-        ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
-''}
+        ${(import ../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "platform-service"; }}
       exec ${forgeCmd} push \
           --image-path "${image}" \
           --registry "${registry}" \

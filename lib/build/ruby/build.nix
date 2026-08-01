@@ -198,8 +198,7 @@ in rec {
 
       # Step 2: Push with forge
       echo "Step 2/2: Pushing to GitHub Packages..."
-      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
-''}
+      ${(import ../../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "ruby/build mkRubyPushApp"; }}
       exec ${forgeCmd} push \
         --image-path "$IMAGE_PATH" \
         --registry "${registry}" \

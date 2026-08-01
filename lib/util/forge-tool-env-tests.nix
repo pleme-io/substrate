@@ -108,8 +108,26 @@ let
   # pass: every real site is `export DOCA_BIN="…"`, while every prose mention
   # measured names the bare variable. Checked against all 7 exporters — no
   # legitimate spelling is excluded.
+  # ★ EXTENDED 2026-08-01, same day: `mkDocaExport` counts, and counts as
+  # STRONGER than a literal export — not as a loophole.
+  #
+  # A literal `export DOCA_BIN="…"` in a provider is, in every case measured
+  # here, wrapped in `optionalString (ociPush != null)`. That text satisfies a
+  # source-level predicate whether or not the branch ever renders, and
+  # `ociPush ? null` is the default in all seven files — so "contains a real
+  # assignment" was never the same claim as "exports it". The difference is not
+  # in the file; it is in the ARGUMENT, so no regex over the text can see it.
+  # (lib/service/platform-service.nix is the existence proof: it carried the
+  # conditional export and is not passed ociPush by any constructor.)
+  #
+  # `util/doca-env.nix::mkDocaExport` removes the branch instead of describing
+  # it — null throws at eval, naming the repair. So delegating to it is a
+  # stronger guarantee than the literal line this predicate was written to find,
+  # and the predicate accepts it on that basis rather than as an exemption.
   providesDoca = text:
-    lib.any (l: lib.hasInfix "DOCA_BIN=" l) (codeLines text);
+    lib.any
+      (l: lib.any (m: lib.hasInfix m l) [ "DOCA_BIN=" "mkDocaExport" ])
+      (codeLines text);
 
   read = f: builtins.readFile f.path;
 

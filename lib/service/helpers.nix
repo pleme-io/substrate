@@ -522,7 +522,7 @@ rec {
           else
             GIT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
           fi
-          ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
+          ${(import ../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "service/helpers mkServiceApps"; }}
           exec ${forgeTool}/bin/forge push \
             --image-path result \
             --registry ${registry} \

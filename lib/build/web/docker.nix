@@ -143,8 +143,7 @@ in {
         ${if atticToken != "" then ''export ATTIC_TOKEN="${atticToken}"'' else ''export ATTIC_TOKEN="''${ATTIC_TOKEN:-$(cat "$HOME/.config/attic/token" 2>/dev/null || true)}"''}
         ${if ghcrToken != "" then ''export GHCR_TOKEN="${ghcrToken}"'' else ''export GHCR_TOKEN="''${GHCR_TOKEN:-''${GITHUB_TOKEN:-$(cat "$HOME/.config/github/token" 2>/dev/null || true)}}"''}
         GIT_SHA="''${RELEASE_GIT_SHA:-$(${pkgs.git}/bin/git rev-parse --short HEAD)}"
-        ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
-''}
+        ${(import ../../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "web/docker mkWebDockerPushApp"; }}
       exec ${forgeCmd} push \
           --image-path result \
           --registry ${registry} \

@@ -96,8 +96,7 @@ rec {
     program = toString (pkgs.writeShellScript "${name}-push" ''
       set -euo pipefail
       GIT_SHA="''${RELEASE_GIT_SHA:-$(${pkgs.git}/bin/git rev-parse --short HEAD)}"
-      ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"
-''}
+      ${(import ../../util/doca-env.nix { lib = pkgs.lib; }).mkDocaExport { inherit ociPush; context = "shared/release-app"; }}
       exec ${forgeCmd} push \
         --image-path result \
         --registry ${registry} \
