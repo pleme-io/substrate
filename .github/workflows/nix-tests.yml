@@ -313,6 +313,12 @@ jobs:
       - name: util/tests.nix (22 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/tests"; }'
 
+      # Wiring invariant: every provider that execs a forge push/image-release
+      # must export DOCA_BIN. Seals a defect hand-fixed SEVEN times over two
+      # days; the suite's own header carries the receipts.
+      - name: util/forge-tool-env (8 assertions — DOCA_BIN at every forge-push provider)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/forge-tool-env"; }'
+
   infra-suites:
     name: infra — eval suites
     runs-on: ubuntu-latest

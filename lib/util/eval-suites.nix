@@ -128,6 +128,13 @@ let
   #   lib/infra/tests/wasm-compat-test.nix  (pending-vacuous-guard)
   suites = {
     # ── lib/types ────────────────────────────────────────────────────
+    # ── wiring invariants ────────────────────────────────────────────
+    # Seals the defect this campaign hand-fixed SEVEN times: a forge-push
+    # provider that does not export DOCA_BIN. See the suite's own header.
+    "util/forge-tool-env" = {
+      min = 5;
+      verdict = fromRunTests (import ./forge-tool-env-tests.nix { inherit lib; });
+    };
     "types/tests" = {
       min = 79;
       verdict = fromRunTests (import ../types/tests.nix { inherit lib; });

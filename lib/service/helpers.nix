@@ -1,6 +1,11 @@
 # Service Helpers - Docker Compose, Test Runners, Dev Shell, Checks, Packages
 # Utility functions for Rust service development and testing
-{ pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken }:
+# `ociPush`: substrate's oci-push (doca), exported to forge as DOCA_BIN.
+# Missed by two rounds of hand-grepping because this file execs forge via
+# `${forgeTool}/bin/forge push`, not the `${forgeCmd} push` spelling the
+# greps looked for. The eval suite in lib/util/forge-tool-env-tests.nix found
+# it on its first run -- which is the argument for the suite over the greps.
+{ pkgs, forgeCmd, defaultAtticToken, defaultGhcrToken, ociPush ? null }:
 
 rec {
   # Generate docker-compose.yml for integration testing
@@ -517,6 +522,7 @@ rec {
           else
             GIT_SHA=$(${pkgs.git}/bin/git rev-parse --short HEAD)
           fi
+          ${pkgs.lib.optionalString (ociPush != null) ''export DOCA_BIN="${ociPush}/bin/oci-push"''}
           exec ${forgeTool}/bin/forge push \
             --image-path result \
             --registry ${registry} \

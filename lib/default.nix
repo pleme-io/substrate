@@ -109,6 +109,7 @@
   serviceHelpersModule = import ./service/helpers.nix {
     inherit pkgs forgeCmd;
     inherit (configModule) defaultAtticToken defaultGhcrToken;
+    ociPush = ociPushPkg;
   };
 
   # Environment-aware deployment apps
