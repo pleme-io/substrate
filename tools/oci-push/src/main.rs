@@ -1269,10 +1269,24 @@ fn push_with_retry_inner(
 /// This is the case ★★ ADVANCE-2 names explicitly — "enhance doca where it
 /// falls short rather than keeping a fallback" — so the fix is `--src-insecure`
 /// / `--dest-insecure` here, NOT leaving image-sync on skopeo.
-/// `pending-doca-transfer-insecure:` add both, mirroring `pull`'s handling,
-/// with a per-side flag rather than one global `--insecure`: a mirror commonly
-/// pulls from a trusted public registry and pushes to a self-signed internal
-/// one, and a single switch would silently relax the trusted side too.
+/// ── CLOSED 2026-08-02. `--src-insecure` / `--dest-insecure` / `--src-ca-cert`
+/// / `--dest-ca-cert` now exist, per-side as argued below, and `transfer`
+/// routes both clients through `client_config_for` — the SAME helper `pull`
+/// uses — instead of a hand-rolled `ClientConfig { protocol, ..Default }`.
+/// That hand-rolled form is precisely why the capability was missing: it
+/// dropped the two fields that carry "this registry is self-signed", so there
+/// was no way to express the intent and no error saying so. A missing struct
+/// field is a silent, permanent absence; a missing match arm at least answers
+/// `unknown flag`.
+///
+/// VERIFIED IN BOTH DIRECTIONS, because "no error" is not acceptance:
+///   `transfer --src-insecure --dest-insecure` parses past them and fails on
+///   the next genuinely-missing arg (`missing required --dest-user`), while
+///   `--bogus` still returns `unknown flag --bogus`. Without that second
+///   control a permissive parser that ignored EVERY flag would look identical.
+///   A bad `--dest-ca-cert` fails with `cannot read CA cert /nonexistent/ca.pem`
+///   BEFORE any network call, which is the point of building both configs
+///   ahead of `block_on`.
 ///
 /// NOTE while converting image-sync: its inspect path swallows the failure.
 /// `let result = Command::new("skopeo")…; if let Ok(output) = result` means a
@@ -1286,6 +1300,10 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
     let mut src_pass: Option<String> = None;
     let mut dest_user: Option<String> = None;
     let mut dest_pass: Option<String> = None;
+    let mut src_insecure = false;
+    let mut dest_insecure = false;
+    let mut src_ca: Option<String> = None;
+    let mut dest_ca: Option<String> = None;
 
     while let Some(flag) = it.next() {
         match flag.as_str() {
@@ -1295,6 +1313,15 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             "--src-pass" => src_pass = Some(next_value(&mut it, "src-pass")?),
             "--dest-user" => dest_user = Some(next_value(&mut it, "dest-user")?),
             "--dest-pass" => dest_pass = Some(next_value(&mut it, "dest-pass")?),
+            // PER-SIDE, deliberately not one global `--insecure`. A mirror
+            // typically pulls from a trusted public registry and pushes to a
+            // self-signed internal one; a single switch would silently relax
+            // verification on the trusted side too, which is the opposite of
+            // what the caller asked for and invisible once it works.
+            "--src-insecure" => src_insecure = true,
+            "--dest-insecure" => dest_insecure = true,
+            "--src-ca-cert" => src_ca = Some(next_value(&mut it, "src-ca-cert")?),
+            "--dest-ca-cert" => dest_ca = Some(next_value(&mut it, "dest-ca-cert")?),
             other => return Err(PushError::UnknownFlag(other.to_string())),
         }
     }
@@ -1333,11 +1360,18 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
     let src_proto = protocol_for(src_ref.registry());
     let dest_proto = protocol_for(dest_ref.registry());
 
+    // Routed through `client_config_for`, the same helper `pull` uses, rather
+    // than a hand-rolled `ClientConfig { protocol, ..Default }`. The hand-rolled
+    // form is why `transfer` silently had no way to express "this registry is
+    // self-signed": it dropped the two fields that carry that intent. Built
+    // BEFORE block_on so a bad CA path fails with a read error naming the file,
+    // not somewhere inside an async pull.
+    let src_cfg = client_config_for(src_ref.registry(), src_insecure, &src_ca)?;
+    let dest_cfg = client_config_for(dest_ref.registry(), dest_insecure, &dest_ca)?;
+    let _ = (src_proto, dest_proto);
+
     runtime()?.block_on(async {
-        let src_client = Client::new(ClientConfig {
-            protocol: src_proto,
-            ..Default::default()
-        });
+        let src_client = Client::new(src_cfg);
         eprintln!("oci-push[transfer]: pulling {src_ref}");
         let data = src_client
             .pull(&src_ref, &src_auth, ACCEPTED_LAYERS.to_vec())
@@ -1347,10 +1381,7 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
                 detail: e.to_string(),
             })?;
 
-        let dest_client = Client::new(ClientConfig {
-            protocol: dest_proto,
-            ..Default::default()
-        });
+        let dest_client = Client::new(dest_cfg);
         // PASSES THE SOURCE MANIFEST THROUGH AS-IS when the source had one.
         //
         // NAMED GAP, found 2026-08-01 while trying to retire skopeo from
