@@ -148,6 +148,20 @@ on:
       GHCR_TOKEN:
         description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
         required: false
+      ECR_TOKEN:
+        description: >-
+          Password for the SOURCE registry an image derivation PULLS FROM, when
+          that registry is private (lib/build/oci/hardened-base.nix's
+          `srcCredsEnv` / `srcCredsUser`). Orthogonal to BOT_PAT/GHCR_TOKEN,
+          which authenticate the DESTINATION push. The variable NAME is fixed
+          at `ECR_TOKEN` -- a `secrets:` key cannot be computed from an input,
+          and the consumer's `srcCredsEnv` must name the SAME string for the
+          derivation's `impureEnvVars` entry to match. Optional: absent, every
+          existing caller is byte-identical. Same input, same wiring, same
+          rationale as nix-image-auto-release.yml's -- an `imageAttr` that
+          happens to be a private-upstream vendor rewrap has the identical
+          need here, so it is solved in both reusables rather than one.
+        required: false
 
 jobs:
   # Resolves the actual build runner via pleme-io/actions/runner-resolve
@@ -184,6 +198,14 @@ jobs:
       contents: read
       packages: write
       id-token: write
+    env:
+      # Source-registry password for a private upstream pull, under the exact
+      # name hardened-base.nix's `srcCredsEnv` declares. Job-level so every nix
+      # invocation in the job carries it, not just today's `nix build` step.
+      # Covers the LocalStore (root runner) case only -- the daemon case is the
+      # `impure-env` line in the Install Nix step below, which explains why one
+      # env export is not sufficient on its own.
+      ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -474,10 +496,35 @@ jobs:
           # DAEMON nix.conf, trusted at install time) makes it honored by the
           # sandboxed fetcher regardless of trusted-user status, the same way
           # the attic lines above already are.
+          #
+          # impure-env (added alongside, same placement, same reason) is a
+          # FOURTH credential layer, and the one that reaches a PRIVATE SOURCE
+          # REGISTRY: hardened-base.nix pulls an upstream image in a
+          # fixed-output derivation carrying `impureEnvVars = [ <srcCredsEnv> ]`,
+          # and that attribute reads the environment of the BUILDER process,
+          # not of the `nix build` that asked for it. Nix's manual, verbatim:
+          # "When a daemon is building its environmental variables are used.
+          # Without the daemon, the environmental variables come from the
+          # environment of the nix-build." MEASURED: a FOD declaring
+          # `impureEnvVars = [ "PROBE_VAR" ]` built through a daemon store with
+          # PROBE_VAR exported in the client's environment saw it UNSET -- so
+          # the job-level ECR_TOKEN export above lands only when the job runs as
+          # root and `store = auto` resolves to LocalStore. `impure-env` is the
+          # supported client-supplied route and is gated on the
+          # `configurable-impure-env` experimental feature; BOTH lines must be
+          # in the DAEMON nix.conf, because `RemoteStore::setOptions` erases
+          # `experimental-features` from the overrides a client forwards over
+          # the socket. Gated on the secret, so a caller passing none renders
+          # two blank lines and an unchanged nix.conf. Sharp edge: `impure-env`
+          # is a whitespace-separated `name=value` list, so a token containing a
+          # space is truncated at the space instead of rejected -- harmless for
+          # the base64/JWT-shaped registry tokens this is for, worth knowing.
           extra-conf: |
             sandbox = relaxed
             access-tokens = github.com=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
             netrc-file = ${{ env.NIX_GIT_NETRC_PATH }}
+            ${{ secrets.ECR_TOKEN && 'extra-experimental-features = configurable-impure-env' || '' }}
+            ${{ secrets.ECR_TOKEN && format('impure-env = ECR_TOKEN={0}', secrets.ECR_TOKEN) || '' }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}

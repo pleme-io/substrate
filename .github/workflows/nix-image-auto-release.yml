@@ -170,6 +170,29 @@ on:
       GHCR_TOKEN:
         description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
         required: false
+      ECR_TOKEN:
+        description: >-
+          Password for the SOURCE registry a vendor rewrap PULLS FROM, when
+          that registry is private (lib/build/oci/hardened-base.nix's
+          `srcCredsEnv` / `srcCredsUser`). Orthogonal to BOT_PAT/GHCR_TOKEN,
+          which authenticate the DESTINATION push -- a rewrap of a private
+          upstream needs both, at opposite ends of the same job. The variable
+          NAME is fixed at `ECR_TOKEN` because a `secrets:` key cannot be
+          computed from an input, and the consumer's own `srcCredsEnv` must
+          name the SAME string for the derivation's `impureEnvVars` entry to
+          match; a consumer that names anything else gets an unauthenticated
+          pull, not a mismatch error (pleme-io/hardened-images' three
+          classicHardenedClickhouse* entries already declare exactly
+          `srcCredsEnv = "ECR_TOKEN"`). Optional: absent, every existing
+          caller is byte-identical -- an image with no `srcCredsEnv` never
+          reads it, and the derivation's own `${ECR_TOKEN:?…}` guard refuses
+          an unauthenticated pull rather than silently attempting one.
+          NOTE this carries a STATIC secret. `aws ecr get-login-password`
+          mints a ~12h token, so an ECR consumer wants a value minted per run
+          (pleme-io/actions/aws-assume-role -> ECR_TOKEN) rather than a repo
+          secret that goes stale; this input is the transport, not the
+          lifetime policy.
+        required: false
 
 permissions:
   contents: read
@@ -277,6 +300,21 @@ jobs:
       # THIS job request an OIDC token scoped to itself, nothing more --
       # zero blast radius for callers that never set cosign-sign/sbom-attest.
       id-token: write
+    env:
+      # Source-registry password for a private upstream pull, under the exact
+      # name hardened-base.nix's `srcCredsEnv` declares. JOB-level, not on one
+      # step: ANY nix invocation in this job can be the one that realizes the
+      # pull FOD -- the scan-before-push `nix build`, the grype and vulnix gate
+      # apps, `nix run .#<release-app>` (the ONLY build at all in the default
+      # scan-before-push:false mode), and the cartorio closure-info build.
+      # Enumerating them is how a step added later silently loses the
+      # credential and regresses to an anonymous pull. Renders empty for every
+      # caller that passes no secret, which the derivation's own
+      # `${ECR_TOKEN:?…}` guard treats identically to unset.
+      #
+      # This is HALF the delivery -- see the Install Nix step's `impure-env`
+      # lines for the other half and for why one env export is not enough.
+      ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
@@ -321,6 +359,47 @@ jobs:
       # path burning 15s before nix concludes the obvious. Neither weakens
       # anything: signature policy is untouched, and a REACHABLE sui is used
       # exactly as before.
+      #
+      # ── AN IMPURE ENV VAR REACHES THE BUILDER FROM THE DAEMON, NOT FROM US ─
+      # hardened-base.nix pulls a private upstream inside a fixed-output
+      # derivation carrying `impureEnvVars = [ <srcCredsEnv> ]` -- legal
+      # because `upstreamSha256` pins the output. That attribute does NOT read
+      # the environment of the `nix build` that requested the build. Nix's own
+      # manual, verbatim: "impureEnvVars implementation takes environment
+      # variables from the current builder process. When a daemon is building
+      # its environmental variables are used. Without the daemon, the
+      # environmental variables come from the environment of the nix-build."
+      # A GitHub-hosted runner is squarely the daemon case (`runner` cannot
+      # write /nix/var/nix, so `store = auto` resolves to the daemon socket),
+      # and that daemon was started at install time with no ECR_TOKEN in
+      # sight. MEASURED, not inferred: a FOD declaring `impureEnvVars =
+      # [ "PROBE_VAR" ]`, built through a daemon store with PROBE_VAR exported
+      # in the client's environment, saw it UNSET. So the job-level env export
+      # above covers ONLY the other store mode -- a runner whose job is root,
+      # where `auto` resolves to LocalStore and the client IS the builder.
+      #
+      # `impure-env` is the one supported client-supplied route, and it is
+      # gated behind the `configurable-impure-env` experimental feature. BOTH
+      # lines have to land in the DAEMON's nix.conf, which is what `extra-conf`
+      # writes: Nix's `RemoteStore::setOptions` explicitly erases
+      # `experimental-features` from the setting overrides a client forwards
+      # over the daemon socket, so enabling the feature via NIX_CONFIG or a CLI
+      # flag reaches the client and never the builder (`impure-env` itself is
+      # NOT erased, but is ignored without the feature). Same placement, same
+      # reason, as image-push.yml's `access-tokens` line: the daemon nix.conf is
+      # trusted at install time, so it is honored regardless of trusted-user
+      # status.
+      #
+      # Both lines are gated on the secret, so a caller that passes none
+      # renders two blank lines and an unchanged nix.conf -- the same shape the
+      # extraSubstituters lines below already use.
+      #
+      # ONE SHARP EDGE: `impure-env` is a whitespace-separated list of
+      # `name=value` items, so a token CONTAINING a space is silently truncated
+      # at the space rather than rejected, and the pull then fails as a plain
+      # auth error. Every registry token this is for (ECR, GHCR, a Harbor robot)
+      # is base64/JWT-shaped and whitespace-free by construction, so this is a
+      # constraint to know rather than one to guard.
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
@@ -328,6 +407,8 @@ jobs:
           determinate: false
           extra-conf: |
             sandbox = relaxed
+            ${{ secrets.ECR_TOKEN && 'extra-experimental-features = configurable-impure-env' || '' }}
+            ${{ secrets.ECR_TOKEN && format('impure-env = ECR_TOKEN={0}', secrets.ECR_TOKEN) || '' }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
