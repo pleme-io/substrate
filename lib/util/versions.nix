@@ -113,7 +113,39 @@
   };
 
   docker = {
-    # Default maxLayers for buildLayeredImage
+    # ── "Default" REACHES 1 OF 5 BUILDERS (counted 2026-08-02) ──────────────
+    # This says "Default maxLayers for buildLayeredImage" and it is not the
+    # default of anything except leptos-build.nix. Every buildLayeredImage call
+    # site in this repo, and whether it references this value:
+    #
+    #   lib/build/rust/leptos-build.nix   3 calls   USES it (2 references)
+    #   lib/build/docker/node-image.nix   2 calls   does not
+    #   lib/build/go/docker.nix           3 calls   does not
+    #   lib/build/go/hardened-image.nix   1 call    does not
+    #   lib/build/web/docker.nix          2 calls   does not
+    #
+    # The four that do not get dockerTools' OWN default, which is 100 -- not
+    # 120. So this constant documents an intent that four fifths of the call
+    # sites never see, and reading it gives a false picture of what the fleet
+    # actually builds with.
+    #
+    # MEASURED CONSEQUENCE, not hypothetical: hardened-images'
+    # `cnpg-postgresql` fails EVERY release at build time with
+    #   Error: usedLayers 101 layers to store 'fromImage' and 'extraCommands',
+    #          but only maxLayers=100 were allowed
+    # and ghcr returns "Package not found" for it -- the image has NEVER
+    # published. It needs exactly one more layer than dockerTools allows, and
+    # the constant that would have given it twenty more was right here, unwired.
+    #
+    # NOT FLIPPED IN THIS PASS, deliberately. Raising maxLayers changes how a
+    # closure is split into layers, which changes every layer digest and
+    # therefore every image digest built through those four builders. That is a
+    # fleet-wide rebuild and a cache invalidation, not a config tweak, and it
+    # should be a deliberate act with someone watching the first rebuild --
+    # not a side effect of fixing one image that has never shipped.
+    #
+    # `pending-maxlayers-wiring: 4 of 5 builders ignore this value. Wire them
+    #  together, in one change, with the digest churn expected and announced.`
     maxLayers = 120;
     # Never use UPX in containers
     useUpx = false;
