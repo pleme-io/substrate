@@ -300,6 +300,40 @@
       backend = "tatara-lisp";
       role = "Build a container image with podman (rootless, daemonless alternative to docker).";
     };
+    # ── RETIRING THE ACTIONS DID NOT RETIRE THE BINARY ──────────────────────
+    # The two entries below are honestly measured and honestly worded, and put
+    # together they still mislead: they retire the two *actions*, and a reader
+    # scanning this catalog reasonably concludes skopeo is gone from the fleet.
+    # It is not. Measured 2026-08-01 across 951 pleme-io repos: ELEVEN live
+    # `${pkgs.skopeo}/bin/skopeo copy` call sites in five repos, none of which
+    # is an action and none of which this catalog can see —
+    #
+    #   aresta/flake.nix:134 · blackmatter-akeyless/flake.nix:135 ·
+    #   enxerto/flake.nix:102 · infrastructure/github-runner/…/flake.nix:914,916,918 ·
+    #   pangea-architectures/services/akeyless-{sra,csi-provider,ztwa,gateway,
+    #     secrets-injection}-image/flake.nix:98 (five, byte-identical)
+    #
+    # All eleven are ONE class, not eleven tasks: `nix build --print-out-paths`
+    # → `skopeo copy docker-archive:… docker://…`, hand-rolled in a flake's
+    # release app.
+    #
+    # THE DESTINATION ALREADY EXISTS AND IS ALREADY CONVERTED. `lib/service/
+    # image-release.nix` (`mkImageReleaseApp`) threads `ociPush` → `DOCA_BIN`;
+    # forge's image_release.rs moved off skopeo. So these eleven are not blocked
+    # on a missing capability — they hand-roll around a primitive that is
+    # already doca-based (Operating Principle #1: use the primitive, don't
+    # re-implement its near-miss).
+    #
+    # HOW THE COUNT WAS NEARLY MISSED, because the trap generalizes: the first
+    # probe was `grep -rn --include=*.nix … .` from the pleme-io root and it
+    # returned 0 — the recorded org-root gitignore trap. A 0 with no control is
+    # indistinguishable from clean, and it was only caught because the same run
+    # probed a known-present string and got 0 for THAT too. Per-repo iteration
+    # (`for d in */; do grep -r "$d"`) returns 31 mentions / 16 uncommented / 11
+    # real. Always pair an absence claim with a positive control that must be
+    # non-zero, and never trust a fleet-wide grep issued from the org root.
+    #
+    # `pending-skopeo-callsites: 11 flake call sites → mkImageReleaseApp.`
     "skopeo-copy" = {
       uses = "pleme-io/actions/skopeo-copy@main";
       backend = "tatara-lisp";
