@@ -2481,15 +2481,17 @@ fn cmd_crypto_version<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushE
         serde_json::from_slice(manifest_raw).map_err(PushError::ManifestParse)?;
     let first = manifest.first().ok_or(PushError::EmptyManifest)?;
 
-    let mut best: Option<(u64, u64, u64)> = None;
+    // EVERY distinct version, not just the highest. See the floor check below
+    // for why that distinction is the whole point.
+    let mut seen: std::collections::BTreeSet<(u64, u64, u64)> = std::collections::BTreeSet::new();
     for layer_path in &first.layers {
         let blob = entries
             .get(layer_path)
             .ok_or_else(|| PushError::MissingEntry(layer_path.clone()))?;
-        scan_layer_for_openssl(blob, &mut best)?;
+        scan_layer_for_openssl(blob, &mut seen)?;
     }
 
-    let Some((a, b, c)) = best else {
+    let Some(&(a, b, c)) = seen.iter().next_back() else {
         return Err(PushError::CryptoVersionAbsent { tarball });
     };
     let found = format_version(a, b, c);
@@ -2497,11 +2499,39 @@ fn cmd_crypto_version<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushE
     if let Some(floor) = min {
         let f = parse_version(floor.as_bytes())
             .ok_or_else(|| PushError::MissingValue("min (expected X.Y.Z)"))?;
-        if (a, b, c) < f {
-            return Err(PushError::CryptoVersionBelowFloor { found, floor });
+        // ── FLOOR THE LOWEST, NOT THE HIGHEST (fixed 2026-08-02) ────────────
+        // This previously kept only the MAXIMUM version seen and compared THAT
+        // against the floor, which asserts "the newest OpenSSL in this image is
+        // recent enough" -- a claim nobody wants. An image bundling BOTH
+        // OpenSSL 3.5.0 and a vulnerable 1.1.1 satisfied it, printed "3.5.0",
+        // and exited 0: the older copy was not merely unreported, it was
+        // unreachable by the gate. A statically linked artifact is exactly
+        // where two copies of a library plausibly coexist, and this gate exists
+        // precisely because no package scanner can see either of them.
+        //
+        // The trigger for finding it: this binary carries THREE distinct
+        // OpenSSL version strings ("3.5.0", "3.0.x", "3"). Only one parses as
+        // X.Y.Z today, so the measured verdict does not change -- but the gate
+        // was one unlucky vendor bump away from certifying a vulnerable copy it
+        // had itself read and discarded.
+        let &(la, lb, lc) = seen.iter().next().expect("non-empty: checked above");
+        if (la, lb, lc) < f {
+            return Err(PushError::CryptoVersionBelowFloor {
+                found: format_version(la, lb, lc),
+                floor,
+            });
         }
     }
-    println!("{found}");
+    // Print every distinct version when there is more than one. A single line
+    // for a multi-version image is how the old behaviour hid the second copy.
+    for (i, &(x, y, z)) in seen.iter().enumerate() {
+        if i + 1 == seen.len() {
+            println!("{}", format_version(x, y, z));
+        } else {
+            println!("{} (also present)", format_version(x, y, z));
+        }
+    }
+    let _ = found;
     Ok(())
 }
 
@@ -2704,7 +2734,7 @@ fn parse_vendored_crate(b: &[u8]) -> Option<String> {
 
 fn scan_layer_for_openssl(
     blob: &[u8],
-    best: &mut Option<(u64, u64, u64)>,
+    seen: &mut std::collections::BTreeSet<(u64, u64, u64)>,
 ) -> Result<(), PushError> {
     const NEEDLE: &[u8] = b"OpenSSL ";
     const CHUNK: usize = 1 << 22; // 4 MiB
@@ -2734,9 +2764,10 @@ fn scan_layer_for_openssl(
             while i + NEEDLE.len() < window.len() {
                 if &window[i..i + NEEDLE.len()] == NEEDLE {
                     if let Some(v) = parse_version(&window[i + NEEDLE.len()..]) {
-                        if best.is_none() || Some(v) > *best {
-                            *best = Some(v);
-                        }
+                        // Record EVERY distinct version. Keeping only the max
+                        // here is what made a second, older, vulnerable copy
+                        // invisible to the floor check.
+                        seen.insert(v);
                     }
                 }
                 i += 1;
