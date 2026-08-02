@@ -260,6 +260,13 @@ enum PushError {
         floor: usize,
         tarball: String,
     },
+    /// `unpack` found its own incomplete-marker already present: a previous
+    /// unpack into this destination failed partway and the tree is truncated.
+    /// Refusing is the point -- the tree looks complete to every other check.
+    UnpackIncomplete {
+        dest: String,
+        marker: &'static str,
+    },
     NotImplemented(&'static str),
     /// `--digest-only` asked of a LOCAL archive. Not a missing feature: a
     /// docker-archive has no registry digest at all — the manifest digest a
@@ -393,6 +400,14 @@ impl fmt::Display for PushError {
                      Read this as a BROKEN PROBE, not a small dependency graph: the needle is the build-layout \
                      convention 'rust_vendor/', and a vendor that stages crates elsewhere yields an empty inventory \
                      that looks exactly like a crate-free image."
+                )
+            }
+            PushError::UnpackIncomplete { dest, marker } => {
+                write!(
+                    f,
+                    "oci-push: '{dest}' contains '{marker}' -- a previous unpack into it FAILED partway, \
+                     so the tree is INCOMPLETE even though it looks well-formed. Delete the destination \
+                     entirely and unpack again; do not boot or scan it."
                 )
             }
             PushError::NotImplemented(what) => {
@@ -2807,12 +2822,58 @@ fn cmd_unpack<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 
     fs::create_dir_all(&dest).map_err(PushError::Archive)?;
 
+    // ── A PARTIAL UNPACK MUST NOT LOOK LIKE A COMPLETE ONE ─────────────────
+    // Measured 2026-08-02: unpacking pleme-io/hardened-clickhouse (20 layers)
+    // failed midway with `Permission denied (os error 13)` and exited 1 --
+    // correctly -- but left 6 of the image's store paths on disk, WITHOUT the
+    // one its own Entrypoint names. Nothing about that tree says it is
+    // truncated: it has the right shape, plausible contents, and a
+    // `find`-able /nix/store. The canonical caller idiom
+    //
+    //     [ -d "$dest" ] || doca unpack --tarball … --dest "$dest"
+    //
+    // then makes the failure UNREACHABLE on every subsequent run: the
+    // directory exists, so unpack is never retried, and the exit code that
+    // reported the problem is never produced again. A boot test against such a
+    // tree fails for a reason that has nothing to do with the image.
+    //
+    // So the incomplete state is made SELF-DECLARING. The marker is written
+    // before the first layer and removed only after the last one, and its
+    // presence on entry is a hard error. Deleting `dest` on failure was the
+    // other option and is worse: `--dest` may legitimately point at a
+    // pre-existing tree, and a tool that removes a directory the user already
+    // had is a far more expensive kind of wrong than one that refuses to
+    // proceed.
+    const MARKER: &str = ".oci-push-unpack-incomplete";
+    let marker = dest.join(MARKER);
+    if marker.exists() {
+        return Err(PushError::UnpackIncomplete {
+            dest: dest.display().to_string(),
+            marker: MARKER,
+        });
+    }
+    fs::write(
+        &marker,
+        format!(
+            "oci-push unpack in progress\ntarball: {}\nlayers: {}\n\
+             If this file is still here, the unpack FAILED partway and this tree is INCOMPLETE.\n\
+             Delete the whole destination and unpack again; do not boot or scan it.\n",
+            tarball,
+            first.layers.len()
+        ),
+    )
+    .map_err(PushError::Archive)?;
+
     for layer_path in &first.layers {
         let blob = entries
             .get(layer_path)
             .ok_or_else(|| PushError::MissingEntry(layer_path.clone()))?;
         apply_layer(blob, &dest)?;
     }
+
+    // Removed only after EVERY layer applied. An early `?` above leaves it in
+    // place, which is the whole point.
+    fs::remove_file(&marker).map_err(PushError::Archive)?;
 
     eprintln!(
         "oci-push[unpack]: {} layer(s) -> {}",
