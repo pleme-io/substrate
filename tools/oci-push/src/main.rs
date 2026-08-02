@@ -2923,6 +2923,49 @@ fn cmd_unpack<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 /// Whiteouts are handled BEFORE the entry is written, and the marker itself is
 /// never materialised — a `.wh.` file left on disk would be a file the image
 /// does not contain.
+/// chmod u+w every existing directory from `dest` down to `target`'s parent.
+///
+/// A dockerTools layer ships store paths mode 0555, and a later entry has to
+/// create children inside them. Making only the immediate parent writable is
+/// not enough when that parent does not exist yet -- the mkdir happens in the
+/// GRANDparent, which is still read-only. Restoring the original modes is
+/// deliberately not attempted: a later tar entry for the directory re-applies
+/// its own mode, and the unpacked tree is an inspection artifact, not a
+/// distributed one.
+fn make_ancestors_writable(dest: &Path, target: &Path) {
+    let Some(parent) = target.parent() else { return };
+    let mut chain: Vec<&Path> = Vec::new();
+    let mut cur = Some(parent);
+    while let Some(p) = cur {
+        if !p.starts_with(dest) {
+            break;
+        }
+        chain.push(p);
+        if p == dest {
+            break;
+        }
+        cur = p.parent();
+    }
+    // Outermost first: a read-only ancestor blocks chmod of nothing, but it
+    // does block the mkdir, so order only matters for clarity here.
+    for p in chain.into_iter().rev() {
+        if !p.is_dir() {
+            continue;
+        }
+        if let Ok(md) = fs::metadata(p) {
+            let mut perm = md.permissions();
+            if perm.readonly() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    perm.set_mode(perm.mode() | 0o700);
+                }
+                let _ = fs::set_permissions(p, perm);
+            }
+        }
+    }
+}
+
 fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
     let mut archive = tar::Archive::new(std::io::Cursor::new(blob));
     for entry in archive.entries().map_err(PushError::Archive)? {
@@ -2995,21 +3038,19 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         // vendor image. Re-open the parent for writing before each entry;
         // the final mode is whatever the LAST entry for that path sets, and
         // a directory listed after its children re-applies its own mode.
-        if let Some(parent) = target.parent() {
-            if parent.is_dir() {
-                if let Ok(md) = fs::metadata(parent) {
-                    let mut perm = md.permissions();
-                    if perm.readonly() {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            perm.set_mode(perm.mode() | 0o700);
-                        }
-                        let _ = fs::set_permissions(parent, perm);
-                    }
-                }
-            }
-        }
+        // Walk EVERY existing ancestor under `dest`, not just the immediate
+        // parent. The old guard was `if parent.is_dir()`, which does nothing
+        // when the parent does not exist yet -- and that is exactly the case
+        // that fails: creating `<store-path>/lib/foo` has to mkdir `lib`
+        // INSIDE `<store-path>`, which dockerTools ships mode 0555. So
+        // `create_dir_all` returned EACCES while the chmod that would have
+        // prevented it was skipped for being one level too low.
+        //
+        // Measured 2026-08-02 on ghcr.io/pleme-io/hardened-clickhouse: 6 store
+        // paths extracted, then EACCES on a clean destination, on every
+        // dockerTools image -- i.e. the whole hardened lane could not be
+        // unpacked, boot-tested or scanned by our own tool.
+        make_ancestors_writable(dest, &target);
         // dockerTools emits its customisation layer with ABSOLUTE paths
         // (`/nix/store/…`) alongside the usual `./`-prefixed ones.
         // `unpack_in` REFUSES an absolute path -- that is its safety
@@ -3027,7 +3068,12 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         if path.is_absolute() {
             if target.starts_with(dest) {
                 if let Some(parent) = target.parent() {
-                    fs::create_dir_all(parent).map_err(PushError::Archive)?;
+                    fs::create_dir_all(parent).map_err(|e| {
+                        PushError::Archive(std::io::Error::new(
+                            e.kind(),
+                            format!("creating parent {parent:?}: {e}"),
+                        ))
+                    })?;
                 }
                 // Name the ENTRY on failure. Without this, a write error
                 // surfaces as the generic "error reading docker-archive:
