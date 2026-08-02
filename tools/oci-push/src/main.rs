@@ -2729,22 +2729,57 @@ fn parse_vendored_crate(b: &[u8]) -> Option<String> {
         .position(|c| !(c.is_ascii_alphanumeric() || *c == b'_' || *c == b'.' || *c == b'-'))
         .unwrap_or(b.len());
     let s = std::str::from_utf8(&b[..end]).ok()?;
-    let (name, version) = s.rsplit_once('-')?;
-    if name.is_empty() {
-        return None;
+
+    // ── SEMVER, NOT JUST X.Y.Z (fixed 2026-08-02) ──────────────────────────
+    // This previously required the ENTIRE tail after the last '-' to be exactly
+    // three numeric parts, so `clickhouse-rs-1.1.0-alpha.1` was rejected
+    // outright and vanished from the inventory. That is the worst direction for
+    // this tool to fail in: a pre-release dependency is exactly the kind you
+    // want VISIBLE in a CVE denominator, and dropping it shrinks the stated
+    // denominator silently.
+    //
+    // It was found by cross-checking against an independent grep, which
+    // disagreed by exactly one crate. The grep was wrong too, in the other
+    // direction: its pattern matches a PREFIX ending at a 3-part version, so it
+    // reported `clickhouse-rs-1.1.0` -- a version that does not exist. Two
+    // extractions of the same bytes, both wrong, disagreeing by one. Neither
+    // could have been caught without the other.
+    //
+    // Now: find the LAST '-' whose tail STARTS with a numeric X.Y.Z, and keep
+    // the whole remainder (pre-release and build metadata included). Scanning
+    // right-to-left matters -- a name may itself contain digits and dots.
+    let bytes = s.as_bytes();
+    for (i, _) in s.char_indices().rev().filter(|(_, c)| *c == '-') {
+        let (name, version) = (&s[..i], &s[i + 1..]);
+        if name.is_empty() || version.is_empty() {
+            continue;
+        }
+        if is_semver_core_prefixed(version) {
+            let _ = bytes;
+            return Some(s.to_string());
+        }
     }
-    let mut parts = version.split('.');
-    let (a, b2, c) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() {
-        return None;
-    }
-    if [a, b2, c]
+    None
+}
+
+/// True when `v` begins with a numeric `X.Y.Z` core, optionally followed by a
+/// semver pre-release (`-alpha.1`) or build (`+deadbeef`) suffix.
+///
+/// Only the CORE is validated. Anything after it is carried through verbatim
+/// rather than parsed: the goal is a faithful component identifier for an SBOM
+/// row, and a stricter grammar here would silently drop rows again -- the exact
+/// failure this function was changed to fix.
+fn is_semver_core_prefixed(v: &str) -> bool {
+    let core_end = v.find(['-', '+']).unwrap_or(v.len());
+    let core = &v[..core_end];
+    let mut parts = core.split('.');
+    let (Some(a), Some(b), Some(c), None) = (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    [a, b, c]
         .iter()
-        .any(|p| p.is_empty() || !p.bytes().all(|d| d.is_ascii_digit()))
-    {
-        return None;
-    }
-    Some(s.to_string())
+        .all(|p| !p.is_empty() && p.bytes().all(|d| d.is_ascii_digit()))
 }
 
 fn scan_layer_for_openssl(
