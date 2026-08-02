@@ -2932,6 +2932,38 @@ fn cmd_unpack<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
 /// deliberately not attempted: a later tar entry for the directory re-applies
 /// its own mode, and the unpacked tree is an inspection artifact, not a
 /// distributed one.
+/// Make a whole subtree writable, then remove it.
+///
+/// `fs::remove_dir_all` fails EACCES on a dockerTools tree for the same reason
+/// `rm -rf` does: store directories ship mode 0555, and unlinking a child
+/// requires write on its PARENT. Measured 2026-08-02 -- the shell `rm -rf` on
+/// exactly this tree reported
+///   rm: cannot remove '.../xgcc-15.3.0-libgcc/lib/libgcc_s.so.1': Permission denied
+/// and doca hit the identical wall one layer down, where it surfaced as an
+/// unattributed "error reading docker-archive".
+fn remove_tree_forcibly(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fn chmod_rec(p: &Path) {
+            if let Ok(md) = fs::symlink_metadata(p) {
+                if md.is_dir() {
+                    let mut perm = md.permissions();
+                    perm.set_mode(perm.mode() | 0o700);
+                    let _ = fs::set_permissions(p, perm);
+                    if let Ok(rd) = fs::read_dir(p) {
+                        for e in rd.flatten() {
+                            chmod_rec(&e.path());
+                        }
+                    }
+                }
+            }
+        }
+        chmod_rec(path);
+    }
+    fs::remove_dir_all(path)
+}
+
 fn make_ancestors_writable(dest: &Path, target: &Path) {
     let Some(parent) = target.parent() else { return };
     let mut chain: Vec<&Path> = Vec::new();
@@ -2982,7 +3014,12 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
             if let Some(dir) = path.parent() {
                 let target = dest.join(dir);
                 if target.is_dir() {
-                    fs::remove_dir_all(&target).map_err(PushError::Archive)?;
+                    remove_tree_forcibly(&target).map_err(|e| {
+                    PushError::Archive(std::io::Error::new(
+                        e.kind(),
+                        format!("removing existing dir {target:?}: {e}"),
+                    ))
+                })?;
                     fs::create_dir_all(&target).map_err(PushError::Archive)?;
                 }
             }
@@ -2994,9 +3031,19 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
                 .join(path.parent().unwrap_or(Path::new("")))
                 .join(deleted);
             if target.is_dir() {
-                fs::remove_dir_all(&target).map_err(PushError::Archive)?;
+                remove_tree_forcibly(&target).map_err(|e| {
+                    PushError::Archive(std::io::Error::new(
+                        e.kind(),
+                        format!("removing existing dir {target:?}: {e}"),
+                    ))
+                })?;
             } else if target.exists() {
-                fs::remove_file(&target).map_err(PushError::Archive)?;
+                fs::remove_file(&target).map_err(|e| {
+                PushError::Archive(std::io::Error::new(
+                    e.kind(),
+                    format!("removing existing file {target:?}: {e}"),
+                ))
+            })?;
             }
             continue;
         }
@@ -3011,7 +3058,12 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
         let rel = path.strip_prefix("/").unwrap_or(&path);
         let target = dest.join(rel);
         if target.is_symlink() || (target.exists() && !target.is_dir()) {
-            fs::remove_file(&target).map_err(PushError::Archive)?;
+            fs::remove_file(&target).map_err(|e| {
+                PushError::Archive(std::io::Error::new(
+                    e.kind(),
+                    format!("removing existing file {target:?}: {e}"),
+                ))
+            })?;
         }
 
         // `unpack_in(dest)`, NOT `unpack(target)`. A real image layer
