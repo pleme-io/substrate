@@ -1,0 +1,11 @@
+# Fixture: a workspace with a Cargo.lock and NO Cargo.nix — the shape of
+# the overwhelming majority of substrate consumers (the lockfile-builder
+# default path). The tie must be a no-op here, and `status.kind` must
+# report "absent" rather than "fresh": there is nothing to have verified,
+# and a guard that reports a tier it does not have over an empty subject
+# set is tier ⊥. This fixture is the additivity half of the suite.
+version = 4
+
+[[package]]
+name = "fixture-root"
+version = "0.1.0"

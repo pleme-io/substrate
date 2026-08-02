@@ -1,0 +1,30 @@
+# Fixture: the DELIBERATELY-BROKEN input the tie must go red on.
+#
+# Modelled on the real `aresta` drift measured 2026-08-01, which is the
+# hardest shape to catch and the one that shipped: the package COUNT is
+# identical to the sibling Cargo.nix (3 == 3), so nothing but a set
+# comparison sees it. `aws-lc-fips-sys` moved 0.13.14 -> 0.13.16 in the
+# lock while the committed Cargo.nix stayed on 0.13.14, and that Cargo.nix
+# is what the shipped FIPS sidecar image was built from — a CMVP-validated
+# algorithm linked against a module the manifest disowns.
+version = 4
+
+[[package]]
+name = "fixture-root"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-fips-sys",
+ "serde",
+]
+
+[[package]]
+name = "aws-lc-fips-sys"
+version = "0.13.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000003"
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000002"

@@ -1,0 +1,24 @@
+# Fixture: a Cargo.lock whose package set MATCHES the sibling Cargo.nix.
+# Shape copied from a real crate2nix-era lock (version 4, checksummed
+# registry deps plus one workspace member with no `source`).
+version = 4
+
+[[package]]
+name = "fixture-root"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
+name = "anyhow"
+version = "1.0.103"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000001"
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000002"

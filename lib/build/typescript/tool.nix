@@ -24,15 +24,20 @@ rec {
   mkPlemeLinker = {plemeLinkerSrc}:
     let
       cargoNix = plemeLinkerSrc + "/Cargo.nix";
-      project = import cargoNix {
-        inherit pkgs;
-        defaultCrateOverrides =
-          pkgs.defaultCrateOverrides
-          // {
-            pleme-linker = oldAttrs: {
-              nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ (with pkgs; [cmake perl git]);
+      # FRESHNESS TIE — see ../rust/cargo-nix-tie.nix.
+      project = (import ../rust/cargo-nix-tie.nix { }).importFresh {
+        inherit cargoNix;
+        src = plemeLinkerSrc;
+        args = {
+          inherit pkgs;
+          defaultCrateOverrides =
+            pkgs.defaultCrateOverrides
+            // {
+              pleme-linker = oldAttrs: {
+                nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ (with pkgs; [cmake perl git]);
+              };
             };
-          };
+        };
       };
     in
       project.rootCrate.build;

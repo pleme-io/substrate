@@ -280,9 +280,13 @@ let
         hostPkgs = hostPkgs;
         defaultCrateOverrides = consumerOverrides;
       }
-      else import cargoNix {
-        pkgs = targetPkgs;
-        defaultCrateOverrides = consumerOverrides;
+      else (import ./cargo-nix-tie.nix { }).importFresh {
+        inherit cargoNix src;
+        cargoLock = src + "/Cargo.lock";
+        args = {
+          pkgs = targetPkgs;
+          defaultCrateOverrides = consumerOverrides;
+        };
       };
   in
     if packageName != null then

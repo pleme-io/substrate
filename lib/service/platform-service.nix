@@ -40,9 +40,13 @@ in rec {
   buildFromCargoNix = { name, cargoNix, crateOverrides ? {} }:
     if builtins.pathExists cargoNix then
       let
-        project = import cargoNix {
-          inherit pkgs;
-          defaultCrateOverrides = pkgs.defaultCrateOverrides // crateOverrides;
+        # FRESHNESS TIE — see ../build/rust/cargo-nix-tie.nix.
+        project = (import ../build/rust/cargo-nix-tie.nix { }).importFresh {
+          inherit cargoNix;
+          args = {
+            inherit pkgs;
+            defaultCrateOverrides = pkgs.defaultCrateOverrides // crateOverrides;
+          };
         };
       in project.rootCrate.build
     else null;

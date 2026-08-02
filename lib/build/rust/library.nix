@@ -89,7 +89,24 @@ in {
     if builtins.pathExists cargoNix then cargoNix
     else crate2nixTools.generatedCargoNix { inherit name src; };
 
-  project = import generatedCargoNix {
+  # FRESHNESS TIE — a committed Cargo.nix must still describe src/Cargo.lock.
+  # This is a REACHED path: 15 repos import this builder directly (the
+  # "pattern-3" route in CLAUDE.md), two of which — `samba` and
+  # `terraform-forge` — commit a Cargo.nix that disagrees with their own
+  # lock as of 2026-08-01. See ./cargo-nix-tie.nix.
+  #
+  # The tie names `cargoNix`, NOT `generatedCargoNix`. On the fallback branch
+  # the latter is a DERIVATION (a store directory holding default.nix), and
+  # handing that to the tie would coerce it to a path and read a directory.
+  # There is also nothing to tie there: crate2nix just generated it from the
+  # tree, so it is current by construction. `assertFresh` no-ops on the
+  # absent artifact and the import proceeds unchanged.
+  cargoNixTie = import ./cargo-nix-tie.nix { };
+
+  project = cargoNixTie.assertFresh {
+    inherit cargoNix src;
+    cargoLock = src + "/Cargo.lock";
+  } (import generatedCargoNix {
     inherit pkgs;
     defaultCrateOverrides = pkgs.defaultCrateOverrides // {
       # rmcp 0.15 uses env!("CARGO_CRATE_NAME") at compile time
@@ -104,7 +121,7 @@ in {
         nativeBuildInputs = allNativeBuildInputs;
       };
     } // crateOverrides;
-  };
+  });
 
   libraryBuild = project.rootCrate.build;
 

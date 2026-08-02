@@ -1,0 +1,8 @@
+# Fixture: the sibling of an unreadable Cargo.nix. Content is irrelevant
+# beyond existing — the parser gap must be reported before any comparison
+# is attempted.
+version = 4
+
+[[package]]
+name = "fixture-root"
+version = "0.1.0"

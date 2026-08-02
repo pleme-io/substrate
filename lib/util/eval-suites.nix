@@ -237,6 +237,15 @@ let
       min = 11;
       verdict = fromPassedTotal (import ../build/rust/tests/spec-invariants-test.nix);
     };
+    # The freshness tie for a committed crate2nix Cargo.nix. Three of its
+    # 20 assertions are the RED RUN against a deliberately-stale fixture,
+    # and five more pin the cases a freshness gate goes silently green on:
+    # the empty subject set, a parser gap, and a directory-shaped generated
+    # artifact. See the suite's own header.
+    "build/rust/cargo-nix-tie" = {
+      min = 20;
+      verdict = fromPassedTotal (import ../build/rust/tests/cargo-nix-tie-test.nix);
+    };
     "build/go/package-builder-ferrite" = {
       min = 16;
       verdict = fromPassedTotal (import ../build/go/tests/package-builder-ferrite-test.nix);

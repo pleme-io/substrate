@@ -78,12 +78,22 @@ in {
     nativeBuildInputs = allNativeBuildInputs;
   });
 
-  project = import generatedCargoNix {
+  # FRESHNESS TIE — see ./cargo-nix-tie.nix. A committed Cargo.nix that no
+  # longer describes src/Cargo.lock throws here, before anything is built
+  # from it. The tie names `cargoNix`, not `generatedCargoNix`: on the
+  # fallback branch the latter is a derivation, and crate2nix just built it
+  # from this tree, so there is nothing to tie.
+  cargoNixTie = import ./cargo-nix-tie.nix { };
+
+  project = cargoNixTie.assertFresh {
+    inherit cargoNix src;
+    cargoLock = src + "/Cargo.lock";
+  } (import generatedCargoNix {
     inherit pkgs;
     defaultCrateOverrides = pkgs.defaultCrateOverrides
       // perMemberDefaults
       // crateOverrides;
-  };
+  });
 
   # Per-member build attributes. crate2nix exposes each workspace member
   # as `project.workspaceMembers.${member}.build`.

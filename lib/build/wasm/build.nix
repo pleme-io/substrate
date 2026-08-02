@@ -39,8 +39,15 @@ in {
       if builtins.pathExists cargoNix then cargoNix
       else crate2nixTools.generatedCargoNix { inherit name src; };
 
-    # Build the WASM crate using crate2nix
-    project = import generatedCargoNix {
+    # Build the WASM crate using crate2nix. FRESHNESS TIE — see
+    # ../rust/cargo-nix-tie.nix: a committed Cargo.nix that no longer
+    # describes src/Cargo.lock throws before the crate is built. The tie
+    # names `cargoNix`, not `generatedCargoNix`: on the fallback branch the
+    # latter is a derivation crate2nix just built from this tree.
+    project = (import ../rust/cargo-nix-tie.nix { }).assertFresh {
+      inherit cargoNix src;
+      cargoLock = src + "/Cargo.lock";
+    } (import generatedCargoNix {
       inherit pkgs;
       defaultCrateOverrides = pkgs.defaultCrateOverrides // {
         ${name} = oldAttrs: {
@@ -51,7 +58,7 @@ in {
           RUSTFLAGS = "-C target-feature=+atomics,+bulk-memory,+mutable-globals";
         };
       } // crateOverrides;
-    };
+    });
 
     wasmBinary = project.rootCrate.build;
 

@@ -22,6 +22,7 @@
 let
   check = import ../../types/assertions.nix;
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs; };
+  cargoNixTie = import ./cargo-nix-tie.nix { };
   # Hardened by default (Pillar 8 / oci/hardened-base.nix). Both image
   # builders below keep a direct `dockerTools.buildLayeredImage` call
   # rather than calling `hardened.mkPackageImage`. The custom-Labels gap
@@ -86,7 +87,16 @@ let
              else (import "${crate2nix}/tools.nix" {inherit pkgs;}).generatedCargoNix {
                name = serviceName; inherit src;
              };
-       in import generatedCargoNix projectArgs;
+       # FRESHNESS TIE — see ./cargo-nix-tie.nix. This is the legacy path's
+       # only import of a committed Cargo.nix, so the tie sits here rather
+       # than at each of the three callers below. It names `cargoNix`, not
+       # `generatedCargoNix`: on the fallback branch the latter is a
+       # derivation crate2nix just built from this tree, so there is nothing
+       # to tie and nothing to read.
+       in cargoNixTie.assertFresh {
+            inherit cargoNix src;
+            cargoLock = src + "/Cargo.lock";
+          } (import generatedCargoNix projectArgs);
 in {
   # Build Rust project using crate2nix for granular per-crate caching.
   #
@@ -202,7 +212,14 @@ in {
     # Import the same Cargo.nix as production - this is the key to avoiding edition2024 issues
     # crate2nix pre-parses all Cargo.toml files when generating Cargo.nix, so we never hit
     # the edition2024 validation that breaks rustPlatform.buildRustPackage
-    project = import cargoNix {
+    # FRESHNESS TIE — see ./cargo-nix-tie.nix. This builder takes `cargoNix`
+    # with no lockfile-builder alternative, so a stale artifact here means
+    # the TEST image and the production image were compiled from different
+    # resolution graphs. `src` is optional on this builder; when it is null
+    # the sibling of `cargoNix` is the workspace root either way.
+    project = cargoNixTie.importFresh {
+      inherit cargoNix;
+      args = {
       inherit pkgs;
       # Build with tests enabled - crate2nix's buildRustCrate supports this
       buildRustCrateForPkgs = pkgs: pkgs.buildRustCrate.override {
@@ -225,6 +242,7 @@ in {
             PROTOC = "${pkgs.protobuf}/bin/protoc";
           };
         } // crateOverrides;
+      };
       };
     };
 

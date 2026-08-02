@@ -19,6 +19,10 @@ let
     fromJSON fromTOML readFile pathExists hashFile listToAttrs map elemAt head
     match filter seq readDir;
 
+  # The one compare-and-throw shape, shared with build/go/lockfile-delta.nix
+  # and build/rust/cargo-nix-tie.nix.
+  tie = import ../shared/freshness-tie.nix { };
+
   stripQuery = url:
     let m = match "([^?]+)\\?.*" url;
     in if m == null then url else head m;
@@ -92,48 +96,38 @@ let
         pkgs = lock.package or [ ];
 
         # ── D2 freshness gate — hard eval throw on stale delta ──────────
+        #
+        # The compare-and-throw now lives in ../shared/freshness-tie.nix,
+        # shared with the Go delta and with the crate2nix Cargo.nix tie.
+        # It was written here first, copied to Go, and the two wordings had
+        # already begun to drift; three uses is the extraction.
         lockSha = hashFile "sha256" cargoLockPath;
-        d2ok =
-          if delta.cargo_lock_sha256 == lockSha then true
-          else
-            # NAME THE REPO. This message used to carry two hashes and nothing
-            # else, which is a genuinely bad failure to receive: the throw
-            # surfaces deep inside an unrelated consumer's module trace (a
-            # stale `mado` took out `nix run .#rebuild` on cid via
-            # nix-darwin -> assertions -> home-manager.sharedModules), so the
-            # operator sees a nixpkgs stack and two opaque hashes with no
-            # indication of WHICH of ~600 workspaces is at fault.
-            #
-            # Measured 2026-08-01: identifying it required hashing every
-            # Cargo.lock in the org and comparing against the `actual` value.
-            # That is a five-minute scan to recover information the throw site
-            # already had in `src`.
-            let
-              # `src` is a path; interpolating it is enough to identify the
-              # repo (a /nix/store/…-source for a flake input, a real path for
-              # a local checkout). Guarded with tryEval so a pathological src
-              # degrades the message rather than replacing this error with a
-              # confusing secondary one.
-              srcHint = let r = builtins.tryEval (toString src);
-                        in if r.success then r.value else "<unprintable src>";
-            in throw ''
-            lockfile-delta: Cargo.gen.lock is STALE (D2 freshness tie failed).
-              workspace                    = ${srcHint}
-              committed cargo_lock_sha256  = ${delta.cargo_lock_sha256}
-              hashFile "sha256" Cargo.lock = ${lockSha}
-
+        d2ok = tie.held {
+          subject = "lockfile-delta (D2)";
+          artifact = "Cargo.gen.lock";
+          # NAME THE REPO. This message used to carry two hashes and nothing
+          # else, which is a genuinely bad failure to receive: the throw
+          # surfaces deep inside an unrelated consumer's module trace (a
+          # stale `mado` took out `nix run .#rebuild` on cid via
+          # nix-darwin -> assertions -> home-manager.sharedModules), so the
+          # operator saw a nixpkgs stack and two opaque hashes with no
+          # indication of WHICH of ~600 workspaces was at fault. Measured
+          # 2026-08-01: identifying it required hashing every Cargo.lock in
+          # the org — a five-minute scan to recover information the throw
+          # site already held in `src`.
+          where = tie.hint src;
+          fresh = delta.cargo_lock_sha256 == lockSha;
+          sides = [
+            ''committed cargo_lock_sha256  = ${delta.cargo_lock_sha256}''
+            ''hashFile "sha256" Cargo.lock = ${lockSha}''
+          ];
+          cause = ''
             Cargo.lock moved without a matching `gen build`, so the committed
             delta no longer describes it. This is a HARD EVAL FAILURE for every
-            consumer of this workspace, not a warning.
-
-            Fix at the source, in the workspace named above:
-              cd <that workspace> && gen build && git commit Cargo.gen.lock
-
-            Do NOT fix it by pinning the consumer back to an older revision —
-            that hides a real break behind a stale pin. To find every drifted
-            workspace at once rather than one failure at a time:
-              gen fleet-check ~/code/github/pleme-io
-          '';
+            consumer of this workspace, not a warning.'';
+          fix = "cd <that workspace> && gen build && git commit Cargo.gen.lock";
+          fleetFix = "gen fleet-check ~/code/github/pleme-io";
+        };
 
         # ── Workspace members: declaration-order paths → name/version ──
         #

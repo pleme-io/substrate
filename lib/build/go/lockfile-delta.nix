@@ -32,6 +32,10 @@ let
   inherit (builtins)
     fromJSON readFile pathExists hashFile listToAttrs map head match seq;
 
+  # The one compare-and-throw shape, shared with build/rust/lockfile-delta.nix
+  # and build/rust/cargo-nix-tie.nix.
+  tie = import ../shared/freshness-tie.nix { };
+
   # gen-gomod's freshness tie when a module has no go.sum: the SHA-256 of the
   # empty string. Matches `gen_delta::sha256_hex(b"")` exactly.
   emptyGoSumSha256 =
@@ -71,35 +75,30 @@ let
           if pathExists goSumPath
           then hashFile "sha256" goSumPath
           else emptyGoSumSha256;
-        d2ok =
-          if (delta.go_sum_sha256 or null) == goSumSha then true
-          else
-            # NAME THE WORKSPACE — same fix as the Rust sibling, same reason.
-            # A throw carrying only hashes surfaces inside an unrelated
-            # consumer's module trace, leaving the operator to find which of
-            # ~600 workspaces is at fault by hashing all of them. `src` is
-            # already in scope here; spending it costs nothing.
-            let
-              srcHint = let r = builtins.tryEval (toString src);
-                        in if r.success then r.value else "<unprintable src>";
-            in throw ''
-            lockfile-delta(go): Go.gen.lock is STALE (D2 freshness tie failed).
-              workspace                = ${srcHint}
-              committed go_sum_sha256  = ${toString (delta.go_sum_sha256 or "<missing>")}
-              hashFile "sha256" go.sum = ${goSumSha}
-
+        #
+        # NAME THE WORKSPACE — same fix as the Rust sibling, same reason. A
+        # throw carrying only hashes surfaces inside an unrelated consumer's
+        # module trace, leaving the operator to find which of ~600
+        # workspaces is at fault by hashing all of them. `src` is already in
+        # scope; spending it costs nothing. The compare-and-throw itself now
+        # lives in ../shared/freshness-tie.nix, so this message and the Rust
+        # one cannot drift apart again.
+        d2ok = tie.held {
+          subject = "lockfile-delta(go) (D2)";
+          artifact = "Go.gen.lock";
+          where = tie.hint src;
+          fresh = (delta.go_sum_sha256 or null) == goSumSha;
+          sides = [
+            ''committed go_sum_sha256  = ${toString (delta.go_sum_sha256 or "<missing>")}''
+            ''hashFile "sha256" go.sum = ${goSumSha}''
+          ];
+          cause = ''
             go.sum moved without a matching `gen build`, so the committed delta
             no longer describes it. This is a HARD EVAL FAILURE for every
-            consumer of this workspace, not a warning.
-
-            Fix at the source, in the workspace named above:
-              cd <that workspace> && gen build && git commit Go.gen.lock
-
-            Do NOT pin the consumer back to an older revision — that hides a
-            real break behind a stale pin. To find every drifted workspace at
-            once:
-              gen fleet-check ~/code/github/pleme-io
-          '';
+            consumer of this workspace, not a warning.'';
+          fix = "cd <that workspace> && gen build && git commit Go.gen.lock";
+          fleetFix = "gen fleet-check ~/code/github/pleme-io";
+        };
 
         # Reconstruct one PackageSpec (full build-spec shape) from the slim
         # per-package delta. The delta key IS the build-spec package key, so

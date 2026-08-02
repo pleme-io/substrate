@@ -117,11 +117,18 @@ let
           } // crateOverrides;
       }
     else
-      import cargoNix {
-        inherit pkgs;
-        defaultCrateOverrides = pkgs.defaultCrateOverrides // {
-          ${effectivePackageName} = pkgOverride;
-        } // crateOverrides;
+      # FRESHNESS TIE — see ./cargo-nix-tie.nix. The image is the artifact
+      # that SHIPS, so a Cargo.nix that no longer describes Cargo.lock is a
+      # hard eval failure here rather than a silently different image.
+      (import ./cargo-nix-tie.nix { }).importFresh {
+        inherit cargoNix src;
+        cargoLock = src + "/Cargo.lock";
+        args = {
+          inherit pkgs;
+          defaultCrateOverrides = pkgs.defaultCrateOverrides // {
+            ${effectivePackageName} = pkgOverride;
+          } // crateOverrides;
+        };
       };
 
   # ============================================================================

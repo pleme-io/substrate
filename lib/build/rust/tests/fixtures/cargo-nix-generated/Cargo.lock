@@ -1,0 +1,9 @@
+# Fixture: a REAL Cargo.lock next to a generated (directory-shaped)
+# Cargo.nix. Both paths exist, so a `pathExists`-only guard passes and the
+# tie then reads a directory. This lock is what makes that regression
+# reachable in the suite.
+version = 4
+
+[[package]]
+name = "fixture-root"
+version = "0.1.0"
