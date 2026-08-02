@@ -3029,7 +3029,21 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).map_err(PushError::Archive)?;
                 }
-                entry.unpack(&target).map_err(PushError::Archive)?;
+                // Name the ENTRY on failure. Without this, a write error
+                // surfaces as the generic "error reading docker-archive:
+                // Permission denied" -- which names neither the path nor even
+                // the right DIRECTION (it is a write, not a read). Measured
+                // 2026-08-02 unpacking ghcr.io/pleme-io/hardened-clickhouse
+                // into a clean destination: 6 store paths extracted, then
+                // EACCES with nothing to act on. `rm -rf` on the same tree
+                // named its offender immediately; doca named nothing, so two
+                // ticks were spent guessing which entry failed.
+                entry.unpack(&target).map_err(|e| {
+                    PushError::Archive(std::io::Error::new(
+                        e.kind(),
+                        format!("writing absolute entry {target:?}: {e}"),
+                    ))
+                })?;
             }
         } else {
             // `unpack_in` returns Ok(FALSE) when it REFUSES an entry -- it
@@ -3042,7 +3056,13 @@ fn apply_layer(blob: &[u8], dest: &Path) -> Result<(), PushError> {
             //
             // Silent loss is strictly worse than a hard failure here, so a
             // refusal is now an error naming the entry.
-            if !entry.unpack_in(dest).map_err(PushError::Archive)? {
+            let unpacked = entry.unpack_in(dest).map_err(|e| {
+                PushError::Archive(std::io::Error::new(
+                    e.kind(),
+                    format!("writing entry {path:?} under {dest:?}: {e}"),
+                ))
+            })?;
+            if !unpacked {
                 return Err(PushError::Archive(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!(
