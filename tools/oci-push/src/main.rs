@@ -251,6 +251,15 @@ enum PushError {
         reference: String,
         var: String,
     },
+    /// `vendored-crates --min-count N` found fewer than N. Deliberately a
+    /// distinct variant from "absent": an inventory of 0 and an inventory of 3
+    /// have the same cause here — the needle stopped matching — and both must
+    /// be reported as a BROKEN PROBE rather than as a small dependency graph.
+    VendoredCrateFloor {
+        found: usize,
+        floor: usize,
+        tarball: String,
+    },
     NotImplemented(&'static str),
     /// `--digest-only` asked of a LOCAL archive. Not a missing feature: a
     /// docker-archive has no registry digest at all — the manifest digest a
@@ -350,11 +359,11 @@ impl fmt::Display for PushError {
             }
             PushError::NoSubcommand => write!(
                 f,
-                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version)"
+                "oci-push: no subcommand (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version | vendored-crates)"
             ),
             PushError::UnknownSubcommand(s) => write!(
                 f,
-                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version)"
+                "oci-push: unknown subcommand '{s}' (expected: push | transfer | inspect | pull | list | resolve | tag | delete | config-show | harden-rootfs | unpack | crypto-version | vendored-crates)"
             ),
             PushError::Json(e) => write!(f, "oci-push: JSON error: {e}"),
             PushError::ConfigParse(e) => write!(f, "oci-push: config parse error: {e}"),
@@ -371,6 +380,19 @@ impl fmt::Display for PushError {
                 write!(
                     f,
                     "oci-push: '{reference}' config declares no env var '{var}' (absent is an error, not an empty value)"
+                )
+            }
+            PushError::VendoredCrateFloor {
+                found,
+                floor,
+                tarball,
+            } => {
+                write!(
+                    f,
+                    "oci-push: '{tarball}' yielded {found} vendored crate(s), below the --min-count floor of {floor}. \
+                     Read this as a BROKEN PROBE, not a small dependency graph: the needle is the build-layout \
+                     convention 'rust_vendor/', and a vendor that stages crates elsewhere yields an empty inventory \
+                     that looks exactly like a crate-free image."
                 )
             }
             PushError::NotImplemented(what) => {
@@ -2522,6 +2544,164 @@ fn format_version(a: u64, b: u64, c: u64) -> String {
 /// Chunked with a 64-byte overlap so a version string straddling a chunk
 /// boundary is still found — the obvious bug in a naive chunked scan, and the
 /// one that would make this silently under-report rather than fail.
+/// `vendored-crates --tarball <path> [--min-count N]` — emit the vendored Rust
+/// crate inventory embedded in an image's binaries, one `name-version` per
+/// line, sorted and deduplicated.
+///
+/// WHY THIS EXISTS. A statically linked vendor binary carries its whole
+/// dependency graph as string literals and nothing else: there is no
+/// Cargo.lock, no source tree, no package database. Every package scanner
+/// looks for a manifest, finds none, and reports zero analysed targets while
+/// exiting 0 — a clean verdict over a denominator of ZERO. Measured on the
+/// shipped classic-hardened-clickhouse-server (2,998,118,032 B): trivy sees 0
+/// targets; the binary names hundreds of exact crate versions, including a
+/// third crypto stack (`ring`, with its own `crypto/fipsmodule/` tree)
+/// alongside the statically linked OpenSSL and the openssl-sys bindings.
+///
+/// This does not judge those versions. It makes them SAYABLE — the
+/// prerequisite for any honest CVE claim about such an image, because you
+/// cannot state a verdict without stating its denominator.
+///
+/// `--min-count` is not ceremony. The needle is a build-layout convention
+/// (`rust_vendor/`), not a standard, and a probe with the WRONG needle returns
+/// an empty inventory that is indistinguishable from a genuinely crate-free
+/// image. That is not hypothetical: probing this same binary for
+/// `index.crates.io` and `cargo/registry` returns 0 for both, because this
+/// vendor stages crates elsewhere. Absence must therefore be loud, and a floor
+/// is how the caller says which absence it is willing to believe.
+fn cmd_vendored_crates<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut tarball: Option<String> = None;
+    let mut min_count: Option<usize> = None;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--tarball" => tarball = Some(next_value(&mut it, "tarball")?),
+            "--min-count" => {
+                let raw = next_value(&mut it, "min-count")?;
+                min_count = Some(
+                    raw.parse::<usize>()
+                        .map_err(|_| PushError::MissingValue("min-count (expected an integer)"))?,
+                );
+            }
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    let tarball = tarball.ok_or(PushError::MissingValue("tarball"))?;
+
+    let entries = NativeBackend::read_archive(&tarball)?;
+    let manifest_raw = entries
+        .get("manifest.json")
+        .ok_or(PushError::NoManifestJson)?;
+    let manifest: Vec<DockerManifestEntry> =
+        serde_json::from_slice(manifest_raw).map_err(PushError::ManifestParse)?;
+    let first = manifest.first().ok_or(PushError::EmptyManifest)?;
+
+    // BTreeSet: sorted + deduplicated by construction, so the emitted list is
+    // stable across runs and diffable against a committed baseline. An
+    // insertion-ordered Vec would produce a different file every build and
+    // make any diff-based gate unusable.
+    let mut found: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for layer_path in &first.layers {
+        let blob = entries
+            .get(layer_path)
+            .ok_or_else(|| PushError::MissingEntry(layer_path.clone()))?;
+        scan_layer_for_vendored_crates(blob, &mut found)?;
+    }
+
+    if let Some(floor) = min_count {
+        if found.len() < floor {
+            return Err(PushError::VendoredCrateFloor {
+                found: found.len(),
+                floor,
+                tarball,
+            });
+        }
+    }
+
+    for c in &found {
+        println!("{c}");
+    }
+    Ok(())
+}
+
+/// Collect `rust_vendor/<name>-<x.y.z>` occurrences into `found`.
+///
+/// Mirrors `scan_layer_for_openssl` deliberately — same raw-tar assumption
+/// (layers are NEVER gzip here; wrapping this in a GzDecoder fails every layer
+/// and would report a scan over zero bytes), same chunked window so a 3 GB
+/// binary never lands in RAM whole.
+fn scan_layer_for_vendored_crates(
+    blob: &[u8],
+    found: &mut std::collections::BTreeSet<String>,
+) -> Result<(), PushError> {
+    const NEEDLE: &[u8] = b"rust_vendor/";
+    const CHUNK: usize = 1 << 22; // 4 MiB
+    // 256, not the 64 used for OpenSSL: the match here is NEEDLE plus a whole
+    // `name-x.y.z` tail, so the overlap must cover the longest crate path or a
+    // crate straddling a chunk boundary is silently dropped — an
+    // under-count that reads exactly like a smaller dependency graph.
+    const OVERLAP: usize = 256;
+
+    let mut archive = tar::Archive::new(std::io::Cursor::new(blob));
+    for entry in archive.entries().map_err(PushError::Archive)? {
+        let mut entry = entry.map_err(PushError::Archive)?;
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let mut carry: Vec<u8> = Vec::new();
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            let n = std::io::Read::read(&mut entry, &mut buf).map_err(PushError::Archive)?;
+            if n == 0 {
+                break;
+            }
+            let mut window = carry.clone();
+            window.extend_from_slice(&buf[..n]);
+            let mut i = 0usize;
+            while i + NEEDLE.len() < window.len() {
+                if &window[i..i + NEEDLE.len()] == NEEDLE {
+                    if let Some(name) = parse_vendored_crate(&window[i + NEEDLE.len()..]) {
+                        found.insert(name);
+                    }
+                }
+                i += 1;
+            }
+            let keep = window.len().saturating_sub(OVERLAP);
+            carry = window[keep..].to_vec();
+        }
+    }
+    Ok(())
+}
+
+/// Parse `<name>-<x.y.z>` from the head of `b`.
+///
+/// Requires the trailing `-x.y.z` so a bare directory name never counts as a
+/// pinned component: an entry with no version is not an SBOM row, it is noise,
+/// and letting it through would inflate the inventory with things no
+/// vulnerability database can be queried about.
+fn parse_vendored_crate(b: &[u8]) -> Option<String> {
+    let end = b
+        .iter()
+        .position(|c| !(c.is_ascii_alphanumeric() || *c == b'_' || *c == b'.' || *c == b'-'))
+        .unwrap_or(b.len());
+    let s = std::str::from_utf8(&b[..end]).ok()?;
+    let (name, version) = s.rsplit_once('-')?;
+    if name.is_empty() {
+        return None;
+    }
+    let mut parts = version.split('.');
+    let (a, b2, c) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    if [a, b2, c]
+        .iter()
+        .any(|p| p.is_empty() || !p.bytes().all(|d| d.is_ascii_digit()))
+    {
+        return None;
+    }
+    Some(s.to_string())
+}
+
 fn scan_layer_for_openssl(
     blob: &[u8],
     best: &mut Option<(u64, u64, u64)>,
@@ -2838,6 +3018,7 @@ fn run() -> Result<(), PushError> {
         Some("resolve") => cmd_resolve(args),
         Some("tag") => cmd_tag(args),
         Some("delete") => cmd_delete(args),
+        Some("vendored-crates") => cmd_vendored_crates(args),
         Some("config-show") => cmd_config_show(args),
         Some("harden-rootfs") => cmd_harden_rootfs(args),
         Some("unpack") => cmd_unpack(args),
