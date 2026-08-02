@@ -9,15 +9,53 @@
 #     check:
 #       uses: pleme-io/substrate/.github/workflows/gem-ci.yml@main
 #
-# Runs `nix flake check` which (via substrate's ruby-gem-flake helper)
-# evaluates the gemspec, builds the bundlerEnv, and runs whatever
-# checks the consumer's flake exposes. For most pangea-* gems that
-# means rspec via the `.#test` app.
+# Runs `nix flake check`, which builds `checks.<system>.*` and NOTHING else
+# — it merely *evaluates* packages/devShells/apps and prints
+# `(build skipped)`. The previous version of this header said it "runs
+# whatever checks the consumer's flake exposes. For most pangea-* gems that
+# means rspec via the `.#test` app", which is two claims and both are wrong:
+# `nix flake check` never runs an app, and `ruby-gem-flake.nix` emits no
+# `checks` output at all. On a gem flake this command is therefore a pure
+# EVALUATION check. Read substrate's CLAUDE.md section
+# "`nix flake check` BUILDS ONLY `checks.<system>.*`" before treating a green
+# run here as test coverage.
+#
+# ── PRIVATE FLAKE INPUTS NEED A TOKEN (wired 2026-08-02) ────────────────
+#
+# nix's GitHub fetcher runs ANONYMOUS unless given one, and GitHub answers
+# 404 — not 403 — for a private repo, so the failure reads as "this revision
+# does not exist" when the revision exists fine and the request was simply
+# unauthenticated. Do not chase a stale pin.
+#
+# Measured on pangea-architectures the first time its CI ever ran
+# (2026-08-02, run after 87e6666 enabled Actions):
+#
+#   error: unable to download
+#     'https://api.github.com/repos/pleme-io/ami-forge/tarball/18f4ce9b…':
+#     HTTP error 404
+#
+# `pleme-io/ami-forge` is declared private in org.yaml, and the rev resolves
+# fine with credentials. This is the same mechanism cargo-ci.yml documents at
+# length for the Rust side; the Ruby reusable never got the wiring, so every
+# gem flake with a private input has been unable to pass this job.
+#
+# BOT_PAT first. The fallback is a courtesy, not a fix: the auto-provided
+# GITHUB_TOKEN is scoped to the RUNNING repo, so it cannot read a DIFFERENT
+# private repo and will still 404 — it only buys the authenticated rate limit
+# for public inputs. A consumer with private inputs must pass `secrets: inherit`
+# AND have BOT_PAT set at the org; if this still 404s, that org secret is the
+# thing to check.
 
 name: gem-ci
 
 on:
   workflow_call:
+    secrets:
+      BOT_PAT:
+        description: >-
+          PAT able to read private pleme-io flake inputs. Optional: a repo
+          whose inputs are all public is byte-identical without it.
+        required: false
 
 jobs:
   check:
@@ -25,3 +63,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
+        with:
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
