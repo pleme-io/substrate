@@ -38,8 +38,12 @@ in {
   buildInputs ? [],
   nativeBuildInputs ? [],
   crateOverrides ? {},
+  # Dev-shell-only tooling, by nixpkgs attribute name. Forwarded verbatim —
+  # see the parameter's docs in tool-release.nix for why it is separate from
+  # nativeBuildInputs. Defaults to [], so no existing consumer changes.
+  devShellPackages ? [],
   ...
 }:
   rustTool {
-    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides;
+    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides devShellPackages;
   }

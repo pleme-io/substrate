@@ -127,6 +127,19 @@ in {
   buildInputs ? [],
   nativeBuildInputs ? [],
   crateOverrides ? {},
+  # Extra packages for the DEV SHELL only, by nixpkgs attribute name.
+  #
+  # Distinct from `nativeBuildInputs`, which feeds the derivation: this is for
+  # tooling the TESTS need and the build does not. `blue` is the motivating
+  # case — one of its tests shells out to `cargo build --target
+  # wasm32-unknown-unknown`, which needs `lld`. That test passed on every
+  # developer laptop, because a laptop has an ambient toolchain, and failed on
+  # the first CI run that ever executed it with `error: linker 'lld' not
+  # found`. The devShell must carry what the tests need, or "passes locally"
+  # means "passes on machines that happen to have it".
+  #
+  # Defaults to `[]`, so no existing consumer changes.
+  devShellPackages ? [],
   # Build-mode switch. `auto` = lockfile-builder when Cargo.build-spec.json
   # exists, else crate2nix Cargo.nix. `lockfile` = force lockfile-builder
   # (errors if spec missing). `cargo-nix` = force the legacy crate2nix path.
@@ -481,7 +494,9 @@ in {
     # `crate2nix.packages.${system}.default` (tool-release-flake.nix) breaks `nix
     # develop` when the input doesn't resolve a per-system package. Developers use the
     # `gen` verbs; the crate2nix-backed `regenerate-cargo-nix` app keeps its own ref.
-    extraPackages = [ ];
+    # Consumer-declared dev-shell tooling, resolved by name against the host
+    # package set the shell is actually built from. See `devShellPackages`.
+    extraPackages = builtins.map (name: hostPkgs.${name}) devShellPackages;
     inherit buildInputs;
   };
 
