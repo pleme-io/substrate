@@ -583,7 +583,22 @@ jobs:
           # above needs a real git binary on PATH inside this shell, and a
           # self-hosted runner shipping no toolchain at all can't be assumed
           # to ship git either.
-          nix shell nixpkgs#cargo nixpkgs#git --command nix run github:pleme-io/gen -- build .
+          # `nixpkgs#rustc` is NOT optional padding next to `nixpkgs#cargo`:
+          # `cargo metadata` shells out to `rustc -vV`, and cargo alone leaves
+          # that resolving against whatever the runner has on PATH. On a
+          # GitHub-hosted runner that is rustup's SHIM, which then reads the
+          # consumer's `rust-toolchain.toml`, tries to materialize the pinned
+          # channel, and fails — confirmed live on hanabi (pins
+          # channel = "1.88" + clippy/rustfmt): "syncing channel updates for
+          # 1.88 ... component download failed for clippy ... could not rename
+          # 'downloaded' file". Reproduced identically on re-run, so it is a
+          # deterministic hole in this step, not a flaky network.
+          #
+          # Supplying rustc from the same nixpkgs makes the toolchain fully
+          # hermetic, which is what the comment above already claims this line
+          # achieves. It also means a consumer's rust-toolchain.toml can no
+          # longer reach out to the network from inside an image build.
+          nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#git --command nix run github:pleme-io/gen -- build .
           if ! git diff --exit-code Cargo.gen.lock; then
             echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
             exit 1

@@ -112,7 +112,12 @@ jobs:
           # cargo's bundled libgit2 ignores url.insteadOf; force the real git
           # binary so the credential above applies to dep resolution.
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        run: nix shell nixpkgs#cargo --command nix run ${{ inputs.gen-ref }} -- build . --commit
+        # nixpkgs#rustc alongside cargo: `cargo metadata` shells out to
+        # `rustc -vV`, and cargo alone leaves that resolving against the
+        # runner's rustup SHIM, which then tries to materialize the consumer's
+        # pinned rust-toolchain.toml over the network mid-job. Same hole fixed
+        # in image-push.yml; see its comment for the live hanabi repro.
+        run: nix shell nixpkgs#cargo nixpkgs#rustc --command nix run ${{ inputs.gen-ref }} -- build . --commit
 
       # Every non-main-push path: a PR, or a dispatch on a non-main ref.
       # Regen only, never commit. Paired with the gate above so the two arms
@@ -124,7 +129,9 @@ jobs:
           || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        run: nix shell nixpkgs#cargo --command nix run ${{ inputs.gen-ref }} -- build .
+        # See the --commit step above: rustc must come from nixpkgs too, or
+        # `cargo metadata` falls through to the runner's rustup shim.
+        run: nix shell nixpkgs#cargo nixpkgs#rustc --command nix run ${{ inputs.gen-ref }} -- build .
 
       # Drift = the PR didn't include a fresh regen of the committed delta.
       # (Cargo.build-spec.json is gitignored under delta-only, so it never
