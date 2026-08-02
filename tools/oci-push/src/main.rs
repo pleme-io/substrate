@@ -232,6 +232,25 @@ enum PushError {
         reference: String,
         label: String,
     },
+    /// `inspect --env NAME` found no `NAME=` entry in the image config's
+    /// `Env` array. Distinct from `LabelAbsent` because the consequence
+    /// differs: a missing label is metadata drift, a missing env var can
+    /// silently change how the ENTRYPOINT behaves at runtime.
+    ///
+    /// Why absent is an error and not `""`: measured 2026-08-02 on
+    /// `classic-hardened-clickhouse-operator`. Its Go FIPS self-check reads
+    /// `GODEBUG=fips140=on`, and when the variable is absent the binary logs
+    /// `level=error … FIPS mode requires this environment variable` and then
+    /// KEEPS RUNNING (45 s run, still alive, exit 124). So a dropped env var
+    /// downgrades the image from FIPS to non-FIPS while every liveness probe,
+    /// every `docker run`, and every scanner still reports a healthy image.
+    /// A reader that mapped absent to `""` would let a gate compare `"" !=
+    /// "fips140=on"` and go red for the right reason by luck, or `-z` and go
+    /// green — the exact class this whole tool refuses.
+    EnvAbsent {
+        reference: String,
+        var: String,
+    },
     NotImplemented(&'static str),
     /// `--digest-only` asked of a LOCAL archive. Not a missing feature: a
     /// docker-archive has no registry digest at all — the manifest digest a
@@ -346,6 +365,12 @@ impl fmt::Display for PushError {
                 write!(
                     f,
                     "oci-push: '{reference}' carries no label '{label}' (absent is an error, not an empty value)"
+                )
+            }
+            PushError::EnvAbsent { reference, var } => {
+                write!(
+                    f,
+                    "oci-push: '{reference}' config declares no env var '{var}' (absent is an error, not an empty value)"
                 )
             }
             PushError::NotImplemented(what) => {
@@ -1548,6 +1573,7 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut ca_cert: Option<String> = None;
     let mut digest_only = false;
     let mut label: Option<String> = None;
+    let mut env_var: Option<String> = None;
     let mut os: Option<String> = None;
     let mut arch: Option<String> = None;
     let mut tarball: Option<String> = None;
@@ -1596,6 +1622,21 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             // a missing label as "" and carries on is the failure this exists
             // to prevent.
             "--label" => label = Some(next_value(&mut it, "label")?),
+            // --env added 2026-08-02. Prints ONE config env var's value to
+            // stdout, nothing else, and exits non-zero when it is absent.
+            //
+            // Why it is needed: an image's `Env` is the third field a
+            // promotion pipeline cares about, and it was the one doca could
+            // not read at all. `config-show` reads doca's OWN config file, not
+            // an image's — a name collision that cost a wrong guess. Reaching
+            // for skopeo `--format '{{.Env}}'` here would be the fallback
+            // ADVANCE-2 forbids.
+            //
+            // What it unlocks: asserting that a published image still carries
+            // the env var its runtime security posture depends on. Env lives
+            // in the config blob, exactly like Labels, so it costs the same
+            // one extra fetch and reuses the same resolution path.
+            "--env" => env_var = Some(next_value(&mut it, "env")?),
             // Explicit platform, mirroring skopeo's --override-os/--override-arch.
             // Defaults to linux/amd64 rather than the client's own platform so
             // the same command gives the same answer on every runner.
@@ -1644,6 +1685,7 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     // that nothing reads.
     let digest_only = digest_only || env_input("INPUT_DIGEST_ONLY").as_deref() == Some("true");
     let label = label.or_else(|| env_input("INPUT_LABEL"));
+    let env_var = env_var.or_else(|| env_input("INPUT_ENV"));
     let os = os
         .or_else(|| env_input("INPUT_OS"))
         .unwrap_or_else(|| "linux".to_string());
@@ -1697,6 +1739,46 @@ fn cmd_inspect<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
                 None => Err(PushError::LabelAbsent {
                     reference: r.to_string(),
                     label: key.to_string(),
+                }),
+            };
+        }
+        // Env lives in the same config blob as Labels, resolved the same way.
+        if let Some(name) = env_var.as_deref() {
+            let (_m, _digest, cfg_raw) =
+                client
+                    .pull_manifest_and_config(&r, &auth)
+                    .await
+                    .map_err(|e| PushError::OciPull {
+                        reference: r.to_string(),
+                        detail: format!("config: {e}"),
+                    })?;
+            let cfg_json: serde_json::Value =
+                serde_json::from_str(&cfg_raw).map_err(PushError::Json)?;
+            // `Env` is an ARRAY of "KEY=value" strings, not an object like
+            // Labels — so this splits on the FIRST '=' only. A value may
+            // itself contain '=' (GODEBUG=fips140=on is exactly that shape,
+            // and splitting on every '=' would yield "fips140" and silently
+            // drop "on"). Both spellings again: OCI "config", archive "Config".
+            let value = cfg_json
+                .get("config")
+                .or_else(|| cfg_json.get("Config"))
+                .and_then(|c| c.get("Env"))
+                .and_then(|e| e.as_array())
+                .and_then(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .find_map(|s| s.split_once('=').filter(|(k, _)| *k == name))
+                })
+                .map(|(_, v)| v.to_string());
+            return match value {
+                Some(v) => {
+                    println!("{v}");
+                    Ok::<(), PushError>(())
+                }
+                None => Err(PushError::EnvAbsent {
+                    reference: r.to_string(),
+                    var: name.to_string(),
                 }),
             };
         }
