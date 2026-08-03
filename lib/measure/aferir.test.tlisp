@@ -1,4 +1,8 @@
 ;;; aferir.test.tlisp — (deftest …) units for the calibration engine.
+;;; lint:allow-file unbound-symbol  NOT SELF-CONTAINED: this file is concatenated
+;;; with aferir.tlisp before running (see the Run: recipe below), so its helpers
+;;; are genuinely unbound when the file is read alone. Correct about the file,
+;;; useless about the program.
 ;;;
 ;;; A tool that refuses uncalibrated measurements had, until this file, no
 ;;; measurement proving IT works. That is the same defect it exists to catch,
