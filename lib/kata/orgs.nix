@@ -129,8 +129,99 @@ let
         "kata.orgs: org '${orgName}' has ${field} = ${builtins.toJSON value}; "
         + "expected one of ${builtins.toJSON valid}."
       );
+  # ── ★ THE OPTION TYPE LIVES HERE, NOT IN THE CONSUMER ─────────────────
+  # A home-manager module needs a `types.attrsOf <something>` for its orgs
+  # option. Writing that submodule in the consumer would restate this
+  # letter's schema in a second place — the exact fan-out `mkOrgs` exists
+  # to remove — and the two would drift the first time a field is added.
+  # Exported so the option type and the renderer are the same declaration.
+  #
+  # Deliberately loose where `mkOrgs` is strict: `kind`/`cloneMethod` are
+  # plain `str` here and validated by the typed throws in `mkOrgs`, which
+  # name the offending org. A `types.enum` would reject with the option
+  # path and the bad value but not say which org — worse for an operator
+  # reading a rebuild failure.
+  orgType = lib.types.submodule (
+    { name, ... }:
+    {
+      options = {
+        description = lib.mkOption {
+          type = lib.types.str;
+          default = name;
+          description = "The CLAUDE.md org-table cell. Defaults to the org name, which reads as a typo — set it.";
+        };
+        kind = lib.mkOption {
+          type = lib.types.str;
+          default = "org";
+          description = "kind: org or user. GitHub's API distinguishes them and both indexers take it verbatim.";
+        };
+        cloneMethod = lib.mkOption {
+          type = lib.types.str;
+          default = "ssh";
+          description = "cloneMethod: ssh or https. https for orgs we do not own.";
+        };
+        discover = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "tend enumerates the org via the GitHub API. false = only what is on disk plus extraRepos.";
+        };
+        sync = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Participate in tend. false makes an org searchable without being reconciled — a decision, not an omission.";
+        };
+        index = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Participate in zoekt AND codesearch. One field, both indexes: they cannot diverge.";
+        };
+        exclude = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = "Repo names tend skips.";
+        };
+        extraRepos = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = "Repos to clone that discovery misses.";
+        };
+        skipForks = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Indexers skip forks.";
+        };
+        skipArchived = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Indexers skip archived repos.";
+        };
+        baseDir = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "Clone root. null derives <codeRoot>/<name>.";
+        };
+        watch = lib.mkOption {
+          type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
+          default = null;
+          description = "tend's per-workspace watch block as an ATTRSET (flake_refresh, file_watches, matrix_file). Typed, not indented YAML spliced into a string.";
+        };
+        flakeDeps = lib.mkOption {
+          type = lib.types.nullOr (lib.types.attrsOf (lib.types.listOf lib.types.str));
+          default = null;
+          description = "tend's flake propagation graph: repo -> the repos that must be bumped when it moves.";
+        };
+        extraConfig = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+          description = "Merged last into the workspace attrs, for a tend key this letter does not model yet.";
+        };
+      };
+    }
+  );
 in
 {
+  inherit orgType;
+
   mkOrgs =
     {
       orgs,
@@ -163,7 +254,7 @@ in
               extraRepos = o.extraRepos or [ ];
               skipForks = o.skipForks or true;
               skipArchived = o.skipArchived or true;
-              baseDir = o.baseDir or "${codeRoot}/${name}";
+              baseDir = if (o.baseDir or null) == null then "${codeRoot}/${name}" else o.baseDir;
               watch = o.watch or null;
               flakeDeps = o.flakeDeps or null;
               extraConfig = o.extraConfig or { };
