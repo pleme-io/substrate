@@ -157,3 +157,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "false"
+          # The other side of the same race. This job races `auto-release` on
+          # every push to main, and whichever loses rebases into a conflict on
+          # exactly the file this job exists to regenerate. Losing is the
+          # BETTER case here — this output is pure derivation, so taking the
+          # replayed side and letting the next run reconcile costs nothing,
+          # whereas aborting leaves the delta unpushed and the next run
+          # regenerates it again (the silent no-progress loop the comment
+          # above already describes).
+          regenerable-paths: "Cargo.gen.lock Cargo.lock Cargo.build-spec.json"

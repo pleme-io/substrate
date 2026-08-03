@@ -206,6 +206,16 @@ jobs:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
+          # The three lockfiles a bump touches are all GENERATED. `gen-spec`
+          # fires on the same push as this workflow and finishes first, so its
+          # regenerated `Cargo.gen.lock` lands while this job is still
+          # building — every release then rebases into a conflict on a file no
+          # human wrote, and aborts. That stranded egaku-term at crates.io
+          # 0.3.1 with its repo at 0.3.4: three bumps tagged and never shipped.
+          # Declaring them regenerable lets the rebase resolve in favour of the
+          # bump; gen-spec re-runs on the resulting push and reconciles.
+          # A conflict in any AUTHORED file still aborts, and names the path.
+          regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
 
   ship:
     needs: [resolve-runner, bump]

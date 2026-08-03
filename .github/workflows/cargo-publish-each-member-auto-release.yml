@@ -90,3 +90,8 @@ jobs:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
+          # Same generated-lockfile race as `cargo-auto-release.yml` — see the
+          # longer note there. A workspace publishing each member is if
+          # anything more exposed: more crates, a longer job, a wider window
+          # for `gen-spec` to land its regeneration first.
+          regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
