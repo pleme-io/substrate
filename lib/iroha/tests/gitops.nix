@@ -32,6 +32,17 @@ let
           type = lib.types.str;
           default = "cid";
         };
+        # The sentinela backend renders its config to /etc and puts the
+        # binary on the system PATH, so both must exist in the universe or
+        # the darwin arm cannot be evaluated at all.
+        environment.etc = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
+        environment.systemPackages = lib.mkOption {
+          type = lib.types.listOf lib.types.anything;
+          default = [ ];
+        };
       };
     };
 
@@ -55,21 +66,63 @@ let
       ]
       ++ modules;
     };
+  # home-manager universe: home.packages / sessionVariables, plus a
+  # launchd.agents option that MUST stay empty — the assertion that the HM
+  # arm observes rather than reconciles needs somewhere an agent could
+  # have landed, or its emptiness proves nothing.
+  hmUniverse =
+    { lib, ... }:
+    {
+      options = {
+        home.packages = lib.mkOption {
+          type = lib.types.listOf lib.types.anything;
+          default = [ ];
+        };
+        home.sessionVariables = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
+        launchd.agents = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
+      };
+    };
+  evalHm =
+    modules:
+    lib.evalModules {
+      class = "homeManager";
+      modules = [
+        hmUniverse
+        { _module.args.pkgs = { }; }
+      ]
+      ++ modules;
+    };
 
   enable = { services.gitops.enable = true; };
 
   # ── specs under test ─────────────────────────────────────────────────
   # Canonical: all defaults (name=gitops, branch=main, interval=300, comin).
   gitops = mkGitopsModule {
-    repository = "github:pleme-io/nix";
+    source = {
+      kind = "github";
+      owner = "pleme-io";
+      repo = "nix";
+    };
+    darwinBackend = "script";
   };
 
   # custom branch + interval, explicit flakeAttr override.
   pinned = mkGitopsModule {
-    repository = "git@github.com:pleme-io/nix.git";
-    branch = "production";
+    source = {
+      kind = "github";
+      owner = "pleme-io";
+      repo = "nix";
+      branch = "production";
+    };
     interval = 600;
     flakeAttr = "rio";
+    darwinBackend = "script";
   };
 
   # custom name + namespace + extra typed options + custom darwinCommand.
@@ -84,8 +137,12 @@ let
         default = false;
       };
     };
-    repository = "github:pleme-io/nix/feature";
+    source = {
+      kind = "git";
+      url = "https://git.example.org/fleet.git";
+    };
     interval = 120;
+    darwinBackend = "script";
   };
 in
 {
@@ -103,7 +160,8 @@ in
       };
     expected = {
       cominEnable = true;
-      url = "github:pleme-io/nix";
+      # The GIT url — comin clones directly and cannot fetch a flake ref.
+      url = "https://github.com/pleme-io/nix.git";
       remoteName = "origin";
     };
   };
@@ -120,7 +178,7 @@ in
     expected = {
       branch = "production";
       period = 600;
-      url = "git@github.com:pleme-io/nix.git";
+      url = "https://github.com/pleme-io/nix.git";
     };
   };
   nixos-default-branch-and-interval = {
@@ -180,7 +238,7 @@ in
       "darwin-rebuild"
       "switch"
       "--flake"
-      "git@github.com:pleme-io/nix.git#rio"
+      "github:pleme-io/nix#rio"
     ];
   };
   darwin-custom-name-command-and-interval = {
@@ -200,7 +258,7 @@ in
         "/run/current-system/sw/bin/darwin-rebuild"
         "switch"
         "--flake"
-        "github:pleme-io/nix/feature#cid"
+        "git+https://git.example.org/fleet.git#cid"
       ];
       interval = 120;
     };
@@ -235,11 +293,15 @@ in
 
   # ── meta ─────────────────────────────────────────────────────────────
   meta-fields = {
-    expr = fancy.meta;
+    expr = builtins.removeAttrs fancy.meta [ "source" ];
     expected = {
       name = "fleet-reconcile";
       kind = "gitops";
-      repository = "github:pleme-io/nix/feature";
+      repository = "git+https://git.example.org/fleet.git";
+      gitUrl = "https://git.example.org/fleet.git";
+      flakeRef = "git+https://git.example.org/fleet.git";
+      nixosBackend = "comin";
+      darwinBackend = "script";
       optionPath = [
         "blackmatter"
         "services"
@@ -291,7 +353,7 @@ in
       (builtins.tryEval
         (builtins.head (evalNixos [
           (mkGitopsModule {
-            repository = "github:pleme-io/nix";
+            source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
             interval = "300";
           }).nixos
           { services.gitops.enable = true; }
@@ -306,12 +368,164 @@ in
       (builtins.tryEval
         (evalNixos [
           (mkGitopsModule {
-            repository = "github:pleme-io/nix";
+            source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
             nixosBackend = "argocd";
           }).nixos
           { services.gitops.enable = true; }
         ]).config.services.comin.enable
       ).success;
     expected = false;
+  };
+
+  # ── ★ THE DIVERGENCE THIS TYPE EXISTS TO KILL ────────────────────────
+  # One source, two spellings, each arm getting the one it can actually
+  # use. Previously `repository` was a single string, so whichever form the
+  # caller passed, the other backend was handed a URL it could not consume:
+  # comin cannot fetch `github:owner/repo`, and `darwin-rebuild --flake`
+  # cannot take `https://….git` without a `git+` scheme.
+  #
+  # Red run: point the comin remote back at `source.flakeRef` and this goes
+  # red on `cominUrl`, which is the exact live misconfiguration it pins.
+  one-source-renders-both-spellings = {
+    expr =
+      let
+        g = mkGitopsModule {
+          source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
+          flakeAttr = "cid";
+          darwinBackend = "script";
+        };
+        cominUrl = (builtins.head (evalNixos [ g.nixos enable ]).config.services.comin.remotes).url;
+        argv = (evalDarwin [ g.darwin enable ]).config.launchd.daemons."gitops-reconcile".serviceConfig.ProgramArguments;
+      in
+      {
+        inherit cominUrl;
+        darwinFlakeRef = builtins.elemAt argv 3;
+      };
+    expected = {
+      cominUrl = "https://github.com/pleme-io/nix.git";
+      darwinFlakeRef = "github:pleme-io/nix#cid";
+    };
+  };
+
+  # The retired single-string input is an EVAL ERROR, not a silent
+  # coercion — a caller passing it is passing exactly one of the two
+  # spellings and would get a broken arm on the other platform.
+  retired-repository-arg-throws = {
+    expr =
+      (builtins.tryEval (
+        builtins.deepSeq (mkGitopsModule { repository = "github:pleme-io/nix"; }).meta true
+      )).success;
+    expected = false;
+  };
+
+  # A source with no kind, or an unknown kind, cannot be guessed at.
+  missing-source-throws = {
+    expr = (builtins.tryEval (builtins.deepSeq (mkGitopsModule { }).meta true)).success;
+    expected = false;
+  };
+  unknown-source-kind-throws = {
+    expr =
+      (builtins.tryEval (
+        builtins.deepSeq (mkGitopsModule { source = { kind = "svn"; url = "x"; }; }).meta true
+      )).success;
+    expected = false;
+  };
+  github-source-without-repo-throws = {
+    expr =
+      (builtins.tryEval (
+        builtins.deepSeq
+          (mkGitopsModule { source = { kind = "github"; owner = "pleme-io"; }; }).meta
+          true
+      )).success;
+    expected = false;
+  };
+
+  # ── the darwin backend is a closed sum ───────────────────────────────
+  bad-darwin-backend-throws = {
+    expr =
+      (builtins.tryEval
+        (mkGitopsModule {
+          source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
+          darwinBackend = "chef";
+          flakeAttr = "cid";
+          sentinelaBin = "/nix/store/fake-sentinela";
+        }).meta.darwinBackend
+      ).success;
+    expected = false;
+  };
+
+  # The DEFAULT darwin backend is the attested daemon, not the periodic
+  # `darwin-rebuild switch` timer. The timer is a rollback machine (it
+  # rolled ryn back twice on 2026-07-02); it stays selectable, but a node
+  # must opt INTO it rather than get it by saying nothing.
+  darwin-defaults-to-the-attested-daemon = {
+    expr =
+      let
+        g = mkGitopsModule {
+          source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
+          flakeAttr = "cid";
+          sentinelaBin = "/nix/store/fake-sentinela";
+        };
+        argv = (evalDarwin [ g.darwin enable ]).config.launchd.daemons."gitops-reconcile".serviceConfig;
+      in
+      {
+        program = builtins.head argv.ProgramArguments;
+        verb = builtins.elemAt argv.ProgramArguments 1;
+        # One long-running process: single-flight is structural, so the
+        # interval-driven overlap the script backend needs a lock for
+        # cannot arise.
+        keepAlive = argv.KeepAlive;
+        backend = g.meta.darwinBackend;
+      };
+    expected = {
+      program = "/nix/store/fake-sentinela/bin/sentinela";
+      verb = "run";
+      keepAlive = true;
+      backend = "sentinela";
+    };
+  };
+
+  # The daemon backend needs its binary; a store path, never PATH lookup
+  # inside launchd.
+  sentinela-backend-without-binary-throws = {
+    expr =
+      (builtins.tryEval (
+        builtins.deepSeq
+          (evalDarwin [
+            (mkGitopsModule {
+              source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
+              flakeAttr = "cid";
+            }).darwin
+            enable
+          ]).config.launchd.daemons."gitops-reconcile".serviceConfig.ProgramArguments
+          true
+      )).success;
+    expected = false;
+  };
+
+  # ── the home-manager arm: observer, never a second reconciler ────────
+  # It must put the status binary on the user PATH and must NOT emit a
+  # launchd agent — an HM arm that reconciled would race the system loop
+  # for the same generation.
+  home-manager-arm-observes-and-does-not-reconcile = {
+    expr =
+      let
+        g = mkGitopsModule {
+          source = { kind = "github"; owner = "pleme-io"; repo = "nix"; };
+          flakeAttr = "cid";
+          sentinelaBin = "/nix/store/fake-sentinela";
+        };
+        c = (evalHm [ g.homeManager { services.gitops.enable = true; } ]).config;
+      in
+      {
+        packages = c.home.packages;
+        configVar = c.home.sessionVariables.SENTINELA_CONFIG;
+        agents = builtins.attrNames c.launchd.agents;
+      };
+    expected = {
+      packages = [ "/nix/store/fake-sentinela" ];
+      configVar = "/etc/pleme-gitops/config.yaml";
+      agents = [ ];
+    };
   };
 }
