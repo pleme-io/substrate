@@ -19,6 +19,7 @@ let
     secret-seed = ./secret-seed.nix;
     topology = ./topology.nix;
     users = ./users.nix;
+    orgs = ./orgs.nix;
     fleet-config = ./fleet-config.nix;
     fleet = ./fleet.nix;
     catalog = ./catalog.nix;

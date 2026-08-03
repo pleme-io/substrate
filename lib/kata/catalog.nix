@@ -45,6 +45,17 @@
     exports = [ "mkWireguardLinks" ];
   };
 
+  orgs = {
+    file = "orgs.nix";
+    tier = "kernel";
+    maturity = "Working";
+    since = "2026-08-03";
+    description = "One typed declaration per code org -> the five faces a workstation renders it into: the tend workspace (clone + reconcile), the CLAUDE.md org table entry, the zoekt source, the codesearch source, and the `use_tend` .envrc. zoekt and codesearch read ONE returned list, so the copy-pasted source pairs that used to drift cannot be written. Per-org tend extras (`watch`, `flakeDeps`, `extraConfig`) are typed attrsets serialized with toJSON, not indented YAML spliced into a string. `sync`/`index` make an opt-out a visible field instead of an invisible omission; `kind`/`cloneMethod` throw on an unknown value, because an unknown kind would enumerate nothing and report success.";
+    subsumes = "the hand-written org fan-out: blackmatter-pleme's plemeWorkspaceYaml + extraTendWorkspaces (types.lines) seam, blackmatter-akeyless's duplicated zoekt/codesearch source pair, and the byte-identical drzln/binti-family blocks in nix nodes cid and ryn.";
+    dependsOn = [ ];
+    exports = [ "mkOrgs" ];
+  };
+
   users = {
     file = "users.nix";
     tier = "kernel";
@@ -64,7 +75,10 @@
     description = "THE BLANKS: the strict typed schema a private fleet repo fills in (name, domains, users, trust, nodes, apps, caches, secrets backend). Per-node liveness is typed (status \"live\"|\"down\" + statusReason), never a magic tag — a retired node keeps its declaration and only leaves the deploy projections. Unknown keys rejected — a typo fails at validation, never silently.";
     subsumes = "The implicit, undocumented contract scattered across the nix repo's lib/*.nix registries.";
     dependsOn = [ ];
-    exports = [ "fleetConfigModule" "validateFleet" ];
+    exports = [
+      "fleetConfigModule"
+      "validateFleet"
+    ];
   };
 
   fleet = {

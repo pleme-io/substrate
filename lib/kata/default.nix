@@ -25,6 +25,7 @@ let
   secretSeed = import ./secret-seed.nix { inherit lib; };
   topology = import ./topology.nix { inherit lib; };
   users = import ./users.nix { inherit lib; };
+  orgs = import ./orgs.nix { inherit lib; };
   fleetConfig = import ./fleet-config.nix { inherit lib; };
   fleet = import ./fleet.nix { inherit lib; };
 in
@@ -35,6 +36,7 @@ domains
 // secretSeed
 // topology
 // users
+// orgs
 // fleetConfig
 // fleet
 // {
