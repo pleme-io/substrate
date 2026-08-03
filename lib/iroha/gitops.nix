@@ -474,7 +474,52 @@ let
         flakeRef = source.flakeRef;
       };
     };
+  # ── the source algebra, exported for option-level consumers ──────────
+  # A repo whose nodes VARY (one host tracking a different fork/branch)
+  # needs `source` to be a module OPTION, not a call-time argument — and
+  # must still derive the two spellings the same way, or the divergence
+  # this letter removes grows back one layer up. So the type and the
+  # derivation are exported rather than sealed inside mkGitopsModule.
+  #
+  # `check` mirrors parseSource's requirements so a malformed source is an
+  # OPTION-TYPE error at the definition site (naming the offending node)
+  # rather than a throw from deep inside a renderer.
+  gitopsSourceType = lib.types.submodule {
+    options = {
+      kind = lib.mkOption {
+        type = lib.types.enum [
+          "github"
+          "git"
+        ];
+        description = "Which source shape this is; selects the required fields.";
+      };
+      owner = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "GitHub owner (kind = \"github\").";
+      };
+      repo = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "GitHub repository name (kind = \"github\").";
+      };
+      url = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Git URL (kind = \"git\").";
+      };
+      branch = lib.mkOption {
+        type = lib.types.str;
+        default = "main";
+        description = "The branch whose HEAD is the deploy target.";
+      };
+    };
+  };
+
+  # attrs -> { kind; branch; gitUrl; flakeRef; … }. The ONE place the two
+  # spellings are derived; every renderer and every consumer reads it.
+  deriveSource = parseSource;
 in
 {
-  inherit mkGitopsModule;
+  inherit mkGitopsModule gitopsSourceType deriveSource;
 }

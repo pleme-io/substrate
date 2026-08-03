@@ -4,7 +4,7 @@
 # override, branch + interval, class tagging, typed throws).
 { lib, iroha }:
 let
-  inherit (iroha) mkGitopsModule;
+  inherit (iroha) mkGitopsModule deriveSource gitopsSourceType;
 
   # ── stub option universes ────────────────────────────────────────────
   # services.comin (NixOS pull-deploy daemon) + an option root for extras.
@@ -526,6 +526,71 @@ in
       packages = [ "/nix/store/fake-sentinela" ];
       configVar = "/etc/pleme-gitops/config.yaml";
       agents = [ ];
+    };
+  };
+
+  # ── the exported source algebra ──────────────────────────────────────
+  # A consumer whose nodes vary declares `source` as an OPTION and must
+  # still derive the two spellings identically, or the divergence grows
+  # back one layer up. Same function, so it cannot.
+  derive-source-github = {
+    expr = removeAttrs (deriveSource {
+      kind = "github";
+      owner = "pleme-io";
+      repo = "nix";
+    }) [ "kind" ];
+    expected = {
+      owner = "pleme-io";
+      repo = "nix";
+      branch = "main";
+      gitUrl = "https://github.com/pleme-io/nix.git";
+      flakeRef = "github:pleme-io/nix";
+    };
+  };
+  derive-source-git-adds-the-flake-scheme-once = {
+    expr = {
+      plain = (deriveSource {
+        kind = "git";
+        url = "https://git.example.org/f.git";
+      }).flakeRef;
+      already = (deriveSource {
+        kind = "git";
+        url = "git+ssh://git.example.org/f.git";
+      }).flakeRef;
+    };
+    expected = {
+      plain = "git+https://git.example.org/f.git";
+      already = "git+ssh://git.example.org/f.git";
+    };
+  };
+  # The exported option type accepts a well-formed source and rejects an
+  # unknown kind at the DEFINITION site (naming the node), rather than
+  # throwing from inside a renderer.
+  source-option-type-accepts-and-rejects = {
+    expr =
+      let
+        evalSrc =
+          def:
+          (lib.evalModules {
+            modules = [
+              {
+                options.src = lib.mkOption { type = gitopsSourceType; };
+              }
+              { src = def; }
+            ];
+          }).config.src.kind;
+      in
+      {
+        good = evalSrc {
+          kind = "github";
+          owner = "o";
+          repo = "r";
+        };
+        bad = (builtins.tryEval (evalSrc { kind = "svn"; })).success;
+      };
+    expected = {
+      good = "github";
+      bad = false;
     };
   };
 }
