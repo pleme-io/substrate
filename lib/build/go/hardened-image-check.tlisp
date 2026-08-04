@@ -30,6 +30,7 @@
 ;; concatenated after that stdlib.
 
 (define (status-of result) (alist-get result "status" -1))
+
 (define (stdout-of result) (alist-get result "stdout" ""))
 
 (define failures (list))
@@ -38,13 +39,15 @@
   (print-line (string-append "  FAIL: " msg))
   (set! failures (cons msg failures)))
 
-(define (note msg)
-  (print-line (string-append "  " msg)))
+(define (note msg) (print-line (string-append "  " msg)))
 
-(define image-dir   (env-get "IMAGE_DIR"))
-(define bin-path    (env-get "BIN_PATH"))
+(define image-dir (env-get "IMAGE_DIR"))
+
+(define bin-path (env-get "BIN_PATH"))
+
 (define expect-user (env-get "EXPECT_USER"))
-(define expect-pie  (env-get "EXPECT_PIE"))
+
+(define expect-pie (env-get "EXPECT_PIE"))
 
 (print-line "== HARDENED conformance ==")
 
@@ -56,53 +59,54 @@
 (define (config-json-candidates)
   (filter
     (fn (p)
-      (and (string-ends-with? p ".json")
-           (not (string-ends-with? p "manifest.json"))
-           (not (string-ends-with? p "index.json"))
-           (not (string-ends-with? p "repositories"))
-           (not (string-ends-with? p "oci-layout"))))
+      (and
+        (string-ends-with? p ".json")
+        (not (string-ends-with? p "manifest.json"))
+        (not (string-ends-with? p "index.json"))
+        (not (string-ends-with? p "repositories"))
+        (not (string-ends-with? p "oci-layout"))))
     (walk-dir image-dir)))
 
 (define cfg-candidates (config-json-candidates))
 
 (if (empty? cfg-candidates)
-    (fail "could not locate the image config json to check the user")
-    (let ((cfg (json-parse (read-file (car cfg-candidates)))))
-      (let ((user (or (alist-get (or (alist-get cfg "config") (list)) "User")
-                      (alist-get (or (alist-get cfg "Config") (list)) "User")
-                      "")))
-        (note (string-format "image user: '{}' (expected '{}')" user expect-user))
-        (when (not (eq? user expect-user))
-          (fail (string-format "image user '{}' is not the expected '{}'" user expect-user)))
-        (when (or (eq? user "") (eq? user "root") (eq? user "0") (eq? user "0:0"))
-          (fail "image runs as root"))
-        ;; runAsNonRoot cannot resolve a NAME against the image, so a named
-        ;; user makes the pod fail admission with a confusing error.
-        (when (and (not (eq? user ""))
-                   (not (re-match? "^[0-9]+(:[0-9]+)?$" user)))
-          (fail (string-format "image user '{}' is not numeric" user))))))
+  (fail "could not locate the image config json to check the user")
+  (let ((cfg (json-parse (read-file (car cfg-candidates)))))
+    (let
+      ((user
+         (or
+           (alist-get (or (alist-get cfg "config") (list)) "User")
+           (alist-get (or (alist-get cfg "Config") (list)) "User")
+           "")))
+      (note (string-format "image user: '{}' (expected '{}')" user expect-user))
+      (when (not (eq? user expect-user))
+        (fail (string-format "image user '{}' is not the expected '{}'" user expect-user)))
+      (when (or (eq? user "") (eq? user "root") (eq? user "0") (eq? user "0:0"))
+        (fail "image runs as root"))
+      ;; runAsNonRoot cannot resolve a NAME against the image, so a named
+      ;; user makes the pod fail admission with a confusing error.
+      (when (and (not (eq? user "")) (not (re-match? "^[0-9]+(:[0-9]+)?$" user)))
+        (fail (string-format "image user '{}' is not numeric" user))))))
 
 ;; ── 2. no setuid/setgid in any layer ─────────────────────────────────────
 ;;
 ;; tar's mode column shows s/S in the execute position for setuid/setgid.
-(define layer-tars
-  (filter (fn (p) (string-ends-with? p ".tar"))
-          (walk-dir image-dir)))
+(define layer-tars (filter (fn (p) (string-ends-with? p ".tar")) (walk-dir image-dir)))
 
 (note (string-format "layers to scan: {}" (length layer-tars)))
 
 (define (layer-setuid-lines tarpath)
-  (filter (fn (line) (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" line))
-          (string-split (stdout-of (exec-capture "tar" "tvf" tarpath)) "\n")))
+  (filter
+    (fn (line) (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" line))
+    (string-split (stdout-of (exec-capture "tar" "tvf" tarpath)) "\n")))
 
-(define setuid-lines
-  (reduce (fn (acc t) (append acc (layer-setuid-lines t))) (list) layer-tars))
+(define setuid-lines (reduce (fn (acc t) (append acc (layer-setuid-lines t))) (list) layer-tars))
 
 (if (empty? setuid-lines)
-    (note "no setuid/setgid bits in any layer")
-    (begin
-      (fail (string-format "setuid/setgid bits present ({} entries)" (length setuid-lines)))
-      (map (fn (l) (print-line (string-append "      " l))) setuid-lines)))
+  (note "no setuid/setgid bits in any layer")
+  (begin
+    (fail (string-format "setuid/setgid bits present ({} entries)" (length setuid-lines)))
+    (map (fn (l) (print-line (string-append "      " l))) setuid-lines)))
 
 ;; ── 3. PIE ───────────────────────────────────────────────────────────────
 (define (elf-type path)
@@ -111,8 +115,8 @@
       ;; re-captures returns the whole match first, then the groups, so the
       ;; group is the SECOND element. Taking car yields "Type:   EXEC".
       (if (or (null? caps) (< (length caps) 2))
-          "unknown"
-          (car (cdr caps))))))
+        "unknown"
+        (car (cdr caps))))))
 
 (when (and (not (eq? bin-path "")) (is-file? bin-path) (eq? expect-pie "1"))
   (let ((t (elf-type bin-path)))
@@ -124,21 +128,20 @@
 (when (and (not (eq? bin-path "")) (is-file? bin-path))
   (let ((sections (stdout-of (exec-capture "readelf" "-S" bin-path))))
     (if (re-match? "\\.symtab" sections)
-        (fail "binary retains a symbol table (Go: -s -w ldflags; Rust/other: strip the artifact -- note Cargo [profile.release] strip is IGNORED by the crate2nix/gen build path)")
-        (note "binary is stripped (no .symtab)")))
+      (fail
+        "binary retains a symbol table (Go: -s -w ldflags; Rust/other: strip the artifact -- note Cargo [profile.release] strip is IGNORED by the crate2nix/gen build path)")
+      (note "binary is stripped (no .symtab)")))
   (let ((notes (stdout-of (exec-capture "readelf" "-n" bin-path))))
     (if (re-match? "(?i)build id" notes)
-        (fail "binary carries a GNU build id; -buildid= did not take effect")
-        (note "binary carries no build id"))))
+      (fail "binary carries a GNU build id; -buildid= did not take effect")
+      (note "binary carries no build id"))))
 
 ;; ── verdict ──────────────────────────────────────────────────────────────
 (if (empty? failures)
-    (begin
-      (print-line "== HARDENED conformance PASSED ==")
-      (exit 0))
-    (begin
-      (print-line (string-format "== HARDENED conformance FAILED ({} failures) ==" (length failures)))
-      (exit 1)))
+  (begin (print-line "== HARDENED conformance PASSED ==") (exit 0))
+  (begin
+    (print-line (string-format "== HARDENED conformance FAILED ({} failures) ==" (length failures)))
+    (exit 1)))
 
 ;; ── tests ────────────────────────────────────────────────────────────────
 ;;
@@ -146,23 +149,37 @@
 ;; that need a real image are covered by the derivation that runs this.
 
 (deftest "a numeric uid:gid is accepted"
-  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532:65532") #t (error "should match")))
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532:65532")
+    #t
+    (error "should match")))
 
 (deftest "a bare numeric uid is accepted"
-  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532") #t (error "should match")))
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "65532")
+    #t
+    (error "should match")))
 
 (deftest "a named user is rejected"
-  (if (re-match? "^[0-9]+(:[0-9]+)?$" "nonroot") (error "should not match") #t))
+  (if (re-match? "^[0-9]+(:[0-9]+)?$" "nonroot")
+    (error "should not match")
+    #t))
 
 (deftest "root is rejected as a name and as a uid"
   (begin
-    (if (eq? "root" "root") #t (error "name check"))
-    (if (eq? "0:0" "0:0") #t (error "uid check"))))
+    (if (eq? "root" "root")
+      #t
+      (error "name check"))
+    (if (eq? "0:0" "0:0")
+      #t
+      (error "uid check"))))
 
 (deftest "a setuid tar line is detected"
   (if (re-match? "^[-d][rwxst-]{2}[sS]" "-rwsr-xr-x root/root 12345 ./bin/su")
-      #t (error "should detect setuid")))
+    #t
+    (error "should detect setuid")))
 
 (deftest "an ordinary tar line is not flagged"
-  (if (re-match? "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]" "-rwxr-xr-x root/root 12345 ./bin/app")
-      (error "should not flag") #t))
+  (if (re-match?
+     "^[-d][rwxst-]{2}[sS]|^[-d][rwxst-]{5}[sS]"
+     "-rwxr-xr-x root/root 12345 ./bin/app")
+    (error "should not flag")
+    #t))

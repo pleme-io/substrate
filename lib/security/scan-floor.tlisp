@@ -53,20 +53,23 @@
   (print-line (string-append "  FAIL: " msg))
   (set! failures (cons msg failures)))
 
-(define (note msg)
-  (print-line (string-append "  " msg)))
+(define (note msg) (print-line (string-append "  " msg)))
 
-(define report        (env-get "REPORT"))
-(define scan-status   (env-get "SCAN_STATUS"))
-(define expect-raw    (env-get "EXPECT_TARGETS"))
-(define fail-on-raw   (env-get "FAIL_ON"))
-(define image-label   (env-get "IMAGE_LABEL"))
+(define report (env-get "REPORT"))
 
-(define (split-list s)
-  (filter (fn (x) (not (eq? x ""))) (string-split s ",")))
+(define scan-status (env-get "SCAN_STATUS"))
+
+(define expect-raw (env-get "EXPECT_TARGETS"))
+
+(define fail-on-raw (env-get "FAIL_ON"))
+
+(define image-label (env-get "IMAGE_LABEL"))
+
+(define (split-list s) (filter (fn (x) (not (eq? x ""))) (string-split s ",")))
 
 (define expect-targets (split-list expect-raw))
-(define fail-on        (split-list fail-on-raw))
+
+(define fail-on (split-list fail-on-raw))
 
 (print-line (string-format "== SCAN FLOOR: {} ==" image-label))
 
@@ -76,7 +79,8 @@
 ;; as the empty listing this gate exists to reject — so it is rejected here
 ;; rather than silently skipped.
 (when (empty? expect-targets)
-  (fail "EXPECT_TARGETS is empty; an image must DECLARE the target classes it contains, otherwise the class check examines nothing"))
+  (fail
+    "EXPECT_TARGETS is empty; an image must DECLARE the target classes it contains, otherwise the class check examines nothing"))
 
 ;; ── 1. scan-error: the scanner failed on its own terms ────────────────────
 ;;
@@ -84,21 +88,21 @@
 ;; errors, so anything other than 0 or 1 is the scanner breaking. Note that a
 ;; grype-style scanner conflates the two in one exit code, which is exactly why
 ;; the report — not the exit code — is the oracle below.
-(define scan-broke
-  (and (not (eq? scan-status "0")) (not (eq? scan-status "1"))))
+(define scan-broke (and (not (eq? scan-status "0")) (not (eq? scan-status "1"))))
 
 (when scan-broke
-  (fail (string-format "scan-error: the scanner exited {} — a scan that did not run cannot be a scan that passed" scan-status)))
+  (fail
+    (string-format
+      "scan-error: the scanner exited {} — a scan that did not run cannot be a scan that passed"
+      scan-status)))
 
 ;; ── 2. report-unparseable: no readable report ─────────────────────────────
-(define report-text
-  (if (path-exists? report) (read-file report) ""))
+(define report-text (if (path-exists? report) (read-file report) ""))
 
 (when (eq? report-text "")
   (fail (string-format "report-unparseable: {} is missing or empty, so nothing was read" report)))
 
-(define parsed
-  (if (eq? report-text "") (list) (json-parse report-text)))
+(define parsed (if (eq? report-text "") (list) (json-parse report-text)))
 
 ;; ── 3. nothing-scanned: THE INVERSION ─────────────────────────────────────
 ;;
@@ -110,85 +114,104 @@
 (define results (or (alist-get parsed "Results") (list)))
 
 (define (type-of r) (or (alist-get r "Type") ""))
+
 (define (target-of r) (or (alist-get r "Target") "<unnamed>"))
+
 (define (vulns-of r) (or (alist-get r "Vulnerabilities") (list)))
+
 (define (secrets-of r) (or (alist-get r "Secrets") (list)))
 
 ;; A Result carrying no `Type` is not a package/binary analysis -- it is the
 ;; secret scanner reporting a hit in a text file. Counting it would let a
 ;; findings-free secret pass satisfy the coverage floor, so the DENOMINATOR is
 ;; the typed analysers only. Secret hits still gate, below.
-(define typed-results
-  (filter (fn (r) (not (eq? (type-of r) ""))) results))
+(define typed-results (filter (fn (r) (not (eq? (type-of r) ""))) results))
+
 (define target-count (length typed-results))
 
 (note (string-format "targets analysed: {}" target-count))
-(map (fn (r)
-       (note (string-format "  target {} (type {}) — {} vuln(s), {} secret(s)"
-                            (target-of r) (type-of r)
-                            (length (vulns-of r)) (length (secrets-of r)))))
-     results)
+
+(map
+  (fn (r)
+    (note
+      (string-format
+        "  target {} (type {}) — {} vuln(s), {} secret(s)"
+        (target-of r)
+        (type-of r)
+        (length (vulns-of r))
+        (length (secrets-of r)))))
+  results)
 
 (if (empty? typed-results)
-    (fail (string-format
-            "nothing-scanned: the scan completed having analysed ZERO targets. This is NOT a clean result — it is the absence of one. Trivy prints '-' here and its own legend reads 'Not scanned'; declared classes were [{}]."
-            expect-raw))
-    (note "denominator is non-zero, so the verdicts below mean something"))
+  (fail
+    (string-format
+      "nothing-scanned: the scan completed having analysed ZERO targets. This is NOT a clean result — it is the absence of one. Trivy prints '-' here and its own legend reads 'Not scanned'; declared classes were [{}]."
+      expect-raw))
+  (note "denominator is non-zero, so the verdicts below mean something"))
 
 ;; ── 4. target-class-missing: a declared class went away ───────────────────
 (define present-types (map type-of typed-results))
 
-(define (type-present? want)
-  (not (empty? (filter (fn (t) (eq? t want)) present-types))))
+(define (type-present? want) (not (empty? (filter (fn (t) (eq? t want)) present-types))))
 
 (when (not (empty? typed-results))
-  (map (fn (want)
-         (if (type-present? want)
-             (note (string-format "declared target class '{}' present ✓" want))
-             (fail (string-format
-                     "target-class-missing: this image DECLARES target class '{}' and the scan did not produce one. Coverage was lost, which reads identically to clean unless asserted."
-                     want))))
-       expect-targets))
+  (map
+    (fn (want)
+      (if (type-present? want)
+        (note (string-format "declared target class '{}' present ✓" want))
+        (fail
+          (string-format
+            "target-class-missing: this image DECLARES target class '{}' and the scan did not produce one. Coverage was lost, which reads identically to clean unless asserted."
+            want))))
+    expect-targets))
 
 ;; ── 5. findings ───────────────────────────────────────────────────────────
 (define (severity-of v) (or (alist-get v "Severity") "UNKNOWN"))
 
-(define (at-floor? sev)
-  (not (empty? (filter (fn (f) (eq? f sev)) fail-on))))
+(define (at-floor? sev) (not (empty? (filter (fn (f) (eq? f sev)) fail-on))))
 
 (define gating
-  (reduce (fn (acc r)
-            (append acc (filter (fn (v) (at-floor? (severity-of v))) (vulns-of r))))
-          (list)
-          results))
+  (reduce
+    (fn (acc r) (append acc (filter (fn (v) (at-floor? (severity-of v))) (vulns-of r))))
+    (list)
+    results))
 
 ;; A committed credential is a finding, not a note. Trivy's secret scanner is
 ;; the one surface here that was never vacuous, so it gates.
-(define secret-hits
-  (reduce (fn (acc r) (append acc (secrets-of r))) (list) results))
+(define secret-hits (reduce (fn (acc r) (append acc (secrets-of r))) (list) results))
 
 (if (empty? secret-hits)
-    (note "no secrets detected in any analysed target")
-    (begin
-      (fail (string-format "findings: {} secret(s) detected" (length secret-hits)))
-      (map (fn (x)
-             (print-line (string-format "      SECRET {} in {}"
-                                        (or (alist-get x "RuleID") "?")
-                                        (or (alist-get x "Title") "?"))))
-           secret-hits)))
+  (note "no secrets detected in any analysed target")
+  (begin
+    (fail (string-format "findings: {} secret(s) detected" (length secret-hits)))
+    (map
+      (fn (x)
+        (print-line
+          (string-format
+            "      SECRET {} in {}"
+            (or (alist-get x "RuleID") "?")
+            (or (alist-get x "Title") "?"))))
+      secret-hits)))
 
 (if (empty? gating)
-    (note (string-format "no findings at or above the floor [{}]" fail-on-raw))
-    (begin
-      (fail (string-format "findings: {} vulnerability/ies at or above the floor [{}]" (length gating) fail-on-raw))
-      (map (fn (v)
-             (print-line (string-format "      {} {} {} {} -> {}"
-                                        (severity-of v)
-                                        (or (alist-get v "VulnerabilityID") "?")
-                                        (or (alist-get v "PkgName") "?")
-                                        (or (alist-get v "InstalledVersion") "?")
-                                        (or (alist-get v "FixedVersion") "(no fix published)"))))
-           gating)))
+  (note (string-format "no findings at or above the floor [{}]" fail-on-raw))
+  (begin
+    (fail
+      (string-format
+        "findings: {} vulnerability/ies at or above the floor [{}]"
+        (length gating)
+        fail-on-raw))
+    (map
+      (fn (v)
+        (print-line
+          (string-format
+            "      {} {} {} {} -> {}"
+            (severity-of v)
+            (or (alist-get v "VulnerabilityID") "?")
+            (or (alist-get v "PkgName") "?")
+            (or (alist-get v "InstalledVersion") "?")
+            (or (alist-get v "FixedVersion") "(no fix published)"))))
+      gating)))
 
 ;; ── verdict ───────────────────────────────────────────────────────────────
 ;;
@@ -196,9 +219,17 @@
 ;; script exits once. A gate that stops at the first failure makes you re-run
 ;; the whole build to discover the second one.
 (if (empty? failures)
-    (begin
-      (print-line (string-format "== SCAN FLOOR: {} — clean over {} analysed target(s) ==" image-label target-count))
-      (exit 0))
-    (begin
-      (print-line (string-format "== SCAN FLOOR: {} — FAILED ({} outcome(s)) ==" image-label (length failures)))
-      (exit 1)))
+  (begin
+    (print-line
+      (string-format
+        "== SCAN FLOOR: {} — clean over {} analysed target(s) =="
+        image-label
+        target-count))
+    (exit 0))
+  (begin
+    (print-line
+      (string-format
+        "== SCAN FLOOR: {} — FAILED ({} outcome(s)) =="
+        image-label
+        (length failures)))
+    (exit 1)))

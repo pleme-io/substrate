@@ -72,12 +72,12 @@
 ;;; clean result.
 
 (define esc (hex-decode "1b"))
-(define color? (equal? (env-get "NO_COLOR" "") ""))
-(define (paint rgb text)
-  (if color? (string-append esc "[38;2;" rgb "m" text esc "[0m") text))
 
-(define (nonempty xs)
-  (filter (lambda (x) (not (equal? (string-trim x) ""))) xs))
+(define color? (equal? (env-get "NO_COLOR" "") ""))
+
+(define (paint rgb text) (if color? (string-append esc "[38;2;" rgb "m" text esc "[0m") text))
+
+(define (nonempty xs) (filter (lambda (x) (not (equal? (string-trim x) ""))) xs))
 
 (define (lines s) (nonempty (string-split s "\n")))
 
@@ -91,21 +91,24 @@
   (let ((r (apply exec-capture argv)))
     (list
       (list "status" (alist-get r "status" -1))
-      (list "out"    (alist-get r "stdout" ""))
-      (list "err"    (string-trim (alist-get r "stderr" ""))))))
+      (list "out" (alist-get r "stdout" ""))
+      (list "err" (string-trim (alist-get r "stderr" ""))))))
 
 (define (campo rec k) (alist-get rec k ""))
+
 (define (estado rec) (alist-get rec "status" -1))
+
 ;;; "Ran fine" is per-tool, not universally zero. grep exits 1 for NO MATCH —
 ;;; a legitimate empty reading, not a failure — and exits 2 for a real error.
 ;;; Guessing that nonzero means broken misreports every honest empty grep as
 ;;; DESCONHECIDO (caught by this file's own first test run). So the CALLER
 ;;; declares the contract and it is THREADED, never a global: both faces supply
 ;;; it from their own surface, and no face can silently inherit the other's.
-(define (oks-de raw)
-  (map (lambda (x) (string-trim x)) (nonempty (string-split raw ","))))
+(define (oks-de raw) (map (lambda (x) (string-trim x)) (nonempty (string-split raw ","))))
+
 (define (ok? oks rec)
   (> (length (filter (lambda (s) (equal? s (string-format "{}" (estado rec)))) oks)) 0))
+
 (define (contagem rec) (length (lines (campo rec "out"))))
 
 ;;; ── Retry, and ONLY for the failures that deserve it ─────────────────────
@@ -118,12 +121,22 @@
     (if (or (ok? oks r) (<= vezes 1))
       r
       (begin
-        (print-line (paint "235;203;139"
-          (string-append "  [aferir] retry (" (string-format "{}" (- vezes 1))
-                         " left) after status " (string-format "{}" (estado r))
-                         (if (equal? "" (campo r "err")) ""
-                             (string-append ": " (campo r "err"))))))
-        (tentar rodar oks argv (- vezes 1))))))
+        (print-line
+          (paint
+            "235;203;139"
+            (string-append
+              "  [aferir] retry ("
+              (string-format "{}" (- vezes 1))
+              " left) after status "
+              (string-format "{}" (estado r))
+              (if (equal? "" (campo r "err"))
+                ""
+                (string-append ": " (campo r "err"))))))
+        (tentar
+          rodar
+          oks
+          argv
+          (- vezes 1))))))
 
 ;;; ── The reading ──────────────────────────────────────────────────────────
 ;;;
@@ -131,54 +144,74 @@
 ;;; control is not a formality: it is the only thing standing between a `vazio`
 ;;; and a lie.
 (define (aferir rodar oks alvo controle vezes)
-  (let* ((a (tentar rodar oks alvo vezes))
-         (n (contagem a)))
+  (let* ((a (tentar rodar oks alvo vezes)) (n (contagem a)))
     (cond
       ;; The target run itself failed. Nothing to interpret.
       ((not (ok? oks a))
-       (list (list "veredito" "desconhecido")
-             (list "n" 0)
-             (list "motivo" (string-append "target exited " (string-format "{}" (estado a))
-                                           (if (equal? "" (campo a "err")) ""
-                                               (string-append ": " (campo a "err")))))))
+        (list
+          (list "veredito" "desconhecido")
+          (list "n" 0)
+          (list
+            "motivo"
+            (string-append
+              "target exited "
+              (string-format "{}" (estado a))
+              (if (equal? "" (campo a "err"))
+                ""
+                (string-append ": " (campo a "err")))))))
       ;; Hits. A positive reading needs no calibration — the instrument
       ;; demonstrably saw something. Calibrating anyway would only cost time.
-      ((> n 0)
-       (list (list "veredito" "achado") (list "n" n) (list "motivo" "")))
+      ((> n 0) (list (list "veredito" "achado") (list "n" n) (list "motivo" "")))
       ;; Zero hits. This is the ONLY branch where the control decides, and the
       ;; only path to `vazio`.
       (else
-        (let* ((c (tentar rodar oks controle vezes))
-               (cn (contagem c)))
+        (let* ((c (tentar rodar oks controle vezes)) (cn (contagem c)))
           (cond
             ((not (ok? oks c))
-             (list (list "veredito" "desconhecido") (list "n" 0)
-                   (list "motivo" (string-append "control exited "
-                                                 (string-format "{}" (estado c))
-                                                 " — instrument unusable, reading discarded"))))
+              (list
+                (list "veredito" "desconhecido")
+                (list "n" 0)
+                (list
+                  "motivo"
+                  (string-append
+                    "control exited "
+                    (string-format "{}" (estado c))
+                    " — instrument unusable, reading discarded"))))
             ((= 0 cn)
-             (list (list "veredito" "desconhecido") (list "n" 0)
-                   (list "motivo" "control found ZERO — the instrument cannot see this corpus, so the target's zero means nothing")))
+              (list
+                (list "veredito" "desconhecido")
+                (list "n" 0)
+                (list
+                  "motivo"
+                  "control found ZERO — the instrument cannot see this corpus, so the target's zero means nothing")))
             (else
-             (list (list "veredito" "vazio") (list "n" 0)
-                   (list "motivo" (string-append "control saw "
-                                                 (string-format "{}" cn)
-                                                 " — instrument verified, target genuinely absent"))))))))))
+              (list
+                (list "veredito" "vazio")
+                (list "n" 0)
+                (list
+                  "motivo"
+                  (string-append
+                    "control saw "
+                    (string-format "{}" cn)
+                    " — instrument verified, target genuinely absent"))))))))))
 
 (define (relatar rotulo r)
-  (let ((v (alist-get r "veredito" "?"))
-        (n (alist-get r "n" 0))
-        (m (alist-get r "motivo" "")))
+  (let ((v (alist-get r "veredito" "?")) (n (alist-get r "n" 0)) (m (alist-get r "motivo" "")))
     (print-line
       (string-append
-        (cond ((equal? v "achado")       (paint "163;190;140" "  achado      "))
-              ((equal? v "vazio")        (paint "136;192;208" "  vazio       "))
-              (else                      (paint "191;97;106"  "  DESCONHECIDO")))
-        " " rotulo
-        (if (equal? v "achado") (string-append "  n=" (string-format "{}" n)) "")
-        (if (equal? m "") "" (string-append "  — " m))))
+        (cond
+          ((equal? v "achado") (paint "163;190;140" "  achado      "))
+          ((equal? v "vazio") (paint "136;192;208" "  vazio       "))
+          (else (paint "191;97;106" "  DESCONHECIDO")))
+        " "
+        rotulo
+        (if (equal? v "achado")
+          (string-append "  n=" (string-format "{}" n))
+          "")
+        (if (equal? m "")
+          ""
+          (string-append "  — " m))))
     v))
-
 
 ;;; ═══ FACES ═══════════════════════════════════════════════════════════════
 ;;;
@@ -209,9 +242,13 @@
     (let ((h (nth i args)))
       (if (equal? h "--")
         (list (reverse acc) (+ i 1))
-        (colher args (+ i 1) (cons h acc))))))
+        (colher
+          args
+          (+ i 1)
+          (cons h acc))))))
 
 (define (secao r) (nth 0 r))
+
 (define (resto r) (nth 1 r))
 
 ;;; ── Flag parsing ─────────────────────────────────────────────────────────
@@ -223,21 +260,20 @@
     acc
     (let ((k (nth i xs)))
       (cond
-        ((or (equal? k "-h") (equal? k "--help"))
-         (flags xs (+ i 1) (cons (list "help" "1") acc)))
+        ((or (equal? k "-h") (equal? k "--help")) (flags xs (+ i 1) (cons (list "help" "1") acc)))
         ((>= (+ i 1) (length xs))
-         (cons (list "erro" (string-append "flag " k " needs a value")) acc))
+          (cons (list "erro" (string-append "flag " k " needs a value")) acc))
         (else
           (let ((v (nth (+ i 1) xs)))
             (cond
               ((or (equal? k "-l") (equal? k "--label"))
-               (flags xs (+ i 2) (cons (list "rotulo" v) acc)))
-              ((equal? k "--ok-status")
-               (flags xs (+ i 2) (cons (list "ok" v) acc)))
-              ((equal? k "--tries")
-               (flags xs (+ i 2) (cons (list "tries" v) acc)))
-              (else
-                (cons (list "erro" (string-append "unknown flag: " k)) acc)))))))))
+                (flags
+                  xs
+                  (+ i 2)
+                  (cons (list "rotulo" v) acc)))
+              ((equal? k "--ok-status") (flags xs (+ i 2) (cons (list "ok" v) acc)))
+              ((equal? k "--tries") (flags xs (+ i 2) (cons (list "tries" v) acc)))
+              (else (cons (list "erro" (string-append "unknown flag: " k)) acc)))))))))
 
 ;;; --tries is a CLOSED ENUM because this interpreter has no string->number.
 ;;; The alternative — coercing an unparseable value to the default — would make
@@ -245,43 +281,42 @@
 ;;; times than its operator believes. Rejecting it is parse-time-rejected;
 ;;; coercing it would be only-mitigated. Take the stronger tier when the
 ;;; language hands you the choice.
-(define (tries-de v)
-  (cond ((equal? v "1") 1)
-        ((equal? v "2") 2)
-        ((equal? v "3") 3)
-        (else -1)))
+(define (tries-de v) (cond ((equal? v "1") 1) ((equal? v "2") 2) ((equal? v "3") 3) (else -1)))
 
-(define ajuda (string-join "\n" (list
-  "aferir — a measurement that refuses to report an uncalibrated zero"
-  ""
-  "USAGE"
-  "  aferir [options] -- <target-cmd> [args...] -- <control-cmd> [args...]"
-  ""
-  "OPTIONS"
-  "  -l, --label <text>     label for the report line (default: medida)"
-  "      --ok-status <csv>  exit statuses meaning THE TOOL RAN (default: 0)."
-  "                         Use 0,1 for grep: 1 is no-match, 2 is a real error."
-  "      --tries <1|2|3>    attempts on a not-ok exit (default: 2). Never"
-  "                         retries an honest empty."
-  "  -h, --help             this text"
-  ""
-  "BOTH -- SECTIONS ARE REQUIRED. The control is a command you already know"
-  "returns output, over the same corpus, by the same mechanism. Without it a"
-  "zero cannot be told apart from a blind instrument, so no verdict is issued."
-  ""
-  "Name binaries by ABSOLUTE PATH. In some shells `grep` is a function that"
-  "execs something else with different ignore-file semantics — the substituted"
-  "instrument this tool exists to catch."
-  ""
-  "EXAMPLE"
-  "  aferir --label sweep --ok-status 0,1 \\"
-  "    -- /usr/bin/grep -rl mkServiceUnit --include=*.nix /path/to/repo \\"
-  "    -- /usr/bin/grep -rl mkDerivation  --include=*.nix /path/to/repo"
-  ""
-  "VERDICTS"
-  "  achado        the instrument saw the thing"
-  "  vazio         the instrument WORKS and the thing is genuinely absent"
-  "  desconhecido  the control failed; the reading means nothing")))
+(define ajuda
+  (string-join
+    "\n"
+    (list
+      "aferir — a measurement that refuses to report an uncalibrated zero"
+      ""
+      "USAGE"
+      "  aferir [options] -- <target-cmd> [args...] -- <control-cmd> [args...]"
+      ""
+      "OPTIONS"
+      "  -l, --label <text>     label for the report line (default: medida)"
+      "      --ok-status <csv>  exit statuses meaning THE TOOL RAN (default: 0)."
+      "                         Use 0,1 for grep: 1 is no-match, 2 is a real error."
+      "      --tries <1|2|3>    attempts on a not-ok exit (default: 2). Never"
+      "                         retries an honest empty."
+      "  -h, --help             this text"
+      ""
+      "BOTH -- SECTIONS ARE REQUIRED. The control is a command you already know"
+      "returns output, over the same corpus, by the same mechanism. Without it a"
+      "zero cannot be told apart from a blind instrument, so no verdict is issued."
+      ""
+      "Name binaries by ABSOLUTE PATH. In some shells `grep` is a function that"
+      "execs something else with different ignore-file semantics — the substituted"
+      "instrument this tool exists to catch."
+      ""
+      "EXAMPLE"
+      "  aferir --label sweep --ok-status 0,1 \\"
+      "    -- /usr/bin/grep -rl mkServiceUnit --include=*.nix /path/to/repo \\"
+      "    -- /usr/bin/grep -rl mkDerivation  --include=*.nix /path/to/repo"
+      ""
+      "VERDICTS"
+      "  achado        the instrument saw the thing"
+      "  vazio         the instrument WORKS and the thing is genuinely absent"
+      "  desconhecido  the control failed; the reading means nothing")))
 
 (define (falhar msg)
   (begin
@@ -291,35 +326,52 @@
 
 ;;; ── The CLI face ─────────────────────────────────────────────────────────
 (define (face-cli args)
-  (let* ((f0 (colher args 0 (list)))
-         (fl (flags (secao f0) 0 (list)))
-         (erro (alist-get fl "erro" ""))
-         (t0 (colher args (resto f0) (list)))
-         (alvo (secao t0))
-         (ctrl (secao (colher args (resto t0) (list)))))
+  (let*
+    ((f0 (colher args 0 (list)))
+      (fl (flags (secao f0) 0 (list)))
+      (erro (alist-get fl "erro" ""))
+      (t0 (colher args (resto f0) (list)))
+      (alvo (secao t0))
+      (ctrl (secao (colher args (resto t0) (list)))))
     (cond
       ((not (equal? "" (alist-get fl "help" ""))) (begin (print-line ajuda) #t))
       ((not (equal? "" erro)) (falhar erro))
       ((= 0 (length alvo))
-       (falhar "no target command — everything after the first `--` is the target"))
+        (falhar "no target command — everything after the first `--` is the target"))
       ;; The refusal that defines the tool. A missing control is not a
       ;; defaultable option; without it there is no honest verdict to print.
       ((= 0 (length ctrl))
-       (falhar (string-append
-         "no control command. A zero from the target cannot be distinguished "
-         "from a blind instrument without one, so no verdict is issued. Give a "
-         "second `--` section running a search you already know returns output "
-         "over the same corpus.")))
+        (falhar
+          (string-append
+            "no control command. A zero from the target cannot be distinguished "
+            "from a blind instrument without one, so no verdict is issued. Give a "
+            "second `--` section running a search you already know returns output "
+            "over the same corpus.")))
       (else
         (let ((n (tries-de (alist-get fl "tries" "2"))))
           (if (= n -1)
-            (falhar (string-append "--tries must be 1, 2 or 3 (got: "
-                                   (alist-get fl "tries" "") "). This interpreter "
-                                   "has no string->number, so the value is a closed "
-                                   "enum rather than silently coerced."))
+            (falhar
+              (string-append
+                "--tries must be 1, 2 or 3 (got: "
+                (alist-get
+                  fl
+                  "tries"
+                  "")
+                "). This interpreter "
+                "has no string->number, so the value is a closed "
+                "enum rather than silently coerced."))
             (begin
-              (relatar (alist-get fl "rotulo" "medida")
-                       (aferir correr (oks-de (alist-get fl "ok" "0")) alvo ctrl n)))))))))
+              (relatar
+                (alist-get
+                  fl
+                  "rotulo"
+                  "medida")
+                (aferir
+                  correr
+                  (oks-de (alist-get fl "ok" "0"))
+                  alvo
+                  ctrl
+                  n)))))))))
 
 ;;; ── The env face ─────────────────────────────────────────────────────────
 ;;; Kept for embedding (launchd/systemd/Nix), where argv is awkward. Splits on
@@ -327,23 +379,35 @@
 (define (argv-de s) (nonempty (string-split s "|")))
 
 (define (face-env)
-  (let ((alvo-s (env-get "AFERIR_ALVO" ""))
-        (ctrl-s (env-get "AFERIR_CONTROLE" ""))
-        (rotulo (env-get "AFERIR_ROTULO" "medida")))
+  (let
+    ((alvo-s (env-get "AFERIR_ALVO" ""))
+      (ctrl-s (env-get "AFERIR_CONTROLE" ""))
+      (rotulo (env-get "AFERIR_ROTULO" "medida")))
     (if (equal? "" alvo-s)
-      #t                                  ; loaded for its definitions: say nothing
+      #t
+      ; loaded for its definitions: say nothing
       (if (equal? "" ctrl-s)
         (begin
-          (print-line (paint "191;97;106"
-            (string-append "  DESCONHECIDO " rotulo
-              "  — AFERIR_CONTROLE is unset. A zero result cannot be distinguished "
-              "from a blind instrument, so no verdict is issued.")))
+          (print-line
+            (paint
+              "191;97;106"
+              (string-append
+                "  DESCONHECIDO "
+                rotulo
+                "  — AFERIR_CONTROLE is unset. A zero result cannot be distinguished "
+                "from a blind instrument, so no verdict is issued.")))
           #f)
         (begin
-          (relatar rotulo
-                   (aferir correr (oks-de (env-get "AFERIR_STATUS_OK" "0"))
-                           (argv-de alvo-s) (argv-de ctrl-s)
-                           (if (equal? (env-get "AFERIR_TENTATIVAS" "2") "1") 1 2))))))))
+          (relatar
+            rotulo
+            (aferir
+              correr
+              (oks-de (env-get "AFERIR_STATUS_OK" "0"))
+              (argv-de alvo-s)
+              (argv-de ctrl-s)
+              (if (equal? (env-get "AFERIR_TENTATIVAS" "2") "1")
+                1
+                2))))))))
 
 ;;; ── Dispatch ─────────────────────────────────────────────────────────────
 ;;; TLISP_TEST=1 loads the definitions and runs neither face, so the test file

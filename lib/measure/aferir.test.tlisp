@@ -36,7 +36,9 @@
       (resp ctrl-status ctrl-out))))
 
 (define ALVO (list "cmd" "TARGET"))
+
 (define CTRL (list "cmd" "CONTROL"))
+
 (define OKS (list "0"))
 
 (define (veredito r) (alist-get r "veredito" "?"))
@@ -102,12 +104,15 @@
   ;; claim rests on reading `tentar`, where the `(or (ok? …) (<= vezes 1))`
   ;; guard returns before recursing. Stated rather than implied: a green run
   ;; here is not evidence of the call count.
-  (let ((r1 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 1))
-        (r2 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 2)))
-    (assert (equal? (veredito r1) (veredito r2))
-            "an empty target must read the same at either retry bound")
-    (assert (equal? (veredito r1) "vazio")
-            "a SEEING control certifies the absence at either bound")))
+  (let
+    ((r1 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 1))
+      (r2 (aferir (fake-runner "" "ctrl" 0 0) OKS ALVO CTRL 2)))
+    (assert
+      (equal? (veredito r1) (veredito r2))
+      "an empty target must read the same at either retry bound")
+    (assert
+      (equal? (veredito r1) "vazio")
+      "a SEEING control certifies the absence at either bound")))
 
 ;;; ── CLI parsing: the illegal states the CLI face removes ────────────────
 
@@ -115,10 +120,11 @@
   ;; The env face MUST split on '|' and therefore mangles such an argument
   ;; (measured: it turned one query into another and returned a confident
   ;; achado n=396). argv has no such hazard, and this pins it.
-  (let* ((args (list "-l" "x" "--" "grep" "a|b" "--" "grep" "ctrl"))
-         (f0 (colher args 0 (list)))
-         (t0 (colher args (nth 1 f0) (list)))
-         (alvo (nth 0 t0)))
+  (let*
+    ((args (list "-l" "x" "--" "grep" "a|b" "--" "grep" "ctrl"))
+      (f0 (colher args 0 (list)))
+      (t0 (colher args (nth 1 f0) (list)))
+      (alvo (nth 0 t0)))
     (assert (= (length alvo) 2) "target section is exactly two words")
     (assert (equal? (nth 1 alvo) "a|b") "the pipe-bearing argument survives intact")))
 
