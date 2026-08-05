@@ -1,0 +1,118 @@
+;; catalog/check.tlisp — the CATALOG REFLECTION gate for substrate's reusable
+;; workflows.
+;;
+;; Asserts, in both directions:
+;;
+;;   1. every `.github/workflows/*.yml` carrying `workflow_call:` has a
+;;      `(defworkflow …)` row in catalog/workflows.lisp, and
+;;   2. every row names a file that exists.
+;;
+;; Direction 1 is the one that earns its keep: it makes ADDING a reusable
+;; workflow require landing its catalog entry IN THE SAME COMMIT. Without it a
+;; catalog is a snapshot that rots the first time someone is in a hurry, and
+;; "substrate publishes N workflows" becomes a number nobody can check.
+;;
+;; Direction 2 catches the other half — a workflow renamed or deleted while its
+;; row stays behind, which is how a catalog starts advertising surface that is
+;; not there.
+;;
+;; TIER — read this before citing the gate as a proof.
+;;
+;; This is CI-CAUGHT, not unrepresentable. Nothing in GitHub Actions stops a
+;; `workflow_call:` file from existing without a row; the check has to run to
+;; notice. It is the honest floor for a YAML surface with no type system, and
+;; it is stated as such rather than rounded up.
+
+(define catalog-path "catalog/workflows.lisp")
+(define workflows-dir ".github/workflows")
+
+;; -------------------------------------------------------------- ;;
+;; Reading the two sides                                           ;;
+;; -------------------------------------------------------------- ;;
+
+;; A file is a REUSABLE workflow iff it DECLARES `workflow_call:` — meaning a
+;; line whose first non-space characters are exactly that key.
+;;
+;; Not a substring search over the file. The first version was, and it
+;; immediately flagged this gate's own workflow, which merely MENTIONS
+;; `workflow_call:` in a comment explaining why it is not one. A structured
+;; file asked a plain-substring question gives a plain-substring answer, and a
+;; false positive here is a hard CI failure on a correct repo.
+;;
+;; Comment lines are excluded outright: `#` can only start a comment at the
+;; beginning of a YAML line, so a trimmed line starting with it is never a key.
+(define
+  (declares-workflow-call? line)
+  (let ((t (string-trim line)))
+    (and (not (string-starts-with? t "#")) (string-starts-with? t "workflow_call:"))))
+
+(define
+  (reusable-workflow? path)
+  (any? declares-workflow-call? (string-split (read-file path) "\n")))
+
+;; Pull the `:file "…"` value out of every row. Written with `filter` + `map`
+;; over split-on-quote rather than a regex: the interpreter has no regex, and a
+;; `:file` line has exactly one quoted field, so splitting on `"` and taking
+;; element 1 is total for every shape this file can hold.
+(define
+  (quoted-value line)
+  (let ((parts (string-split line "\"")))
+    (if (> (length parts) 1) (nth 1 parts) "")))
+
+(define
+  (catalogued-files)
+  (map
+    quoted-value
+    (filter
+      (lambda (line) (string-starts-with? (string-trim line) ":file"))
+      (string-split (read-file catalog-path) "\n"))))
+
+;; -------------------------------------------------------------- ;;
+;; The gate                                                        ;;
+;; -------------------------------------------------------------- ;;
+
+(define
+  (main)
+  (let*
+    ((on-disk (filter reusable-workflow? (glob (string-append workflows-dir "/*.yml"))))
+      (on-disk-names (map path-basename on-disk))
+      (in-catalog (catalogued-files))
+      (missing (filter (lambda (f) (not (member? f in-catalog))) on-disk-names))
+      (orphaned (filter (lambda (f) (not (member? f on-disk-names))) in-catalog)))
+    (cond
+      ((not (null? missing))
+        (log-error
+          (string-append
+            "catalog: "
+            (string-format "{}" (length missing))
+            " reusable workflow(s) have no (defworkflow …) row in "
+            catalog-path
+            ": "
+            (string-join ", " missing)
+            ". A reusable workflow is fleet surface — a consumer has to read "
+            "the YAML to learn its contract until it is catalogued. Add the "
+            "row in this commit."))
+        (exit 1))
+      ((not (null? orphaned))
+        (log-error
+          (string-append
+            "catalog: "
+            (string-format "{}" (length orphaned))
+            " row(s) name a workflow that does not exist: "
+            (string-join ", " orphaned)
+            ". A catalog advertising surface that is gone is worse than no "
+            "catalog. Remove or re-point the row."))
+        (exit 1))
+      (else
+        (log-info
+          (string-append
+            "catalog: ok — "
+            (string-format "{}" (length on-disk-names))
+            " reusable workflow(s), all catalogued"))
+        (exit 0)))))
+
+;; `TLISP_TEST=1` lets the test harness load the definitions without running
+;; the gate. `env-required` would throw when the var is absent, which is the
+;; normal case, so the presence check goes through the environment the harness
+;; actually sets rather than a missing `env-set?`.
+(main)

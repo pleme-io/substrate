@@ -1,0 +1,66 @@
+name: catalog-check
+
+# CATALOG REFLECTION for substrate's reusable workflows.
+#
+# substrate publishes 71 reusable workflows carrying ~1,450 consumer call-sites
+# across the fleet. Until `catalog/workflows.lisp` landed, nothing declared what
+# any of them TAKES, EMITS, or OWNS — a consumer had to read the YAML to learn a
+# contract, and nothing could measure whether a pattern already had a home. That
+# is how 144 hand-authored workflows accumulated in 99 repos underneath an
+# 81%-adopted substrate.
+#
+# This job is what stops the catalog being a snapshot that rots: adding a
+# reusable workflow now REQUIRES landing its `(defworkflow …)` row in the same
+# commit, and deleting or renaming one requires removing its row.
+#
+# Deliberately NOT a reusable workflow itself — it checks THIS repo's own
+# surface, so it has no `workflow_call:` and is correctly absent from the
+# catalog it enforces.
+#
+# TIER: CI-caught, not unrepresentable. Nothing in Actions prevents an
+# uncatalogued `workflow_call:` file from existing; this has to run to notice.
+# That is the honest floor for a YAML surface with no type system.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "catalog/**"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "catalog/**"
+  workflow_dispatch:
+
+jobs:
+  catalog:
+    name: every reusable workflow is catalogued
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the gate
+        # Paren/parser check only — that is what this action does, and the
+        # honest thing to say about it.
+        #
+        # It does NOT cover unbound symbols, which is the failure mode that
+        # actually bites here: an unbound symbol parses fine and explodes only
+        # when evaluation REACHES it, so a gate can lint clean and still die
+        # mid-check. `tatara-script lint --unbound` catches those and caught
+        # FIVE while this file was written (`filter-map`, `extract-quoted`,
+        # `list-files`, `basename`, `env-set?` — none of them real). It is not
+        # wired here because the tatara-script action appends `args` AFTER the
+        # script path, so it cannot express `lint --unbound <file>`, and
+        # tlisp-lint has no such mode. Run it locally before touching
+        # check.tlisp. Closing that gap is a one-input change to either action.
+        uses: pleme-io/actions/tlisp-lint@main
+        with:
+          paths: "catalog/*.tlisp"
+
+      - name: Check the catalog
+        # The real gate. Running it also covers the unbound-symbol case for
+        # every path evaluation actually takes.
+        uses: pleme-io/actions/tatara-script@main
+        with:
+          script-file: catalog/check.tlisp
