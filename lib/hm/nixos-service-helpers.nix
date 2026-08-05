@@ -49,6 +49,8 @@ with lib;
     execStartPost ? null,
     restart ? "always",
     restartSec ? 5,
+    startLimitIntervalSec ? 300,
+    startLimitBurst ? 3,
     killMode ? "control-group",
     delegate ? false,
     limitNOFILE ? null,
@@ -61,6 +63,27 @@ with lib;
       after = after;
       wants = wants;
       requires = requires;
+
+      # ── ★ A START LIMIT THAT CAN ACTUALLY BE REACHED ──────────────────
+      # Same class as mkSystemdService in ./service-helpers.nix — read that
+      # header for the rio 2026-08-05 measurement. Here it is sharper: this
+      # helper defaults `restart = "always"` with `restartSec = 5`, and
+      # systemd's default limit is 5 starts / 10s, so only ~2 starts land in a
+      # window and the limit is UNREACHABLE. A unit whose failure is permanent
+      # restarts forever in `activating` — which `systemctl --failed` does not
+      # list, so nothing surfaces it.
+      #
+      # Top-level attrs, NOT serviceConfig: these are [Unit] keys, and NixOS
+      # renders serviceConfig into [Service] where systemd logs "Unknown key
+      # name" and IGNORES them. A limit that reads as set and enforces nothing
+      # is the same invisible-failure class.
+      #
+      # Overridable because a unit whose permanent death is worse than its
+      # looping wants unbounded retry — upstream nixpkgs ships `sshd` and `k3s`
+      # at `StartLimitIntervalSec=0` for exactly that reason (0 DISABLES the
+      # limit rather than tightening it).
+      startLimitIntervalSec = startLimitIntervalSec;
+      startLimitBurst = startLimitBurst;
 
       serviceConfig = {
         Type = type;
