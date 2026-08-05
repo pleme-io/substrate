@@ -57,7 +57,7 @@
   :inputs    (bump-type source-paths add-paths rename-prefix no-verify runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN BOT_PAT)
-  :consumers 50)
+  :consumers 51)
 
 (defworkflow go-auto-release
   :file      "go-auto-release.yml"
@@ -115,13 +115,21 @@
   :secrets   (ZOT_PASSWORD SOURCE_PASSWORD CA_CERT_TOKEN)
   :consumers 35)
 
+(defworkflow reusable-flakehub
+  :file      "reusable-flakehub.yml"
+  :pattern   other
+  :inputs    (visibility rolling directory runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 22)
+
 (defworkflow cargo-ci
   :file      "cargo-ci.yml"
   :pattern   rust-workspace
   :inputs    (flake-args devshell test-args build-targets fmt-check devshell-args)
   :outputs   ()
   :secrets   ()
-  :consumers 19)
+  :consumers 20)
 
 (defworkflow cargo-publish-each-member-auto-release
   :file      "cargo-publish-each-member-auto-release.yml"
@@ -161,14 +169,6 @@
   :inputs    (runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN)
-  :consumers 4)
-
-(defworkflow reusable-flakehub
-  :file      "reusable-flakehub.yml"
-  :pattern   other
-  :inputs    (visibility rolling directory runner)
-  :outputs   ()
-  :secrets   ()
   :consumers 4)
 
 (defworkflow caixa-validate
@@ -369,6 +369,14 @@
   :inputs    (bump-type source-paths manifest-glob runner)
   :outputs   ()
   :secrets   (BOT_PAT)
+  :consumers 0)
+
+(defworkflow cargo-gate-ci
+  :file      "cargo-gate-ci.yml"
+  :pattern   rust-workspace
+  :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain)
+  :outputs   ()
+  :secrets   ()
   :consumers 0)
 
 (defworkflow cd-stack

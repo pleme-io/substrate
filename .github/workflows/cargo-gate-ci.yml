@@ -1,0 +1,116 @@
+name: cargo-gate-ci
+
+# Rust CI for repos with NO flake.nix — a bare-toolchain fmt/clippy/test gate.
+#
+# WHY THIS EXISTS ALONGSIDE cargo-ci.yml
+#
+# cargo-ci.yml opens with `nix flake check`, so it structurally cannot serve a
+# repo that has no flake. Measured 2026-08-04 across the fleet's hand-authored
+# ci.yml files: 34 are Rust, and 18 of those repos have NO flake.nix (the
+# enxame-* crates, reedline, webpki, selo, bencode, and the two synthesizers).
+# They were the largest remaining block of hand-authored workflows in the
+# fleet, and they were hand-authored for a REASON — four carry dated headers
+# saying so in as many words:
+#
+#     WHY THIS IS NOT THE 3-LINE cargo-ci.yml SHIM (do not 'simplify' it back)
+#
+# A documented gap, not accidental drift. The right answer is a second
+# reusable, not forcing a flake onto 18 crates that do not want one.
+#
+# COMPOSES, DOES NOT REIMPLEMENT: every step is `pleme-io/actions/rust-gate`.
+# This workflow contributes the matrix, runner resolution, credentials and the
+# advisory-clippy posture — nothing else.
+#
+# THE DEFAULTS ARE A FAITHFUL PORT, and getting there required extending
+# rust-gate rather than bending these repos to it. rust-gate previously
+# hardcoded `cargo fmt --check` and `cargo test --workspace`; these 18 run
+# `cargo fmt --all -- --check` and `cargo test --all-targets`. Those are
+# DIFFERENT AXES — `--all`/`--workspace` select workspace MEMBERS,
+# `--all-targets` selects target KINDS (lib/bins/tests/benches/examples) — so
+# adopting rust-gate as it stood would have silently stopped compiling test and
+# bench targets across 18 repos while reading as pure progress. rust-gate now
+# takes `fmt-args` / `test-args`, defaulted to its old behaviour so its four
+# existing consumers are untouched.
+
+on:
+  workflow_call:
+    inputs:
+      os-matrix:
+        description: >-
+          JSON array of runner labels. Defaults to the macos-15 +
+          ubuntu-latest pair these repos already use. A repo with no
+          platform-specific code should narrow to '["ubuntu-latest"]' —
+          macOS minutes bill at 10x on a private repo.
+        required: false
+        type: string
+        default: '["macos-15", "ubuntu-latest"]'
+      fmt-args:
+        description: "Arguments to cargo fmt. Ported default checks every workspace member."
+        required: false
+        type: string
+        default: "--all -- --check"
+      test-args:
+        description: >-
+          Arguments to cargo test. Ported default is --all-targets, matching
+          the workflows this replaces. Pass "--workspace --all-targets" to
+          widen to every member as well — an upgrade, so it is opt-in.
+        required: false
+        type: string
+        default: "--all-targets"
+      clippy-advisory:
+        description: >-
+          Run clippy without failing on it. True by default because all 18
+          workflows this replaces run clippy under continue-on-error; set
+          false for -D warnings.
+        required: false
+        type: boolean
+        default: true
+      run-fmt:
+        required: false
+        type: boolean
+        default: true
+      rust-toolchain:
+        description: "Toolchain channel (stable / nightly / 1.89.0)"
+        required: false
+        type: string
+        default: "stable"
+
+jobs:
+  gate:
+    name: "cargo fmt + clippy + test (${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os-matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Private pleme-io git deps resolve over HTTPS during `cargo test`, and a
+      # repo with one dies on an anonymous 404 without this. The hand-authored
+      # originals had no credential step at all.
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # fmt + test gate. clippy is driven separately below so its advisory
+      # posture is explicit rather than buried in a flag.
+      - uses: pleme-io/actions/rust-gate@main
+        with:
+          run-fmt: ${{ inputs.run-fmt }}
+          run-clippy: ${{ !inputs.clippy-advisory }}
+          run-test: "true"
+          fmt-args: ${{ inputs.fmt-args }}
+          test-args: ${{ inputs.test-args }}
+          rust-toolchain: ${{ inputs.rust-toolchain }}
+
+      - name: cargo clippy (advisory)
+        if: inputs.clippy-advisory
+        continue-on-error: true
+        uses: pleme-io/actions/rust-gate@main
+        with:
+          run-fmt: "false"
+          run-clippy: "true"
+          run-test: "false"
+          rust-toolchain: ${{ inputs.rust-toolchain }}
