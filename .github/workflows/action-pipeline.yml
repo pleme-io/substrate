@@ -1,0 +1,91 @@
+name: action-pipeline
+
+# A repo's whole CI as a DECLARED PIPELINE of pleme-io actions:
+#
+#     jobs:
+#       ci:
+#         uses: pleme-io/substrate/.github/workflows/action-pipeline.yml@main
+#         with:
+#           pipeline: |
+#             (defpipeline ci
+#               (step rust-gate :fmt-args "--all -- --check" :test-args "--all-targets")
+#               (step tlisp-lint)
+#               (step security-audit))
+#         secrets: inherit
+#
+# ── WHAT THIS ADDS THAT THE PROFILE COMPOSER CANNOT ──────────────────────
+#
+# pleme.yml dispatches to WHOLE REUSABLES by name, so a repo picks a shape off
+# the shelf. It cannot express a shape nobody wrote down — and 56 of the
+# fleet's workflows are structurally unique, which is exactly the set a
+# by-name dispatcher can never reach.
+#
+# This reaches them, because the unit of composition is the ACTION rather than
+# the workflow. The fleet ships 341 actions; a pipeline is any ordered subset
+# of them. That is a combinatorially larger surface than 73 reusables, and it
+# is reached without a single new workflow file per repo.
+#
+# ── IT IS STILL NOT "ARBITRARY BEHAVIOUR" ────────────────────────────────
+#
+# The set is CLOSED. A `(step …)` may only name an action that exists in
+# pleme-io/actions, checked before anything runs; an unknown name is a hard red
+# that lists what was available. No caller-supplied shell is ever executed —
+# the spec is data, and every executable line comes from a reviewed action with
+# an owner and its own tests. That is the difference between composing what we
+# ship and accepting a payload, and it is why this is expressible while a
+# shell-input composer is not.
+#
+# ── HONEST STATUS ────────────────────────────────────────────────────────
+#
+# NEW, 0 consumers. The underlying action is verified end-to-end (it dispatched
+# tlisp-lint and workflow-shim-lint for real, propagated their outputs, and
+# refused an unknown action and an empty pipeline), but no repo calls this
+# workflow yet. The fleet carries 34 zero-consumer reusables already; do not
+# cite this as load-bearing until something calls it.
+
+on:
+  workflow_call:
+    inputs:
+      pipeline:
+        description: >-
+          The `(defpipeline …)` spec. Every `(step …)` names a pleme-io action;
+          `:key "value"` pairs become that action's inputs.
+        required: true
+        type: string
+      checkout-actions-ref:
+        description: "Ref of pleme-io/actions to compose from."
+        required: false
+        type: string
+        default: "main"
+      runner:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  pipeline:
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - name: Checkout the consumer repo
+        uses: actions/checkout@v4
+
+      # The actions repo is checked out as DATA, into a sibling path, because
+      # the pipeline composes `stdlib + <name>/run.tlisp` by reading files. It
+      # is pinned by ref rather than floating, so a pipeline run is
+      # reproducible against a known action set.
+      - name: Checkout pleme-io/actions
+        uses: actions/checkout@v4
+        with:
+          repository: pleme-io/actions
+          ref: ${{ inputs.checkout-actions-ref }}
+          path: .pleme-actions
+
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/action-pipeline@main
+        with:
+          pipeline: ${{ inputs.pipeline }}
+          actions-root: .pleme-actions

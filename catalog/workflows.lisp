@@ -195,6 +195,14 @@
   :secrets   (BOT_PAT GHCR_TOKEN)
   :consumers 3)
 
+(defworkflow retirada-ci-watch
+  :file      "retirada-ci-watch.yml"
+  :pattern   ops
+  :inputs    (watch-repo watch-workflow dry-run loop-for-secs poll-interval-secs source-dir runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 3)
+
 (defworkflow ansible-collection-ansible-test
   :file      "ansible-collection-ansible-test.yml"
   :pattern   ansible-collection
@@ -275,6 +283,22 @@
   :secrets   ()
   :consumers 2)
 
+(defworkflow codeql-scan
+  :file      "codeql-scan.yml"
+  :pattern   gate
+  :inputs    (languages runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 2)
+
+(defworkflow cve-suppression-gate
+  :file      "cve-suppression-gate.yml"
+  :pattern   gate
+  :inputs    (fail-on-violation runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 2)
+
 (defworkflow helm-chart-release
   :file      "helm-chart-release.yml"
   :pattern   helm-chart
@@ -322,6 +346,14 @@
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 1)
+
+(defworkflow action-pipeline
+  :file      "action-pipeline.yml"
+  :pattern   universal-composer
+  :inputs    (pipeline checkout-actions-ref runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
 
 (defworkflow ai-stack
   :file      "ai-stack.yml"
@@ -387,14 +419,6 @@
   :secrets   (KUBECONFIG_B64 SLACK_WEBHOOK_URL)
   :consumers 0)
 
-(defworkflow codeql-scan
-  :file      "codeql-scan.yml"
-  :pattern   gate
-  :inputs    (languages runner)
-  :outputs   ()
-  :secrets   ()
-  :consumers 0)
-
 (defworkflow comment-command-dispatch
   :file      "comment-command-dispatch.yml"
   :pattern   other
@@ -431,14 +455,6 @@
   :file      "cse-audit.yml"
   :pattern   gate
   :inputs    (workspace_root strict only)
-  :outputs   ()
-  :secrets   ()
-  :consumers 0)
-
-(defworkflow cve-suppression-gate
-  :file      "cve-suppression-gate.yml"
-  :pattern   gate
-  :inputs    (fail-on-violation runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -639,14 +655,6 @@
   :file      "release-pipeline.yml"
   :pattern   other
   :inputs    (build-container image)
-  :outputs   ()
-  :secrets   ()
-  :consumers 0)
-
-(defworkflow retirada-ci-watch
-  :file      "retirada-ci-watch.yml"
-  :pattern   ops
-  :inputs    (watch-repo watch-workflow dry-run loop-for-secs poll-interval-secs source-dir runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)
