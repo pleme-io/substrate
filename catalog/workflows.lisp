@@ -203,6 +203,14 @@
   :secrets   ()
   :consumers 3)
 
+(defworkflow action-pipeline
+  :file      "action-pipeline.yml"
+  :pattern   universal-composer
+  :inputs    (pipeline checkout-actions-ref runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 2)
+
 (defworkflow ansible-collection-ansible-test
   :file      "ansible-collection-ansible-test.yml"
   :pattern   ansible-collection
@@ -346,14 +354,6 @@
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 1)
-
-(defworkflow action-pipeline
-  :file      "action-pipeline.yml"
-  :pattern   universal-composer
-  :inputs    (pipeline checkout-actions-ref runner)
-  :outputs   ()
-  :secrets   ()
-  :consumers 0)
 
 (defworkflow ai-stack
   :file      "ai-stack.yml"
@@ -663,6 +663,14 @@
   :file      "rust-binary-auto-release.yml"
   :pattern   rust
   :inputs    (bump-type source-paths binary-name features no-default-features runner)
+  :outputs   ()
+  :secrets   (BOT_PAT)
+  :consumers 0)
+
+(defworkflow rust-private-auto-release
+  :file      "rust-private-auto-release.yml"
+  :pattern   rust
+  :inputs    (bump-type registry-name source-paths add-paths rename-prefix no-verify runner)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)

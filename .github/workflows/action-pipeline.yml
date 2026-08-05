@@ -69,23 +69,42 @@ jobs:
       - name: Checkout the consumer repo
         uses: actions/checkout@v4
 
-      # The actions repo is checked out as DATA, into a sibling path, because
-      # the pipeline composes `stdlib + <name>/run.tlisp` by reading files. It
-      # is pinned by ref rather than floating, so a pipeline run is
-      # reproducible against a known action set.
-      - name: Checkout pleme-io/actions
-        uses: actions/checkout@v4
-        with:
-          repository: pleme-io/actions
-          ref: ${{ inputs.checkout-actions-ref }}
-          path: .pleme-actions
-
+      # Credentials FIRST, so the clone below carries none of its own.
+      #
+      # An earlier cut embedded the token directly in the clone URL, in the
+      # userinfo position, and the fleet pre-commit secret-blocker refused it
+      # — correctly, even
+      # though the token was a variable: a credential-shaped URI is the pattern
+      # that gets copied, and once one reaches a commit no force-push recalls
+      # it from clones, forks or CI caches. Configuring the helper first makes
+      # the clone a plain URL.
       - uses: pleme-io/actions/git-credentials@main
         with:
           bot-pat: ${{ secrets.BOT_PAT }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # The actions repo is fetched as DATA into RUNNER_TEMP — deliberately
+      # OUTSIDE the consumer's workspace.
+      #
+      # The first version used `actions/checkout` with `path: .pleme-actions`,
+      # which put ~341 actions inside the tree the pipeline then runs against.
+      # Any step that scans the working directory sees them. sui's very first
+      # pipeline run failed on exactly that: runtime-install-lint reported
+      # seven "NEW violations" in `./.pleme-actions/*` — real findings about
+      # the ACTIONS repo, surfaced in a repo that does not own them and cannot
+      # fix them. `actions/checkout` cannot write outside GITHUB_WORKSPACE, so
+      # a shallow clone is the mechanism; three lines of glue, which is what
+      # the NO-SHELL rule allows for exactly this.
+      #
+      # Pinned by ref rather than floating, so a run stays reproducible against
+      # a known action set.
+      - name: Fetch pleme-io/actions (outside the workspace)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "${{ inputs.checkout-actions-ref }}" \
+            https://github.com/pleme-io/actions.git "${RUNNER_TEMP}/pleme-actions"
+
       - uses: pleme-io/actions/action-pipeline@main
         with:
           pipeline: ${{ inputs.pipeline }}
-          actions-root: .pleme-actions
+          actions-root: ${{ runner.temp }}/pleme-actions
