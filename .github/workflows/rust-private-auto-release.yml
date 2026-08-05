@@ -88,8 +88,8 @@ permissions:
   packages: write
 
 concurrency:
-  group: auto-release-${{ github.repository }}
-  cancel-in-progress: false
+  group: private-auto-release-${{ github.workflow }}-${{ github.repository }}
+  cancel-in-progress: true
 
 jobs:
   bump:
