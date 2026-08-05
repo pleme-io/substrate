@@ -1,0 +1,222 @@
+name: rust-private-auto-release
+
+# Reusable workflow: on push to main, bump the workspace patch
+# version + commit + tag + push + ship every workspace member to
+# GitHub Packages (a private crates.io alternative).
+#
+# This is the PRIVATE counterpart of rust-auto-release.yml. The only
+# differences are:
+#   1. Publishes to GitHub Packages, not crates.io
+#   2. Uses GITHUB_TOKEN (or a PAT with package:write) for auth
+#   3. Works for PRIVATE repos (no visibility skip)
+#   4. Each consumer must have a .cargo/config.toml declaring the
+#      registry + each crate's Cargo.toml must carry
+#      `publish = ["pleme-io"]` to prevent accidental crates.io leaks
+#
+# Consumer (.github/workflows/auto-release.yml):
+#
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#       inputs:
+#         bump-type:
+#           description: "patch | minor | major"
+#           required: false
+#           default: patch
+#
+#   jobs:
+#     release:
+#       uses: pleme-io/substrate/.github/workflows/rust-private-auto-release.yml@main
+#       with:
+#         bump-type: ${{ inputs.bump-type || 'patch' }}
+#         registry-name: pleme-io
+#       secrets: inherit
+#
+# secrets passed through:
+#   GITHUB_TOKEN — automatically provided; used for both git push and
+#                  cargo publish to GitHub Packages.
+#   BOT_PAT      — optional PAT with `repo` + `package:write` scope.
+#                  If present, tag pushes can trigger downstream
+#                  workflows and cross-repo package publishes work.
+
+on:
+  workflow_call:
+    inputs:
+      bump-type:
+        description: "patch | minor | major"
+        type: string
+        required: false
+        default: patch
+      registry-name:
+        description: "The GitHub Packages registry name (matches the [registries.<name>] key in .cargo/config.toml). Must match the `publish = [...]` list in each Cargo.toml."
+        type: string
+        required: false
+        default: pleme-io
+      source-paths:
+        description: "Space-separated git pathspecs the skip-detector inspects for changes since the last tag."
+        type: string
+        required: false
+        default: "*.rs Cargo.toml Cargo.lock"
+      add-paths:
+        description: "Space-separated git pathspecs the bump commit stages."
+        type: string
+        required: false
+        default: "Cargo.toml Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
+      rename-prefix:
+        description: "Prefix used when auto-renaming a conflicting crate."
+        type: string
+        required: false
+        default: "pleme-io-"
+      no-verify:
+        description: "Skip cargo publish's verification compile step."
+        type: string
+        required: false
+        default: "true"
+      runner:
+        description: "Explicit runner label override; empty = route by caller repo visibility."
+        type: string
+        required: false
+        default: ""
+    secrets:
+      BOT_PAT:
+        required: false
+        description: "Optional PAT with repo + package:write scope."
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: auto-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump workspace + tag
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: bump
+        uses: pleme-io/actions/rust-workspace-bump@main
+        with:
+          bump-type: ${{ inputs.bump-type }}
+          source-paths: ${{ inputs.source-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.bump.outputs.new-version }}
+          add-paths: ${{ inputs.add-paths }}
+
+      - if: steps.bump.outputs.bumped == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "true"
+
+  ship:
+    name: Ship workspace to GitHub Packages
+    needs: bump
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    if: needs.bump.outputs.bumped == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure GitHub Packages registry
+        shell: bash
+        run: |
+          mkdir -p ~/.cargo
+          cat > ~/.cargo/config.toml << 'EOF'
+          [registries.${{ inputs.registry-name }}]
+          index = "sparse+https://cargo.pkg.github.com/${{ github.repository_owner }}/"
+          token = "Bearer ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}"
+
+          # Prevent accidental publishes to crates.io
+          [registry]
+          default = "${{ inputs.registry-name }}"
+          EOF
+
+      - name: Publish workspace to GitHub Packages
+        uses: pleme-io/actions/rust-workspace-publish@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+          rename-prefix: ${{ inputs.rename-prefix }}
+          publish-mode: full
+          registry: ${{ inputs.registry-name }}
+        env:
+          CARGO_REGISTRIES_PLEME_IO_TOKEN: "Bearer ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}"
+          CARGO_REGISTRIES_PLEME_IO_INDEX: "sparse+https://cargo.pkg.github.com/${{ github.repository_owner }}/"
+
+  drip:
+    name: Drip-publish remaining capacity
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    needs: bump
+    if: >-
+      always()
+      && (
+        github.event_name == 'schedule'
+        || github.event_name == 'workflow_dispatch'
+        || (needs.bump.result == 'success' && needs.bump.outputs.bumped != 'true')
+      )
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure GitHub Packages registry
+        shell: bash
+        run: |
+          mkdir -p ~/.cargo
+          cat > ~/.cargo/config.toml << 'EOF'
+          [registries.${{ inputs.registry-name }}]
+          index = "sparse+https://cargo.pkg.github.com/${{ github.repository_owner }}/"
+          token = "Bearer ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}"
+
+          [registry]
+          default = "${{ inputs.registry-name }}"
+          EOF
+
+      - name: Drip-publish to GitHub Packages
+        uses: pleme-io/actions/rust-workspace-publish@main
+        with:
+          no-verify: ${{ inputs.no-verify }}
+          rename-prefix: ${{ inputs.rename-prefix }}
+          publish-mode: drip
+          registry: ${{ inputs.registry-name }}
+        env:
+          CARGO_REGISTRIES_PLEME_IO_TOKEN: "Bearer ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}"
+          CARGO_REGISTRIES_PLEME_IO_INDEX: "sparse+https://cargo.pkg.github.com/${{ github.repository_owner }}/"

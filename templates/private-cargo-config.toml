@@ -1,0 +1,23 @@
+# .cargo/config.toml — GitHub Packages private registry
+#
+# This configures cargo to resolve pleme-io private crates from
+# GitHub Packages instead of crates.io. Place this file at the
+# repo root (cargo reads .cargo/config.toml automatically).
+#
+# Consumer repos that DEPEND on private pleme-io crates also need
+# this file — they read from the registry, they don't publish to it.
+#
+# Auth: set CARGO_REGISTRIES_PLEME_IO_TOKEN env var to
+#   "Bearer <GITHUB_TOKEN>" or "Bearer <PAT with package:read>"
+#
+# In CI, the GITHUB_TOKEN is automatically available. For local
+# development, generate a PAT with `package:read` scope and set:
+#   export CARGO_REGISTRIES_PLEME_IO_TOKEN="Bearer ghp_xxxxx"
+
+[registries.pleme-io]
+index = "sparse+https://cargo.pkg.github.com/pleme-io/"
+
+# Prevent accidental publishes to crates.io — all private crates
+# must go to the pleme-io GitHub Packages registry only.
+[registry]
+default = "pleme-io"
