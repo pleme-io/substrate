@@ -38,7 +38,7 @@
 (defworkflow pre-merge-gate
   :file      "pre-merge-gate.yml"
   :pattern   gate
-  :inputs    (run-rust-gate run-npm-gate run-python-gate run-tlisp-lint run-publish-verify runner)
+  :inputs    (run-rust-gate run-npm-gate run-python-gate run-tlisp-lint run-workflow-shim-lint run-publish-verify runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN NPM_TOKEN PYPI_API_TOKEN BOT_PAT)
   :consumers 166)

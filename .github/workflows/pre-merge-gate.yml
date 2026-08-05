@@ -42,6 +42,14 @@ on:
         type: string
         required: false
         default: "true"
+      run-workflow-shim-lint:
+        description: >-
+          Report workflow files that are hand-authored instead of shims over a
+          catalogued substrate reusable. Reports only — it does not fail the
+          gate yet (see the job below for why and for the end state).
+        type: string
+        required: false
+        default: "true"
       run-publish-verify:
         type: string
         required: false
@@ -133,6 +141,33 @@ jobs:
         with:
           threshold: "15"
           fail-on-violation: "true"
+
+  workflow-shim:
+    name: 'universal · workflow-shim-lint (CATALOG REFLECTION)'
+    needs: detect
+    if: inputs.run-workflow-shim-lint == 'true'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+      # `fail-on-violation` is FALSE on purpose, and temporarily.
+      #
+      # Measured 2026-08-04: 144 hand-authored workflows across 99
+      # pleme-io-authored repos (a further 176 live in vendored upstream forks
+      # and are out of scope). Failing today would red 99 repos at once for a
+      # backlog they did not create, and the reliable result of that is people
+      # learning to ignore the gate rather than convert anything.
+      #
+      # So this reports, loudly, in the 169 repos that already call
+      # pre-merge-gate — which is how the backlog becomes visible where the
+      # work happens instead of in a one-off audit. The end state is
+      # `fail-on-violation: "true"`, once those 144 are converted or carry a
+      # typed `# skip-workflow-shim: <reason>` waiver.
+      #
+      # TIER while this reads false: only-mitigated. Not a gate yet, and it
+      # should not be described as one.
+      - uses: pleme-io/actions/workflow-shim-lint@main
+        with:
+          fail-on-violation: "false"
 
   publish-dry-run:
     name: 'universal · auto-release-verify'
