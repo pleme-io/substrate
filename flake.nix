@@ -654,8 +654,24 @@
           "release:sql-apply" = self.lib.${system}.mkImageReleaseApp {
             name = "sql-apply";
             registry = "ghcr.io/pleme-io/sql-apply";
-            # Evaluated per target arch — the helper resolves both linux image
-            # derivations at eval time and tags them amd64-/arm64-.
+            # amd64 ONLY, overriding the helper's dual-arch default.
+            #
+            # The default is ["x86_64-linux" "aarch64-linux"], and because the
+            # helper interpolates BOTH image derivations into the release
+            # script, running it on one runner tries to build the other arch
+            # there: `Reason: platform mismatch / Required system:
+            # 'aarch64-linux' / Current system: 'x86_64-linux'` (measured, run
+            # 31002775957). A dual-arch release needs a runner per arch plus a
+            # manifest join, which is exactly the shape hardened-images uses --
+            # release-vector + release-vector-arm64 + join-vector.
+            #
+            # amd64 is also what this image is FOR: every hardened-* image in
+            # Camelot's Zot is amd64-only (verified against the registry: the
+            # node-exporter, kube-state-metrics, keda and rabbitmq manifests all
+            # report linux/amd64), and the Jobs that will run sql-apply schedule
+            # on the amd64 pool. Adding arm64 is the split-plus-join above, not
+            # a wider default here.
+            systems = [ "x86_64-linux" ];
             mkImage = sys: import ./lib/build/sql-apply-image.nix {
               pkgs = import nixpkgs { system = sys; };
             };
