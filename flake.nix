@@ -667,6 +667,12 @@
           sql-apply = import ./lib/build/sql-apply.nix {
             pkgs = import nixpkgs { inherit system; };
           };
+          # The image carrying it — a K8s Job's `command:` can only run what is
+          # inside its image, so the tool needs one to reach a cluster.
+          # distroless-static: no shell, no database CLI, no libc.
+          sql-apply-image = import ./lib/build/sql-apply-image.nix {
+            pkgs = import nixpkgs { inherit system; };
+          };
         });
 
         # Sibling ecosystem surfaces. Same shape as `rust` — every

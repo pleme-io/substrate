@@ -35,3 +35,4 @@ pkgs.rustPlatform.buildRustPackage {
     mainProgram = "sql-apply";
   };
 }
+
