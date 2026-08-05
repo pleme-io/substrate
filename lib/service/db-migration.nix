@@ -79,23 +79,48 @@
       echo "Migrations complete."
     '';
 
-    sqlRunner = writeShellScript "migrate-${name}" ''
-      set -euo pipefail
-      DB_URL="''${DATABASE_URL:?DATABASE_URL required}"
+    # DESHELLIFIED. This was a writeShellScript whose body was
+    # `for f in ${migrationsDir}/*.sql; do ''${DATABASE_CLI:-psql} "$DB_URL" < "$f"; done`.
+    # Two things were wrong with it beyond the no-shell rule:
+    #
+    #   1. Piping a whole file to a CLI yields ONE exit status for the file, so
+    #      "this migration already ran" and "the table I need is missing" were
+    #      indistinguishable. sql-apply splits the file and classifies each
+    #      failure by driver error code, tolerating only the already-exists
+    #      family (and only when asked).
+    #   2. Because the runner WAS a shell script, a shell was mandatory at
+    #      runtime, which is what pinned this pattern to the busybox-carrying
+    #      wolfi base. A typed binary that talks TCP needs neither a shell nor a
+    #      database CLI, so the sql type now runs distroless-static.
+    #
+    # $DATABASE_URL is unchanged -- the same env contract the shell runner used --
+    # so this is a drop-in for consumers. $DATABASE_CLI is gone: sqlx dispatches
+    # on the URL scheme (mysql:// or postgres://) instead.
+    sqlApply = (import ../build/sql-apply.nix { inherit pkgs; });
 
-      echo "Running SQL migrations for ${name} from ${migrationsDir}..."
-      for f in ${migrationsDir}/*.sql; do
-        echo "Applying: $(basename $f)"
-        # Generic: pipe SQL files to database CLI
-        # Users should set DATABASE_CLI to their DB client (mysql, psql, etc.)
-        ''${DATABASE_CLI:-psql} "$DB_URL" < "$f"
-      done
-      echo "Migrations complete."
-    '';
+    sqlRunnerArgs = [
+      "${sqlApply}/bin/sql-apply"
+      "apply"
+      "--dir"
+      "${migrationsDir}"
+    ];
 
-    runner = if type == "liquibase" then liquibaseRunner
-             else if type == "sql" then sqlRunner
-             else throw "Unsupported migration type: ${type}. Use 'liquibase' or 'sql'.";
+    # entrypoint, not a single script: the sql type's entrypoint is a typed
+    # binary plus its flags, while liquibase remains a shell script wrapping a
+    # JVM invocation.
+    entrypointArgv =
+      if type == "liquibase" then [ "${liquibaseRunner}" ]
+      else if type == "sql" then sqlRunnerArgs
+      else throw "Unsupported migration type: ${type}. Use 'liquibase' or 'sql'.";
+
+    # The sql type no longer needs a shell OR a database CLI, so it drops from
+    # wolfi (glibc + busybox) to distroless-static. liquibase still needs glibc
+    # for its JVM and a shell for its wrapper, so it stays on wolfi -- the base
+    # is now chosen by what the type actually requires rather than by the
+    # runner's implementation language.
+    imageBase =
+      if type == "liquibase" then hardened.bases.wolfi
+      else hardened.bases.distroless-static;
 
     # `hardened.mkPackageImage`'s `package` param is mandatory and gets
     # folded into `contents` via `buildLayeredImage`'s own
@@ -116,20 +141,23 @@
 
     dockerImage = hardened.mkPackageImage {
       service = name;
-      base = hardened.bases.wolfi;
+      base = imageBase;
       package = dbPackage;
       publishName = "migrate-${name}";
       publishTag = "latest";
-      entrypoint = [ runner ];
+      entrypoint = entrypointArgv;
       env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
       user = "${toString hardened.nonrootUid}:${toString hardened.nonrootGid}";
     };
   in {
-    package = runner;
+    # `package` is the executable itself: the typed binary for the sql type, the
+    # JVM wrapper script for liquibase.
+    package = if type == "liquibase" then liquibaseRunner else sqlApply;
     inherit dockerImage;
     app = {
       type = "app";
-      program = "${runner}";
+      program =
+        if type == "liquibase" then "${liquibaseRunner}" else "${sqlApply}/bin/sql-apply";
     };
   };
 }

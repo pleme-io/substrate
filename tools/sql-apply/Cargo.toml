@@ -1,0 +1,47 @@
+# sql-apply — typed SQL migration runner. Replaces the writeShellScript bodies
+# lib/service/db-migration.nix used to ship (`for f in *.sql; do
+# ${DATABASE_CLI:-psql} "$DB_URL" < "$f"; done`), whose shell-ness was what
+# forced a busybox-carrying base on every consumer.
+#
+# sqlx 0.8 + runtime-tokio + tls-rustls is the fleet's existing choice (12 other
+# pleme-io crates use it), and it is pure Rust: rustls rather than OpenSSL, so
+# ZERO C deps -- the same constraint relver documents for choosing
+# std::process::Command over git2. The `any` driver dispatches on the URL scheme,
+# so one binary serves mysql and postgres without a database CLI.
+[package]
+name = "sql-apply"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Typed SQL migration runner: wait / wait-tables / apply, statement at a time — replaces inline shell + a database CLI in substrate's db-migration pattern"
+
+[[bin]]
+name = "sql-apply"
+path = "src/main.rs"
+
+[lib]
+name = "sql_apply"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+humantime = "2"
+sqlx = { version = "0.8", default-features = false, features = [
+  "any",
+  "mysql",
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+] }
+thiserror = "2"
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

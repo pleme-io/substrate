@@ -660,6 +660,13 @@
           relver = import ./lib/build/relver.nix {
             pkgs = import nixpkgs { inherit system; };
           };
+          # sql-apply: typed SQL migration runner. `nix run …#sql-apply -- apply …`
+          # replaces lib/service/db-migration.nix's writeShellScript runner (and
+          # the database CLI it shelled to), which is what forced a busybox base
+          # on every consumer of that pattern.
+          sql-apply = import ./lib/build/sql-apply.nix {
+            pkgs = import nixpkgs { inherit system; };
+          };
         });
 
         # Sibling ecosystem surfaces. Same shape as `rust` — every
