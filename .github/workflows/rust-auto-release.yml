@@ -160,6 +160,17 @@ jobs:
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
+          # PARITY with cargo-auto-release.yml:218 — this reusable was the
+          # only one of the family missing it. The three lockfiles a bump
+          # touches are all GENERATED, and `gen-spec` fires on the same push
+          # and can finish first, so its regenerated Cargo.gen.lock lands
+          # while this job is still building. Without declaring them
+          # regenerable, git-push-with-token defaults to "" and ABORTS the
+          # rebase on a conflict in a file no human wrote — stranding the
+          # release after the tag already exists. Declaring them resolves in
+          # favour of the bump, which is correct: the bump's copy is the one
+          # generated against the version being released.
+          regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
 
   ship:
     name: Ship workspace to registry
