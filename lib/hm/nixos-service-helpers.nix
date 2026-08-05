@@ -82,8 +82,11 @@ with lib;
       # looping wants unbounded retry — upstream nixpkgs ships `sshd` and `k3s`
       # at `StartLimitIntervalSec=0` for exactly that reason (0 DISABLES the
       # limit rather than tightening it).
-      startLimitIntervalSec = startLimitIntervalSec;
-      startLimitBurst = startLimitBurst;
+      # mkDefault so an explicit local decision always wins — see the note in
+      # iroha/service-module.nix; a hard value here collided with nix's
+      # `pleme.power.lifelineRestart` (deliberate 0) and broke eval.
+      startLimitIntervalSec = lib.mkDefault startLimitIntervalSec;
+      startLimitBurst = lib.mkDefault startLimitBurst;
 
       serviceConfig = {
         Type = type;

@@ -244,8 +244,10 @@ let
               # [Unit] keys, at the service level: in serviceConfig they render
               # into [Service], where systemd logs "Unknown key name" and
               # IGNORES them — a bound that reads as set and enforces nothing.
-              startLimitIntervalSec = startLimitIntervalSec;
-              startLimitBurst = startLimitBurst;
+              # mkDefault: a node may deliberately widen or disable this (see
+              # nix's `pleme.power.lifelineRestart`). A hard value collides.
+              startLimitIntervalSec = lib.mkDefault startLimitIntervalSec;
+              startLimitBurst = lib.mkDefault startLimitBurst;
 
               serviceConfig = {
                 Type = "oneshot";

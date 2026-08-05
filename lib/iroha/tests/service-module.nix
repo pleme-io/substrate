@@ -429,8 +429,19 @@ in
       # would restart it forever in `activating` — invisible to
       # `systemctl --failed`. This characterization test CAUGHT the factory
       # change, which is what it is for.
-      startLimitIntervalSec = 300;
-      startLimitBurst = 3;
+      # ★ mkDefault-WRAPPED on purpose, and pinned in that form. A factory
+      # default must LOSE to an explicit local decision: nix's
+      # `pleme.power.lifelineRestart` sets `startLimitIntervalSec = 0` on units
+      # that must never permanently give up, and the first cut of this fix
+      # emitted HARD values, which collided —
+      #   error: The option `systemd.services.seibi-reconverge.
+      #   startLimitIntervalSec' has conflicting definition values: 0 / 300
+      # — and broke rio's evaluation outright, strictly worse than the
+      # invisible crashloop it closes. Asserting the wrapper (not just the
+      # number) is what makes "this is a default" a pinned property rather
+      # than an intention.
+      startLimitIntervalSec = lib.mkDefault 300;
+      startLimitBurst = lib.mkDefault 3;
       serviceConfig = {
         ExecStart = "/nix/store/x/bin/toride daemon /nix/store/y-toride.conf";
         Type = "simple";

@@ -281,8 +281,19 @@ let
         # [Unit] keys, NOT serviceConfig. In [Service] systemd logs "Unknown
         # key name" and IGNORES them, so the limit would read as set and
         # enforce nothing — the same invisible-failure class it closes.
-        // optionalAttrs (startLimitIntervalSec != null) { inherit startLimitIntervalSec; }
-        // optionalAttrs (startLimitBurst != null) { inherit startLimitBurst; }
+        # ★ mkDefault, NOT a hard value. A node or module may set these
+        # deliberately — nix's `pleme.power.lifelineRestart` sets
+        # `startLimitIntervalSec = 0` on a typed list of units that must NEVER
+        # permanently give up (a lifeline). A hard definition here collides
+        # with that and the module system correctly refuses to guess:
+        #   error: The option `systemd.services.seibi-reconverge.
+        #   startLimitIntervalSec' has conflicting definition values: 0 / 300
+        # Measured 2026-08-05 — the first cut of this fix emitted hard values
+        # and broke rio's evaluation outright, which is strictly worse than the
+        # invisible crashloop it closes. A FACTORY default must always lose to
+        # an explicit local decision.
+        // optionalAttrs (startLimitIntervalSec != null) { startLimitIntervalSec = lib.mkDefault startLimitIntervalSec; }
+        // optionalAttrs (startLimitBurst != null) { startLimitBurst = lib.mkDefault startLimitBurst; }
         // optionalAttrs (environment != { }) { inherit environment; }
         // serviceExtra;
     in
