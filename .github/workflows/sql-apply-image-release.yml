@@ -1,0 +1,61 @@
+# Publishes the sql-apply OCI image to GHCR.
+#
+# substrate is a library repo and this is its first image-publishing workflow.
+# The reason is structural, not convenience: sql-apply is a FIRST-PARTY tool and
+# the two existing homes for "get an image published" both reject it.
+# hardened-images' catalog requires `upstreamImage` -- its generator calls that
+# "the REQUIRED 'what does this replace'" -- because that repo hardens UPSTREAM
+# images; supplying a fabricated value would be dishonest metadata in a repo
+# whose own comments repeatedly punish exactly that. vendor-mirror.yml's
+# `vendor-*` naming is reserved for third-party mirrors. So the image is
+# published from where it is built, and hardened-images only MIRRORS it into
+# Camelot's cluster-internal Zot (as `pleme-sql-apply`, the prefix
+# `pleme-concprobe` already establishes for our own tools) -- that mirror is the
+# one step which MUST run there, because Zot is only reachable from Camelot's
+# own ARC pool.
+#
+# Nix dockerTools + hardened-base's distroless-static. No Dockerfile. The image
+# is the Rust binary plus a CA bundle, a nonroot 65532 user and a /tmp stub --
+# measured contents, no glibc and no busybox, so there is no shell inside to
+# exec. That is only possible because the runner it replaces was deshellified;
+# the shell version forced the busybox-carrying wolfi base.
+#
+# NO boot-check, and the omission is deliberate rather than an oversight. The
+# reusable offers two modes and neither fits a one-shot CLI: `boot-check-cmd`
+# does `docker exec <c> sh -c ...`, which needs a shell this image does not have,
+# and `boot-check-still-running` asserts the container is STILL RUNNING after a
+# poll window -- which is exactly what a CLI that parses argv and exits is NOT.
+# The correctness gate for this binary is its own unit suite plus the live
+# mysql:8.0 run that applied 566 real statements, not a container liveness poll.
+name: sql-apply-image-release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/sql-apply/**'
+      - 'lib/build/sql-apply.nix'
+      - 'lib/build/sql-apply-image.nix'
+      - '.github/workflows/sql-apply-image-release.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/nix-image-auto-release.yml
+    with:
+      release-app: "release:sql-apply"
+      # Zero-tolerance CVE gate: build the image locally, scan the LOCAL tarball
+      # before it is pushed anywhere. Enabled from the first run rather than
+      # retrofitted -- the attack surface is one static Rust binary plus a CA
+      # bundle, so there is no pre-existing finding baseline to grandfather.
+      scan-before-push: true
+      image-attr: "sql-apply-image"
+      # Label only -- nothing is pulled from this ref; it makes the scan output
+      # readable rather than naming a bare tarball path.
+      scan-image-ref: "ghcr.io/pleme-io/sql-apply:0.1.0"
+    secrets: inherit

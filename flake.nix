@@ -636,6 +636,32 @@
         # single `gen-pin.json` edit. Available as a top-level binary and
         # for IFD invocation inside `mkBuildSpec`. Built from the pinned
         # source via substrate's own tool-builder (no flake-input cycle).
+        # substrate is a library repo and had no `apps` output until sql-apply.
+        # It needs one for a narrow, structural reason: `sql-apply` is a
+        # FIRST-PARTY tool, and the two existing image-publishing homes both
+        # reject it. hardened-images' catalog requires `upstreamImage` ("the
+        # REQUIRED 'what does this replace'", lib/mk-hardened-image-set.nix) —
+        # a hardened rebuild of an upstream, which this is not; supplying a
+        # fake one would be dishonest metadata. vendor-mirror.yml's `vendor-*`
+        # naming is for third-party mirrors. So the image is published from
+        # where it is built, and hardened-images only MIRRORS it into Zot
+        # (as `pleme-sql-apply`, the prefix `pleme-concprobe` already
+        # establishes for our own tools).
+        #
+        # Additive: no consumer reads `substrate.apps`, and adding the output
+        # cannot change what any existing `packages`/`lib` consumer resolves.
+        apps = eachSystem (system: {
+          "release:sql-apply" = self.lib.${system}.mkImageReleaseApp {
+            name = "sql-apply";
+            registry = "ghcr.io/pleme-io/sql-apply";
+            # Evaluated per target arch — the helper resolves both linux image
+            # derivations at eval time and tags them amd64-/arm64-.
+            mkImage = sys: import ./lib/build/sql-apply-image.nix {
+              pkgs = import nixpkgs { system = sys; };
+            };
+          };
+        });
+
         packages = eachSystem (system: {
           gen = genFor system;
           # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
