@@ -81,7 +81,31 @@ jobs:
       # use-flakehub: false — no FlakeHub account; the default attempts
       # FlakeHub auth and emits a red-herring ##[error] in every run.
       # The native GitHub Actions cache half is what we want.
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      #
+      # PUBLIC ONLY. magic-nix-cache restores its closure by shelling out to
+      # `cat … | xz -d | nix-store --import`, and the self-hosted pool that
+      # private repos route to (line 60) runs the UPSTREAM MINIMAL
+      # ghcr.io/actions/actions-runner image, which ships no `xz` — measured
+      # 2026-08-05 on camelot-builder-pleme-eks-mwsjp-runner-gjvk7:
+      #   /bin/sh: 1: xz: not found
+      #   error: unexpected end-of-file
+      # reproduced identically on a re-run, so not transient. GitHub-hosted
+      # images carry xz, which is why the public callers (sui, gen, engenho)
+      # are green while EVERY private caller is red.
+      #
+      # This is the SAME CLASS as the `cargo metadata` note below: the pool's
+      # image lacks tools the hosted image has, and each one has been found by
+      # a red run rather than by a check. The load-bearing fix is for that pool
+      # to run our own arc-runner image (rio's private pool already does —
+      # ghcr.io/pleme-io/arc-runner, k8s/clusters/rio/infrastructure/arc/
+      # runner-pool-private.yaml) instead of upstream's; camelot's pool is NOT
+      # in the k8s repo, so that is a separate change and is tracked as
+      # `pending-arc-runner-image: camelot private pool`. Skipping the cache
+      # costs a cold nix store on private runs — strictly better than the
+      # unconditional failure it replaces, and it changes nothing for public
+      # callers.
+      - if: ${{ !github.event.repository.private }}
+        uses: DeterminateSystems/magic-nix-cache-action@main
         with:
           use-flakehub: false
 
