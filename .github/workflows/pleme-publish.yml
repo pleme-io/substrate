@@ -1,0 +1,53 @@
+name: pleme-publish
+
+# TIER-2 COMPOSER for the `publish` family — 5 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-publish(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: action-release, compliance-attest, npm-auto-release, python-auto-release, reusable-gen-spec"
+        required: true
+        type: string
+
+jobs:
+  action-release:
+    if: inputs.target == 'action-release'
+    uses: ./.github/workflows/action-release.yml
+    secrets: inherit
+
+  compliance-attest:
+    if: inputs.target == 'compliance-attest'
+    uses: ./.github/workflows/compliance-attest.yml
+    secrets: inherit
+
+  npm-auto-release:
+    if: inputs.target == 'npm-auto-release'
+    uses: ./.github/workflows/npm-auto-release.yml
+    secrets: inherit
+
+  python-auto-release:
+    if: inputs.target == 'python-auto-release'
+    uses: ./.github/workflows/python-auto-release.yml
+    secrets: inherit
+
+  reusable-gen-spec:
+    if: inputs.target == 'reusable-gen-spec'
+    uses: ./.github/workflows/reusable-gen-spec.yml
+    secrets: inherit

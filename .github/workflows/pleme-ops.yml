@@ -1,0 +1,113 @@
+name: pleme-ops
+
+# TIER-2 COMPOSER for the `ops` family — 17 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-ops(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: ai-stack, auto-release-verify, cd-stack, comment-command-dispatch, container-stack, crates-publish, cse-audit, data-stack, esteira-rio-bump, esteira-rio-release, ios-game-ci, mac-autobump-release, observability-deploy, reusable-flakehub, security-gate, super-cache-ci-build, web3-stack"
+        required: true
+        type: string
+
+jobs:
+  ai-stack:
+    if: inputs.target == 'ai-stack'
+    uses: ./.github/workflows/ai-stack.yml
+    secrets: inherit
+
+  auto-release-verify:
+    if: inputs.target == 'auto-release-verify'
+    uses: ./.github/workflows/auto-release-verify.yml
+    secrets: inherit
+
+  cd-stack:
+    if: inputs.target == 'cd-stack'
+    uses: ./.github/workflows/cd-stack.yml
+    secrets: inherit
+
+  comment-command-dispatch:
+    if: inputs.target == 'comment-command-dispatch'
+    uses: ./.github/workflows/comment-command-dispatch.yml
+    secrets: inherit
+
+  container-stack:
+    if: inputs.target == 'container-stack'
+    uses: ./.github/workflows/container-stack.yml
+    secrets: inherit
+
+  crates-publish:
+    if: inputs.target == 'crates-publish'
+    uses: ./.github/workflows/crates-publish.yml
+    secrets: inherit
+
+  cse-audit:
+    if: inputs.target == 'cse-audit'
+    uses: ./.github/workflows/cse-audit.yml
+    secrets: inherit
+
+  data-stack:
+    if: inputs.target == 'data-stack'
+    uses: ./.github/workflows/data-stack.yml
+    secrets: inherit
+
+  esteira-rio-bump:
+    if: inputs.target == 'esteira-rio-bump'
+    uses: ./.github/workflows/esteira-rio-bump.yml
+    secrets: inherit
+
+  esteira-rio-release:
+    if: inputs.target == 'esteira-rio-release'
+    uses: ./.github/workflows/esteira-rio-release.yml
+    secrets: inherit
+
+  ios-game-ci:
+    if: inputs.target == 'ios-game-ci'
+    uses: ./.github/workflows/ios-game-ci.yml
+    secrets: inherit
+
+  mac-autobump-release:
+    if: inputs.target == 'mac-autobump-release'
+    uses: ./.github/workflows/mac-autobump-release.yml
+    secrets: inherit
+
+  observability-deploy:
+    if: inputs.target == 'observability-deploy'
+    uses: ./.github/workflows/observability-deploy.yml
+    secrets: inherit
+
+  reusable-flakehub:
+    if: inputs.target == 'reusable-flakehub'
+    uses: ./.github/workflows/reusable-flakehub.yml
+    secrets: inherit
+
+  security-gate:
+    if: inputs.target == 'security-gate'
+    uses: ./.github/workflows/security-gate.yml
+    secrets: inherit
+
+  super-cache-ci-build:
+    if: inputs.target == 'super-cache-ci-build'
+    uses: ./.github/workflows/super-cache-ci-build.yml
+    secrets: inherit
+
+  web3-stack:
+    if: inputs.target == 'web3-stack'
+    uses: ./.github/workflows/web3-stack.yml
+    secrets: inherit

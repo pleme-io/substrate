@@ -1,241 +1,256 @@
 name: pleme
 
-# THE UNIVERSAL COMPOSER — one entry point over the catalogued reusables.
-#
-# A consumer that does not want to choose can call exactly this, name its
-# profile, and get the fleet-standard CI + release for that shape:
+# THE UNIVERSAL COMPOSER — one entry point over the whole catalogued surface.
 #
 #     jobs:
 #       pleme:
 #         uses: pleme-io/substrate/.github/workflows/pleme.yml@main
 #         with:
-#           profile: rust-workspace
+#           family: rust
+#           target: cargo-auto-release
 #         secrets: inherit
 #
-# WHAT THIS IS AND IS NOT
+# REACH: 72 of the 73 catalogued reusables (everything except this file) —
+# 63 flat leaves through ten tier-2 family composers, plus the 9 that nest,
+# dispatched directly here.
 #
-# It is a DISPATCHER, not a reimplementation. Every arm delegates to a
-# workflow already in catalog/workflows.lisp; this file contributes the
-# profile vocabulary and nothing else. Adding behaviour here instead of in the
-# workflow it fronts is the one way to make it harmful, because the dispatcher
-# is the thing nobody reads.
+# ── THE STRUCTURE IS THE PLATFORM'S, MEASURED ────────────────────────────
 #
-# WHY 14 PROFILES AND NOT ALL 73 REUSABLES — the limit, measured
+# Two GitHub limits shape this, and both were measured rather than assumed:
 #
-# This file sits at 20 `uses:` calls, which is EXACTLY GitHub's per-workflow
-# cap. Not a design preference and not room left on the table: the boundary is
-# consumed. 14 profiles reach 19 of the catalogue's 73 reusables, which is
-# 824 of 1481 measured consumer call-sites — 56% of everything the fleet
-# actually calls, in one entry point.
+#   1. A workflow may contain at most 20 `uses:` calls. One file therefore
+#      cannot dispatch to 73 leaves — hence tier 2.
+#   2. A chain may be at most 4 workflows, so
+#         consumer(1) -> pleme(2) -> pleme-rust(3) -> leaf(4)
+#      is exactly legal — but ONLY while the leaf calls no reusable itself.
 #
-# The obvious escape — a tier of per-family sub-composers — is NOT available,
-# and that was measured rather than assumed. GitHub allows a chain of 4
-# workflows, and several leaves already spend a level of it: cargo-ci.yml and
-# pre-merge-gate.yml each call a reusable of their own. So
-# consumer(1) → pleme(2) → cargo-ci(3) → its child(4) is already AT the limit.
-# Inserting pleme-rust(3) would make it 5 and the run would not start.
+# Limit 2 is why the split is by NESTING rather than by taste. Nine reusables
+# call reusables of their own — cargo-ci, pre-merge-gate, cargo-release,
+# helm-chart-release, auto-release, auto-release-min, release-pipeline,
+# pleme-stack, super-cache-ci-build-matrix. Routing any of them through a
+# tier-2 composer would make the chain 5 and the run would refuse to start, so
+# they are dispatched DIRECTLY below. That asymmetry is not a wart; it is the
+# shape the 4-level cap forces once some leaves are themselves composites.
 #
-# So the structure is two layers because the platform makes it two layers:
-# this composer for the profiles that carry the majority of call-sites, and
-# catalog/workflows.lisp as the complete index for the other 54. Calling a
-# reusable directly stays a first-class answer — `workflow-shim-lint` accepts
-# it identically, and for the 54 it is the ONLY answer.
+# An earlier cut of this file claimed a second tier was impossible outright.
+# That was wrong, and wrong in a specific way worth remembering: it
+# generalised "cargo-ci nests, so its chain is full" into "no tier-2 is
+# possible", when 63 of the 73 leaves are flat and admit one perfectly well.
+# The limit was mine, not GitHub's.
 #
-# HONEST STATUS: 0 consumers. Every arm is a workflow with real adoption
-# (362, 337, 166, 164, …), but this composition of them has never run. The
-# fleet already carries 34 zero-consumer reusables; do not cite this one as
-# load-bearing until something calls it.
+# ── WHAT THIS FILE MUST NEVER BECOME ─────────────────────────────────────
+#
+# A dispatcher, not an implementation. Every arm delegates to something already
+# in catalog/workflows.lisp. Behaviour added here rather than in the workflow
+# it fronts is invisible, because a dispatcher is the file nobody opens.
+#
+# HONEST STATUS: 0 consumers. Every leaf it reaches has real adoption (362,
+# 337, 166, 164, …) but this composition has never run. The fleet already
+# carries 34 zero-consumer reusables; do not cite this as load-bearing until
+# something calls it.
 
 on:
   workflow_call:
     inputs:
-      profile:
+      family:
         description: >-
-          The repo's shape. Determines which catalogued reusables run.
+          Which part of the catalogue to dispatch into.
 
-            rust-workspace     cargo workspace WITH a flake   (cargo-ci + cargo-auto-release)
-            rust-bare          cargo, NO flake.nix            (cargo-gate-ci + rust-auto-release)
-            go                 Go module                      (go-auto-release)
-            ruby-gem           Ruby gem                       (gem-ci + gem-auto-bump + gem-release)
-            nix-image          Nix-built container image      (nix-image-auto-release)
-            node-package       npm package                    (npm-auto-release)
-            python-package     Python package                 (python-auto-release)
-            ansible-collection Ansible collection             (ansible-collection-ci + -release)
-            caixa-package      a (defcaixa …) package         (caixa-validate + caixa-publish)
-            helm-chart         Helm chart                     (helm-publish)
-            container-image    prebuilt image push            (image-push)
-            iac-crossplane     Crossplane provider            (crossplane-provider-publish)
-            iac-terraform      Terraform provider             (terraform-provider-publish)
-            action-repo        a pleme-io/actions-style repo  (gate only; its release lives
-                               in pleme-actions' release-action.yml, called directly)
+            rust ruby go ansible caixa iac helm container publish ops
+              -> a tier-2 family composer; `target` names the reusable
+
+            direct
+              -> one of the 9 nesting reusables, named by `target`:
+                 cargo-ci, pre-merge-gate, cargo-release, helm-chart-release,
+                 auto-release, auto-release-min, release-pipeline,
+                 pleme-stack, super-cache-ci-build-matrix
         required: true
         type: string
-      stages:
-        description: "ci | release | both"
-        required: false
+      target:
+        description: "The reusable to run within that family."
+        required: true
         type: string
-        default: "both"
-      bump-type:
-        description: "patch | minor | major, for the release stage"
-        required: false
-        type: string
-        default: patch
       runner:
         required: false
         type: string
         default: ""
 
 jobs:
-  # ── validation ───────────────────────────────────────────────────────
-  # An unknown profile must FAIL, not silently run nothing. Every arm below
-  # is `if:`-gated, so a typo like `profile: rust_workspace` would otherwise
-  # skip every job and report a green run that did no work — the same
-  # green-over-nothing shape as the `dep-missing` defer this fleet just fixed.
+  # An unknown family or target must FAIL, not silently run nothing. Every arm
+  # is `if:`-gated, so a typo would otherwise skip all of them and report a
+  # green run that did no work — the same green-over-nothing shape as the
+  # `dep-missing` defer fixed elsewhere in this fleet today.
   validate:
-    name: "profile is known"
+    name: "family + target are known"
     runs-on: ${{ inputs.runner != '' && inputs.runner || 'ubuntu-latest' }}
     steps:
+      - uses: actions/checkout@v4
       - uses: pleme-io/actions/tatara-script@main
         with:
           script: |
-            (define known
-              (list
-                "rust-workspace" "rust-bare" "go" "ruby-gem" "nix-image" "node-package"
-                "python-package" "ansible-collection" "caixa-package" "helm-chart"
-                "container-image" "iac-crossplane" "iac-terraform" "action-repo"))
-            (define p (env-get "PROFILE" ""))
-            (define s (env-get "STAGES" "both"))
+            (define families
+              (list "rust" "ruby" "go" "ansible" "caixa" "iac" "helm" "container"
+                    "publish" "ops" "direct"))
+            (define direct-targets
+              (list "cargo-ci" "pre-merge-gate" "cargo-release" "helm-chart-release"
+                    "auto-release" "auto-release-min" "release-pipeline" "pleme-stack"
+                    "super-cache-ci-build-matrix"))
+            (define f (env-get "FAMILY" ""))
+            (define t (env-get "TARGET" ""))
             (cond
-              ((not (member? p known))
-                (log-error (string-append "unknown profile '" p "' — known: " (string-join ", " known)))
+              ((not (member? f families))
+                (log-error
+                  (string-append "unknown family '" f "' — known: " (string-join ", " families)))
                 (exit 1))
-              ((not (member? s (list "ci" "release" "both")))
-                (log-error (string-append "unknown stages '" s "' — known: ci, release, both"))
+              ((equal? t "") (log-error "target is required") (exit 1))
+              ;; A `direct` target must be one of the nine that nest. Naming a
+              ;; flat leaf here would skip every arm and go green having done
+              ;; nothing — exactly what this job exists to stop.
+              ((and (equal? f "direct") (not (member? t direct-targets)))
+                (log-error
+                  (string-append
+                    "'" t "' is not one of the 9 nesting reusables. Flat leaves go through "
+                    "their family composer instead — see catalog/workflows.lisp. Known: "
+                    (string-join ", " direct-targets)))
                 (exit 1))
-              (else (log-info (string-append "profile=" p " stages=" s)) (exit 0)))
+              ;; For a family target, confirm the tier-2 composer actually names
+              ;; it. A wrong name would skip that composer's arms and report
+              ;; success having run nothing.
+              ((and (not (equal? f "direct"))
+                    (not
+                      (string-contains?
+                        (read-file (string-append ".github/workflows/pleme-" f ".yml"))
+                        (string-append "inputs.target == '" t "'"))))
+                (log-error
+                  (string-append "'" t "' is not a target of the '" f "' family composer"))
+                (exit 1))
+              (else (log-info (string-append "family=" f " target=" t)) (exit 0)))
         env:
-          PROFILE: ${{ inputs.profile }}
-          STAGES: ${{ inputs.stages }}
+          FAMILY: ${{ inputs.family }}
+          TARGET: ${{ inputs.target }}
 
-  # ── CI stage ─────────────────────────────────────────────────────────
-  ci-rust-workspace:
+  # ── tier 2: the 63 flat leaves, by family ────────────────────────────
+  rust:
     needs: validate
-    if: inputs.profile == 'rust-workspace' && inputs.stages != 'release'
+    if: inputs.family == 'rust'
+    uses: ./.github/workflows/pleme-rust.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  ruby:
+    needs: validate
+    if: inputs.family == 'ruby'
+    uses: ./.github/workflows/pleme-ruby.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  go:
+    needs: validate
+    if: inputs.family == 'go'
+    uses: ./.github/workflows/pleme-go.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  ansible:
+    needs: validate
+    if: inputs.family == 'ansible'
+    uses: ./.github/workflows/pleme-ansible.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  caixa:
+    needs: validate
+    if: inputs.family == 'caixa'
+    uses: ./.github/workflows/pleme-caixa.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  iac:
+    needs: validate
+    if: inputs.family == 'iac'
+    uses: ./.github/workflows/pleme-iac.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  helm:
+    needs: validate
+    if: inputs.family == 'helm'
+    uses: ./.github/workflows/pleme-helm.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  container:
+    needs: validate
+    if: inputs.family == 'container'
+    uses: ./.github/workflows/pleme-container.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  publish:
+    needs: validate
+    if: inputs.family == 'publish'
+    uses: ./.github/workflows/pleme-publish.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  ops:
+    needs: validate
+    if: inputs.family == 'ops'
+    uses: ./.github/workflows/pleme-ops.yml
+    with: { target: "${{ inputs.target }}" }
+    secrets: inherit
+
+  # ── the 9 that nest: dispatched DIRECTLY, or the chain would be 5 ────
+  direct-cargo-ci:
+    needs: validate
+    if: inputs.family == 'direct' && inputs.target == 'cargo-ci'
     uses: ./.github/workflows/cargo-ci.yml
     secrets: inherit
 
-  ci-rust-bare:
+  direct-pre-merge-gate:
     needs: validate
-    if: inputs.profile == 'rust-bare' && inputs.stages != 'release'
-    uses: ./.github/workflows/cargo-gate-ci.yml
-    secrets: inherit
-
-  ci-ruby-gem:
-    needs: validate
-    if: inputs.profile == 'ruby-gem' && inputs.stages != 'release'
-    uses: ./.github/workflows/gem-ci.yml
-    secrets: inherit
-
-  ci-ansible-collection:
-    needs: validate
-    if: inputs.profile == 'ansible-collection' && inputs.stages != 'release'
-    uses: ./.github/workflows/ansible-collection-ci.yml
-    secrets: inherit
-
-  ci-caixa-package:
-    needs: validate
-    if: inputs.profile == 'caixa-package' && inputs.stages != 'release'
-    uses: ./.github/workflows/caixa-validate.yml
-    secrets: inherit
-
-  # Universal quality gate — every profile gets it. This is the job carrying
-  # workflow-shim-lint, so a repo adopting the composer also starts reporting
-  # its own hand-authored workflows.
-  gate:
-    needs: validate
-    if: inputs.stages != 'release'
+    if: inputs.family == 'direct' && inputs.target == 'pre-merge-gate'
     uses: ./.github/workflows/pre-merge-gate.yml
     secrets: inherit
 
-  # ── release stage ────────────────────────────────────────────────────
-  release-rust-workspace:
+  direct-cargo-release:
     needs: validate
-    if: inputs.profile == 'rust-workspace' && inputs.stages != 'ci'
-    uses: ./.github/workflows/cargo-auto-release.yml
-    with:
-      bump-type: ${{ inputs.bump-type }}
+    if: inputs.family == 'direct' && inputs.target == 'cargo-release'
+    uses: ./.github/workflows/cargo-release.yml
     secrets: inherit
 
-  release-rust-bare:
+  direct-helm-chart-release:
     needs: validate
-    if: inputs.profile == 'rust-bare' && inputs.stages != 'ci'
-    uses: ./.github/workflows/rust-auto-release.yml
-    with:
-      bump-type: ${{ inputs.bump-type }}
+    if: inputs.family == 'direct' && inputs.target == 'helm-chart-release'
+    uses: ./.github/workflows/helm-chart-release.yml
     secrets: inherit
 
-  release-go:
+  direct-auto-release:
     needs: validate
-    if: inputs.profile == 'go' && inputs.stages != 'ci'
-    uses: ./.github/workflows/go-auto-release.yml
+    if: inputs.family == 'direct' && inputs.target == 'auto-release'
+    uses: ./.github/workflows/auto-release.yml
     secrets: inherit
 
-  release-ruby-gem:
+  direct-auto-release-min:
     needs: validate
-    if: inputs.profile == 'ruby-gem' && inputs.stages != 'ci'
-    uses: ./.github/workflows/gem-release.yml
+    if: inputs.family == 'direct' && inputs.target == 'auto-release-min'
+    uses: ./.github/workflows/auto-release-min.yml
     secrets: inherit
 
-  release-nix-image:
+  direct-release-pipeline:
     needs: validate
-    if: inputs.profile == 'nix-image' && inputs.stages != 'ci'
-    uses: ./.github/workflows/nix-image-auto-release.yml
+    if: inputs.family == 'direct' && inputs.target == 'release-pipeline'
+    uses: ./.github/workflows/release-pipeline.yml
     secrets: inherit
 
-  release-node-package:
+  direct-pleme-stack:
     needs: validate
-    if: inputs.profile == 'node-package' && inputs.stages != 'ci'
-    uses: ./.github/workflows/npm-auto-release.yml
+    if: inputs.family == 'direct' && inputs.target == 'pleme-stack'
+    uses: ./.github/workflows/pleme-stack.yml
     secrets: inherit
 
-  release-python-package:
+  direct-super-cache-ci-build-matrix:
     needs: validate
-    if: inputs.profile == 'python-package' && inputs.stages != 'ci'
-    uses: ./.github/workflows/python-auto-release.yml
-    secrets: inherit
-
-  release-ansible-collection:
-    needs: validate
-    if: inputs.profile == 'ansible-collection' && inputs.stages != 'ci'
-    uses: ./.github/workflows/ansible-collection-release.yml
-    secrets: inherit
-
-  release-caixa-package:
-    needs: validate
-    if: inputs.profile == 'caixa-package' && inputs.stages != 'ci'
-    uses: ./.github/workflows/caixa-publish.yml
-    secrets: inherit
-
-  release-helm-chart:
-    needs: validate
-    if: inputs.profile == 'helm-chart' && inputs.stages != 'ci'
-    uses: ./.github/workflows/helm-publish.yml
-    secrets: inherit
-
-  release-container-image:
-    needs: validate
-    if: inputs.profile == 'container-image' && inputs.stages != 'ci'
-    uses: ./.github/workflows/image-push.yml
-    secrets: inherit
-
-  release-iac-crossplane:
-    needs: validate
-    if: inputs.profile == 'iac-crossplane' && inputs.stages != 'ci'
-    uses: ./.github/workflows/crossplane-provider-publish.yml
-    secrets: inherit
-
-  release-iac-terraform:
-    needs: validate
-    if: inputs.profile == 'iac-terraform' && inputs.stages != 'ci'
-    uses: ./.github/workflows/terraform-provider-publish.yml
+    if: inputs.family == 'direct' && inputs.target == 'super-cache-ci-build-matrix'
+    uses: ./.github/workflows/super-cache-ci-build-matrix.yml
     secrets: inherit

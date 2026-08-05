@@ -1,0 +1,43 @@
+name: pleme-go
+
+# TIER-2 COMPOSER for the `go` family — 3 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-go(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: go-auto-release, go-binary-release, go-gen-spec"
+        required: true
+        type: string
+
+jobs:
+  go-auto-release:
+    if: inputs.target == 'go-auto-release'
+    uses: ./.github/workflows/go-auto-release.yml
+    secrets: inherit
+
+  go-binary-release:
+    if: inputs.target == 'go-binary-release'
+    uses: ./.github/workflows/go-binary-release.yml
+    secrets: inherit
+
+  go-gen-spec:
+    if: inputs.target == 'go-gen-spec'
+    uses: ./.github/workflows/go-gen-spec.yml
+    secrets: inherit

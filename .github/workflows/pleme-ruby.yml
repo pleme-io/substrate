@@ -1,0 +1,43 @@
+name: pleme-ruby
+
+# TIER-2 COMPOSER for the `ruby` family — 3 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-ruby(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: gem-auto-bump, gem-ci, gem-release"
+        required: true
+        type: string
+
+jobs:
+  gem-auto-bump:
+    if: inputs.target == 'gem-auto-bump'
+    uses: ./.github/workflows/gem-auto-bump.yml
+    secrets: inherit
+
+  gem-ci:
+    if: inputs.target == 'gem-ci'
+    uses: ./.github/workflows/gem-ci.yml
+    secrets: inherit
+
+  gem-release:
+    if: inputs.target == 'gem-release'
+    uses: ./.github/workflows/gem-release.yml
+    secrets: inherit

@@ -1,0 +1,73 @@
+name: pleme-rust
+
+# TIER-2 COMPOSER for the `rust` family — 9 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-rust(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: cargo-auto-release, cargo-gate-ci, cargo-publish-each-member-auto-release, nix-devshell-cargo-test, nix-image-auto-release, rust-auto-release, rust-binary-auto-release, rust-binary-release, rust-release"
+        required: true
+        type: string
+
+jobs:
+  cargo-auto-release:
+    if: inputs.target == 'cargo-auto-release'
+    uses: ./.github/workflows/cargo-auto-release.yml
+    secrets: inherit
+
+  cargo-gate-ci:
+    if: inputs.target == 'cargo-gate-ci'
+    uses: ./.github/workflows/cargo-gate-ci.yml
+    secrets: inherit
+
+  cargo-publish-each-member-auto-release:
+    if: inputs.target == 'cargo-publish-each-member-auto-release'
+    uses: ./.github/workflows/cargo-publish-each-member-auto-release.yml
+    secrets: inherit
+
+  nix-devshell-cargo-test:
+    if: inputs.target == 'nix-devshell-cargo-test'
+    uses: ./.github/workflows/nix-devshell-cargo-test.yml
+    secrets: inherit
+
+  nix-image-auto-release:
+    if: inputs.target == 'nix-image-auto-release'
+    uses: ./.github/workflows/nix-image-auto-release.yml
+    secrets: inherit
+
+  rust-auto-release:
+    if: inputs.target == 'rust-auto-release'
+    uses: ./.github/workflows/rust-auto-release.yml
+    secrets: inherit
+
+  rust-binary-auto-release:
+    if: inputs.target == 'rust-binary-auto-release'
+    uses: ./.github/workflows/rust-binary-auto-release.yml
+    secrets: inherit
+
+  rust-binary-release:
+    if: inputs.target == 'rust-binary-release'
+    uses: ./.github/workflows/rust-binary-release.yml
+    secrets: inherit
+
+  rust-release:
+    if: inputs.target == 'rust-release'
+    uses: ./.github/workflows/rust-release.yml
+    secrets: inherit

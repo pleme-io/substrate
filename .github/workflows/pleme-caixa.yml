@@ -1,0 +1,58 @@
+name: pleme-caixa
+
+# TIER-2 COMPOSER for the `caixa` family — 6 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-caixa(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: caixa-auto-release, caixa-forge, caixa-publish-tlisp, caixa-publish, caixa-tlisp-auto-release, caixa-validate"
+        required: true
+        type: string
+
+jobs:
+  caixa-auto-release:
+    if: inputs.target == 'caixa-auto-release'
+    uses: ./.github/workflows/caixa-auto-release.yml
+    secrets: inherit
+
+  caixa-forge:
+    if: inputs.target == 'caixa-forge'
+    uses: ./.github/workflows/caixa-forge.yml
+    secrets: inherit
+
+  caixa-publish-tlisp:
+    if: inputs.target == 'caixa-publish-tlisp'
+    uses: ./.github/workflows/caixa-publish-tlisp.yml
+    secrets: inherit
+
+  caixa-publish:
+    if: inputs.target == 'caixa-publish'
+    uses: ./.github/workflows/caixa-publish.yml
+    secrets: inherit
+
+  caixa-tlisp-auto-release:
+    if: inputs.target == 'caixa-tlisp-auto-release'
+    uses: ./.github/workflows/caixa-tlisp-auto-release.yml
+    secrets: inherit
+
+  caixa-validate:
+    if: inputs.target == 'caixa-validate'
+    uses: ./.github/workflows/caixa-validate.yml
+    secrets: inherit

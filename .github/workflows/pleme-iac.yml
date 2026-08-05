@@ -1,0 +1,53 @@
+name: pleme-iac
+
+# TIER-2 COMPOSER for the `iac` family — 5 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-iac(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: crossplane-function-auto-release, crossplane-provider-publish, pulumi-provider-publish, steampipe-plugin-publish, terraform-provider-publish"
+        required: true
+        type: string
+
+jobs:
+  crossplane-function-auto-release:
+    if: inputs.target == 'crossplane-function-auto-release'
+    uses: ./.github/workflows/crossplane-function-auto-release.yml
+    secrets: inherit
+
+  crossplane-provider-publish:
+    if: inputs.target == 'crossplane-provider-publish'
+    uses: ./.github/workflows/crossplane-provider-publish.yml
+    secrets: inherit
+
+  pulumi-provider-publish:
+    if: inputs.target == 'pulumi-provider-publish'
+    uses: ./.github/workflows/pulumi-provider-publish.yml
+    secrets: inherit
+
+  steampipe-plugin-publish:
+    if: inputs.target == 'steampipe-plugin-publish'
+    uses: ./.github/workflows/steampipe-plugin-publish.yml
+    secrets: inherit
+
+  terraform-provider-publish:
+    if: inputs.target == 'terraform-provider-publish'
+    uses: ./.github/workflows/terraform-provider-publish.yml
+    secrets: inherit

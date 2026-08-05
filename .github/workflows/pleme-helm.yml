@@ -1,0 +1,43 @@
+name: pleme-helm
+
+# TIER-2 COMPOSER for the `helm` family — 3 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-helm(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: helm-auto-release, helm-monorepo-auto-release, helm-publish"
+        required: true
+        type: string
+
+jobs:
+  helm-auto-release:
+    if: inputs.target == 'helm-auto-release'
+    uses: ./.github/workflows/helm-auto-release.yml
+    secrets: inherit
+
+  helm-monorepo-auto-release:
+    if: inputs.target == 'helm-monorepo-auto-release'
+    uses: ./.github/workflows/helm-monorepo-auto-release.yml
+    secrets: inherit
+
+  helm-publish:
+    if: inputs.target == 'helm-publish'
+    uses: ./.github/workflows/helm-publish.yml
+    secrets: inherit

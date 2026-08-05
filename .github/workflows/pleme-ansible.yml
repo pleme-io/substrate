@@ -1,0 +1,78 @@
+name: pleme-ansible
+
+# TIER-2 COMPOSER for the `ansible` family — 10 reusables.
+#
+# Called by pleme.yml. Calling it directly also works and simply spends one
+# fewer chain level.
+#
+# WHY A SECOND TIER EXISTS: GitHub caps a workflow at 20 `uses:` calls, so one
+# file cannot dispatch to all 73 catalogued reusables. Family composers are
+# what make near-total coverage expressible — the top level dispatches to 10
+# of these instead of to 63 leaves.
+#
+# WHY ONLY *FLAT* LEAVES LIVE HERE: GitHub allows a chain of 4 workflows, so
+# consumer(1) -> pleme(2) -> pleme-ansible(3) -> leaf(4) is exactly 4, and legal
+# ONLY while the leaf calls no reusable of its own. Every member below was
+# verified to nest zero. The 9 reusables that DO nest (cargo-ci,
+# pre-merge-gate, cargo-release, helm-chart-release, auto-release, …) are
+# dispatched DIRECTLY from pleme.yml, because routing them through here would
+# make the chain 5 and the run would not start.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "One of: ansible-collection-ansible-test, ansible-collection-auto-bump, ansible-collection-auto-merge, ansible-collection-ci, ansible-collection-docs-lint, ansible-collection-integration-live, ansible-collection-matrix, ansible-collection-published-install, ansible-collection-release, ansible-collection-upstream-watch"
+        required: true
+        type: string
+
+jobs:
+  ansible-collection-ansible-test:
+    if: inputs.target == 'ansible-collection-ansible-test'
+    uses: ./.github/workflows/ansible-collection-ansible-test.yml
+    secrets: inherit
+
+  ansible-collection-auto-bump:
+    if: inputs.target == 'ansible-collection-auto-bump'
+    uses: ./.github/workflows/ansible-collection-auto-bump.yml
+    secrets: inherit
+
+  ansible-collection-auto-merge:
+    if: inputs.target == 'ansible-collection-auto-merge'
+    uses: ./.github/workflows/ansible-collection-auto-merge.yml
+    secrets: inherit
+
+  ansible-collection-ci:
+    if: inputs.target == 'ansible-collection-ci'
+    uses: ./.github/workflows/ansible-collection-ci.yml
+    secrets: inherit
+
+  ansible-collection-docs-lint:
+    if: inputs.target == 'ansible-collection-docs-lint'
+    uses: ./.github/workflows/ansible-collection-docs-lint.yml
+    secrets: inherit
+
+  ansible-collection-integration-live:
+    if: inputs.target == 'ansible-collection-integration-live'
+    uses: ./.github/workflows/ansible-collection-integration-live.yml
+    secrets: inherit
+
+  ansible-collection-matrix:
+    if: inputs.target == 'ansible-collection-matrix'
+    uses: ./.github/workflows/ansible-collection-matrix.yml
+    secrets: inherit
+
+  ansible-collection-published-install:
+    if: inputs.target == 'ansible-collection-published-install'
+    uses: ./.github/workflows/ansible-collection-published-install.yml
+    secrets: inherit
+
+  ansible-collection-release:
+    if: inputs.target == 'ansible-collection-release'
+    uses: ./.github/workflows/ansible-collection-release.yml
+    secrets: inherit
+
+  ansible-collection-upstream-watch:
+    if: inputs.target == 'ansible-collection-upstream-watch'
+    uses: ./.github/workflows/ansible-collection-upstream-watch.yml
+    secrets: inherit

@@ -145,7 +145,7 @@
   :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain)
   :outputs   ()
   :secrets   ()
-  :consumers 12)
+  :consumers 13)
 
 (defworkflow crates-publish
   :file      "crates-publish.yml"
@@ -507,6 +507,86 @@
   :secrets   ()
   :consumers 0)
 
+(defworkflow pleme-ansible
+  :file      "pleme-ansible.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-caixa
+  :file      "pleme-caixa.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-container
+  :file      "pleme-container.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-go
+  :file      "pleme-go.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-helm
+  :file      "pleme-helm.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-iac
+  :file      "pleme-iac.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-ops
+  :file      "pleme-ops.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-publish
+  :file      "pleme-publish.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-ruby
+  :file      "pleme-ruby.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme-rust
+  :file      "pleme-rust.yml"
+  :pattern   family-composer
+  :inputs    (target)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
 (defworkflow pleme-stack
   :file      "pleme-stack.yml"
   :pattern   stack-composition
@@ -518,7 +598,7 @@
 (defworkflow pleme
   :file      "pleme.yml"
   :pattern   universal-composer
-  :inputs    (profile stages bump-type runner)
+  :inputs    (family target runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)
