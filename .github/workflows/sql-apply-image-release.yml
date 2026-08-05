@@ -36,6 +36,10 @@ on:
       - 'tools/sql-apply/**'
       - 'lib/build/sql-apply.nix'
       - 'lib/build/sql-apply-image.nix'
+      # flake.nix defines `apps."release:sql-apply"` -- the thing this workflow
+      # RUNS. Omitting it meant a fix to the release app itself pushed without
+      # triggering anything, which reads exactly like a green build.
+      - 'flake.nix'
       - '.github/workflows/sql-apply-image-release.yml'
   workflow_dispatch: {}
 
