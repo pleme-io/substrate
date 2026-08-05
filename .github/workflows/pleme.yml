@@ -20,25 +20,31 @@ name: pleme
 # workflow it fronts is the one way to make it harmful, because the dispatcher
 # is the thing nobody reads.
 #
-# WHY IT IS NOT "EVERY POSSIBLE GHA BEHAVIOUR" IN ONE FILE
+# WHY 14 PROFILES AND NOT ALL 73 REUSABLES — the limit, measured
 #
-# GitHub caps a workflow at 20 `uses:` calls and reusable nesting at 4 levels.
-# A single file enumerating all 72 reusables is therefore not expressible, and
-# a file approaching the cap would put its behaviour in a giant `if:` matrix —
-# the least testable construct Actions offers, and the exact shape of the
-# `provider.opencode`-style failure where one bad key takes down everything.
+# This file sits at 20 `uses:` calls, which is EXACTLY GitHub's per-workflow
+# cap. Not a design preference and not room left on the table: the boundary is
+# consumed. 14 profiles reach 19 of the catalogue's 73 reusables, which is
+# 824 of 1481 measured consumer call-sites — 56% of everything the fleet
+# actually calls, in one entry point.
 #
-# So the tree is TWO layers by construction: this composer covers the profiles
-# that account for the overwhelming majority of the fleet, and the catalog is
-# the complete index for anything outside them. A consumer with an unusual
-# shape calls its reusable directly — that is a supported answer, not a
-# fallback, and `workflow-shim-lint` accepts it identically.
+# The obvious escape — a tier of per-family sub-composers — is NOT available,
+# and that was measured rather than assumed. GitHub allows a chain of 4
+# workflows, and several leaves already spend a level of it: cargo-ci.yml and
+# pre-merge-gate.yml each call a reusable of their own. So
+# consumer(1) → pleme(2) → cargo-ci(3) → its child(4) is already AT the limit.
+# Inserting pleme-rust(3) would make it 5 and the run would not start.
 #
-# HONEST STATUS: NEW, and at 0 consumers. Every arm below is a workflow with
-# real adoption (362, 337, 166, …), but this composition of them has never
-# run. Treat it as available, not as proven — the fleet already carries 34
-# zero-consumer reusables, and this file should not be quoted as though it
-# were load-bearing until something calls it.
+# So the structure is two layers because the platform makes it two layers:
+# this composer for the profiles that carry the majority of call-sites, and
+# catalog/workflows.lisp as the complete index for the other 54. Calling a
+# reusable directly stays a first-class answer — `workflow-shim-lint` accepts
+# it identically, and for the 54 it is the ONLY answer.
+#
+# HONEST STATUS: 0 consumers. Every arm is a workflow with real adoption
+# (362, 337, 166, 164, …), but this composition of them has never run. The
+# fleet already carries 34 zero-consumer reusables; do not cite this one as
+# load-bearing until something calls it.
 
 on:
   workflow_call:
@@ -47,14 +53,21 @@ on:
         description: >-
           The repo's shape. Determines which catalogued reusables run.
 
-            rust-workspace   cargo workspace with a flake  (cargo-ci + cargo-auto-release)
-            rust-bare        cargo, NO flake.nix           (cargo-gate-ci + rust-auto-release)
-            go               Go module                     (go-auto-release)
-            ruby-gem         Ruby gem                      (gem-ci + gem-release)
-            nix-image        Nix-built container image     (nix-image-auto-release)
-            action-repo      a pleme-io/actions-style repo (pre-merge-gate only; release
-                             lives in pleme-actions' release-action.yml, which a repo
-                             calls directly — see catalog note below)
+            rust-workspace     cargo workspace WITH a flake   (cargo-ci + cargo-auto-release)
+            rust-bare          cargo, NO flake.nix            (cargo-gate-ci + rust-auto-release)
+            go                 Go module                      (go-auto-release)
+            ruby-gem           Ruby gem                       (gem-ci + gem-auto-bump + gem-release)
+            nix-image          Nix-built container image      (nix-image-auto-release)
+            node-package       npm package                    (npm-auto-release)
+            python-package     Python package                 (python-auto-release)
+            ansible-collection Ansible collection             (ansible-collection-ci + -release)
+            caixa-package      a (defcaixa …) package         (caixa-validate + caixa-publish)
+            helm-chart         Helm chart                     (helm-publish)
+            container-image    prebuilt image push            (image-push)
+            iac-crossplane     Crossplane provider            (crossplane-provider-publish)
+            iac-terraform      Terraform provider             (terraform-provider-publish)
+            action-repo        a pleme-io/actions-style repo  (gate only; its release lives
+                               in pleme-actions' release-action.yml, called directly)
         required: true
         type: string
       stages:
@@ -85,7 +98,11 @@ jobs:
       - uses: pleme-io/actions/tatara-script@main
         with:
           script: |
-            (define known (list "rust-workspace" "rust-bare" "go" "ruby-gem" "nix-image" "action-repo"))
+            (define known
+              (list
+                "rust-workspace" "rust-bare" "go" "ruby-gem" "nix-image" "node-package"
+                "python-package" "ansible-collection" "caixa-package" "helm-chart"
+                "container-image" "iac-crossplane" "iac-terraform" "action-repo"))
             (define p (env-get "PROFILE" ""))
             (define s (env-get "STAGES" "both"))
             (cond
@@ -117,6 +134,18 @@ jobs:
     needs: validate
     if: inputs.profile == 'ruby-gem' && inputs.stages != 'release'
     uses: ./.github/workflows/gem-ci.yml
+    secrets: inherit
+
+  ci-ansible-collection:
+    needs: validate
+    if: inputs.profile == 'ansible-collection' && inputs.stages != 'release'
+    uses: ./.github/workflows/ansible-collection-ci.yml
+    secrets: inherit
+
+  ci-caixa-package:
+    needs: validate
+    if: inputs.profile == 'caixa-package' && inputs.stages != 'release'
+    uses: ./.github/workflows/caixa-validate.yml
     secrets: inherit
 
   # Universal quality gate — every profile gets it. This is the job carrying
@@ -161,4 +190,52 @@ jobs:
     needs: validate
     if: inputs.profile == 'nix-image' && inputs.stages != 'ci'
     uses: ./.github/workflows/nix-image-auto-release.yml
+    secrets: inherit
+
+  release-node-package:
+    needs: validate
+    if: inputs.profile == 'node-package' && inputs.stages != 'ci'
+    uses: ./.github/workflows/npm-auto-release.yml
+    secrets: inherit
+
+  release-python-package:
+    needs: validate
+    if: inputs.profile == 'python-package' && inputs.stages != 'ci'
+    uses: ./.github/workflows/python-auto-release.yml
+    secrets: inherit
+
+  release-ansible-collection:
+    needs: validate
+    if: inputs.profile == 'ansible-collection' && inputs.stages != 'ci'
+    uses: ./.github/workflows/ansible-collection-release.yml
+    secrets: inherit
+
+  release-caixa-package:
+    needs: validate
+    if: inputs.profile == 'caixa-package' && inputs.stages != 'ci'
+    uses: ./.github/workflows/caixa-publish.yml
+    secrets: inherit
+
+  release-helm-chart:
+    needs: validate
+    if: inputs.profile == 'helm-chart' && inputs.stages != 'ci'
+    uses: ./.github/workflows/helm-publish.yml
+    secrets: inherit
+
+  release-container-image:
+    needs: validate
+    if: inputs.profile == 'container-image' && inputs.stages != 'ci'
+    uses: ./.github/workflows/image-push.yml
+    secrets: inherit
+
+  release-iac-crossplane:
+    needs: validate
+    if: inputs.profile == 'iac-crossplane' && inputs.stages != 'ci'
+    uses: ./.github/workflows/crossplane-provider-publish.yml
+    secrets: inherit
+
+  release-iac-terraform:
+    needs: validate
+    if: inputs.profile == 'iac-terraform' && inputs.stages != 'ci'
+    uses: ./.github/workflows/terraform-provider-publish.yml
     secrets: inherit
