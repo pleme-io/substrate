@@ -214,6 +214,30 @@ let
       group = spec.group or null;
       restart = spec.restart or "on-failure";
       restartSec = spec.restartSec or null;
+      # ── ★ A START LIMIT THAT CAN ACTUALLY BE REACHED ────────────────────
+      # systemd's default limit is `StartLimitBurst=5` starts within
+      # `StartLimitIntervalSec=10s`. A unit whose `RestartSec` is comparable to
+      # or larger than that window can never accumulate 5 starts inside it, so
+      # the limit is UNREACHABLE and a unit whose failure is PERMANENT restarts
+      # forever — in `activating`, a state `systemctl --failed` does not list.
+      #
+      # MEASURED 2026-08-05 on rio: the fleet guard found ELEVEN such units on
+      # one node, several of them emitted by factories like this one. The live
+      # ones that night: `wadachi-daemon` at 531 restarts, `sui-cache-serve`
+      # crashlooping on a missing key, and `seed-grafana-*` at NRestarts=10854
+      # over ~15h — none of them in any failed-unit list.
+      #
+      # `null` OMITS both keys, mirroring how `restart = null` omits Restart:
+      # a unit whose permanent death is worse than its looping legitimately
+      # wants unbounded retry, and upstream nixpkgs ships `sshd` and `k3s` that
+      # way on purpose (note 0 DISABLES the limit rather than tightening it).
+      # A no-retry oneshot (`restart = null`) needs no limit either.
+      startLimitIntervalSec =
+        if (spec.restart or "on-failure") == null then null
+        else spec.startLimitIntervalSec or 300;
+      startLimitBurst =
+        if (spec.restart or "on-failure") == null then null
+        else spec.startLimitBurst or 3;
       remainAfterExit = spec.remainAfterExit or null;
       execStartPre = spec.execStartPre or [ ];
       execStartPost = spec.execStartPost or [ ];
@@ -254,6 +278,11 @@ let
         // optionalAttrs (after != [ ]) { inherit after; }
         // optionalAttrs (before != [ ]) { inherit before; }
         // optionalAttrs (wantedBy != [ ]) { inherit wantedBy; }
+        # [Unit] keys, NOT serviceConfig. In [Service] systemd logs "Unknown
+        # key name" and IGNORES them, so the limit would read as set and
+        # enforce nothing — the same invisible-failure class it closes.
+        // optionalAttrs (startLimitIntervalSec != null) { inherit startLimitIntervalSec; }
+        // optionalAttrs (startLimitBurst != null) { inherit startLimitBurst; }
         // optionalAttrs (environment != { }) { inherit environment; }
         // serviceExtra;
     in

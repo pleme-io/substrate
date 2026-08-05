@@ -420,6 +420,17 @@ in
       after = [ "network-online.target" "dnsmasq.service" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      # [Unit] keys, at the SERVICE level rather than inside serviceConfig —
+      # systemd ignores StartLimit* in [Service] with "Unknown key name", so
+      # this placement is the whole point and is pinned here on purpose.
+      # Added 2026-08-05: `toride` was one of ELEVEN units the fleet guard
+      # found on rio behind a start limit it could never reach (RestartSec=5
+      # against the default 5-starts-per-10s window), so a permanent failure
+      # would restart it forever in `activating` — invisible to
+      # `systemctl --failed`. This characterization test CAUGHT the factory
+      # change, which is what it is for.
+      startLimitIntervalSec = 300;
+      startLimitBurst = 3;
       serviceConfig = {
         ExecStart = "/nix/store/x/bin/toride daemon /nix/store/y-toride.conf";
         Type = "simple";
