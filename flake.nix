@@ -651,31 +651,52 @@
         # Additive: no consumer reads `substrate.apps`, and adding the output
         # cannot change what any existing `packages`/`lib` consumer resolves.
         apps = eachSystem (system: {
-          "release:sql-apply" = self.lib.${system}.mkImageReleaseApp {
-            name = "sql-apply";
-            registry = "ghcr.io/pleme-io/sql-apply";
-            # amd64 ONLY, overriding the helper's dual-arch default.
-            #
-            # The default is ["x86_64-linux" "aarch64-linux"], and because the
-            # helper interpolates BOTH image derivations into the release
-            # script, running it on one runner tries to build the other arch
-            # there: `Reason: platform mismatch / Required system:
-            # 'aarch64-linux' / Current system: 'x86_64-linux'` (measured, run
-            # 31002775957). A dual-arch release needs a runner per arch plus a
-            # manifest join, which is exactly the shape hardened-images uses --
-            # release-vector + release-vector-arm64 + join-vector.
-            #
-            # amd64 is also what this image is FOR: every hardened-* image in
-            # Camelot's Zot is amd64-only (verified against the registry: the
-            # node-exporter, kube-state-metrics, keda and rabbitmq manifests all
-            # report linux/amd64), and the Jobs that will run sql-apply schedule
-            # on the amd64 pool. Adding arm64 is the split-plus-join above, not
-            # a wider default here.
-            systems = [ "x86_64-linux" ];
-            mkImage = sys: import ./lib/build/sql-apply-image.nix {
-              pkgs = import nixpkgs { system = sys; };
+          # Pushes through doca (oci-push) DIRECTLY rather than through
+          # substrate's own mkImageReleaseApp, for a structural reason:
+          # mkImageReleaseApp emits a `forge` invocation, and substrate resolves
+          # forge as `inputs.forge or null` -- an input it never declares -- so
+          # the app calls a bare `forge` nothing puts on PATH and the push dies
+          # with `forge: not found`, exit 127 (measured, run 31003430292).
+          # hardened-images does not use that helper either; its own mkPushApp
+          # shells straight to doca, which substrate DOES package. Same shape
+          # here.
+          #
+          # amd64 ONLY. mkImageReleaseApp's dual-arch default interpolates both
+          # image derivations into one script, so running it on a single runner
+          # tries to build the other arch there -- `Reason: platform mismatch /
+          # Required system: 'aarch64-linux' / Current system: 'x86_64-linux'`
+          # (measured, run 31002775957). Dual-arch needs a runner per arch plus
+          # a manifest join, the release-vector + release-vector-arm64 +
+          # join-vector shape. amd64 is also what this image is FOR: every
+          # hardened-* image in Camelot's Zot is amd64-only (verified against
+          # the registry) and the Jobs that run sql-apply schedule on the amd64
+          # pool.
+          #
+          # Credentials are NOT handled here: the release workflow's registry
+          # login writes ~/.docker/config.json, which doca reads through its own
+          # docker_config_credentials path.
+          "release:sql-apply" =
+            let
+              pkgsHere = import nixpkgs { inherit system; };
+              image = import ./lib/build/sql-apply-image.nix {
+                pkgs = import nixpkgs { system = "x86_64-linux"; };
+              };
+              doca = self.packages.${system}.oci-push;
+            in
+            {
+              type = "app";
+              program = toString (pkgsHere.writeShellScript "release-sql-apply" ''
+                set -eu
+                sha="''${GITHUB_SHA:-dev}"
+                exec ${doca}/bin/oci-push push \
+                  --backend native \
+                  --registry ghcr.io \
+                  --image pleme-io/sql-apply \
+                  --tag "amd64-''${sha}" \
+                  --additional-tags amd64-latest \
+                  --tarball ${image}
+              '');
             };
-          };
         });
 
         packages = eachSystem (system: {
