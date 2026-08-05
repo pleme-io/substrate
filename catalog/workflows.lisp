@@ -115,6 +115,14 @@
   :secrets   (ZOT_PASSWORD SOURCE_PASSWORD CA_CERT_TOKEN)
   :consumers 35)
 
+(defworkflow cargo-ci
+  :file      "cargo-ci.yml"
+  :pattern   rust-workspace
+  :inputs    (flake-args devshell test-args build-targets fmt-check devshell-args)
+  :outputs   ()
+  :secrets   ()
+  :consumers 24)
+
 (defworkflow reusable-flakehub
   :file      "reusable-flakehub.yml"
   :pattern   other
@@ -122,14 +130,6 @@
   :outputs   ()
   :secrets   ()
   :consumers 22)
-
-(defworkflow cargo-ci
-  :file      "cargo-ci.yml"
-  :pattern   rust-workspace
-  :inputs    (flake-args devshell test-args build-targets fmt-check devshell-args)
-  :outputs   ()
-  :secrets   ()
-  :consumers 20)
 
 (defworkflow cargo-publish-each-member-auto-release
   :file      "cargo-publish-each-member-auto-release.yml"
@@ -387,6 +387,14 @@
   :secrets   (KUBECONFIG_B64 SLACK_WEBHOOK_URL)
   :consumers 0)
 
+(defworkflow codeql-scan
+  :file      "codeql-scan.yml"
+  :pattern   gate
+  :inputs    (languages runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
 (defworkflow comment-command-dispatch
   :file      "comment-command-dispatch.yml"
   :pattern   other
@@ -423,6 +431,14 @@
   :file      "cse-audit.yml"
   :pattern   gate
   :inputs    (workspace_root strict only)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow cve-suppression-gate
+  :file      "cve-suppression-gate.yml"
+  :pattern   gate
+  :inputs    (fail-on-violation runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -623,6 +639,14 @@
   :file      "release-pipeline.yml"
   :pattern   other
   :inputs    (build-container image)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow retirada-ci-watch
+  :file      "retirada-ci-watch.yml"
+  :pattern   ops
+  :inputs    (watch-repo watch-workflow dry-run loop-for-secs poll-interval-secs source-dir runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)

@@ -1,0 +1,79 @@
+name: retirada-ci-watch
+
+# Watches a workflow for jobs STARVED on the self-hosted pool — queued with no
+# runner ever assigned until GitHub's 24h queue timeout gives up. Confirmed
+# 2026-07-23 against two real incidents; the failure mode is starvation, not a
+# mid-job spot reclaim.
+#
+# Three repos carried this by hand (autorevivy, hardened-images,
+# pangea-operator) with byte-identical steps differing ONLY in which repo and
+# workflow they watch. That is the definition of a parameterizable pattern, and
+# it survived an earlier sweep because the three files' comment headers — each
+# carrying its own incident evidence — made them look unlike each other. The
+# evidence belongs in the consumer; the mechanism belongs here.
+
+on:
+  workflow_call:
+    inputs:
+      watch-repo:
+        description: "owner/repo to watch, e.g. pleme-io/autorevivy"
+        required: true
+        type: string
+      watch-workflow:
+        description: "workflow file to watch, e.g. image.yml"
+        required: true
+        type: string
+      dry-run:
+        description: >-
+          Report findings without dispatching. Default true — all three
+          consumers force it, because none has an on-demand-fallback input to
+          redispatch onto yet. Flip per-repo when one does.
+        required: false
+        type: string
+        default: "true"
+      loop-for-secs:
+        required: false
+        type: string
+        default: "270"
+      poll-interval-secs:
+        required: false
+        type: string
+        default: "60"
+      source-dir:
+        description: "Directory holding the retirada-ci-watch crate."
+        required: false
+        type: string
+        default: "retirada-ci-watch"
+      runner:
+        required: false
+        type: string
+        default: "camelot-builder-pleme-eks"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  watch:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "${{ inputs.source-dir }} -> target"
+          shared-key: retirada-ci-watch
+      - run: nix shell nixpkgs#gcc -c cargo build --release --features watch-cli --bin retirada-ci-watch
+        working-directory: ${{ inputs.source-dir }}
+      - name: Watch for starved jobs
+        working-directory: ${{ inputs.source-dir }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUST_LOG: info
+        run: >-
+          ./target/release/retirada-ci-watch
+          --repo ${{ inputs.watch-repo }} --workflow ${{ inputs.watch-workflow }}
+          --loop-for-secs ${{ inputs.loop-for-secs }}
+          --poll-interval-secs ${{ inputs.poll-interval-secs }}
+          --dry-run=${{ inputs.dry-run }}

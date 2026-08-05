@@ -1,0 +1,48 @@
+name: codeql-scan
+
+# CodeQL security scanning as a reusable.
+#
+# Two repos carried this BYTE-IDENTICALLY (ansible-akeyless,
+# ansible-akeyless-gen) — an empty `diff`. The only thing that could ever vary
+# between consumers is the language matrix, so that is the one input.
+#
+# The schedule stays in the CONSUMER, not here: a reusable workflow cannot
+# carry its own `schedule:` trigger, and spreading cron times across repos is
+# deliberate anyway (both currently sit off-peak, Tuesdays 07:17 UTC, to avoid
+# fighting the daily PR rush for runner capacity).
+
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: >-
+          JSON array of CodeQL languages. Defaults to python, which is what
+          both current consumers analyze — they are pure Python + YAML.
+        required: false
+        type: string
+        default: '["python"]'
+      runner:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  analyze:
+    name: "analyze (${{ matrix.language }})"
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
