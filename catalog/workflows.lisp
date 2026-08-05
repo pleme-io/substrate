@@ -139,6 +139,14 @@
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 14)
 
+(defworkflow cargo-gate-ci
+  :file      "cargo-gate-ci.yml"
+  :pattern   rust-workspace
+  :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain)
+  :outputs   ()
+  :secrets   ()
+  :consumers 12)
+
 (defworkflow crates-publish
   :file      "crates-publish.yml"
   :pattern   other
@@ -371,14 +379,6 @@
   :secrets   (BOT_PAT)
   :consumers 0)
 
-(defworkflow cargo-gate-ci
-  :file      "cargo-gate-ci.yml"
-  :pattern   rust-workspace
-  :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain)
-  :outputs   ()
-  :secrets   ()
-  :consumers 0)
-
 (defworkflow cd-stack
   :file      "cd-stack.yml"
   :pattern   stack-composition
@@ -511,6 +511,14 @@
   :file      "pleme-stack.yml"
   :pattern   stack-composition
   :inputs    (build-container image)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
+(defworkflow pleme
+  :file      "pleme.yml"
+  :pattern   universal-composer
+  :inputs    (profile stages bump-type runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)

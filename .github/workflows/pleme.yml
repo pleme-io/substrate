@@ -1,0 +1,164 @@
+name: pleme
+
+# THE UNIVERSAL COMPOSER — one entry point over the catalogued reusables.
+#
+# A consumer that does not want to choose can call exactly this, name its
+# profile, and get the fleet-standard CI + release for that shape:
+#
+#     jobs:
+#       pleme:
+#         uses: pleme-io/substrate/.github/workflows/pleme.yml@main
+#         with:
+#           profile: rust-workspace
+#         secrets: inherit
+#
+# WHAT THIS IS AND IS NOT
+#
+# It is a DISPATCHER, not a reimplementation. Every arm delegates to a
+# workflow already in catalog/workflows.lisp; this file contributes the
+# profile vocabulary and nothing else. Adding behaviour here instead of in the
+# workflow it fronts is the one way to make it harmful, because the dispatcher
+# is the thing nobody reads.
+#
+# WHY IT IS NOT "EVERY POSSIBLE GHA BEHAVIOUR" IN ONE FILE
+#
+# GitHub caps a workflow at 20 `uses:` calls and reusable nesting at 4 levels.
+# A single file enumerating all 72 reusables is therefore not expressible, and
+# a file approaching the cap would put its behaviour in a giant `if:` matrix —
+# the least testable construct Actions offers, and the exact shape of the
+# `provider.opencode`-style failure where one bad key takes down everything.
+#
+# So the tree is TWO layers by construction: this composer covers the profiles
+# that account for the overwhelming majority of the fleet, and the catalog is
+# the complete index for anything outside them. A consumer with an unusual
+# shape calls its reusable directly — that is a supported answer, not a
+# fallback, and `workflow-shim-lint` accepts it identically.
+#
+# HONEST STATUS: NEW, and at 0 consumers. Every arm below is a workflow with
+# real adoption (362, 337, 166, …), but this composition of them has never
+# run. Treat it as available, not as proven — the fleet already carries 34
+# zero-consumer reusables, and this file should not be quoted as though it
+# were load-bearing until something calls it.
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: >-
+          The repo's shape. Determines which catalogued reusables run.
+
+            rust-workspace   cargo workspace with a flake  (cargo-ci + cargo-auto-release)
+            rust-bare        cargo, NO flake.nix           (cargo-gate-ci + rust-auto-release)
+            go               Go module                     (go-auto-release)
+            ruby-gem         Ruby gem                      (gem-ci + gem-release)
+            nix-image        Nix-built container image     (nix-image-auto-release)
+            action-repo      a pleme-io/actions-style repo (pre-merge-gate only; release
+                             lives in pleme-actions' release-action.yml, which a repo
+                             calls directly — see catalog note below)
+        required: true
+        type: string
+      stages:
+        description: "ci | release | both"
+        required: false
+        type: string
+        default: "both"
+      bump-type:
+        description: "patch | minor | major, for the release stage"
+        required: false
+        type: string
+        default: patch
+      runner:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  # ── validation ───────────────────────────────────────────────────────
+  # An unknown profile must FAIL, not silently run nothing. Every arm below
+  # is `if:`-gated, so a typo like `profile: rust_workspace` would otherwise
+  # skip every job and report a green run that did no work — the same
+  # green-over-nothing shape as the `dep-missing` defer this fleet just fixed.
+  validate:
+    name: "profile is known"
+    runs-on: ${{ inputs.runner != '' && inputs.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: pleme-io/actions/tatara-script@main
+        with:
+          script: |
+            (define known (list "rust-workspace" "rust-bare" "go" "ruby-gem" "nix-image" "action-repo"))
+            (define p (env-get "PROFILE" ""))
+            (define s (env-get "STAGES" "both"))
+            (cond
+              ((not (member? p known))
+                (log-error (string-append "unknown profile '" p "' — known: " (string-join ", " known)))
+                (exit 1))
+              ((not (member? s (list "ci" "release" "both")))
+                (log-error (string-append "unknown stages '" s "' — known: ci, release, both"))
+                (exit 1))
+              (else (log-info (string-append "profile=" p " stages=" s)) (exit 0)))
+        env:
+          PROFILE: ${{ inputs.profile }}
+          STAGES: ${{ inputs.stages }}
+
+  # ── CI stage ─────────────────────────────────────────────────────────
+  ci-rust-workspace:
+    needs: validate
+    if: inputs.profile == 'rust-workspace' && inputs.stages != 'release'
+    uses: ./.github/workflows/cargo-ci.yml
+    secrets: inherit
+
+  ci-rust-bare:
+    needs: validate
+    if: inputs.profile == 'rust-bare' && inputs.stages != 'release'
+    uses: ./.github/workflows/cargo-gate-ci.yml
+    secrets: inherit
+
+  ci-ruby-gem:
+    needs: validate
+    if: inputs.profile == 'ruby-gem' && inputs.stages != 'release'
+    uses: ./.github/workflows/gem-ci.yml
+    secrets: inherit
+
+  # Universal quality gate — every profile gets it. This is the job carrying
+  # workflow-shim-lint, so a repo adopting the composer also starts reporting
+  # its own hand-authored workflows.
+  gate:
+    needs: validate
+    if: inputs.stages != 'release'
+    uses: ./.github/workflows/pre-merge-gate.yml
+    secrets: inherit
+
+  # ── release stage ────────────────────────────────────────────────────
+  release-rust-workspace:
+    needs: validate
+    if: inputs.profile == 'rust-workspace' && inputs.stages != 'ci'
+    uses: ./.github/workflows/cargo-auto-release.yml
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets: inherit
+
+  release-rust-bare:
+    needs: validate
+    if: inputs.profile == 'rust-bare' && inputs.stages != 'ci'
+    uses: ./.github/workflows/rust-auto-release.yml
+    with:
+      bump-type: ${{ inputs.bump-type }}
+    secrets: inherit
+
+  release-go:
+    needs: validate
+    if: inputs.profile == 'go' && inputs.stages != 'ci'
+    uses: ./.github/workflows/go-auto-release.yml
+    secrets: inherit
+
+  release-ruby-gem:
+    needs: validate
+    if: inputs.profile == 'ruby-gem' && inputs.stages != 'ci'
+    uses: ./.github/workflows/gem-release.yml
+    secrets: inherit
+
+  release-nix-image:
+    needs: validate
+    if: inputs.profile == 'nix-image' && inputs.stages != 'ci'
+    uses: ./.github/workflows/nix-image-auto-release.yml
+    secrets: inherit
