@@ -80,6 +80,41 @@ const MT_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
 /// (ghcr.io) and a properly-TLS'd in-cluster registry speak HTTPS -- see
 /// `--dest-ca-cert` for pinning a self-signed in-cluster cert rather than
 /// falling back to `--insecure` (plain HTTP).
+/// Flatten an error AND its full `source()` chain into one line.
+///
+/// ── WHY THIS EXISTS (measured 2026-08-05, hardened-rabbitmq → cluster Zot) ───
+/// Every registry failure this tool reports went through `e.to_string()`, which
+/// renders only the OUTERMOST layer of the error. For a transport failure that
+/// is always the same sentence:
+///
+///     error sending request for url (https://…/v2/hardened-rabbitmq/blobs/uploads/)
+///
+/// It names the URL and says nothing about WHY. The actual cause — a rustls
+/// handshake rejection, an h2 GOAWAY, a connection reset, a refused connect —
+/// lives one or more levels down the `source()` chain, and was being discarded
+/// at the point of construction.
+///
+/// The cost of that is not cosmetic. Diagnosing one such failure took an entire
+/// session of out-of-band probing (curl from a pod, openssl on the CA,
+/// concurrent-POST tests, reading Zot's own logs) purely to recover information
+/// the error object was already carrying. Two real defects were found and fixed
+/// on the way — a stale cluster CA, and an image-pull credential absent from a
+/// namespace — and NEITHER was this error's cause, because the message could
+/// not distinguish them.
+///
+/// A tool that refuses to say why it failed makes every one of its failures cost
+/// the same as the worst one. Walking `source()` is three lines.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut cur = e.source();
+    while let Some(s) = cur {
+        out.push_str(": ");
+        out.push_str(&s.to_string());
+        cur = s.source();
+    }
+    out
+}
+
 fn protocol_for(registry: &str) -> ClientProtocol {
     let host = registry.split('/').next().unwrap_or(registry);
     let bare = host.split(':').next().unwrap_or(host);
@@ -734,7 +769,7 @@ impl PushBackend for NativeBackend {
                     .await
                     .map_err(|e| PushError::OciPush {
                         tag: tag.clone(),
-                        detail: e.to_string(),
+                        detail: error_chain(&e),
                     })?;
                 eprintln!("oci-push[native]: pushed {reference_str}");
             }
@@ -1527,7 +1562,7 @@ fn cmd_transfer<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> 
             .await
             .map_err(|e| PushError::OciPush {
                 tag: dest_ref.to_string(),
-                detail: e.to_string(),
+                detail: error_chain(&e),
             })?;
         eprintln!("oci-push[transfer]: done {src_ref} -> {dest_ref}");
         Ok::<(), PushError>(())
@@ -2382,7 +2417,7 @@ fn cmd_tag<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
                 .await
                 .map_err(|e| PushError::OciPush {
                     tag: dest.to_string(),
-                    detail: e.to_string(),
+                    detail: error_chain(&e),
                 })?;
         eprintln!("oci-push[tag]: {src} -> {dest} ({digest})");
         Ok::<(), PushError>(())
@@ -3347,9 +3382,78 @@ mod upload_plan_tests {
     }
 }
 
+// SYNTHETIC-FIXTURE — every credential-shaped string below this line is test
+// data, and there are no real ones anywhere in this file.
+//
+// This marker exists because the global block-secrets pre-commit hook matches
+// `pass(word|wd)\s*[:=]\s*<8+ non-space>`, and this module's own fixtures hit it
+// without carrying a credential:
+//
+//     let real_passwd = root.join("real-passwd");   // a PATH, not a password
+//     r#"{"auths":{"ghcr.io":{"username":"u2","password":"p2"}}}"#
+//
+// The first is a filesystem path for the authfile tests; the second is a
+// two-character dummy in a docker-config fixture. Neither authenticates against
+// anything. Without this marker every commit touching this file is refused, and
+// the habit that forms is `--no-verify` on everything — which is precisely what
+// the hook's own header warns about, and it would disarm the guard for the real
+// case. The marker is file-scoped, so the standing obligation is that a genuine
+// credential never gets added here; if one ever must be, this file gets split
+// rather than the marker widened.
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `error_chain` must reach EVERY level, not just the first cause.
+    ///
+    /// The real case this guards is a three-deep reqwest error whose outermost
+    /// layer is the useless "error sending request for url (...)" sentence. A
+    /// one-level unwrap would still have hidden the cause, so the test asserts
+    /// the DEEPEST message is present, not merely that the string got longer.
+    #[test]
+    fn error_chain_walks_every_level() {
+        #[derive(Debug)]
+        struct Layer(&'static str, Option<Box<Layer>>);
+        impl std::fmt::Display for Layer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.0)
+            }
+        }
+        impl std::error::Error for Layer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.1.as_deref().map(|l| l as &(dyn std::error::Error + 'static))
+            }
+        }
+
+        let deep = Layer(
+            "error sending request for url (https://zot/v2/x/blobs/uploads/)",
+            Some(Box::new(Layer(
+                "client error (Connect)",
+                Some(Box::new(Layer("invalid peer certificate: UnknownIssuer", None))),
+            ))),
+        );
+        let s = error_chain(&deep);
+        assert!(s.contains("error sending request"), "outermost lost: {s}");
+        assert!(s.contains("client error (Connect)"), "middle lost: {s}");
+        assert!(
+            s.contains("invalid peer certificate: UnknownIssuer"),
+            "DEEPEST cause lost -- this is the whole point of the function: {s}"
+        );
+    }
+
+    /// A lone error with no source must not gain punctuation or trailing noise.
+    #[test]
+    fn error_chain_of_a_leaf_is_unchanged() {
+        #[derive(Debug)]
+        struct Leaf;
+        impl std::fmt::Display for Leaf {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("plain failure")
+            }
+        }
+        impl std::error::Error for Leaf {}
+        assert_eq!(error_chain(&Leaf), "plain failure");
+    }
 
     fn build_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
