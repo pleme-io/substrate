@@ -1,0 +1,117 @@
+#!/usr/bin/env tatara-script
+;; gen-pin-freshness.tlisp — every gen-pin.json must name a rev whose
+;; Cargo.gen.lock is FRESH against that rev's own Cargo.lock.
+;;
+;; Replaces a `python3 - <<'PY'` heredoc that was hand-written four times in
+;; one session to diagnose a live fleet outage. That is the deshellify tell:
+;; real logic (JSON read, hashing, comparison, a verdict) with no lint, no
+;; tests, and no review, discarded after each use.
+;;
+;; WHAT IT GUARDS. gen's D2 freshness tie records, inside Cargo.gen.lock, the
+;; sha256 of the Cargo.lock it was generated from. `gen build` and the lock
+;; must therefore land in the SAME commit. substrate pins gen by rev in two
+;; independent files, so a pin can be moved onto a gen commit that broke that
+;; rule — and nothing here noticed.
+;;
+;; RECEIPT (2026-08-06). substrate 88c0ffc moved lib/build/go/gen-pin.json to
+;; gen 39878d8c, which had bumped Cargo.lock (blake3, sha2) without
+;; regenerating Cargo.gen.lock. Every Go build through substrate's gen path
+;; then died at eval with "Cargo.gen.lock is STALE (D2 freshness tie failed)".
+;; 25 repos in one rollout. The rust pin was fine, which is exactly why a
+;; per-pin check is the right shape — one pin being healthy proves nothing
+;; about the other.
+;;
+;; Usage:  tatara-script tools/gen-pin-freshness.tlisp
+;;         GEN_REPO=/path/to/gen tatara-script tools/gen-pin-freshness.tlisp
+;;
+;; Exit 0 = every pin fresh. Exit 1 = at least one pin stale or unverifiable.
+;; An unverifiable pin is a FAILURE, never a pass: a gate whose "everything is
+;; fine" and "I could not look" are the same output verifies nothing.
+
+(define GEN-REPO (env-get "GEN_REPO" "../gen"))
+(define TMP "/tmp/.gen-pin-freshness.cargo.lock")
+
+(define (status-of r) (alist-get r "status" -1))
+(define (stdout-of r) (alist-get r "stdout" ""))
+(define (stderr-of r) (alist-get r "stderr" ""))
+
+;; Read one path out of the gen repo AT a rev. Never checks out, never
+;; mutates — `git show` reads the object database directly, so this is safe
+;; to run against a working tree someone else is using.
+(define (git-show rev file)
+  (exec-capture "git" "-C" GEN-REPO "show" (string-append rev ":" file)))
+
+;; sha256 of a string, via one tool invocation. There is no hashing builtin,
+;; and `shasum` on its own is a single command, not logic-in-shell.
+(define (sha256-of text)
+  (write-file TMP text)
+  (let* ((r (exec-capture "shasum" "-a" "256" TMP)))
+    (cond
+      ((= (status-of r) 0) (first (string-split (string-trim (stdout-of r)) " ")))
+      (else ""))))
+
+;; Verdict for one pin file. Returns #t when the pin is trustworthy.
+(define (check-pin label pin-file)
+  (cond
+    ((not (path-exists? pin-file))
+      (print-line (string-format "  {}  MISSING pin file {}" label pin-file))
+      #f)
+    (else
+      (let* ((pin (json-parse (read-file pin-file)))
+             (rev (alist-get pin "rev" "")))
+        (cond
+          ((equal? rev "")
+            (print-line (string-format "  {}  pin has no `rev` field" label))
+            #f)
+          (else (check-rev label rev)))))))
+
+(define (check-rev label rev)
+  (let* ((gen-r (git-show rev "Cargo.gen.lock"))
+         (lock-r (git-show rev "Cargo.lock")))
+    (cond
+      ;; The rev is not in the local clone. NOT a pass — say so and fail.
+      ((not (= (status-of gen-r) 0))
+        (print-line (string-format "  {}  {} UNVERIFIABLE — {}" label rev
+          (string-trim (stderr-of gen-r))))
+        (print-line "        run `git -C <gen> fetch --all` and re-check")
+        #f)
+      ((not (= (status-of lock-r) 0))
+        (print-line (string-format "  {}  {} UNVERIFIABLE — no Cargo.lock at rev" label rev))
+        #f)
+      (else
+        (let* ((recorded (alist-get (json-parse (stdout-of gen-r)) "cargo_lock_sha256" ""))
+               (actual (sha256-of (stdout-of lock-r))))
+          (cond
+            ;; A rev older than the D2 field. The gate genuinely does not fire
+            ;; there, so report it as its own state rather than rounding it to
+            ;; either verdict.
+            ((equal? recorded "")
+              (print-line (string-format "  {}  {} NO-D2-FIELD (pre-dates the freshness tie)" label rev))
+              #t)
+            ((equal? recorded actual)
+              (print-line (string-format "  {}  {} FRESH" label rev))
+              #t)
+            (else
+              (print-line (string-format "  {}  {} STALE" label rev))
+              (print-line (string-format "        recorded {}" recorded))
+              (print-line (string-format "        actual   {}" actual))
+              (print-line "        gen must run `gen build` in the SAME commit as its Cargo.lock")
+              #f)))))))
+
+(print-line "gen-pin freshness")
+(print-line (string-format "gen repo: {}" GEN-REPO))
+
+(define verdicts
+  (list
+    (check-pin "go  " "lib/build/go/gen-pin.json")
+    (check-pin "rust" "lib/build/rust/gen-pin.json")))
+
+(define bad (length (filter (lambda (v) (not v)) verdicts)))
+
+(cond
+  ((= bad 0)
+    (print-line "OK — every gen pin is fresh")
+    (exit 0))
+  (else
+    (print-line (string-format "FAIL — {} pin(s) stale or unverifiable" bad))
+    (exit 1)))

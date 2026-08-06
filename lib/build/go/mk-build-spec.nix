@@ -92,6 +92,24 @@ let
     export GOPATH=$PWD/.go
     export GOCACHE=$PWD/.gocache
     export HOME=$PWD
+    # go(1) IGNORES a go.mod that sits directly in the system temp root, and a
+    # __noChroot build runs with TMPDIR == $PWD — so the module just copied
+    # here IS the temp root, and gen's `go list ./...` fails with "directory
+    # prefix . does not contain main module". Point TMPDIR at a subdirectory
+    # so $PWD stops being the temp root.
+    #
+    # Measured 2026-08-06 in isolation: go 1.25.10, 1.26.3 AND 1.26.5 all
+    # refuse it, so this is NOT a toolchain-bump regression — it is why every
+    # gen-IFD Go build failed the moment the gen pin moved off a rev that
+    # never reached this code path.
+    mkdir -p .tmp
+    export TMPDIR=$PWD/.tmp
+    # NOTE: do NOT `go mod vendor` here. It makes gen's `go list` succeed, but
+    # gen then records the module as vendored, vendorHash resolves to null, and
+    # buildGoModule fails the SAME "inconsistent vendoring" error one layer
+    # later against a source tree that has no vendor/. Measured 2026-08-06.
+    # Non-vendored support belongs in gen-gomod's RealGoBuildEnv, which
+    # hardcodes -mod=vendor + GOPROXY=off and overrides any GOFLAGS set here.
     gen build . > /dev/null
     if [ ! -f Go.build-spec.json ]; then
       echo "mkBuildSpec(go): gen build did not produce Go.build-spec.json" >&2
