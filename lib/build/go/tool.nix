@@ -140,8 +140,19 @@
     # builtins.compareVersions (NOT fragile shell parsing) — that the consuming
     # go.mod's `go` directive is not AHEAD of the toolchain. Otherwise the build
     # would fail deep in `go mod download` with the cryptic "requires go >= X
-    # (running Y; GOTOOLCHAIN=local)". Fleet rule: authored go.mod declares the
-    # MINOR only (e.g. `go 1.25`), never a patch ahead of the builder.
+    # (running Y; GOTOOLCHAIN=local)". Fleet rule: authored go.mod declares a
+    # version NOT AHEAD of the builder — that, and only that, is the predicate.
+    #
+    # DO NOT prescribe the bare minor (`go 1.26`). MEASURED 2026-08-06 with a
+    # two-module reproduction: cmd/go orders a bare `1.N` STRICTLY BELOW `1.N.0`,
+    # and a module's `go` directive must be >= every module in its graph. So
+    # `go 1.25` against a dependency declaring `go 1.25.0` fails with "updates to
+    # go.mod needed", and `go 1.26` fails against `go 1.26.0`. Today that floor is
+    # raised by every current golang.org/x/*, k8s.io/*, crossplane, connectrpc and
+    # validator release, so bare-minor is unsatisfiable for most real modules.
+    # `1.N.0` is the lowest form that clears it, which is why the remediation below
+    # suggests that rather than the minor.
+    #
     # Reading go.mod is tryEval-guarded, so a non-path / unreadable src silently
     # skips the check rather than breaking the build.
     goVersionAssert =
@@ -159,8 +170,10 @@
       in
         if req != null && builtins.compareVersions req tool > 0
         then throw ("substrate.mkGoTool: ${pname} go.mod requires 'go ${req}' but the substrate "
-          + "goToolchain is ${tool}. Pin go.mod to the minor only ('go ${lib.versions.majorMinor tool}'), "
-          + "never a patch ahead of the builder.")
+          + "goToolchain is ${tool}. Lower go.mod to at most 'go ${tool}' — the lowest form that still "
+          + "clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a bare "
+          + "'go ${lib.versions.majorMinor tool}' sorts BELOW it and will not build. "
+          + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
         else null;
 
   in builtins.seq goVersionAssert (pkgs.buildGoModule ({

@@ -206,8 +206,10 @@
       in
         if req != null && builtins.compareVersions req tool > 0
         then throw ("substrate.mkGoPrivateModule: ${pname} go.mod requires 'go ${req}' but the "
-          + "substrate goToolchain is ${tool}. Pin go.mod to the minor only "
-          + "('go ${lib.versions.majorMinor tool}'), never a patch ahead of the builder.")
+          + "substrate goToolchain is ${tool}. Lower go.mod to at most 'go ${tool}' — the lowest "
+          + "form that still clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a "
+          + "bare 'go ${lib.versions.majorMinor tool}' sorts BELOW it and will not build. "
+          + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
         else null;
 
   in builtins.seq goVersionAssert (builtins.seq _prefixCheck (pkgs.buildGoModule ({

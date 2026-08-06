@@ -86,7 +86,9 @@ let
   # ── Toolchain-parity gate (mirror of mkGoTool's goVersionAssert) ────────────
   # The spec's `-lang` follows go_version; compiling go1.26 source with a go1.25
   # toolchain yields subtly-wrong archives. Refuse at eval, pointing the operator
-  # at the fleet rule: pin go.mod to the toolchain minor, never a patch ahead.
+  # at the fleet rule: go.mod is never AHEAD of the builder. The remediation names
+  # `1.N.0` rather than a bare `1.N` because cmd/go orders bare-minor BELOW
+  # `1.N.0` — see mkGoTool's goVersionAssert header for the measurement.
   goLangAssert = spec:
     let
       req = (spec.module or { }).go_version or null;
@@ -96,9 +98,10 @@ let
     then throw ''
       package-builder(go): spec go_version ${req} is AHEAD of the substrate Go
       toolchain ${tool}. Compiling with a mismatched -lang produces wrong
-      archives. Pin the module's go directive to the toolchain minor
-      (${lib.versions.majorMinor tool}) — never a patch ahead of the builder —
-      or bump build/go/toolchain.nix.
+      archives. Lower the module's go directive to at most ${tool}; the lowest
+      form that still clears a dependency floor is ${lib.versions.majorMinor tool}.0
+      (a bare ${lib.versions.majorMinor tool} sorts BELOW it and will not build).
+      Otherwise raise the fleet pin in build/go/go-toolchain-pin.json.
     ''
     else null;
 
