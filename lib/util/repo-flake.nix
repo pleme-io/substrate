@@ -53,6 +53,11 @@
   license ? null,
 
   # Go-specific
+  # The fleet Go toolchain. Default null builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs. Only
+  # consulted when language == "go"; every other language keeps a plain package
+  # set so it never pays for a Go compiler build.
+  goToolchain ? null,
   vendorHash ? null,
   proxyVendor ? false,
   subPackages ? null,
@@ -120,7 +125,14 @@ let
     || throw "repo-flake: 'pname' is required when builder is '${builder}' (not devShell)"; true;
 in
 flake-utils.lib.eachDefaultSystem (system: let
-  pkgs = import nixpkgs { inherit system; };
+  # The compiling toolchain, not the go.mod directive, decides which stdlib
+  # links in. This was the last substrate entry point handing consumers their
+  # own nixpkgs `go`; measured 2026-08-06, that was 21 Go repos on go 1.25.4.
+  # Conditional on language so the other ten languages are untouched.
+  pkgs =
+    if language == "go"
+    then (import ../build/go/overlay.nix).mkGoPkgs { inherit nixpkgs system goToolchain; }
+    else import nixpkgs { inherit system; };
   lib = pkgs.lib;
 
   # ── Language-specific dev shell packages ───────────────────────────

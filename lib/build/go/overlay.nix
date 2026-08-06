@@ -175,6 +175,31 @@ rec {
         overlays = [ (mkGoOverlay { goToolchain = tc; }) ] ++ overlays;
       };
 
+  # Refuse a Go derivation compiled below the fleet CVE floor.
+  #
+  # mkGoPkgs makes the pinned compiler the DEFAULT; this makes an unpinned one
+  # an ERROR. Without it, a seventh entry point that forgets to call mkGoPkgs
+  # silently ships a vulnerable stdlib again — which is exactly how the hole
+  # existed while tool.nix's header already claimed the toolchain was "the
+  # single source of truth".
+  #
+  # Asserts on drv.passthru.go.version, NOT pkgs.go.version: nixpkgs aliases
+  # buildGoModule to buildGo1XXModule, so a caller naming pkgs.buildGo125Module
+  # bypasses the overlay while pkgs.go.version still reads the pinned value.
+  # Only the derivation knows which compiler actually ran.
+  assertGoFloor = { drv, what ? "a Go derivation" }:
+    let
+      pin = builtins.fromJSON (builtins.readFile ./go-toolchain-pin.json);
+      got = drv.passthru.go.version or null;
+    in
+      if got == null then drv
+      else if builtins.compareVersions got pin.cveFloor < 0
+      then throw ("substrate: ${what} was compiled with go ${got}, below the fleet CVE "
+        + "floor ${pin.cveFloor}. Build it through overlay.nix's mkGoPkgs so the pinned "
+        + "toolchain is used, or pass goToolchain explicitly. Lowering the floor needs "
+        + "'skip-go-floor: <typed-reason>' in the deviating repo's CLAUDE.md.")
+      else drv;
+
   # Get the Go toolchain without an overlay, built from the given pkgs.
   #
   # NOTE the constraint the name does not carry: this builds the toolchain WITH

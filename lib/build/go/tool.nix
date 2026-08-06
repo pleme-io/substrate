@@ -122,6 +122,7 @@
       (check.attrs "versionLdflags" versionLdflags)
     ];
     completionsHelper = import ../../util/completions.nix;
+    goOverlayLib = import ./overlay.nix;
 
     # Build ldflags: explicit ldflags take priority, otherwise construct from versionLdflags
     effectiveLdflags =
@@ -176,7 +177,7 @@
           + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
         else null;
 
-  in builtins.seq goVersionAssert (pkgs.buildGoModule ({
+  in builtins.seq goVersionAssert (goOverlayLib.assertGoFloor { what = pname; drv = pkgs.buildGoModule ({
     inherit pname version src proxyVendor doCheck tags;
     vendorHash = effectiveVendorHash;
 
@@ -193,7 +194,7 @@
   }
   // lib.optionalAttrs (subPackages != null) { inherit subPackages; }
   // lib.optionalAttrs (modRoot != null) { inherit modRoot; }
-  // extraAttrs));
+  // extraAttrs); });
 
   # Create a Nix overlay that provides multiple Go tools.
   #
