@@ -528,6 +528,23 @@ jobs:
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
+            # ── ★ AN UNREACHABLE CACHE MUST NOT KILL THE BUILD ──────────────
+            # Without these two, a configured-but-unreachable substituter is
+            # FATAL: nix aborts the build instead of falling back to building
+            # from source. MEASURED — hardened-images run 30665557380
+            # (release-clickhouse-keeper) died with
+            #   error: unable to download 'http://sui.camelot-build.svc/….narinfo':
+            #   Timeout was reached (28)
+            # A build cache is an OPTIMISATION; it must never be a liveness
+            # dependency of the thing it accelerates.
+            #
+            # The sibling `nix-image-auto-release.yml:430-431` has carried both
+            # lines; this workflow — the more widely-called of the two — did
+            # not. Same gate (`extraSubstituters` non-empty), so a consumer
+            # that configures no cache is byte-unaffected, and the pair can
+            # only ever loosen a failure into a slower success.
+            ${{ inputs.extraSubstituters && 'fallback = true' || '' }}
+            ${{ inputs.extraSubstituters && 'connect-timeout = 5' || '' }}
 
       # gen-lockfile freshness gate — conditional, zero blast radius for
       # non-gen consumers (a bare `[ -f Cargo.gen.lock ]` guard skips
