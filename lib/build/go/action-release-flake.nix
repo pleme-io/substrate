@@ -42,6 +42,9 @@
 #     };
 {
   nixpkgs,
+  # The fleet Go toolchain. Default null builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs.
+  goToolchain ? null,
   forge ? null,
 }:
 {
@@ -51,6 +54,7 @@
   ...
 } @ args:
 let
+  goOverlay = import ./overlay.nix;
   toolReleaseFlake = import ./tool-release-flake.nix {
     inherit nixpkgs;
   };
@@ -60,7 +64,7 @@ let
   toolFlake = toolReleaseFlake (builtins.removeAttrs args [ "action" ]);
 
   renderActionYml = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     rendered = import ../rust/action-yml-render.nix {
       inherit toolName action;
       inherit (pkgs) lib;
@@ -68,7 +72,7 @@ let
   in rendered;
 
   mkActionYmlPackage = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     rendered = renderActionYml system;
   in pkgs.runCommand "${toolName}-action-yml" { } ''
     mkdir -p $out
@@ -77,7 +81,7 @@ ${rendered}EOF
   '';
 
   mkWriteActionYmlApp = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     rendered = renderActionYml system;
     script = pkgs.writeShellScriptBin "write-action-yml" ''
       set -euo pipefail

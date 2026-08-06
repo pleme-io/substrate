@@ -77,7 +77,7 @@ let
   underscored = mm: builtins.replaceStrings [ "." ] [ "_" ] mm;
   squashed = mm: builtins.replaceStrings [ "." ] [ "" ] mm;
 in
-{
+rec {
   # ── mkGoToolchain — the fenix.toolchainOf analogue ──────────────────────
   #
   # Build the fleet Go toolchain from a GIVEN package set. flake.nix calls this
@@ -147,6 +147,33 @@ in
     }
     // { "go_${underscored mm}" = tc; }
     // { "buildGo${squashed mm}Module" = mkBuilder; };
+
+  # THE one way a substrate entry point constructs a Go-capable package set.
+  #
+  # Every Go builder used to do `import nixpkgs { inherit system; }` with no
+  # overlays, so the compiler was whatever the CONSUMER's nixpkgs shipped — and
+  # the compiler, not the go.mod directive, decides which stdlib is linked in.
+  # MEASURED 2026-08-06 across 68 substrate-consuming Go repos: 67 compiled with
+  # an unpinned go (1.25.4 -> 28 known stdlib vulns on 30 repos; 1.26.3 -> 5 on
+  # 36; only 1 repo was clean, and that by coincidence of a fresh lock).
+  #
+  # The toolchain is built from an UN-OVERLAID pkgs and then injected. Letting
+  # mkGoOverlay build it in place (its `goToolchain ? null` arm) recurses through
+  # the stdenv booter — measured: "infinite recursion encountered".
+  #
+  # Scoped to the returned package set only: this does not rebuild the world, it
+  # repins `go` / `buildGoModule` for the derivations this entry point creates.
+  mkGoPkgs = { nixpkgs, system, goToolchain ? null, overlays ? [ ] }:
+    let
+      basePkgs = import nixpkgs { inherit system; };
+      tc =
+        if goToolchain != null then goToolchain
+        else getGoToolchain { pkgs = basePkgs; };
+    in
+      import nixpkgs {
+        inherit system;
+        overlays = [ (mkGoOverlay { goToolchain = tc; }) ] ++ overlays;
+      };
 
   # Get the Go toolchain without an overlay, built from the given pkgs.
   #

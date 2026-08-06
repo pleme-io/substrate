@@ -27,6 +27,13 @@
 {
   nixpkgs,
   forge ? null,
+  # The fleet Go toolchain. Default `null` builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs, so a
+  # consumer gets the pin without threading a new flake input. Pass
+  # `substrate.goToolchains.${system}.stable` to reuse substrate's already-built
+  # one instead; required on a consumer older than 25.05, where building the
+  # toolchain in place aborts on the missing `replaceVars`.
+  goToolchain ? null,
 }:
 {
   toolName,
@@ -50,10 +57,18 @@ let
 
   goToolBuilder = import ./tool.nix;
   goDevenv = import ./devenv.nix;
+  goOverlay = import ./overlay.nix;
   releaseHelpers = import ../../util/release-helpers.nix;
 
+  # The compiling toolchain — not the go.mod directive — decides which stdlib
+  # ships. MEASURED 2026-08-06 across 68 substrate-consuming Go repos: 67 built
+  # with their own nixpkgs `go` (1.25.4 -> 28 known stdlib vulns on 30 repos,
+  # 1.26.3 -> 5 on 36) because this file constructed `pkgs` with no overlays.
+  # Applying the fleet overlay here pins `go` + `buildGoModule` for every
+  # consumer of this builder, with no per-repo change. Scoped to THIS pkgs
+  # instance, so it does not rebuild the world.
   mkPerSystem = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     lib = pkgs.lib;
     package = goToolBuilder.mkGoTool pkgs ({
       pname = toolName;

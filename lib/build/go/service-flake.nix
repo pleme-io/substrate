@@ -47,6 +47,9 @@
 #   numericUid = 10001      — uid > 10000, no /etc/passwd needed
 {
   nixpkgs,
+  # The fleet Go toolchain. Default null builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs.
+  goToolchain ? null,
   substrate,
   forge,
 }:
@@ -94,13 +97,14 @@
   goVersion ? null,
 }:
 let
+  goOverlay = import ./overlay.nix;
   archForSystem = {
     "x86_64-linux"  = "amd64";
     "aarch64-linux" = "arm64";
   };
 
   mkPerSystem = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     arch = archForSystem.${system};
 
     # Toolchain selection: channel-default `go` unless the consumer pins a

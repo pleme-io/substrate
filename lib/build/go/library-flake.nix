@@ -44,6 +44,9 @@
 # module trios — mostly relevant when a library ships a companion CLI shim.
 {
   nixpkgs,
+  # The fleet Go toolchain. Default null builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs.
+  goToolchain ? null,
   forge ? null,
 }:
 {
@@ -69,6 +72,8 @@ let
     else true;
 
   goLibraryCheck = import ./library-check.nix;
+
+  goOverlay = import ./overlay.nix;
   releaseHelpers = import ../../util/release-helpers.nix;
 
   # mkGoLibraryCheck has a closed attrset (no `...`) and no `modRoot`
@@ -80,7 +85,7 @@ let
     else { extraAttrs = (libArgs.extraAttrs or {}) // { inherit modRoot; }; };
 
   mkPerSystem = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     lib = pkgs.lib;
     # Build-verification derivation — compiles the library, installs nothing.
     check = goLibraryCheck.mkGoLibraryCheck pkgs ({

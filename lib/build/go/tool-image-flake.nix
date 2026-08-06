@@ -38,6 +38,8 @@
 #   nix run .#bump     — semver bump (when repo is set).
 {
   nixpkgs,
+  # The fleet Go toolchain. Default null builds the PINNED version.
+  goToolchain ? null,
   forge ? null,
 }:
 {
@@ -68,6 +70,8 @@ let
     else true;
 
   goToolBuilder = import ./tool.nix;
+
+  goOverlay = import ./overlay.nix;
   goDocker = import ./docker.nix;
   goDevenv = import ./devenv.nix;
   releaseHelpers = import ../../util/release-helpers.nix;
@@ -104,9 +108,9 @@ let
   # default (consumers can pass `env` / `extraContents` / distroless knobs).
   mkImage = arch: let
     targetSystem = archToSystem arch;
-    pkgs = import nixpkgs {
+    pkgs = goOverlay.mkGoPkgs {
+      inherit nixpkgs goToolchain;
       system = targetSystem;
-      overlays = [ ((import ./overlay.nix).mkGoOverlay {}) ];
     };
     binary = goToolBuilder.mkGoTool pkgs ({
       pname = toolName;

@@ -44,6 +44,9 @@
 # defaults to the first binary (which is also packages.default).
 {
   nixpkgs,
+  # The fleet Go toolchain. Default null builds the PINNED version
+  # (lib/build/go/go-toolchain-pin.json) from the consumer's own nixpkgs.
+  goToolchain ? null,
   forge ? null,
 }:
 {
@@ -60,6 +63,7 @@
   ...
 }:
 let
+  goOverlay = import ./overlay.nix;
   flakeWrapper = import ../../util/flake-wrapper.nix { inherit nixpkgs; };
   pkgsLib = (import nixpkgs { system = "x86_64-linux"; }).lib;
   hygiene = import ../../util/flake-hygiene.nix {
@@ -104,7 +108,7 @@ let
     else (builtins.head binaryList).name;
 
   mkPerSystem = system: let
-    pkgs = import nixpkgs { inherit system; };
+    pkgs = goOverlay.mkGoPkgs { inherit nixpkgs system goToolchain; };
     lib = pkgs.lib;
 
     # Shared source + ldflags for the whole workspace, in the exact shape
