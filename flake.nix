@@ -586,6 +586,13 @@
         # Guarded by checks.<system>.devshell-preflight above.
         devshellPreflightPath = ./lib/util/devshell-preflight.nix;
 
+        # The publish gate's environment resolution, exposed the same way and
+        # for the same reason: a workflow reaches it by path through
+        # `builtins.getFlake`, so the branch lives in Nix and the calling step
+        # is a redirect with no logic in it. See lib/util/test-env.nix's header
+        # for why this is not a `run:` block and not a .tlisp.
+        testEnvPath = ./lib/util/test-env.nix;
+
         # Standalone import paths for consumer flakes
         rustToolReleaseFlakeBuilder = ./lib/build/rust/tool-release-flake.nix;
         rustToolImageFlakeBuilder = ./lib/build/rust/tool-image-flake.nix;

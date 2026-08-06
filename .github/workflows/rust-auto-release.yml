@@ -307,25 +307,24 @@ jobs:
       # missing buildInput — a loud false RED — never a vacuous green, which
       # is what separates it from the unpinned-toolchain fallback
       # devshell-preflight.nix explicitly rejects.
+      # The BRANCH lives in lib/util/test-env.nix, next to the
+      # devshell-preflight it branches on. This step redirects stdout and does
+      # nothing else — no `if`, no `grep`, no parsing. That is the property
+      # worth holding; the language is downstream of it.
+      #
+      # It was a ~15-line `run:` with an embedded eval, a `grep -qx` and an
+      # if/else for about an hour, written by the same hand that spent the
+      # session enforcing the no-shell rule — inline shell in a workflow reads
+      # as YAML with a long string in it, so the rule does not fire.
       - name: Resolve test environment
         id: env
-        run: |
-          shell='${{ inputs.test-devshell }}'
-          [ -n "$shell" ] || shell=default
-          if nix eval --impure --raw --expr \
-            'let p = import (builtins.getFlake "github:pleme-io/substrate").devshellPreflightPath {
-                system = builtins.currentSystem;
-                devshell = "'"$shell"'";
-                devShells = (builtins.getFlake (toString ./.)).devShells or {};
-                strict = false;
-              }; in if p.ok then "ok" else "no"' 2>/dev/null | grep -qx ok
-          then
-            echo "installable=.#$shell" >> "$GITHUB_OUTPUT"
-            echo "tier=declared-devshell" >> "$GITHUB_OUTPUT"
-          else
-            echo "installable=github:pleme-io/substrate#release-gate" >> "$GITHUB_OUTPUT"
-            echo "tier=substrate-fallback" >> "$GITHUB_OUTPUT"
-          fi
+        run: >-
+          nix eval --impure --raw --expr
+          'import (builtins.getFlake "github:pleme-io/substrate").testEnvPath {
+             system    = builtins.currentSystem;
+             devshell  = "${{ inputs.test-devshell }}";
+             devShells = (builtins.getFlake (toString ./.)).devShells or {};
+           }' >> "$GITHUB_OUTPUT"
 
       # nextest comes from substrate's pin as an absolute store path, NOT
       # from the consumer's devShell — 20 of 52 consumers pin substrate at
