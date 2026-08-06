@@ -99,8 +99,9 @@ on:
         type: string
         default: "gnu"
         description: >-
-          "gnu" (default) builds the linux legs against glibc on ubuntu-22.04,
-          so the artifact runs on glibc 2.35 and newer. "musl" builds fully
+          "gnu" (default) links against the build runner's glibc, so the
+          artifact carries that runner's version as a FLOOR and will not run on
+          an older consumer. "musl" builds fully
           static linux binaries with no libc floor at all. Prefer musl for a
           CLI that has to run on arbitrary runners and images; stay on gnu for
           GUI/GPU apps, which dynamically load wayland/X/GL at runtime and do
@@ -113,19 +114,23 @@ jobs:
   build:
     strategy:
       fail-fast: false
-      # The linux legs are pinned to ubuntu-22.04, NOT ubuntu-latest. A glibc
-      # binary carries a floor equal to the glibc it was linked against, and
-      # ubuntu-latest moved to 24.04 (glibc 2.39), so artifacts silently stopped
-      # running on every 22.04 consumer with
-      #   version `GLIBC_2.39' not found (required by <binary>)
-      # Repos pin 22.04 for their own reasons (kind, older kernels), and the
-      # release must meet the consumer rather than the other way round. Building
-      # on the older runner costs nothing and lowers the floor to 2.35.
-      # linux-libc: musl removes the floor entirely; see the input's docs.
+      # The linux legs build on ubuntu-latest, and the artifact's libc floor is
+      # set by the LINKER (linux-libc), not by the runner. Those are separate
+      # concerns and conflating them is a trap with teeth: an earlier revision
+      # of this file pinned the legs to ubuntu-22.04 to lower the floor, which
+      # broke every linux release outright, because the build step itself runs
+      # `pleme-io/actions/rust-cross-build` — a tatara-script-backed action whose
+      # own binary needs glibc 2.39. The pipeline that produces a 22.04-capable
+      # binary could not run on 22.04. Receipt: tatara-lisp v0.3.36, linux legs
+      # dead with `GLIBC_2.39 not found` before cargo was ever invoked, macOS
+      # legs green.
+      # Use linux-libc: musl for an artifact with no libc floor at all. The
+      # linux-baseline job below stays pinned to 22.04 — it only RUNS the
+      # artifact and uses no tatara-script, so it is free to be the old runner.
       matrix:
         include: ${{ fromJSON(inputs.linux-libc == 'musl'
-          && '[{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-musl","suffix":"linux-x86_64"},{"os":"ubuntu-22.04","target":"aarch64-unknown-linux-musl","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]'
-          || '[{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","suffix":"linux-x86_64"},{"os":"ubuntu-22.04","target":"aarch64-unknown-linux-gnu","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]') }}
+          && '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-musl","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-musl","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]'
+          || '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -389,12 +394,23 @@ jobs:
           objdump -T "${{ inputs.binary-name }}-linux-x86_64" 2>/dev/null \
             | grep -oE 'GLIBC_[0-9.]+' | sort -Vu || echo "  none (static)"
 
-      - name: It must execute here
+      # A musl artifact claims NO libc floor, so failing to run here is a broken
+      # promise and fails the release. A gnu artifact carries the build runner's
+      # glibc as a floor by construction; that is a known property, not a
+      # regression, so it is reported loudly and does not fail 9 consumers'
+      # pipelines. Move a consumer to linux-libc: musl to get the guarantee.
+      - name: Does it run on the oldest supported runner
+        id: baseline
+        continue-on-error: ${{ inputs.linux-libc != 'musl' }}
         run: |
-          ./${{ inputs.binary-name }}-linux-x86_64 --help >/dev/null 2>&1 \
+          if ./${{ inputs.binary-name }}-linux-x86_64 --help >/dev/null 2>&1 \
             || ./${{ inputs.binary-name }}-linux-x86_64 --version >/dev/null 2>&1 \
-            || ./${{ inputs.binary-name }}-linux-x86_64 >/dev/null 2>&1
-          echo "OK: the released binary runs on $(. /etc/os-release && echo "$PRETTY_NAME"), glibc $(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
+            || ./${{ inputs.binary-name }}-linux-x86_64 >/dev/null 2>&1; then
+            echo "OK: runs on $(. /etc/os-release && echo "$PRETTY_NAME")"
+          else
+            echo "::warning::${{ inputs.binary-name }} does not run on ubuntu-22.04 (glibc $(ldd --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')). Its floor is the build runner's glibc. Set linux-libc: musl for a floor-free artifact."
+            exit 1
+          fi
 
       - name: A musl build must be statically linked
         if: inputs.linux-libc == 'musl'
