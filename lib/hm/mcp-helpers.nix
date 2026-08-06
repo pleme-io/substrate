@@ -290,6 +290,13 @@ in rec {
     '';
 
     extraArgsStr = concatStringsSep " " (map escapeShellArg (agent.extraArgs or []));
+
+    # Optional shell snippet executed after env setup but before exec.
+    # Used by context consumers (e.g. anvil's claude.ai-connector
+    # reconciliation) to reconcile drift in CLAUDE_CONFIG_DIR-managed
+    # files on every launch. Keep the snippet idempotent — it runs
+    # every invocation.
+    preExecSnippet = agent.preExec or "";
   in
     pkgs.writeShellScriptBin "${agentName}-${ctxName}" ''
       export WORKSPACE=${escapeShellArg ctxName}
@@ -297,6 +304,7 @@ in rec {
       ${configDirSetup}
       ${authExports}
       ${unsetExports}
+      ${preExecSnippet}
       exec ${agent.targetBin} \
         --settings ${settingsJson} \
         --mcp-config ${mcpJson} \
