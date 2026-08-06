@@ -57,50 +57,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Was a `python3 - <<'PY'` heredoc carrying this whole check inline.
+      # Same semantics, verified branch by branch against fixtures: name+runs
+      # required, a composite must have non-empty steps, a non-mapping top
+      # level is an error, and a glob matching nothing stays a tolerated
+      # ::warning:: + exit 0 (the glob is a caller input; zero is a real
+      # answer here, unlike in pleme-io/actions where the count is fixed).
       - name: Validate action.yml manifests
+        uses: pleme-io/actions/tatara-script@main
         env:
           ACTION_GLOB: ${{ inputs.action-glob }}
-        run: |
-          set -euo pipefail
-          # Find every manifest matching the glob and run a minimal
-          # schema check: must be valid YAML, must have `name:` and
-          # `runs:` keys at the top level. We deliberately do not
-          # depend on a third-party validator — keeping the substrate
-          # workflow dependency-free.
-          python3 - <<'PY'
-          import os
-          import sys
-          import glob
-          import yaml
-          pattern = os.environ['ACTION_GLOB']
-          paths = sorted(glob.glob(pattern, recursive=True))
-          if not paths:
-              print(f"::warning::No action.yml files matched {pattern!r}")
-              sys.exit(0)
-          bad = []
-          for p in paths:
-              with open(p) as fh:
-                  try:
-                      doc = yaml.safe_load(fh) or {}
-                  except yaml.YAMLError as e:
-                      bad.append((p, f"YAML parse error: {e}"))
-                      continue
-              if not isinstance(doc, dict):
-                  bad.append((p, "top-level must be a mapping"))
-                  continue
-              for k in ('name', 'runs'):
-                  if k not in doc:
-                      bad.append((p, f"missing required top-level key {k!r}"))
-              runs = doc.get('runs')
-              if isinstance(runs, dict) and runs.get('using') == 'composite':
-                  steps = runs.get('steps')
-                  if not (isinstance(steps, list) and steps):
-                      bad.append((p, "composite action with empty/missing steps"))
-          for p, msg in bad:
-              print(f"::error file={p}::{msg}")
-          print(f"Validated {len(paths)} action manifest(s); {len(bad)} error(s)")
-          sys.exit(1 if bad else 0)
-          PY
+        with:
+          script-file: tools/validate-action-manifests.tlisp
 
   # 2. Fast-forward the matching major-version branch and 3. cut a Release.
   release:
