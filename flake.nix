@@ -203,6 +203,17 @@
           kata =
             (import ./lib/kata { lib = nixpkgs.lib; }).tests.asCheck pkgs;
 
+          # MODULE TRIO — the macro that emits the NixOS + darwin + HM modules
+          # for much of the fleet, and which had NO tests until 2026-08-06.
+          # That absence is how `withShikumiConfig` came to mean "home-manager
+          # only" unnoticed: the flag reads as a whole-trio feature at every
+          # call site while the system arms silently omitted it.
+          #
+          # NOT VACUOUS: red-run before landing. Reverting the system-scope
+          # render fails exactly `testSystemRendersShikumiYaml` and
+          # `testSystemDaemonGetsConfigEnvVar`, naming the defect.
+          module-trio = import ./lib/tests/module-trio-test.nix { inherit pkgs; };
+
           # MINIMAL-PRODUCTION-IMAGE — pure base-selection forcing-function
           # (no shell / no init / no libc in the minimal base). Runs on every
           # system incl. darwin.

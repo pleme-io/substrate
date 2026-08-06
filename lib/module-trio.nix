@@ -94,13 +94,42 @@
 #                     subcommand (default: []).
 #   userDaemonEnv     attrset of env vars (default: {}).
 #
-#   withShikumiConfig bool — add services.<name>.settings (HM only) and
-#                     deploy a YAML config to ~/.config/<name>/<name>.yaml.
-#                     Used by shikumi-style apps that read a YAML file at
-#                     startup. anvil entries auto-pick up <NAME>_CONFIG env.
+#   withShikumiConfig bool — add services.<name>.settings and deploy a YAML
+#                     config. Used by shikumi-style apps that read a YAML file
+#                     at startup. anvil entries auto-pick up <NAME>_CONFIG env.
+#
+#                     ALL THREE ARMS (was HM-only before 2026-08-06):
+#                       HM      → ~/.config/<name>/<name>.yaml via home.file
+#                       NixOS   → /etc/<name>/<name>.yaml via environment.etc,
+#                                 and <NAME>_CONFIG on the daemon unit
+#                       Darwin  → same /etc path, and <NAME>_CONFIG on the
+#                                 launchd daemon
+#
+#                     The system arms were the gap: a consumer shipping a
+#                     privileged system daemon with a shikumi-typed config
+#                     surface got the `daemon` options and NO way to feed
+#                     them, so `withShikumiConfig` read as a whole-trio
+#                     feature while silently doing nothing outside HM. Its
+#                     only route was to hand-write environment.etc plus a
+#                     hand-set daemon.environment entry at every call site —
+#                     i.e. to re-implement this flag per consumer.
+#                     Regression-tested in lib/tests/module-trio-test.nix.
+#
+#                     Empty `settings` renders NOTHING (no file, no env var):
+#                     a present-but-empty YAML would make the app resolve its
+#                     `Custom` tier against a document with no keys instead of
+#                     resolving the prescribed tier. An explicit
+#                     daemon.environment.<NAME>_CONFIG still wins over the
+#                     module's own render.
 #   shikumiDefaults   attrset of default settings (default: {}).
-#   shikumiConfigPath path string for the YAML, relative to ~ (default:
+#   shikumiConfigPath path string for the HM YAML, relative to ~ (default:
 #                     ".config/<name>/<name>.yaml").
+#   systemShikumiConfigPath
+#                     path string for the NixOS/Darwin YAML, relative to /etc
+#                     (default: "<name>/<name>.yaml"). Separate from the HM
+#                     path because that one is $HOME-relative and carries a
+#                     leading `.config`; reusing it would put a dotfile in
+#                     /etc.
 #
 #   extraHmOptions    attrset of additional HM options to merge (default: {}).
 #   extraSystemOptions attrset of additional NixOS+Darwin options (default: {}).
@@ -244,6 +273,13 @@ in
       withShikumiConfig = spec.withShikumiConfig or false;
       shikumiDefaults   = spec.shikumiDefaults   or {};
       shikumiConfigPath = spec.shikumiConfigPath or ".config/${name}/${name}.yaml";
+      # The SYSTEM-scope sibling of `shikumiConfigPath`, relative to /etc.
+      # Separate from the HM path because that one is relative to $HOME and
+      # carries a leading `.config`; reusing it would put a dotfile under
+      # /etc. Consumers override only when a tool has an established
+      # system config location it must keep.
+      systemShikumiConfigPath =
+        spec.systemShikumiConfigPath or "${name}/${name}.yaml";
       shikumiEnvVar     = spec.shikumiEnvVar     or
                           (lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] name) + "_CONFIG");
 
@@ -491,9 +527,74 @@ in
         let inner = mkServiceInner pkgs;
         in if inner == {} then {} else { services.${name} = inner; };
 
+      # ── The ONE system-scope shikumi renderer, shared by both arms ──────
+      # NixOS and nix-darwin differ in how they run a daemon and not at all in
+      # how they render /etc, so the render lives here once. Two arms computing
+      # the same YAML independently is exactly the drift this macro exists to
+      # end — and a NixOS/darwin divergence in a config PATH is the kind that
+      # surfaces as "works on my machine" months later.
+      #
+      # Returns `{ render, file, env }`:
+      #   render — is there anything to write? (false ⇒ emit no /etc entry)
+      #   file   — the generated YAML derivation
+      #   env    — `{ ${shikumiEnvVar} = "/etc/<path>"; }`, or `{}`
+      #
+      # `pruneNulls` for the same reason the HM arm uses it: shikumi's
+      # extraction is ATOMIC, so a single explicit `null` on a non-Option field
+      # fails the WHOLE extraction and the app silently falls back to full
+      # prescribed defaults with only a warn log. An unset option must be
+      # ABSENT from the YAML, never present-and-null.
+      systemShikumi = { cfg, pkgs }:
+        let
+          authored = cfg.settings or {};
+          hasSettings = withShikumiConfig && authored != {};
+          merged = lib.recursiveUpdate shikumiDefaults authored;
+          pruned = irohaCore.pruneNulls merged;
+        in
+        if !hasSettings then
+          { render = false; file = null; env = {}; }
+        else {
+          render = true;
+          file = (pkgs.formats.yaml {}).generate "${name}.yaml" pruned;
+          env = { ${shikumiEnvVar} = "/etc/${systemShikumiConfigPath}"; };
+        };
+
       systemOptions = pkgs: {
         enable = mkEnableOption description;
         package = mkPackageOption pkgs;
+      } // optionalAttrs withShikumiConfig {
+        # ── ★ SYSTEM-SCOPE shikumi config ────────────────────────────
+        # `withShikumiConfig` used to add `settings` to the HOME-MANAGER
+        # module only, and render it to `home.file`. That made the flag a
+        # half-truth for the shape it most often ships in: a privileged
+        # SYSTEM daemon. Such a tool got the `daemon` options and no way to
+        # configure the thing the daemon runs — the operator's only route
+        # was to hand-write an `environment.etc` entry and hand-set the env
+        # var in `daemon.environment`, i.e. to re-implement this feature at
+        # every call site.
+        #
+        # Found via pleme-io/breathe's host agent: a shikumi-typed Rust
+        # config surface (bare/discovered/prescribed/Custom) had no system
+        # module able to feed it, so the tiered surface was reachable only
+        # from home-manager while the binary runs as root under systemd.
+        #
+        # Same option name and same merge semantics as the HM arm, so a
+        # consumer writes `settings` once and it means the same thing on
+        # whichever scope it enables.
+        settings = mkOption {
+          # `types.attrs`, matching the HM arm — a `(pkgs.formats.yaml {}).type`
+          # here forces pkgs while the module system is computing the
+          # enclosing freeformType, which recurses. See the HM option's note.
+          type = types.attrs;
+          default = {};
+          description = ''
+            Typed configuration rendered to `/etc/${systemShikumiConfigPath}`
+            and pointed at by `${shikumiEnvVar}` in the daemon's environment.
+
+            Merged the same way as the home-manager arm: authored values win
+            over typed-group values.
+          '';
+        };
       } // optionalAttrs withSystemDaemon {
         daemon = {
           enable = mkOption {
@@ -760,6 +861,7 @@ in
       nixosModule = { lib, config, pkgs, ... }:
         let
           cfg = config.services.${name};
+          sys = systemShikumi { inherit cfg pkgs; };
         in
         {
           options.services.${name} = systemOptions pkgs;
@@ -767,12 +869,26 @@ in
           config = mkIf cfg.enable (mkMerge [
             { environment.systemPackages = [ cfg.package ]; }
 
+            # The rendered config, and ONLY when there is something to render.
+            # An empty `settings` writes no file at all rather than an empty
+            # document — a present-but-empty YAML would make the binary resolve
+            # the `Custom` tier against a file with no keys, which is a
+            # different (and worse) outcome than resolving the prescribed tier.
+            (mkIf sys.render {
+              environment.etc.${systemShikumiConfigPath}.source = sys.file;
+            })
+
             (mkIf (withSystemDaemon && (cfg.daemon.enable or false)) (nixosHelpers.mkNixOSService {
               name = "${name}-daemon";
               description = "${description} daemon";
               command = "${cfg.package}/bin/${binaryName}";
               args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
-              environment = cfg.daemon.environment;
+              # The env var is MERGED UNDER the operator's own environment, so
+              # an explicit `daemon.environment.<VAR>` still wins — a consumer
+              # pointing the tool at a hand-managed config (or a secret-bearing
+              # path rendered by sops) must not be silently overridden by the
+              # module's own render.
+              environment = sys.env // cfg.daemon.environment;
             }))
 
             (extraNixosConfig cfg)
@@ -785,6 +901,7 @@ in
       darwinModule = { lib, config, pkgs, ... }:
         let
           cfg = config.services.${name};
+          sys = systemShikumi { inherit cfg pkgs; };
         in
         {
           options.services.${name} = systemOptions pkgs;
@@ -792,12 +909,19 @@ in
           config = mkIf cfg.enable (mkMerge [
             { environment.systemPackages = [ cfg.package ]; }
 
+            # nix-darwin has the same `environment.etc` surface as NixOS, so
+            # the system config lands at the same path on both — one spelling
+            # for an operator to learn, and one path for the tool to document.
+            (mkIf sys.render {
+              environment.etc.${systemShikumiConfigPath}.source = sys.file;
+            })
+
             (mkIf (withSystemDaemon && (cfg.daemon.enable or false)) (darwinHelpers.mkLaunchdDaemon {
               name = "${name}-daemon";
               label = "io.pleme.${name}.daemon";
               command = "${cfg.package}/bin/${binaryName}";
               args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
-              env = cfg.daemon.environment;
+              env = sys.env // cfg.daemon.environment;
             }))
 
             (extraDarwinConfig cfg)
