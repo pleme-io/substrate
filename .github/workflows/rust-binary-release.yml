@@ -128,6 +128,23 @@ on:
           GUI/GPU apps, which dynamically load wayland/X/GL at runtime and do
           not work statically linked.
 
+    secrets:
+      # ── PRIVATE GIT DEPENDENCIES ─────────────────────────────────────────
+      # Optional. Supply when the crate's Cargo.toml pulls private pleme-io
+      # git deps (tsunagu, magma, shigoto, shikumi, gen, …). Without it a
+      # cross-build of such a crate fails to authenticate the clone.
+      #
+      # This workflow previously accepted NO secrets at all, which is why
+      # pangea-operator could not call it and forked the whole job instead
+      # (release.yml:408-499): its own header records the incident —
+      # "failed to authenticate when downloading repository ... tsunagu",
+      # and notes the job "likely never actually succeeded with tsunagu in
+      # the dependency graph before, on ANY runner". Per-leg `features` was
+      # only ONE of the two blockers; this was the other.
+      BOT_PAT:
+        required: false
+        description: "PAT with read access to private pleme-io repos. Omit for public-only dependency graphs."
+
 permissions:
   contents: write
 
@@ -163,6 +180,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # ── Private git-dependency credential ────────────────────────────────
+      # Ported from image-push.yml:321-326, which root-caused this in a live
+      # incident. Two halves, and BOTH are load-bearing:
+      #
+      #   url.insteadOf  — rewrites https://github.com/ to carry the token so
+      #                    cargo can clone a private pleme-io git dependency.
+      #   --unset-all extraheader
+      #                  — actions/checkout@v4 leaves its own ephemeral,
+      #                    THIS-repo-scoped GITHUB_TOKEN in local git config,
+      #                    matched by URL PREFIX against ANY github.com fetch.
+      #                    Left in place it SHADOWS the token above and the
+      #                    clone fails with a credential that looks present.
+      #
+      # The empty-token guard is INSIDE the shell, not a step-level `if:` —
+      # the `secrets` context is not available in `if:`, and an unguarded
+      # rewrite with an empty token would emit
+      # `https://x-access-token:@github.com/` and break PUBLIC fetches for
+      # every existing caller. So a caller that passes no BOT_PAT is exactly
+      # unaffected.
+      - name: Configure git credentials for private git dependencies
+        shell: bash
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          if [ -n "${GIT_AUTH_TOKEN:-}" ]; then
+            git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git config --unset-all http.https://github.com/.extraheader || true
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -205,6 +251,19 @@ jobs:
 
       - name: Build + stage
         uses: pleme-io/actions/rust-cross-build@main
+        env:
+          # ★ THE THIRD HALF, and it is not optional when private git deps are
+          # in play. image-push.yml:555-560 records the incident verbatim: the
+          # `url.insteadOf` step above "ran clean, yet `cargo metadata` still
+          # failed to authenticate cloning a private git dependency,
+          # identically to before that step existed." This env var is Cargo's
+          # own documented remedy, named in the original error's hint text
+          # ("if the git CLI succeeds then net.git-fetch-with-cli may help").
+          #
+          # Unconditional: it only changes WHICH git implementation cargo
+          # fetches with (the system CLI instead of libgit2), never whether a
+          # credential is used, so a public-only caller is unaffected.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         with:
           binary-name:         ${{ inputs.binary-name }}
           target:              ${{ matrix.target }}
