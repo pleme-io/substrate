@@ -78,6 +78,51 @@ on:
         type: string
         required: false
         default: ""
+      # ── The publish gate ────────────────────────────────────────────────
+      #
+      # Until 2026-08-06 this workflow published 52 crates to crates.io with
+      # NO test job at all: `ship` and `drip` needed only `bump`. Measured
+      # consequence — izumi published 0.1.15 while
+      # `every_provider_in_the_matrix_works` was failing on main.
+      #
+      # `require-tests` is ON by default, fleet-wide, deliberately. A publish
+      # gate that must be opted into is not a gate.
+      require-tests:
+        description: "Block publishing unless the test job passes. Default true. Turning it off REQUIRES require-tests-waiver."
+        type: boolean
+        required: false
+        default: true
+      require-tests-waiver:
+        description: "Typed reason, REQUIRED when require-tests is false. Same grammar as the fleet's `skip-<name>: <typed-reason>`. Time pressure is not a reason."
+        type: string
+        required: false
+        default: ""
+      # PER-REPO by default, not per-crate — measured, not preference.
+      # Counting published crates with zero tests across all 52 consumers:
+      # per-crate blocks 19 of 52 repos on day one (51 zero-test crates,
+      # including 4 in magma, 9 in promessa, 7 in mirante); per-repo blocks 1
+      # (umbra). Per-crate is the destination a repo ratchets into once it has
+      # earned it, not the setting that bricks 37% of the release pipeline the
+      # day the gate lands.
+      test-granularity:
+        description: "repo = the whole workspace run must execute >0 tests. crate = every published member must. Default repo."
+        type: string
+        required: false
+        default: "repo"
+      # Defaults to the CONSUMER's own devShell. Deliberately no value here:
+      # `default` is wrong (substrate itself declares only `selftest-cargo`,
+      # and 25 consumers resolve `default` to a devenv shell `nix develop`
+      # cannot enter non-interactively), so the resolution lives in the job.
+      test-devshell:
+        description: "Flake devShell the test job runs in. Empty = resolve (consumer's default, falling back to substrate's release-gate)."
+        type: string
+        required: false
+        default: ""
+      test-args:
+        description: "Args appended to the test command."
+        type: string
+        required: false
+        default: "--workspace --no-fail-fast"
     secrets:
       # required:false, deliberately. GitHub validates the WHOLE reusable call
       # graph at startup, BEFORE any job `if:` is evaluated, so a
@@ -172,9 +217,144 @@ jobs:
           # generated against the version being released.
           regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
 
+  waiver:
+    name: Waiver check
+    # Runs on EVERY invocation, including the ones where the gate is off —
+    # that is the whole point. Without this job, `require-tests: false` is a
+    # silent bypass a reviewer would have to notice in a diff; with it, the
+    # opt-out costs a sentence and appears in the run.
+    #
+    # Same grammar as the fleet's `skip-<name>: <typed-reason>` waivers and as
+    # lib/build/rust/test-check.nix's own `tests.enable`/`reason` pair, which
+    # throws with "Turning the test gate off is a decision that must be
+    # recorded at the declaration, not an undocumented flip."
+    runs-on: ubuntu-latest
+    steps:
+      - name: A disabled test gate requires a typed reason
+        if: ${{ inputs.require-tests == false && inputs.require-tests-waiver == '' }}
+        run: |
+          echo "::error::require-tests is false with no require-tests-waiver."
+          echo "That combination lets this repo publish to crates.io after a run"
+          echo "that executed ZERO tests. Some crates genuinely have no runnable"
+          echo "test (pure type definitions, generated bindings, a re-export"
+          echo "facade) — but never silently:"
+          echo ""
+          echo "    with:"
+          echo "      require-tests: false"
+          echo "      require-tests-waiver: \"generated bindings only; no hand-authored behaviour\""
+          echo ""
+          echo "Pair it with skip-tests-required: <same reason> at the top of this"
+          echo "repo's CLAUDE.md. Time pressure is not an acceptable reason, and"
+          echo "\"we'll add tests later\" is the state most of this workflow's"
+          echo "consumers are already in."
+          exit 1
+
+  test:
+    name: Test gate
+    # ── NO `needs: bump`, deliberately ─────────────────────────────────────
+    # `bump` is SKIPPED outright on schedule ticks and bot-actor pushes
+    # (its own `if:` at the top of this file). A job that needs a skipped job
+    # is itself skipped, so `needs: bump` here would skip the gate on every
+    # schedule tick — and `drip`'s scheduled arm would then be blocked by a
+    # SKIP, regressing the exact never-published hole drip exists to close.
+    # Running in parallel with bump also halves wall-clock.
+    #
+    # Consequence to state rather than hide: this verifies the PRE-bump tree,
+    # while `ship` re-checkouts main and publishes the POST-bump tree. Only
+    # version numbers differ between them, so the subject-set gap is real but
+    # narrow.
+    #
+    # STEPS ARE INLINE rather than `uses:` nix-devshell-cargo-test.yml, and
+    # that is load-bearing: this workflow is registered as a FLAT LEAF in
+    # pleme-rust.yml, whose header records that `consumer -> pleme ->
+    # pleme-rust -> leaf` is exactly GitHub's 4-workflow ceiling and legal
+    # ONLY while the leaf nests nothing. Calling a reusable here would make
+    # that chain 5 and the run would not start at all. The steps below also
+    # need two things that reusable cannot express — an injected nextest and
+    # the release-gate fallback — so this is a different job, not a copy.
+    if: inputs.require-tests
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+
+      # Same private-git-dep credential fix as nix-devshell-cargo-test.yml:
+      # nix-installer's github-token covers NIX's fetcher only, never CARGO's
+      # separate git-dependency resolution, and checkout's this-repo-scoped
+      # extraheader silently wins over url.insteadOf by prefix match.
+      - name: Configure git credentials for private git dependencies (cargo)
+        env:
+          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --unset-all http.https://github.com/.extraheader || true
+
+      # Resolve WHICH shell the tests run in, and at what TIER.
+      #
+      # Measured 2026-08-06 across all 52 consumers of this workflow: only 17
+      # can enter their own devShell. 25 are devenv-backed (`nix develop`
+      # fails pure AND --impure), 7 have no flake, 3 hard-fail otherwise. A
+      # gate that simply used `.#default` would block ~35 repos from
+      # publishing for an ENVIRONMENT defect, not a test failure — and the
+      # reds would be muted within a week.
+      #
+      # So: the consumer's own shell when the preflight says Ok, else
+      # substrate's pinned `release-gate`. The fallback's failure mode is a
+      # missing buildInput — a loud false RED — never a vacuous green, which
+      # is what separates it from the unpinned-toolchain fallback
+      # devshell-preflight.nix explicitly rejects.
+      - name: Resolve test environment
+        id: env
+        run: |
+          shell='${{ inputs.test-devshell }}'
+          [ -n "$shell" ] || shell=default
+          if nix eval --impure --raw --expr \
+            'let p = import (builtins.getFlake "github:pleme-io/substrate").devshellPreflightPath {
+                system = builtins.currentSystem;
+                devshell = "'"$shell"'";
+                devShells = (builtins.getFlake (toString ./.)).devShells or {};
+                strict = false;
+              }; in if p.ok then "ok" else "no"' 2>/dev/null | grep -qx ok
+          then
+            echo "installable=.#$shell" >> "$GITHUB_OUTPUT"
+            echo "tier=declared-devshell" >> "$GITHUB_OUTPUT"
+          else
+            echo "installable=github:pleme-io/substrate#release-gate" >> "$GITHUB_OUTPUT"
+            echo "tier=substrate-fallback" >> "$GITHUB_OUTPUT"
+          fi
+
+      # nextest comes from substrate's pin as an absolute store path, NOT
+      # from the consumer's devShell — 20 of 52 consumers pin substrate at
+      # 2026-06-07, so anything added to their shell reaches them only after
+      # they re-lock, and a consumer can replace `extraPackages` outright.
+      - name: Fetch the anti-vacuity runner
+        id: nextest
+        run: |
+          out=$(nix build --no-link --print-out-paths github:pleme-io/substrate#cargo-nextest)
+          echo "bin=$out/bin/cargo-nextest" >> "$GITHUB_OUTPUT"
+
+      # `--no-tests=fail` IS the anti-vacuity assertion, and it is a flag on
+      # an existing tool rather than a gate of our own. `cargo test` exits 0
+      # when it runs zero tests — measured on three shapes (no tests at all,
+      # every test #[ignore], a filter matching nothing), all exit 0. nextest
+      # exits 4 on each. Without this flag the gate would happily green a
+      # publish that executed nothing, which is the precise failure it exists
+      # to prevent.
+      - name: Test gate (${{ steps.env.outputs.tier }}, ${{ inputs.test-granularity }} granularity)
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: |
+          echo "::notice::test gate tier=${{ steps.env.outputs.tier }} shell=${{ steps.env.outputs.installable }} granularity=${{ inputs.test-granularity }}"
+          nix develop "${{ steps.env.outputs.installable }}" -c \
+            "${{ steps.nextest.outputs.bin }}" nextest run --no-tests=fail ${{ inputs.test-args }}
+
   ship:
     name: Ship workspace to registry
-    needs: bump
+    needs: [bump, test]
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     # privacy posture 2026-07-05: private repos bump+tag only — no public
     # registry publish; see pangea-architectures PRIVACY-WAVES.md. Publishing
@@ -182,7 +362,21 @@ jobs:
     # yanks. Same caller-visibility expression family as the runner routing
     # above (in a workflow_call the github context is the CALLER's run).
     # Nothing depends on this job, so a visibility-skip fails nothing downstream.
-    if: needs.bump.outputs.bumped == 'true' && !github.event.repository.private
+    # The test result is asserted EXPLICITLY, never inferred from `needs:`.
+    # A job-level `if:` REPLACES the implicit `success()` (unlike a step-level
+    # one, which ANDs it), so this job's previous condition — carrying no
+    # `success()` and no mention of a test — would have let a SKIPPED test job
+    # satisfy `needs:` and publish anyway. `needs:` alone closes nothing here.
+    # The second arm is the waiver path: with require-tests false the gate is
+    # skipped by design, and the `waiver` job below has already refused the run
+    # if no typed reason was given.
+    if: >-
+      needs.bump.outputs.bumped == 'true'
+      && !github.event.repository.private
+      && (
+        needs.test.result == 'success'
+        || (inputs.require-tests == false && needs.test.result == 'skipped')
+      )
     steps:
       # Re-checkout to pick up the bumped Cargo.toml from main.
       - uses: actions/checkout@v4
@@ -260,10 +454,23 @@ jobs:
     # residual (same as the runner-routing edge above): schedule-triggered
     # callers may lack github.event.repository, so `!…private` falls open —
     # private repos should not carry a drip schedule in the first place.
-    needs: bump
+    needs: [bump, test]
+    # `always()` is load-bearing for the schedule arm (bump is skipped there),
+    # but it is ALSO why `needs: test` alone would have closed nothing: an
+    # `if:` opening with `always()` ignores every needs RESULT by definition,
+    # so a FAILED test job would still have let this publish to crates.io.
+    # The test result therefore has to be asserted as its own clause.
+    #
+    # On the schedule/dispatch arms the gate still applies: `test` has no
+    # `needs: bump`, so it runs on those triggers too and this condition is
+    # satisfied by a real pass, not by a skip.
     if: >-
       always()
       && !github.event.repository.private
+      && (
+        needs.test.result == 'success'
+        || (inputs.require-tests == false && needs.test.result == 'skipped')
+      )
       && (
         github.event_name == 'schedule'
         || github.event_name == 'workflow_dispatch'

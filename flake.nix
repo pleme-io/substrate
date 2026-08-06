@@ -430,7 +430,47 @@
           selftest-cargo = pkgs.mkShell {
             packages = [ pkgs.cargo pkgs.rustc ];
           };
+
+          # ── release-gate ────────────────────────────────────────────────
+          # The floor the publish gate runs in when a consumer's OWN devShell
+          # cannot be entered. Measured 2026-08-06 across the 52
+          # rust-auto-release consumers: only 17 can be entered; 25 are
+          # devenv-backed (`nix develop` fails pure AND --impure), 7 have no
+          # flake, 3 hard-fail otherwise — and substrate itself declares no
+          # `default`. Without this shell a default-on gate blocks ~35 repos
+          # from publishing on day one, for an environment defect rather than
+          # a test failure.
+          #
+          # WHY THIS IS NOT THE FALLBACK devshell-preflight.nix REJECTS.
+          # That file refuses `dtolnay/rust-toolchain@stable` + bare cargo,
+          # because an UNPINNED ambient toolchain lets a crate that needs
+          # hermetic inputs go green on the accident — a fresh vacuous guard
+          # inside the gate meant to close one. This is a nix-PINNED substrate
+          # shell, and the distinction is decisive: when a crate needs an input
+          # this lacks, it FAILS TO BUILD — a loud false RED. It cannot
+          # manufacture a green over an environment that could not run the
+          # tests. If a crate passes without its declared inputs, those inputs
+          # were not load-bearing and the green is true.
+          #
+          # Still a WEAKER tier than the declared shell — the environment under
+          # test is not the crate's own — so the gate stamps `tier=` on every
+          # run rather than letting a fallback pass as the strong thing.
+          #
+          # Honest limits: no per-crate buildInputs (pkg-config + protobuf +
+          # openssl cover the 6 protoc consumers and openssl-sys, NOT the 2
+          # wgpu/GPU ones), and a repo's rust-toolchain.toml is ignored here
+          # (that is a rustup feature; this ships plain rustc). Both are
+          # false-REDs when they bite, never false greens.
+          #
+          # Separate from selftest-cargo on purpose: that shell's comment
+          # commits it to being the minimal shape substrate's builders emit,
+          # and the selftest asserts against it. This one is allowed to grow.
+          release-gate = pkgs.mkShell {
+            packages = [ pkgs.cargo pkgs.rustc pkgs.pkg-config pkgs.protobuf ];
+            buildInputs = [ pkgs.openssl ];
+          };
         });
+
 
         # Devenv modules for consumer repos
         # Import these in devenv.shells.default.imports or devenv.lib.mkShell modules
@@ -701,6 +741,27 @@
 
         packages = eachSystem (system: {
           gen = genFor system;
+
+          # cargo-nextest exposed as a PACKAGE, deliberately NOT added to
+          # consumer devShells.
+          #
+          # The anti-vacuity assertion must not be supplied by the repo being
+          # gated. 20 of the 52 rust-auto-release consumers pin substrate at
+          # 2026-06-07, so anything added to mkRustDevShell reaches them only
+          # after they re-lock — and a consumer can replace `tools` /
+          # `extraPackages` outright. Handing the workflow an absolute store
+          # path instead makes the assertion work on every consumer TODAY and
+          # unremovable from the consumer side.
+          #
+          # Why nextest at all: `cargo test` EXITS 0 when it runs zero tests.
+          # Measured 2026-08-06 (cargo 1.91.0), one fixture per shape — crate
+          # with no tests: exit 0; all #[ignore]: exit 0; filter matching
+          # nothing: exit 0. All three are vacuous greens, and `cargo test`
+          # cannot tell you which one you have. `cargo nextest run
+          # --no-tests=fail` exits 4 on each. So the anti-vacuity rule is a
+          # FLAG ON AN EXISTING TOOL, not a gate of our own invention.
+          # Already in substrate's nixpkgs pin (0.9.136) — no new flake input.
+          cargo-nextest = (import nixpkgs { inherit system; }).cargo-nextest;
           # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
           # replaces inline skopeo bash in the image-push pipeline.
           # fenix threaded through 2026-07-22 -- see lib/build/oci-push.nix's
