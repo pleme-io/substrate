@@ -67,6 +67,27 @@ on:
         type: boolean
         default: false
         description: "When true, pass --no-default-features to cargo build"
+      matrix-include:
+        type: string
+        default: ""
+        description: >-
+          JSON array replacing the built-in cross-build matrix. Empty (default)
+          keeps the two libc variants selected by `linux-libc`, so existing
+          callers are unaffected. Each object needs at least os/target/suffix,
+          and MAY carry per-leg `features` / `no-default-features`, which
+          override the workflow-level inputs for that leg only.
+
+          Exists because a cross-build matrix routinely needs different features
+          per target, and the workflow-level inputs apply ONE pair to the whole
+          matrix. pangea-operator forked all 97 lines of this job for exactly
+          that reason (release.yml:403-499); with this input it can call the
+          reusable instead.
+
+          Example:
+            matrix-include: >-
+              [{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu",
+                "suffix":"linux-aarch64","no-default-features":true,
+                "features":"graphql grpc executor_magma"}]
       system-deps:
         type: string
         default: ""
@@ -127,10 +148,18 @@ jobs:
       # Use linux-libc: musl for an artifact with no libc floor at all. The
       # linux-baseline job below stays pinned to 22.04 — it only RUNS the
       # artifact and uses no tatara-script, so it is free to be the old runner.
+      # ── `matrix-include` overrides this WHOLE list when supplied ─────────
+      # Empty (the default) keeps the two built-in libc variants exactly as
+      # they were, so every existing caller is byte-unaffected. A caller that
+      # needs a different leg set — or per-leg `features` /
+      # `no-default-features` (see the Build step) — passes its own JSON
+      # instead of forking the workflow.
       matrix:
-        include: ${{ fromJSON(inputs.linux-libc == 'musl'
+        include: ${{ fromJSON(inputs.matrix-include != ''
+          && inputs.matrix-include
+          || (inputs.linux-libc == 'musl'
           && '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-musl","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-musl","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]'
-          || '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]') }}
+          || '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]')) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -180,8 +209,25 @@ jobs:
           binary-name:         ${{ inputs.binary-name }}
           target:              ${{ matrix.target }}
           suffix:              ${{ matrix.suffix }}
-          features:            ${{ inputs.features }}
-          no-default-features: ${{ inputs.no-default-features }}
+          # ── PER-LEG override, falling back to the workflow-level input ──
+          # `matrix.features` is only set when a caller supplies its own
+          # `matrix-include`; the hardcoded default matrix has no such key, so
+          # `matrix.features` is null there and `||` yields `inputs.features`
+          # unchanged. That is what keeps every existing caller byte-identical.
+          #
+          # Why this exists: a cross-build matrix routinely needs DIFFERENT
+          # features per target — pangea-operator forked this whole workflow
+          # (97 lines, release.yml:403-499) for exactly one reason, stated in
+          # its own header: "the shared reusable's features/no-default-features
+          # inputs apply ONE pair to its WHOLE matrix". A fork is an expensive
+          # way to express a per-row value.
+          #
+          # NOTE the empty-string guard: `matrix.features || inputs.features`
+          # would also fall through when a leg DELIBERATELY sets `features: ""`
+          # to mean "no features here". Comparing against null instead makes
+          # "explicitly empty" expressible and distinct from "unset".
+          features: ${{ matrix.features == null && inputs.features || matrix.features }}
+          no-default-features: ${{ matrix.no-default-features == null && inputs.no-default-features || matrix.no-default-features }}
 
       # ── Derive the release version from the tag (vX.Y.Z → X.Y.Z) ─────
       - name: Resolve version
