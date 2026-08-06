@@ -40,9 +40,14 @@
     env ? [],
     protobufDeps ? [],
   }: let
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goFloorBuild = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.mkGrpcService"; drv = pkgs.buildGoModule args; };
     goDocker = import ./docker.nix;
 
-    binary = pkgs.buildGoModule {
+    binary = goFloorBuild {
       pname = name;
       inherit version src vendorHash subPackages ldflags;
       inherit buildInputs nativeBuildInputs;

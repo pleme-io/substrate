@@ -91,6 +91,11 @@
     license ? pkgs.lib.licenses.mit,
     platforms ? pkgs.lib.platforms.all,
   }: let
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goFloorBuild = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.goPrivateModule"; drv = pkgs.buildGoModule args; };
     lib = pkgs.lib;
     check = import ../../types/assertions.nix;
 
@@ -212,7 +217,7 @@
           + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
         else null;
 
-  in builtins.seq goVersionAssert (builtins.seq _prefixCheck (pkgs.buildGoModule ({
+  in builtins.seq goVersionAssert (builtins.seq _prefixCheck (goFloorBuild ({
     inherit pname version src doCheck tags vendorHash;
 
     # The vendor FOD env. buildGoModule threads `env` + the goModules

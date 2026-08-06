@@ -49,6 +49,11 @@
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
   }: let
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goFloorBuild = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.mkGoLibraryCheck"; drv = pkgs.buildGoModule args; };
     lib = pkgs.lib;
     check = import ../../types/assertions.nix;
     _ = check.all [
@@ -69,7 +74,7 @@
       if vendorHash == "__from-spec__"
       then goLockfileBuilder.resolveVendorHash { inherit src; }
       else vendorHash;
-  in pkgs.buildGoModule ({
+  in goFloorBuild ({
     inherit pname version src proxyVendor tags;
     vendorHash = effectiveVendorHash;
     doCheck = false;

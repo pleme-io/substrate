@@ -41,6 +41,11 @@
     postInstall ? "",
     platforms ? pkgs.lib.platforms.linux,
   }: let
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goFloorBuild = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.mkMonorepoBinary"; drv = pkgs.buildGoModule args; };
     check = import ../../types/assertions.nix;
     _ = check.all [
       (check.nonEmptyStr "pname" pname)
@@ -55,7 +60,7 @@
       inherit pname completions;
     };
 
-  in pkgs.buildGoModule {
+  in goFloorBuild {
     inherit pname subPackages;
     inherit (monoSrc) version src;
 

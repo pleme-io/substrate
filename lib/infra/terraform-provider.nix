@@ -43,9 +43,14 @@
     resourcesPath ? null,
     providerToml ? null,
   }: let
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goFloorBuild = args: (import ../build/go/overlay.nix).assertGoFloor {
+      what = "substrate.mkTerraformProvider"; drv = pkgs.buildGoModule args; };
     lib = pkgs.lib;
 
-    package = pkgs.buildGoModule {
+    package = goFloorBuild {
       inherit pname version src vendorHash doCheck ldflags;
       nativeBuildInputs = extraBuildInputs;
       meta = {

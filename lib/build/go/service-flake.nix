@@ -109,9 +109,15 @@ let
 
     # Toolchain selection: channel-default `go` unless the consumer pins a
     # specific nixpkgs attr (e.g. "go_1_26") to match its go.mod directive.
-    goBuild = if goVersion == null
-      then pkgs.buildGoModule
-      else pkgs.buildGoModule.override { go = pkgs.${goVersion}; };
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goBuild = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.mkGoServiceFlake";
+      drv = (if goVersion == null
+        then pkgs.buildGoModule
+        else pkgs.buildGoModule.override { go = pkgs.${goVersion}; }) args;
+    };
 
     # MINIMAL-PRODUCTION-IMAGE — the static-friendly Go build tags are
     # applied only in the minimal posture. `netgo`/`osusergo` drop the

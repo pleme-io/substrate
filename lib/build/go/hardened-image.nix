@@ -217,10 +217,15 @@ let
     # in principle for libc = "none" (the compiler only runs at build time and
     # the artifact links no libc); for the musl lane the C-toolchain/libc mixing
     # is UNPROVEN — see the tier note in the header.
-    goBuilder =
-      if goToolchain != null
-      then buildPkgs.buildGoModule.override { go = goToolchain; }
-      else buildPkgs.buildGoModule;
+    # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
+    # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
+    # naming the fix, never a silently vulnerable artifact.
+    goBuilder = args: (import ./overlay.nix).assertGoFloor {
+      what = "substrate.mkHardenedGoImage";
+      drv = (if goToolchain != null
+        then buildPkgs.buildGoModule.override { go = goToolchain; }
+        else buildPkgs.buildGoModule) args;
+    };
 
     cgoEnabled = if libc == "musl" then "1" else "0";
 
