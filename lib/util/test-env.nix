@@ -55,8 +55,11 @@
   devShells ? { },
   fallback ? "github:pleme-io/substrate",
   fallbackShell ? "release-gate",
+  lib ? (import <nixpkgs> { }).lib,
 }:
 let
+  githubOutput = import ./github-output.nix { inherit lib; };
+
   shell = if devshell == "" then "default" else devshell;
 
   pre = import ./devshell-preflight.nix {
@@ -70,10 +73,18 @@ let
   installable = if pre.ok then ".#${shell}" else "${fallback}#${fallbackShell}";
   tier = if pre.ok then "declared-devshell" else "substrate-fallback";
 in
-# EXACTLY the $GITHUB_OUTPUT key=value lines, trailing newline included. No
-# value can contain a newline, so no heredoc delimiter is needed and the
-# caller's redirect is total — it never has to parse or reshape this.
+# Rendered by the typed emitter, not concatenated here.
+#
+# This line used to be `"installable=${installable}\ntier=${tier}\n"` — a
+# hand-assembled wire format, written in the same pass that removed a `run:`
+# block for the identical reason. The no-shell rule fires on shell and does not
+# fire on a format string, so the defect walked straight back in wearing Nix.
+# `github-output.nix` refuses a newline in a value (that is an INJECTION, not a
+# formatting slip — it writes extra keys), a non-string, a malformed key, and
+# an empty set, and it sorts so the bytes never move for free.
 if pre.ok || useFallback then
-  "installable=${installable}\ntier=${tier}\n"
+  githubOutput.render {
+    inherit installable tier;
+  }
 else
   throw pre.message
