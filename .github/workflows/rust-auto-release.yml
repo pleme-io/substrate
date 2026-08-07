@@ -420,7 +420,36 @@ jobs:
     # Three arms, and the third is the one that makes this job trustworthy
     # rather than opt-in:
     #
-    #   schedule           — the consumer's */15 auto-drain
+    #   schedule           — the consumer's */15 auto-drain, and ★ THIS ARM IS
+    #                        DEAD IN ALMOST EVERY CONSUMER. A reusable workflow
+    #                        cannot schedule itself; `on: schedule` has to be
+    #                        declared in the CALLING shim. Measured 2026-08-07
+    #                        across the org: of 434 shims calling
+    #                        cargo-/rust-auto-release, exactly THREE declare it
+    #                        (blue, sui, tatara-rust-ast). The other 431 reach
+    #                        this job only via push or manual dispatch.
+    #
+    #                        That is why the "hands-off across the natural
+    #                        rate-limit refill" promise above is NOT general.
+    #                        Receipt: magma parked `magma-attest` on crates.io
+    #                        new-crate capacity, ten downstream crates deferred
+    #                        behind it, and the run went red saying "circular
+    #                        dep or stuck registry index" — a cause that was
+    #                        false twice over. Nothing retried, because for
+    #                        magma there was no next tick. It took an operator
+    #                        dispatch.
+    #
+    #                        DO NOT "fix" this by arming all 431. 431 repos x
+    #                        4/hr is ~41k runs/day of near-total no-ops, all
+    #                        drawing on the SAME 5000/hr GitHub bucket the
+    #                        org-posture operator already exhausts on its own.
+    #                        The cure would be worse than the disease. Arm the
+    #                        few repos doing a genuine multi-crate bootstrap
+    #                        (that is what blue/sui/tatara-rust-ast are), and
+    #                        for the general case prefer ONE central catch-up
+    #                        that reads the crates.io sparse index — free, no
+    #                        GitHub API — and dispatches only repos actually
+    #                        behind: O(behind) instead of O(all).
     #   workflow_dispatch  — operator-forced "publish what's missing now",
     #                        the resume hand-off for a backlog a cancelled or
     #                        deferred ship stranded, with no fake source
