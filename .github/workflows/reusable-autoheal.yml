@@ -119,6 +119,22 @@ on:
         description: "Install Nix + the magic cache. Required when repair/regen run via `nix run`."
         type: boolean
         default: true
+      toolchain:
+        description: >-
+          Space-separated nix packages to put on PATH for detect/repair/regen,
+          e.g. "nixpkgs#cargo nixpkgs#rustc". Empty runs the commands bare.
+
+          TYPED BECAUSE OMITTING IT IS SILENT AND FATAL, proven on the pilot run
+          (arch-synthesizer, 2026-08-06): every arm of this workflow resolved
+          correctly and `Repair and commit` still failed, because
+          `gen build` shells out to `cargo metadata`, `cargo metadata` shells to
+          `rustc -vV`, and ubuntu-latest ships neither. The old
+          reusable-gen-spec.yml carried the wrapper inline in each command
+          string, so a caller writing its own command had no way to know it was
+          required. Making it an input puts the requirement where a caller
+          reads it, instead of in a comment beside someone else's command.
+        type: string
+        default: ""
 
 concurrency:
   group: autoheal-${{ github.workflow }}-${{ github.ref }}
@@ -182,7 +198,7 @@ jobs:
         if: inputs.detect != ''
         continue-on-error: ${{ env.MODE == 'heal' }}
         run: |
-          if ${{ inputs.detect }}; then
+          if ${{ inputs.toolchain != '' && format('nix shell {0} --command ', inputs.toolchain) || '' }}${{ inputs.detect }}; then
             echo "${{ inputs.artifact }} is fresh"
           else
             if [ "${{ env.MODE }}" = "check" ]; then
@@ -195,11 +211,11 @@ jobs:
 
       - name: Repair and commit
         if: env.MODE == 'heal'
-        run: ${{ inputs.repair }}
+        run: ${{ inputs.toolchain != '' && format('nix shell {0} --command ', inputs.toolchain) || '' }}${{ inputs.repair }}
 
       - name: Regenerate without committing
         if: env.MODE == 'check'
-        run: ${{ inputs.regen }}
+        run: ${{ inputs.toolchain != '' && format('nix shell {0} --command ', inputs.toolchain) || '' }}${{ inputs.regen }}
 
       # Drift here = the PR did not include a fresh regen.
       - name: Fail if the regen was not included
