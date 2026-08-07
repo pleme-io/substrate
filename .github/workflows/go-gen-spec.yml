@@ -1,8 +1,12 @@
-# go-gen-spec — fleet-wide gen Go build-spec + Go.gen.lock maintenance.
+# go-gen-spec — Go build-spec + Go.gen.lock maintenance.
 #
-# The Go analogue of reusable-gen-spec.yml — the spread engine for the
-# Go.gen.lock slim-delta migration. Any Go-module repo adopts it with a thin
-# caller:
+# A thin caller of `reusable-autoheal.yml`. The skeleton this file used to
+# carry by hand — checkout, nix, regenerate, fail-the-PR, push back — is the
+# AUTOHEAL quality and now lives in exactly one place. See that file's header
+# for why: fourteen workflows carried this shape and each re-decided the runner,
+# eight of them onto a pool that had stalled.
+#
+# Consumers are unchanged. A Go-module repo still adopts it with:
 #
 #   # .github/workflows/go-gen-spec.yml
 #   name: go-gen-spec
@@ -14,83 +18,56 @@
 #       uses: pleme-io/substrate/.github/workflows/go-gen-spec.yml@main
 #       secrets: inherit
 #
-# Mechanism (conditional logic in Rust, not shell):
-#   `gen build . --commit` auto-detects the go.mod and regenerates BOTH the
-#   committed full `Go.build-spec.json` AND the slim `Go.gen.lock` delta (the
-#   producer emits both since gen-gomod's gomod-parity work), atomically
-#   committing if drifted (gen-spec-bot identity), no-op when fresh.
+# TWO THINGS THIS GAINS by delegating, both of which it lacked (2026-08-06):
 #
-#   - push to main : regen + commit + push back via the typed action.
-#   - pull request : regen without commit; fail the PR if either artifact
-#                    drifted (author must include the regen commit).
+#   1. A FRESHNESS GATE. This workflow had none — it could only ever say "the
+#      regen changed something", and only after a full `go list` resolution had
+#      already run. `gen confirm` reads go.sum + the committed Go.gen.lock and
+#      returns a verdict offline, in milliseconds, before anything expensive.
+#      Measured: the cargo sibling had this and Go did not.
 #
-# Uses PUBLISHED gen (`nix run github:pleme-io/gen`) — NOT a from-source build
-# — so it works in any consumer repo. substrate's Go lockfile-builder consumes
-# the committed Go.gen.lock as the highest-priority spec source (delta >
-# build-spec > IFD), so adopting this workflow is what eliminates eval-time IFD
-# for the repo.
+#   2. EVENT TOTALITY. Its push arm matched only `push`, and its PR arm only
+#      `pull_request`, so a `workflow_dispatch` from a caller matched NEITHER —
+#      every step skipped and the job reported SUCCESS having done nothing.
+#      That is the same fake-green the cargo sibling hit live and fixed; this
+#      file still had the hole. The shared workflow now refuses an unhandled
+#      event instead of skipping it.
 #
-# NOTE: Go support requires gen's gomod-parity branch to be MERGED + PUBLISHED
-# — the default `gen-ref` below must resolve to a gen build that carries the
-# gomod adapter. Until the branch is merged, pin `gen-ref` to the published
-# gomod-parity rev.
+# `gen build . --commit` auto-detects go.mod and regenerates BOTH the full
+# Go.build-spec.json and the slim Go.gen.lock delta, committing atomically as
+# gen-spec-bot and no-op when fresh.
+#
+# NOTE: Go support requires a published gen carrying the gomod adapter — pin
+# `gen-ref` to a rev that has it if the default does not.
 name: go-gen-spec
 
 on:
   workflow_call:
     inputs:
       gen-ref:
-        description: "gen flake ref to run (pin for reproducibility). Go support requires the gomod-parity branch merged + published."
+        description: "gen flake ref to run (pin for reproducibility)."
         type: string
         default: "github:pleme-io/gen"
-
-concurrency:
-  group: go-gen-spec-${{ github.ref }}
-  cancel-in-progress: false
+      runner:
+        description: "Runner override; empty uses the shared default."
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
   go-gen-spec:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.BOT_PAT }}
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-
-      # Regen Go.build-spec.json + Go.gen.lock. On main: --commit (atomic,
-      # gen-spec-bot, no-op when fresh). On PR: regen only.
-      - name: Regen spec + delta (push to main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: nix run ${{ inputs.gen-ref }} -- build . --commit
-
-      - name: Regen spec + delta (PR — no commit)
-        if: github.event_name == 'pull_request'
-        run: nix run ${{ inputs.gen-ref }} -- build .
-
-      # Drift = the PR didn't include a fresh regen of either artifact.
-      - name: Fail PR if regen was not included
-        if: github.event_name == 'pull_request'
-        run: |
-          drift=""
-          git diff --quiet -- Go.build-spec.json || drift="$drift Go.build-spec.json"
-          git diff --quiet -- Go.gen.lock        || drift="$drift Go.gen.lock"
-          if [ -n "$drift" ]; then
-            echo "::error::stale artifacts:$drift — run \`gen build . --commit\` locally and include the regen commit."
-            git --no-pager diff -- Go.gen.lock Go.build-spec.json | head -200
-            exit 1
-          fi
-
-      - uses: pleme-io/actions/git-push-with-token@main
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-          push-tags: "false"
+    # Fully-qualified, not `./…`: this workflow is itself called from another
+    # repo, and the fleet's 109 other nested calls all use this form. A relative
+    # path resolves against the CALLER's checkout, which is not substrate.
+    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
+    secrets: inherit
+    with:
+      artifact: "Go.gen.lock"
+      paths: "Go.gen.lock Go.build-spec.json"
+      detect: "nix run ${{ inputs.gen-ref }} -- confirm"
+      repair: "nix run ${{ inputs.gen-ref }} -- build . --commit"
+      regen: "nix run ${{ inputs.gen-ref }} -- build ."
+      fix-hint: "gen build . --commit"
+      runner: ${{ inputs.runner }}

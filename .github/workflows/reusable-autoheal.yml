@@ -1,0 +1,223 @@
+# reusable-autoheal — the AUTOHEAL quality, once, for every generated artifact.
+#
+# AUTOHEAL: a generated artifact that drifts from its source is detected,
+# regenerated, and pushed back, without a human.
+#
+# ── WHY THIS EXISTS (measured 2026-08-06) ───────────────────────────────────
+# Fourteen workflows in this directory carried this same skeleton — checkout,
+# toolchain, regenerate, fail-the-PR, push-back — and each one re-decided the
+# single question that matters most: WHICH RUNNER. Eight chose
+# `camelot-builder-pleme-eks`. That pool was stalled, so on every PRIVATE repo
+# both `gen-spec` and `auto-release` were dead: jobs queued and never started,
+# or failed with "Failed to resolve action download info: Service Unavailable".
+#
+# Blast radius when measured: 284 of 412 repos carrying a Cargo.gen.lock are
+# private, so 69% of the gated fleet had NO working autoheal. It went unnoticed
+# because the workflows were installed everywhere — a committed shim proves
+# adoption, never a run.
+#
+# The two `gen-spec` siblings are the proof that one decision made N times
+# diverges: `reusable-gen-spec.yml` had a freshness gate and the broken runner
+# routing; `go-gen-spec.yml` had working runner routing and NO gate at all.
+# Each held what the other lacked. This workflow is their union, and the
+# runner is now ONE decision in ONE place.
+#
+# ── THE RUNNER POLICY, AND WHY IT IS NOT VISIBILITY-ROUTED ──────────────────
+# `ubuntu-latest` for everything unless a caller explicitly overrides. The
+# previous policy routed private repos to the self-hosted pool to avoid billed
+# hosted minutes on a GitHub Free org — a real cost concern, and the reason it
+# was written that way. But the trade was silent: when the pool stopped, the
+# fleet stopped healing and nothing said so.
+#
+# Measured cost of the swap for gen-spec: 243 runs/month across the private
+# delta repos, ~4 min each ≈ 970 min against GitHub Free's 2000 private-repo
+# minutes. Affordable for THIS workload; a caller with a heavier job should
+# pass `runner` explicitly rather than have a default decide for it.
+#
+# `go-gen-spec.yml` already ran everything on `ubuntu-latest`, including for
+# private callers, and its runs are green — so this is the policy that was
+# already working in the fleet, not a new bet.
+#
+# ── EVENT TOTALITY IS A CORRECTNESS PROPERTY, NOT TIDINESS ──────────────────
+# `reusable-gen-spec.yml` recorded a live fake-green: a `workflow_dispatch`
+# matched NEITHER its push arm nor its pull_request arm, so every regen and
+# gate step skipped and the job reported SUCCESS having done nothing — a manual
+# re-run of a genuinely stale repo looked fixed. `go-gen-spec.yml` still has
+# that hole today.
+#
+# So mode is resolved ONCE, in a pure GHA expression (no shell), and an event
+# this workflow does not handle resolves to `unknown` and FAILS. A new trigger
+# can never again silently fall through every arm.
+#
+#   heal  = push to main, or a deliberate dispatch on main
+#           → detect (advisory), repair WITH commit, push back
+#   check = a pull request, or a dispatch off main
+#           → detect (FATAL), repair WITHOUT commit, fail if the artifact moved
+#
+# ── WHY `heal` IS ADVISORY AND `check` IS FATAL ─────────────────────────────
+# Inherited deliberately from `reusable-gen-spec.yml`, and it is load-bearing:
+# a push to main IS the auto-heal path — this job repairs main by regenerating
+# and pushing — so failing at the detect step would abort before the repair and
+# break the very mechanism that keeps the fleet fresh. main is nonetheless
+# transiently stale between the source push and the repair push, and a consumer
+# that bumps inside that window breaks, so `heal` emits a warning annotation
+# rather than silence.
+#
+# On a PR a human is present and can act, which is where a gate belongs: Meta's
+# Infer measured the same analysis at ~0% fix rate in batch mode and >70% at
+# diff time — placement, not accuracy, decides whether a gate works.
+#
+# ── NEVER AUTO-COMMIT ONTO A PR ─────────────────────────────────────────────
+# `check` regenerates but never commits. A bot pushing with GITHUB_TOKEN does
+# not re-trigger workflows, so auto-committing a regenerated artifact onto a PR
+# produces a green tick over bytes no check ever saw. Kubernetes, Go
+# (`go mod tidy -diff`), Bazel and rules_rust are all fail-with-instructions
+# for exactly this reason. The failure prints the ONE command that fixes it.
+name: reusable-autoheal
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: "Human name of what is healed, for annotations (e.g. 'Cargo.gen.lock')."
+        type: string
+        required: true
+      paths:
+        description: "Space-separated paths the PR arm diffs to prove the regen was included."
+        type: string
+        required: true
+      repair:
+        description: "Command that regenerates AND commits. Runs in `heal` only."
+        type: string
+        required: true
+      regen:
+        description: "Command that regenerates WITHOUT committing. Runs in `check` only."
+        type: string
+        required: true
+      detect:
+        description: >-
+          Optional cheap offline predicate; non-zero exit means drifted. Runs
+          before the expensive regen so a verdict is available in milliseconds.
+          Advisory in `heal`, fatal in `check`. Omit to skip detection.
+        type: string
+        default: ""
+      fix-hint:
+        description: "The single copy-pasteable command printed when the gate fails."
+        type: string
+        required: true
+      runner:
+        description: "Runner override. Empty uses ubuntu-latest — see the header."
+        type: string
+        default: ""
+      git-credentials:
+        description: >-
+          Install the pleme-io git credential rewrite. Required whenever the
+          repair resolves private sibling pleme-io dependencies.
+        type: boolean
+        default: true
+      nix:
+        description: "Install Nix + the magic cache. Required when repair/regen run via `nix run`."
+        type: boolean
+        default: true
+
+concurrency:
+  group: autoheal-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  autoheal:
+    runs-on: ${{ inputs.runner != '' && inputs.runner || 'ubuntu-latest' }}
+    env:
+      # Resolved ONCE, in expressions rather than shell, so there is exactly one
+      # place that decides and no arm can be added without going through it.
+      # Anything not named here is `unknown` and fails below — see the header's
+      # fake-green receipt.
+      MODE: >-
+        ${{ (github.event_name == 'pull_request'
+              || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
+            && 'check'
+            || (((github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+                  && github.ref == 'refs/heads/main')
+                && 'heal'
+                || 'unknown') }}
+    steps:
+      # FIRST, before any work: refuse an event this workflow does not handle,
+      # rather than skipping every arm and reporting success.
+      - name: Refuse an unhandled event
+        if: env.MODE == 'unknown'
+        run: |
+          echo "::error::autoheal: unhandled event '${{ github.event_name }}' on '${{ github.ref }}' — refusing to report success having done nothing. Add an arm to reusable-autoheal.yml."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # checkout's token is scoped to THIS repo, so a private sibling pleme-io
+      # dependency fails to authenticate during resolution. This action owns the
+      # BOT_PAT > GITHUB_TOKEN order and the checkout-extraheader unset that
+      # makes the rewrite actually take effect.
+      - uses: pleme-io/actions/git-credentials@main
+        if: inputs.git-credentials
+        with:
+          bot-pat: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/nix-installer-action@main
+        if: inputs.nix
+        with:
+          github-token: ${{ secrets.BOT_PAT }}
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+        if: inputs.nix
+
+      # The cheap offline verdict, BEFORE the expensive regen. It names the
+      # actual state; the PR diff below can only say "the regen changed
+      # something", and only after a full resolution has already run.
+      - name: Detect drift
+        id: detect
+        if: inputs.detect != ''
+        continue-on-error: ${{ env.MODE == 'heal' }}
+        run: |
+          if ${{ inputs.detect }}; then
+            echo "${{ inputs.artifact }} is fresh"
+          else
+            if [ "${{ env.MODE }}" = "check" ]; then
+              echo "::error::stale ${{ inputs.artifact }} — every consumer of this workspace fails until it is regenerated. Fix: ${{ inputs.fix-hint }}"
+            else
+              echo "::warning::main is transiently stale — the repair step below will regenerate and push it. A consumer bumping this input before that push lands will fail."
+            fi
+            exit 1
+          fi
+
+      - name: Repair and commit
+        if: env.MODE == 'heal'
+        run: ${{ inputs.repair }}
+
+      - name: Regenerate without committing
+        if: env.MODE == 'check'
+        run: ${{ inputs.regen }}
+
+      # Drift here = the PR did not include a fresh regen.
+      - name: Fail if the regen was not included
+        if: env.MODE == 'check'
+        run: |
+          if ! git diff --quiet -- ${{ inputs.paths }}; then
+            echo "::error::stale ${{ inputs.artifact }} — run \`${{ inputs.fix-hint }}\` locally and include the regen commit."
+            git --no-pager diff -- ${{ inputs.paths }} | head -200
+            exit 1
+          fi
+
+      # Must match the `heal` arm EXACTLY. When a commit arm and its push arm
+      # diverged, the regenerated artifact was committed locally and never
+      # pushed, so it died with the runner and the next run regenerated the same
+      # thing again — a silent no-progress loop.
+      - uses: pleme-io/actions/git-push-with-token@main
+        if: env.MODE == 'heal'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          push-tags: "false"
