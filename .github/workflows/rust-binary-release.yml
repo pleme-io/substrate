@@ -517,12 +517,32 @@ jobs:
             exit 1
           fi
 
-      - name: A musl build must be statically linked
+      # The property a musl build promises is "no libc floor", and the ELF fact
+      # that CARRIES it is the absence of a PT_INTERP program header: with no
+      # dynamic loader named, nothing can demand a libc version at exec time.
+      # The second half is belt-and-braces — a versioned GLIBC_* import would be
+      # a floor even if some other loader were arranged.
+      #
+      # This used to grep file(1) for the literal string 'statically linked',
+      # which is a PROXY for that fact and the wrong one: rustc emits the
+      # *-unknown-linux-musl targets as static-PIE, and file(1) reports those as
+      # 'static-pie linked'. So the gate failed tatara-lisp v0.3.41 on an
+      # artifact that was static, imported zero GLIBC_* symbols, and had just
+      # been PROVEN to run on ubuntu-22.04 by the step directly above it. Assert
+      # the fact, never the phrasing of the tool that reports it.
+      - name: A musl build must carry no libc floor
         if: inputs.linux-libc == 'musl'
         run: |
-          if file "${{ inputs.binary-name }}-linux-x86_64" | grep -q 'statically linked'; then
-            echo "OK: statically linked, no libc floor"
-          else
-            echo "::error::linux-libc is musl but the artifact is dynamically linked"
+          bin="${{ inputs.binary-name }}-linux-x86_64"
+          if readelf -lW "$bin" | grep -qE '^[[:space:]]*INTERP[[:space:]]'; then
+            echo "::error::linux-libc is musl but $bin names a dynamic loader (PT_INTERP present)"
+            readelf -lW "$bin" | grep -A1 -E '^[[:space:]]*INTERP[[:space:]]'
             exit 1
           fi
+          floor="$(objdump -T "$bin" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -Vu)"
+          if [ -n "$floor" ]; then
+            echo "::error::linux-libc is musl but $bin imports versioned glibc symbols: $(echo "$floor" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "OK: no PT_INTERP, no versioned glibc symbols — no libc floor"
+          echo "     file(1) says: $(file -b "$bin")"
