@@ -147,6 +147,25 @@ jobs:
   autoheal:
     runs-on: ${{ inputs.runner != '' && inputs.runner || 'ubuntu-latest' }}
     env:
+      # ── LOAD-BEARING, AND IT WAS DROPPED ONCE ─────────────────────────────
+      # cargo's bundled libgit2 IGNORES the `url.insteadOf` rewrite that the
+      # git-credentials step installs, so without this, resolving a PRIVATE git
+      # dependency fails — and it fails misleadingly, as
+      #
+      #   revision <sha> not found
+      #   network failure seems to have happened
+      #   if a proxy or similar is necessary `net.git-fetch-with-cli` may help
+      #
+      # which reads as "that commit does not exist" when the commit is present
+      # and pushed; the runner simply cannot see the repo. Chased exactly that
+      # way on arch-synthesizer (2026-08-07): the rev was verified identical to
+      # origin/main before the real cause was found.
+      #
+      # Set at JOB level rather than per-step: detect, repair and regen can all
+      # resolve dependencies, and the old per-step placement is precisely what
+      # made it easy to lose when this workflow was lifted out of
+      # reusable-gen-spec.yml.
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       # Resolved ONCE, in expressions rather than shell, so there is exactly one
       # place that decides and no arm can be added without going through it.
       # Anything not named here is `unknown` and fails below — see the header's
