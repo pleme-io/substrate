@@ -1,7 +1,14 @@
-# reusable-gen-spec — fleet-wide gen build-spec + Cargo.gen.lock maintenance.
+# reusable-gen-spec — Cargo.gen.lock + build-spec maintenance, for 417 callers.
 #
-# The spread engine for the Cargo.gen.lock slim-delta migration. Any Rust
-# repo adopts it with a thin caller:
+# A thin caller of `reusable-autoheal.yml`. The skeleton this file used to carry
+# by hand — checkout, credentials, nix, detect, regenerate, fail-the-PR, push
+# back — is the AUTOHEAL quality and now lives in exactly one place. Read that
+# file's header for the receipts; the short version is that fourteen workflows
+# carried this shape and each re-decided the runner, eight onto a pool that had
+# stalled, which killed autoheal on every private repo in the fleet.
+#
+# ── THE INTERFACE IS UNCHANGED. Callers do not move. ────────────────────────
+# Same name, same two inputs, same defaults. A Rust repo still adopts it with:
 #
 #   # .github/workflows/gen-spec.yml
 #   name: gen-spec
@@ -13,21 +20,45 @@
 #       uses: pleme-io/substrate/.github/workflows/reusable-gen-spec.yml@main
 #       secrets: inherit
 #
-# Mechanism (conditional logic in Rust, not shell):
-#   `gen build . --commit` regenerates BOTH the committed full
-#   `Cargo.build-spec.json` AND the slim `Cargo.gen.lock` delta (the
-#   producer emits both since gen-cargo P1), atomically committing if
-#   drifted (gen-spec-bot identity), no-op when fresh.
+# ── WHAT MATERIALLY CHANGES FOR CALLERS ─────────────────────────────────────
+# 1. THE RUNNER. Jobs no longer route by repo visibility. Private repos ran on
+#    camelot-builder-pleme-eks, which is stalled — measured 2026-08-06, 284 of
+#    the 412 repos carrying a Cargo.gen.lock are private, so 69% of the gated
+#    fleet had no working autoheal at all. Everything now runs on ubuntu-latest
+#    unless a caller passes `runner`.
 #
-#   - push to main : regen + commit + push back via the typed action.
-#   - pull request : regen without commit; fail the PR if either artifact
-#                    drifted (author must include the regen commit).
+#    This costs billed minutes on private repos, which is exactly what the old
+#    routing existed to avoid, so it was measured before being chosen: 243
+#    gen-spec runs/month across the private delta repos at ~4 min each ≈ 970
+#    min against GitHub Free's 2000 private-repo minutes.
 #
-# Uses PUBLISHED gen (`nix run github:pleme-io/gen`) — NOT a from-source
-# build — so it works in any consumer repo, not just gen itself.
-# substrate's lockfile-builder consumes the committed Cargo.gen.lock as the
-# highest-priority spec source (delta > build-spec > IFD), so adopting this
-# workflow is what eliminates eval-time IFD for the repo.
+# 2. A workflow_dispatch can no longer fake-green. It previously matched
+#    neither the push arm nor the pull_request arm, so every step skipped and
+#    the job reported SUCCESS having done nothing — a manual re-run of a
+#    genuinely stale repo looked fixed. Unhandled events now fail.
+#
+# ── PROVEN BEFORE THIS FILE WAS TOUCHED ─────────────────────────────────────
+# Piloted on amimori (private, previously two consecutive failures on the
+# camelot pool): the run went in_progress in seconds, detect passed, repair
+# committed, and push-back succeeded — and because that repo carried a v1
+# delta, the heal also migrated it to v2 with manifest_sha256. Full chain, on
+# the exact class of repo this migration is meant to rescue.
+#
+# A first pilot on arch-synthesizer failed and was NOT the workflow: that repo
+# has 17 sibling `path = "../…"` dependencies, so `cargo metadata` cannot
+# resolve there in CI under any workflow. 45 of 412 delta repos (11%) share
+# that shape and need their own answer — this migration does not fix them and
+# does not claim to.
+#
+# ── SEMANTICS PRESERVED EXACTLY ─────────────────────────────────────────────
+# `detect` is plain `gen confirm` (strict), as before — NOT `--if-present`.
+# Refactor and behaviour change do not belong in one commit. Note the
+# consequence, unchanged from before: on a v1 delta `confirm` reports
+# untied-manifests and exits non-zero, which is advisory on a push (so the
+# repair still runs and migrates it) and fatal on a PR.
+#
+# The PR arm diffs only Cargo.gen.lock: Cargo.build-spec.json is gitignored
+# under the delta-only doctrine, so it never registers as a tracked diff.
 name: reusable-gen-spec
 
 on:
@@ -37,192 +68,30 @@ on:
         description: "gen flake ref to run (pin for reproducibility)."
         type: string
         default: "github:pleme-io/gen"
-      # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
-      # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
-      # off github.event.repository.private (the caller's event payload),
-      # never an org-level Actions variable — pleme-io's GitHub Free org
-      # plan doesn't share org vars/secrets into private repos' workflow
-      # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
       runner:
+        description: "Runner override. Empty uses the shared default (ubuntu-latest)."
         type: string
         default: ""
-
-concurrency:
-  group: gen-spec-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
   contents: write
 
 jobs:
   gen-spec:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      # `gen build` shells to `cargo metadata`, which resolves EVERY git
-      # dependency — and checkout's token is scoped to THIS repo only, so a
-      # sibling PRIVATE pleme-io dep (≈20 flipped private 2026-07-23) fails
-      # with "failed to authenticate when downloading repository". The action
-      # owns the BOT_PAT > GITHUB_TOKEN order and the checkout-extraheader
-      # unset that makes the rewrite actually take effect.
-      - uses: pleme-io/actions/git-credentials@main
-        with:
-          bot-pat: ${{ secrets.BOT_PAT }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ secrets.BOT_PAT }}
-      # use-flakehub: false — no FlakeHub account; the default attempts
-      # FlakeHub auth and emits a red-herring ##[error] in every run.
-      # The native GitHub Actions cache half is what we want.
-      #
-      # PUBLIC ONLY. magic-nix-cache restores its closure by shelling out to
-      # `cat … | xz -d | nix-store --import`, and the self-hosted pool that
-      # private repos route to (line 60) runs the UPSTREAM MINIMAL
-      # ghcr.io/actions/actions-runner image, which ships no `xz` — measured
-      # 2026-08-05 on camelot-builder-pleme-eks-mwsjp-runner-gjvk7:
-      #   /bin/sh: 1: xz: not found
-      #   error: unexpected end-of-file
-      # reproduced identically on a re-run, so not transient. GitHub-hosted
-      # images carry xz, which is why the public callers (sui, gen, engenho)
-      # are green while EVERY private caller is red.
-      #
-      # This is the SAME CLASS as the `cargo metadata` note below: the pool's
-      # image lacks tools the hosted image has, and each one has been found by
-      # a red run rather than by a check. The load-bearing fix is for that pool
-      # to run our own arc-runner image (rio's private pool already does —
-      # ghcr.io/pleme-io/arc-runner, k8s/clusters/rio/infrastructure/arc/
-      # runner-pool-private.yaml) instead of upstream's; camelot's pool is NOT
-      # in the k8s repo, so that is a separate change and is tracked as
-      # `pending-arc-runner-image: camelot private pool`. Skipping the cache
-      # costs a cold nix store on private runs — strictly better than the
-      # unconditional failure it replaces, and it changes nothing for public
-      # callers.
-      - if: ${{ !github.event.repository.private }}
-        uses: DeterminateSystems/magic-nix-cache-action@main
-        with:
-          use-flakehub: false
-
-      # DELTA-ONLY: the committed artifact is the slim Cargo.gen.lock.
-      # gen build regenerates it (and a gitignored Cargo.build-spec.json
-      # intermediate). On main: --commit retires build-spec + commits the
-      # delta as gen-spec-bot (no-op when fresh). On PR: regen only.
-      #
-      # `gen build` shells out to the literal `cargo metadata` binary (not a
-      # Nix-mediated call), which GitHub-hosted runners carry pre-installed
-      # but the `camelot-builder-pleme-eks` self-hosted pool this job
-      # defaults to for private repos (line 60 above) does not — confirmed
-      # live: every private-repo run here fails
-      # "failed to start `cargo metadata`: No such file or directory".
-      # `nix shell nixpkgs#cargo` supplies it hermetically, identically on
-      # every runner regardless of what it ships with.
-      # FAKE-GREEN FIX: a `workflow_dispatch` matched NEITHER this gate nor
-      # the pull_request one below, so every regen + gate + push step
-      # skipped and the job reported SUCCESS having done nothing — a manual
-      # re-run of a genuinely stale repo looked fixed. A dispatch on main is
-      # a deliberate operator re-run and is treated exactly like a push;
-      # a dispatch on any other ref still takes the no-commit path.
-      # ── THE OFFLINE TIE, checked BEFORE the expensive regen ───────────
-      # `gen confirm` reads ONLY Cargo.lock + the committed Cargo.gen.lock and
-      # compares sha256(Cargo.lock) against the delta's recorded
-      # cargo_lock_sha256 (the D2 tie). No cargo metadata, no network, no
-      # ~/.cargo — a verdict in milliseconds, where the regen below needs a
-      # full dependency resolution.
-      #
-      # WHY IT IS HERE AT ALL, when the PR diff gate below already catches
-      # drift: the diff gate can only speak AFTER a successful `gen build`,
-      # and it reports "the regen changed something". `confirm` names the
-      # actual state — fresh / stale / missing / untied-manifests — and does
-      # it before anything expensive runs. Measured 2026-08-05: codesearch,
-      # the one fleet repo with a Cargo.gen.lock and no gate, sat in
-      # "untied-manifests" while 413 gated repos were fresh.
-      #
-      # FATAL ON PR, ADVISORY ON MAIN, deliberately. A push to main is the
-      # auto-heal path: this job REPAIRS main by regenerating and pushing, so
-      # failing here would break the very mechanism that keeps the fleet
-      # fresh. But main IS transiently stale between a release push and this
-      # job's repair push, and a consumer that bumps inside that window
-      # breaks — so on main it emits a warning annotation instead of silence.
-      - name: Delta freshness tie (gen confirm)
-        id: tie
-        continue-on-error: ${{ github.event_name != 'pull_request' }}
-        run: |
-          if nix run ${{ inputs.gen-ref }} -- confirm; then
-            echo "delta tie is fresh"
-          else
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "::error::stale Cargo.gen.lock — Cargo.lock moved without a \`gen build\`. Every Nix consumer of this workspace fails to EVALUATE until the delta is regenerated. Fix: \`gen build . && git commit Cargo.gen.lock\`"
-            else
-              echo "::warning::main is transiently stale — the regen step below will repair and push it. A consumer bumping this input before that push lands will fail to evaluate."
-            fi
-            exit 1
-          fi
-
-      - name: Regen delta (push to main / dispatch on main)
-        if: >-
-          github.ref == 'refs/heads/main'
-          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        env:
-          # cargo's bundled libgit2 ignores url.insteadOf; force the real git
-          # binary so the credential above applies to dep resolution.
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        # nixpkgs#rustc alongside cargo: `cargo metadata` shells out to
-        # `rustc -vV`, and cargo alone leaves that resolving against the
-        # runner's rustup SHIM, which then tries to materialize the consumer's
-        # pinned rust-toolchain.toml over the network mid-job. Same hole fixed
-        # in image-push.yml; see its comment for the live hanabi repro.
-        run: nix shell nixpkgs#cargo nixpkgs#rustc --command nix run ${{ inputs.gen-ref }} -- build . --commit
-
-      # Every non-main-push path: a PR, or a dispatch on a non-main ref.
-      # Regen only, never commit. Paired with the gate above so the two arms
-      # are TOTAL over the events this reusable can receive — that totality
-      # is the actual fix; a third event must not silently fall through both.
-      - name: Regen delta (PR / off-main dispatch — no commit)
-        if: >-
-          github.event_name == 'pull_request'
-          || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        # See the --commit step above: rustc must come from nixpkgs too, or
-        # `cargo metadata` falls through to the runner's rustup shim.
-        run: nix shell nixpkgs#cargo nixpkgs#rustc --command nix run ${{ inputs.gen-ref }} -- build .
-
-      # Drift = the PR didn't include a fresh regen of the committed delta.
-      # (Cargo.build-spec.json is gitignored under delta-only, so it never
-      # registers as a tracked diff.)
-      - name: Fail PR if delta regen was not included
-        if: github.event_name == 'pull_request'
-        run: |
-          if ! git diff --quiet -- Cargo.gen.lock; then
-            echo "::error::stale Cargo.gen.lock — run \`gen build . --commit\` locally and include the regen commit."
-            git --no-pager diff -- Cargo.gen.lock | head -200
-            exit 1
-          fi
-
-      # Must match the --commit arm above EXACTLY. When these two diverged, a
-      # dispatch on main committed the regenerated delta locally and then
-      # never pushed it, so the commit was discarded with the runner and the
-      # next run regenerated the same delta again — a silent no-progress loop.
-      - uses: pleme-io/actions/git-push-with-token@main
-        if: >-
-          github.ref == 'refs/heads/main'
-          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-          push-tags: "false"
-          # The other side of the same race. This job races `auto-release` on
-          # every push to main, and whichever loses rebases into a conflict on
-          # exactly the file this job exists to regenerate. Losing is the
-          # BETTER case here — this output is pure derivation, so taking the
-          # replayed side and letting the next run reconcile costs nothing,
-          # whereas aborting leaves the delta unpushed and the next run
-          # regenerates it again (the silent no-progress loop the comment
-          # above already describes).
-          regenerable-paths: "Cargo.gen.lock Cargo.lock Cargo.build-spec.json"
+    # Fully-qualified, not `./…`: this workflow is itself called from another
+    # repo, and a relative path resolves against the CALLER's checkout, which
+    # is not substrate. Matches the fleet's 109 other nested calls.
+    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
+    secrets: inherit
+    with:
+      artifact: "Cargo.gen.lock"
+      paths: "Cargo.gen.lock"
+      detect: "nix run ${{ inputs.gen-ref }} -- confirm"
+      repair: "nix run ${{ inputs.gen-ref }} -- build . --commit"
+      regen: "nix run ${{ inputs.gen-ref }} -- build ."
+      fix-hint: "gen build . && git commit Cargo.lock Cargo.gen.lock"
+      # ubuntu-latest ships neither. `gen build` shells to `cargo metadata`,
+      # which shells to `rustc -vV`; the old inline `nix shell` wrapper is now
+      # this typed input.
+      toolchain: "nixpkgs#cargo nixpkgs#rustc"
+      runner: ${{ inputs.runner }}

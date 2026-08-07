@@ -39,5 +39,21 @@ jobs:
 
   go-gen-spec:
     if: inputs.target == 'go-gen-spec'
-    uses: ./.github/workflows/go-gen-spec.yml
+    # Calls reusable-autoheal DIRECTLY rather than via go-gen-spec, to stay
+    # inside GHA's 4-level nesting cap. go-gen-spec now delegates to autoheal
+    # itself, so the hop through it would make the chain
+    #   consumer → pleme.yml → pleme-go → go-gen-spec → autoheal
+    # which is FIVE levels and fails to dispatch. Same reason as the
+    # reusable-gen-spec job in pleme-publish.yml.
+    #
+    # Keep these `with:` values identical to go-gen-spec.yml's.
+    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
     secrets: inherit
+    with:
+      artifact: "Go.gen.lock"
+      paths: "Go.gen.lock Go.build-spec.json"
+      detect: "nix run github:pleme-io/gen -- confirm"
+      repair: "nix run github:pleme-io/gen -- build . --commit"
+      regen: "nix run github:pleme-io/gen -- build ."
+      fix-hint: "gen build . && git commit Go.gen.lock Go.build-spec.json"
+      toolchain: "nixpkgs#go"

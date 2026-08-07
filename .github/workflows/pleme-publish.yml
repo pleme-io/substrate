@@ -49,5 +49,23 @@ jobs:
 
   reusable-gen-spec:
     if: inputs.target == 'reusable-gen-spec'
-    uses: ./.github/workflows/reusable-gen-spec.yml
+    # Calls reusable-autoheal DIRECTLY rather than going through
+    # reusable-gen-spec, purely to stay inside GHA's 4-level nesting cap.
+    # reusable-gen-spec now delegates to autoheal itself, so routing through it
+    # here would make the chain
+    #   consumer → pleme.yml → pleme-publish → reusable-gen-spec → autoheal
+    # which is FIVE levels and fails to dispatch. Going direct makes it four.
+    #
+    # Keep these `with:` values identical to reusable-gen-spec.yml's. They are
+    # duplicated only because the nesting cap forbids the extra hop; if that
+    # cap ever lifts, collapse this back to a call of reusable-gen-spec.
+    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
     secrets: inherit
+    with:
+      artifact: "Cargo.gen.lock"
+      paths: "Cargo.gen.lock"
+      detect: "nix run github:pleme-io/gen -- confirm"
+      repair: "nix run github:pleme-io/gen -- build . --commit"
+      regen: "nix run github:pleme-io/gen -- build ."
+      fix-hint: "gen build . && git commit Cargo.lock Cargo.gen.lock"
+      toolchain: "nixpkgs#cargo nixpkgs#rustc"
