@@ -63,12 +63,27 @@ jobs:
       # level is an error, and a glob matching nothing stays a tolerated
       # ::warning:: + exit 0 (the glob is a caller input; zero is a real
       # answer here, unlike in pleme-io/actions where the count is fixed).
+      # ★ The script lives in SUBSTRATE, but every step above this one runs
+      # against the CONSUMER's checkout — so `tools/validate-action-manifests.tlisp`
+      # resolved relative to the caller and was never found. Measured
+      # 2026-08-08: pleme-io/actions run 31236737014, `script-file not found:
+      # tools/validate-action-manifests.tlisp`, and the release never validated
+      # anything. It is not a consumer bug — the file exists in exactly one
+      # repo (this one) and in no caller, so the job could only ever have
+      # failed. A reusable workflow that requires the consumer to ship a
+      # specific file is not reusable; it owns its own tooling.
+      - name: Check out substrate (for its validator)
+        uses: actions/checkout@v4
+        with:
+          repository: pleme-io/substrate
+          ref: main
+          path: .substrate-tools
       - name: Validate action.yml manifests
         uses: pleme-io/actions/tatara-script@main
         env:
           ACTION_GLOB: ${{ inputs.action-glob }}
         with:
-          script-file: tools/validate-action-manifests.tlisp
+          script-file: .substrate-tools/tools/validate-action-manifests.tlisp
 
   # 2. Fast-forward the matching major-version branch and 3. cut a Release.
   release:
