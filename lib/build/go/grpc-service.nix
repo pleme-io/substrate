@@ -45,15 +45,22 @@
     # naming the fix, never a silently vulnerable artifact.
     goFloorBuild = args: (import ./overlay.nix).assertGoFloor {
       what = "substrate.mkGrpcService"; drv = pkgs.buildGoModule args; };
+    # Contract probed ONCE against the real functor, not the assertGoFloor
+    # wrapper above. See service-flake.nix for the full argument: `env` vs
+    # top-level is a property of the resolved nixpkgs and has already inverted
+    # once, so spelling the winner per call site is a hand-list.
+    cgoLib = import ./cgo-contract.nix { lib = pkgs.lib; };
+    placeCgo = cgoLib.placeCgo (cgoLib.probe pkgs.buildGoModule);
+
     goDocker = import ./docker.nix;
 
     binary = goFloorBuild {
       pname = name;
       inherit version src vendorHash subPackages ldflags;
       inherit buildInputs nativeBuildInputs;
-      # In `env`, and a STRING: buildGoModule reads args.env.CGO_ENABLED, and
-      # derivation env values must be strings. Corrected 2026-08-01.
-      env.CGO_ENABLED = "0";
+      # Contract spent through placeCgo (probed above), never spelled here.
+      # Value stays a STRING — derivation env values must be.
+      env = (placeCgo "0").env;
       meta = {
         description = "${name} gRPC service";
         mainProgram = name;

@@ -112,6 +112,21 @@ let
     # This builder takes the CONSUMER's pkgs, so nothing here constrains WHICH
     # compiler runs. Floor it: a below-CVE-floor stdlib becomes an eval error
     # naming the fix, never a silently vulnerable artifact.
+    # ── THE CGO CONTRACT IS PROBED ONCE, HERE ─────────────────────────
+    # `env` vs top-level is a property of the RESOLVED nixpkgs, and it has
+    # ALREADY inverted once in this file — see the 2026-08-01 correction
+    # below, which cost substrate's only red nix-tests job. Spelling the
+    # winner at each call site is the hand-list shape: the next inversion
+    # needs N edits, and whichever one is missed fails as a two-sides-disagree
+    # eval error far from its cause.
+    #
+    # Probed against `pkgs.buildGoModule` — the real functor — NOT against
+    # `goBuild` below, which wraps it in assertGoFloor; probing the wrapper
+    # would construct a throwaway derivation through a Go-floor assert. Once,
+    # at the pkgs seam, then threaded down.
+    cgoLib = import ./cgo-contract.nix { lib = nixpkgs.lib; };
+    placeCgo = cgoLib.placeCgo (cgoLib.probe pkgs.buildGoModule);
+
     goBuild = args: (import ./overlay.nix).assertGoFloor {
       what = "substrate.mkGoServiceFlake";
       drv = (if goVersion == null
@@ -162,7 +177,9 @@ let
       # That eval error has been failing checks.go-minimal-image-serves --
       # substrate's ONLY red nix-tests job -- on every run measured today.
       # GOEXPERIMENT/GOFIPS were already correct here; only CGO moved.
-      env = { CGO_ENABLED = "0"; }
+      # Contract spent through placeCgo (probed above), never spelled here.
+      # Value stays a STRING — derivation env values must be.
+      env = (placeCgo "0").env
         // (if fipsBuild then { GOEXPERIMENT = "boringcrypto"; GOFIPS = "1"; } else {});
       doCheck = false;
       meta.mainProgram = serviceName;
