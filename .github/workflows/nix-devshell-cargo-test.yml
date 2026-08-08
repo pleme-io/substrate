@@ -34,9 +34,19 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: "Runner label"
+        # Empty = route by CALLER repo visibility. The old default was a
+        # literal "ubuntu-24.04", which silently billed GitHub-hosted minutes
+        # for every PRIVATE consumer — the exact outcome the org invariant in
+        # `pleme-io/actions/runner-resolve` forbids ("a CI path either flows
+        # through a genuinely public repo or Camelot self-hosted, never a
+        # metered GitHub-hosted runner on a private repo"). frost and seki
+        # both inherited it, and on 2026-08-08 that class of pin exhausted the
+        # org's Actions spending limit, blocking every private repo in
+        # pleme-io. A default that costs money on a private repo is not a
+        # neutral default.
+        description: "Runner label; empty routes by caller repo visibility (private -> camelot-builder-pleme-eks, public -> ubuntu-24.04)"
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       devshell:
         description: "Flake devShell output name (e.g. `.#ruby-eval`)"
         type: string
@@ -108,7 +118,10 @@ on:
 jobs:
   cargo-test:
     name: cargo test (nix devShell ${{ inputs.devshell }})
-    runs-on: ${{ inputs.runner }}
+    # ubuntu-24.04 rather than -latest for the PUBLIC arm: tatara-script's
+    # release binary is linked against glibc 2.39 and dies instantly on
+    # 22.04's 2.35, so the floor is pinned rather than floating.
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04') }}
     permissions:
       contents: read
     steps:
