@@ -158,6 +158,7 @@
     # skips the check rather than breaking the build.
     goVersionAssert =
       let
+        directive = import ./directive.nix { inherit lib; };
         gomodPath = "${src}/${lib.optionalString (modRoot != null) (modRoot + "/")}go.mod";
         read = builtins.tryEval (builtins.readFile gomodPath);
         goLine =
@@ -168,13 +169,38 @@
           if goLine == null then null
           else lib.head (lib.splitString " " (lib.removePrefix "go " goLine));
         tool = pkgs.go.version;
+
+        # ── ONE PREDICATE, 2026-08-08 ────────────────────────────────
+        # The ordering rule used to be re-derived here inline. That is the
+        # second-copy shape that let Go.gen.lock's producer and consumer
+        # disagree on 12 of 13 fields, so the comparison now lives in
+        # ./directive.nix and is driven by directive-vectors.json — the same
+        # table gen's Rust half reads.
+        verdict = directive.classify { directive = if req == null then "" else req; fleetGo = tool; };
       in
-        if req != null && builtins.compareVersions req tool > 0
+        # THROW SCOPED TO `above-fleet-toolchain` ONLY. cmd/go genuinely
+        # refuses that one, and it has 0 fleet offenders today, so the throw
+        # ships with nothing to break.
+        #
+        # BARE-MINOR IS A TRACE, NOT A THROW, and that is deliberate. Measured
+        # on go1.25.10: bare-minor BUILDS under -mod=mod (go silently rewrites
+        # go.mod to the patch form) and fails only under -mod=readonly/vendor.
+        # 29 of 69 Nix-Go repos are bare-minor, so throwing here breaks 29
+        # repos in one commit to fix a class that self-heals on the loose
+        # path. Escalation has a COUNTED done-predicate — `gen adopt-go
+        # --dry-run --all` reporting bare-minor-directive == 0 — not a
+        # judgement call.
+        if verdict.verdict == "above-fleet-toolchain"
         then throw ("substrate.mkGoTool: ${pname} go.mod requires 'go ${req}' but the substrate "
-          + "goToolchain is ${tool}. Lower go.mod to at most 'go ${tool}' — the lowest form that still "
-          + "clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a bare "
-          + "'go ${lib.versions.majorMinor tool}' sorts BELOW it and will not build. "
+          + "goToolchain is ${tool}. ${verdict.why} Lower go.mod to at most 'go ${tool}' — the lowest "
+          + "form that still clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a bare "
+          + "'go ${lib.versions.majorMinor tool}' sorts BELOW it. "
           + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
+        else if verdict.verdict == "bare-minor"
+        then builtins.trace
+          ("substrate.mkGoTool: ${pname} declares a bare-minor 'go ${req}'. ${verdict.why} "
+            + "This builds today; it fails under -mod=readonly/-mod=vendor. Fix is one line: 'go ${req}.0'.")
+          null
         else null;
 
   in builtins.seq goVersionAssert (goOverlayLib.assertGoFloor { what = pname; drv = pkgs.buildGoModule ({
