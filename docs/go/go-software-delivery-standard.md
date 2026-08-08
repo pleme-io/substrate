@@ -5382,6 +5382,43 @@ AMQP client) MUST live behind a build tag or in a leaf sub-package so the defaul
 
 ## Dimension: Build and Packaging (BUILD)
 
+### BUILD-GEN-01 — the gen Go path exists, and is deliberately off
+
+This document ran to 7,701 lines mentioning `gen-gomod`, `Go.gen.lock` and
+`gen build` **zero times** (measured 2026-08-08). That silence was itself the
+defect: an agent reading only this standard would find no reason the Go
+lockfile-delta path is absent, and the shortest correction available to them
+was to wire it.
+
+**The rule: a Go repo does not commit a `Go.gen.lock`, and must not rely on one
+being produced.**
+
+`gen-gomod` carries a complete, tested emitter (`gen_delta.rs`). Its
+`write_gen_delta` has **zero call sites** — `gen-cargo`'s sibling has one — so
+no such file has ever been written: **0 fleet-wide against a 425-file
+`Cargo.gen.lock` control**.
+
+It is retired **by declaration, not by absence**:
+
+| half | mechanism |
+|---|---|
+| producer | `specs/go-delta.lisp` declares `:mode "retired" :reason "no-consumer"`; `write_gen_delta` requires an `ActiveDelta` witness that `DeltaPolicy::activate` refuses to mint while retired |
+| consumer | `lib/build/go/delta-schema.nix` declares every field required-or-defaulted; `lockfile-delta.nix` reads only through it |
+| binding | a byte-identical golden pair, where a shape change turns **exactly one** side red |
+
+The consumer half matters independently. Before it was closed, feeding the
+reader the literal bytes gen emits today produced
+`{ packages = { }; root_package = null; }` behind a **green** D2 freshness
+verdict — a zero-package build spec, no throw. The freshness tie was working
+correctly the whole time; it answers *"does this artifact still describe its
+source?"*, not *"is this the shape I was written against?"*, and 17 bare `or`
+defaults answered the second question with yes for every possible input.
+
+**Reviving it** is one declaration change *plus* making substrate's reader
+accept the new shape. Doing only the first is what the golden pair exists to
+catch.
+
+
 Substrate Nix builders that package the Go (and Node) primitives. The macro law:
 one cross-language-identical surface so a consumer never re-learns the knobs.
 

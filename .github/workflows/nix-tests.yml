@@ -391,6 +391,9 @@ jobs:
       - name: util/gen-pin-gate.nix (cross-file pin distinctness)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/gen-pin"; }'
 
+      - name: build/go/tests/gsds-gen-coverage-test.nix (10 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/gsds-gen-coverage"; }'
+
       - name: build/go/tests/lockfile-delta-schema-test.nix (24 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/gen-lock-schema"; }'
 

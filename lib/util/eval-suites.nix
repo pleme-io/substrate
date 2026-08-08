@@ -264,6 +264,15 @@ let
       min = 2;
       verdict = fromPassedTotal (import ../util/gen-pin-gate.nix { inherit lib; });
     };
+    # The Go delivery standard must document the gen Go path. Measured
+    # 2026-08-08: 7,701 lines mentioning gen-gomod / Go.gen.lock / gen build
+    # ZERO times. The silence WAS the defect — an agent reading only the
+    # standard found no reason the path is absent, and the shortest correction
+    # available was to wire it. A prose fix with no gate decays.
+    "build/go/gsds-gen-coverage" = {
+      min = 10;
+      verdict = fromPassedTotal (import ../build/go/tests/gsds-gen-coverage-test.nix);
+    };
     "build/go/gen-lock-schema" = {
       min = 24;
       verdict = fromPassedTotal (import ../build/go/tests/lockfile-delta-schema-test.nix);
