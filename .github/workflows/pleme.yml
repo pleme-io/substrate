@@ -82,7 +82,14 @@ jobs:
   # `dep-missing` defer fixed elsewhere in this fleet today.
   validate:
     name: "family + target are known"
-    runs-on: ${{ inputs.runner != '' && inputs.runner || 'ubuntu-latest' }}
+    # The fallback used to be a bare 'ubuntu-latest', which on a PRIVATE caller
+    # is a metered runner — the same defect fixed across 31 reusables on
+    # 2026-08-08, surviving here because this line is an EXPRESSION and the
+    # sweep matched bare literals only. Receipt: pleme-io/tend's gen-spec ran
+    # on `ubuntu-latest` with 0 steps (blocked) hours after the fleet "was
+    # routed". An explicit `inputs.runner` still wins, so a caller that needs
+    # a specific label is unaffected.
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/tatara-script@main
