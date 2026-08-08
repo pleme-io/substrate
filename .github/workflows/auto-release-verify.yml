@@ -38,7 +38,13 @@ permissions:
 jobs:
   detect:
     name: Detect repo type
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     outputs:
       repo-type: ${{ steps.detect.outputs.repo-type }}
     steps:
@@ -50,7 +56,13 @@ jobs:
     name: 'rust-workspace · verify (dry-run)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'rust-workspace'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/rust-workspace-publish@main
@@ -64,7 +76,13 @@ jobs:
     name: 'rust-single-crate · verify (dry-run)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'rust-single-crate'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/cargo-publish-crate@main
@@ -78,7 +96,13 @@ jobs:
     name: 'npm · verify (dry-run)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'npm'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/npm-publish@main
@@ -91,7 +115,13 @@ jobs:
     name: 'python · verify (dry-run)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'python'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/python-publish@main
@@ -104,7 +134,13 @@ jobs:
     name: 'helm · verify (dry-run)'
     needs: detect
     if: needs.detect.outputs.repo-type == 'helm'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/helm-publish@main
@@ -120,7 +156,13 @@ jobs:
   verify-unsupported:
     needs: detect
     if: needs.detect.outputs.repo-type == 'unknown'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     steps:
       - name: Diagnose
         run: |

@@ -107,7 +107,13 @@ jobs:
   # boundaries are annotated below.
   release:
     name: 'go · Drafted→…→FormulaUpdated (goreleaser)'
-    runs-on: ubuntu-latest
+    # A reusable workflow's `runs-on` executes in the CALLER's billing
+    # context, so a bare metered label here charges every PRIVATE consumer.
+    # That is what exhausted the org's Actions spending limit on 2026-08-08,
+    # after which every private repo's release path failed INSTANTLY with
+    # zero steps — which reads as "autobump/autorelease is broken" rather
+    # than "billing blocked". Public callers keep the exact label they had.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
     outputs:
       version: ${{ steps.semver.outputs.version }}
     steps:
