@@ -1,0 +1,15 @@
+{
+  "_comment": "THE ONE committed vector table for the `go` directive predicate. Read by BOTH substrate's tests/directive-test.nix (Nix) and gen's directive_vectors.rs (Rust). A single byte edit here MUST turn both suites red; if only one goes red, a second copy of the rule exists somewhere and that is the defect. Every verdict arm carries >= 1 row -- tests/directive-test.nix asserts that, because an arm with no vector is a branch nothing exercises.",
+  "fleetGo": "1.26.5",
+  "vectors": [
+    { "directive": "1.25.0",  "fleetGo": "1.26.5", "verdict": "satisfiable",           "note": "patch-pinned, below the toolchain: the shape the fleet wants" },
+    { "directive": "1.26.5",  "fleetGo": "1.26.5", "verdict": "satisfiable",           "note": "exactly the toolchain is fine" },
+    { "directive": "1.25",    "fleetGo": "1.26.5", "verdict": "bare-minor",            "note": "MEASURED go1.25.10: builds under -mod=mod (go rewrites go.mod to 1.25.0), FAILS under -mod=readonly/vendor" },
+    { "directive": "1.16",    "fleetGo": "1.26.5", "verdict": "bare-minor",            "note": "an old bare minor is still bare minor -- age is not the axis" },
+    { "directive": "1.27.0",  "fleetGo": "1.26.5", "verdict": "above-fleet-toolchain", "note": "cmd/go refuses: module needs a newer language version than the toolchain" },
+    { "directive": "1.26.6",  "fleetGo": "1.26.5", "verdict": "above-fleet-toolchain", "note": "one patch above still refuses -- the comparison is not minor-only" },
+    { "directive": "",        "fleetGo": "1.26.5", "verdict": "no-directive",          "note": "no `go` line at all; cmd/go assumes a very old language version" },
+    { "directive": "1",       "fleetGo": "1.26.5", "verdict": "unparseable",           "note": "not 1.N or 1.N.P" },
+    { "directive": "1.2.3.4", "fleetGo": "1.26.5", "verdict": "unparseable",           "note": "too many components" }
+  ]
+}

@@ -269,6 +269,15 @@ let
     # ZERO times. The silence WAS the defect — an agent reading only the
     # standard found no reason the path is absent, and the shortest correction
     # available was to wire it. A prose fix with no gate decays.
+    # The ONE `go` directive predicate, driven by directive-vectors.json — the
+    # same table gen's Rust half reads, so one byte edit must turn BOTH red.
+    # Includes an anti-vacuity guard: mkEvalChecks computes `passed = results
+    # == [ ]`, so an emptied vector table would build GREEN. Deleting the only
+    # `above-fleet-toolchain` row fails the suite naming the uncovered arm.
+    "build/go/directive" = {
+      min = 15;
+      verdict = fromPassedTotal (import ../build/go/tests/directive-test.nix);
+    };
     "build/go/gsds-gen-coverage" = {
       min = 10;
       verdict = fromPassedTotal (import ../build/go/tests/gsds-gen-coverage-test.nix);
