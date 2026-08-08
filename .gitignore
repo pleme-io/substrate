@@ -1,3 +1,7 @@
 result
 result-*
 .direnv/
+
+# Cargo build artifacts, at any depth. tools/sql-apply/target/ showed up
+# untracked on 2026-08-08 because nothing covered a nested crate.
+**/target/
