@@ -77,6 +77,69 @@
   # nix-darwin -> assertions -> home-manager.sharedModules). Identifying the
   # culprit then meant hashing every Cargo.lock in the org — a five-minute
   # scan to recover information the throw site already held in `src`.
+  # schemaViolation :: { … } -> throw
+  #
+  # The SECOND failure mode, and the one `held` is structurally blind to.
+  #
+  # `held` answers "is this artifact still describing its source?". It cannot
+  # answer "is this artifact the SHAPE this reader was written against?" —
+  # and a reader that defaults an absent key silently answers YES to the
+  # second question while `held` answers YES to the first, producing a green
+  # verdict over a reconstruction that dropped everything.
+  #
+  # MEASURED 2026-08-08, which is why this exists. `build/go/lockfile-delta.nix`
+  # defaulted 17 keys with bare `or`. Fed the exact bytes gen-gomod emits today
+  # — `{schema_version, go_sum_sha256, source_hashes}`, with no `per_package`
+  # at all — it returned
+  #
+  #     { version = 1; packages = { }; root_package = null;
+  #       workspace_members = [ ]; }
+  #
+  # behind a GREEN D2 tie. A zero-package build spec, no throw, no warning.
+  # gen-gomod's `write_gen_delta` has ZERO call sites today, so this is
+  # dormant rather than live — but it is one added call from being a fleet-wide
+  # silent-wrong-answer, and the reader is the half that must refuse.
+  #
+  # Like `held`, this NEVER RETURNS FALSE: it throws or it is never called.
+  # It names the PRODUCING ADAPTER as well as the field, because the reader
+  # and the writer live in different repositories and a message naming only
+  # the key sends the operator to the wrong one.
+  #
+  # TIER: eval-rejected (a Nix `throw`), identical to `held`. Not
+  # unrepresentable — the writer can still emit any JSON it likes; this is the
+  # reader refusing to guess. Do not round it up.
+  schemaViolation =
+    {
+      subject,
+      artifact,
+      where,
+      field,
+      adapter,
+      expected,
+      got,
+      cause,
+      fix,
+    }:
+    throw ''
+      ${subject}: ${artifact} does not match the shape this reader requires.
+        workspace = ${where}
+        field     = ${field}
+        producer  = ${adapter}
+        expected  = ${expected}
+        got       = ${got}
+
+      ${cause}
+
+      Fix at the PRODUCER, in the workspace named above:
+        ${fix}
+
+      Do NOT add a default for the missing field. A default is how a reader
+      answers a question it cannot answer: it converts an absent producer
+      contract into a plausible-looking value, and every consumer downstream
+      then trusts a reconstruction that dropped the thing it was reconstructing.
+      That is the defect this constructor exists to make impossible.
+    '';
+
   held =
     {
       subject,

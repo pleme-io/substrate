@@ -36,6 +36,10 @@ let
   # and build/rust/cargo-nix-tie.nix.
   tie = import ../shared/freshness-tie.nix { };
 
+  # The closed schema. Every read of the delta goes through it; a bare `or`
+  # in this file is the defect it exists to prevent (see delta-schema.nix).
+  schema = import ./delta-schema.nix { inherit lib; };
+
   # gen-gomod's freshness tie when a module has no go.sum: the SHA-256 of the
   # empty string. Matches `gen_delta::sha256_hex(b"")` exactly.
   emptyGoSumSha256 =
@@ -65,7 +69,8 @@ let
         delta = fromJSON (readFile genLockPath);
         goModSrc = readFile goModPath;
         modulePath = goModModulePath goModSrc;
-        perPackage = delta.per_package or { };
+        where = tie.hint src;
+        perPackage = schema.field schema.topLevel delta where "per_package";
 
         # ── D2 freshness gate — hard eval throw on stale delta ──────────
         # Tie is over go.sum CONTENT (empty-string hash when the module is
@@ -83,13 +88,20 @@ let
         # scope; spending it costs nothing. The compare-and-throw itself now
         # lives in ../shared/freshness-tie.nix, so this message and the Rust
         # one cannot drift apart again.
+        committedGoSum = schema.field schema.topLevel delta where "go_sum_sha256";
+
         d2ok = tie.held {
           subject = "lockfile-delta(go) (D2)";
           artifact = "Go.gen.lock";
           where = tie.hint src;
-          fresh = (delta.go_sum_sha256 or null) == goSumSha;
+          # Read through the schema, NOT `or null`. `go_sum_sha256` is a
+          # REQUIRED field, so its absence is a shape violation, not a
+          # staleness verdict — and reporting a missing tie subject as
+          # "STALE" would send the operator to `gen build` to fix a
+          # producer-contract break that `gen build` does not cause.
+          fresh = committedGoSum == goSumSha;
           sides = [
-            ''committed go_sum_sha256  = ${toString (delta.go_sum_sha256 or "<missing>")}''
+            ''committed go_sum_sha256  = ${toString committedGoSum}''
             ''hashFile "sha256" go.sum = ${goSumSha}''
           ];
           cause = ''
@@ -108,28 +120,32 @@ let
         # leaves it null/absent for in-tree / dep-free modules.
         mkPackage = key: pd:
           let
-            hasVendorHash = (pd.vendor_hash or null) != null;
+            f = schema.field schema.perPackage pd where;
+            pdClosed = schema.closed schema.perPackage pd where "package `${key}`";
+            vendorHashV = f "vendor_hash";
+            pnameV = f "pname";
+            hasVendorHash = vendorHashV != null;
             args = {
-              pname = pd.pname or key;
-              version = pd.version or "0.0.0";
-              tags = pd.tags or [ ];
-              ldflags = pd.ldflags or [ ];
-              subPackages = pd.sub_packages or [ ];
-              env = pd.env or { };
-              nativeBuildInputs = pd.native_build_inputs or [ ];
-              buildInputs = pd.build_inputs or [ ];
+              pname = if pnameV == null then key else pnameV;
+              version = f "version";
+              tags = f "tags";
+              ldflags = f "ldflags";
+              subPackages = f "sub_packages";
+              env = f "env";
+              nativeBuildInputs = f "native_build_inputs";
+              buildInputs = f "build_inputs";
             }
             # vendorHash is only present in the spec when the module has
             # external deps; otherwise it stays absent (→ nixpkgs null).
-            // (lib.optionalAttrs hasVendorHash { vendorHash = pd.vendor_hash; })
-            // (lib.optionalAttrs (pd ? proxy_vendor && pd.proxy_vendor != null) { proxyVendor = pd.proxy_vendor; })
-            // (lib.optionalAttrs (pd ? do_check && pd.do_check != null) { doCheck = pd.do_check; });
-          in {
-            name = pd.module or modulePath;
-            version = pd.version or "0.0.0";
+            // (lib.optionalAttrs hasVendorHash { vendorHash = vendorHashV; })
+            // (lib.optionalAttrs (f "proxy_vendor" != null) { proxyVendor = f "proxy_vendor"; })
+            // (lib.optionalAttrs (f "do_check" != null) { doCheck = f "do_check"; });
+          in seq pdClosed {
+            name = f "module";
+            version = f "version";
             inherit args;
             has_external_deps = hasVendorHash;
-            quirks = pd.quirks or [ ];
+            quirks = f "quirks";
           };
 
         packages = listToAttrs
@@ -142,16 +158,30 @@ let
         # IndexMap → JSON object order, which Nix's fromJSON preserves as the
         # attrset; `head` of attrNames is the gen root convention).
         packageKeys = builtins.attrNames perPackage;
-        root_package =
-          if packageKeys == [ ] then null else head packageKeys;
+        # NO `if packageKeys == [ ] then null` BRANCH. That branch is exactly
+        # what the current gen shape reconstructed to — a null root behind a
+        # green tie — and it is safe to delete only because `nonEmptyOk`
+        # below refuses an empty set first.
+        root_package = head packageKeys;
         workspace_members =
-          map (k: (perPackage.${k}.module or modulePath)) packageKeys;
+          map (k: schema.field schema.perPackage perPackage.${k} where "module") packageKeys;
+
+        # ── The three checks, all FORCED below ────────────────────────────
+        closedTop = schema.closed schema.topLevel delta where "Go.gen.lock top level";
+        nonEmptyOk = schema.nonEmpty perPackage where "per_package";
       in
-      seq d2ok {
-        version = delta.schema_version or 1;
+      # ★ FORCING IS THE WHOLE POINT — the critic's mandatory override.
+      #
+      # Nix is lazy. `seq d2ok { … }` forces ONE binding; an unreferenced
+      # `closedTop` or `nonEmptyOk` would never evaluate, so the checks would
+      # be dead in production while a test suite using `deepSeq` reported them
+      # green. That is the vacuous-guard class this whole change exists to
+      # remove, reproduced inside its own fix. All three are forced here.
+      seq d2ok (seq closedTop (seq nonEmptyOk {
+        version = schema.field schema.topLevel delta where "schema_version";
         inherit packages root_package workspace_members;
-        go_sum_sha256 = delta.go_sum_sha256;
-      };
+        go_sum_sha256 = schema.field schema.topLevel delta where "go_sum_sha256";
+      }));
 in
 {
   inherit reconstruct emptyGoSumSha256;

@@ -388,5 +388,8 @@ jobs:
       - name: build/rust/tests/cargo-nix-tie-test.nix (20 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/rust/cargo-nix-tie"; }'
 
+      - name: build/go/tests/lockfile-delta-schema-test.nix (24 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/gen-lock-schema"; }'
+
       - name: build/go/tests/package-builder-ferrite-test.nix (16 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/package-builder-ferrite"; }'

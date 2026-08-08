@@ -246,6 +246,17 @@ let
       min = 20;
       verdict = fromPassedTotal (import ../build/rust/tests/cargo-nix-tie-test.nix);
     };
+    # The CLOSED schema of Go.gen.lock, and the reader that refuses to guess.
+    # Its anchor is a RED RUN against the literal bytes gen-gomod emits today:
+    # measured 2026-08-08, the previous reader turned that input into a
+    # zero-package build spec with a null root behind a GREEN D2 tie, via 17
+    # bare `or` defaults. Four of the 24 cases read ONE field without deepSeq,
+    # because Nix is lazy and a check that is never forced is dead in
+    # production while a deepSeq-ing suite reports it green.
+    "build/go/gen-lock-schema" = {
+      min = 24;
+      verdict = fromPassedTotal (import ../build/go/tests/lockfile-delta-schema-test.nix);
+    };
     "build/go/package-builder-ferrite" = {
       min = 16;
       verdict = fromPassedTotal (import ../build/go/tests/package-builder-ferrite-test.nix);
