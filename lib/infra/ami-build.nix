@@ -182,16 +182,74 @@ in rec {
   # — and peak memory — were IDENTICAL, and the same translation unit
   # died at the same point on the retry. When sizing for memory, reason
   # about the product.
-  amiBuilderInstanceSpecs = {
-    "t3.small"    = { vcpu = 2;  ramGb = 2;  };
-    "t3.medium"   = { vcpu = 2;  ramGb = 4;  };
-    "t3.large"    = { vcpu = 2;  ramGb = 8;  };
-    "t3.xlarge"   = { vcpu = 4;  ramGb = 16; };
-    "c7i.xlarge"  = { vcpu = 4;  ramGb = 8;  };
-    "c7i.2xlarge" = { vcpu = 8;  ramGb = 16; };
-    "c7i.4xlarge" = { vcpu = 16; ramGb = 32; };
-    "c7i.8xlarge" = { vcpu = 32; ramGb = 64; };
+  # ── Generated rows for the REGULAR families ──────────────────────
+  # c/m/r sizing is strictly regular: the size suffix fixes the vCPU count
+  # and the family letter fixes GiB-per-vCPU. Hand-listing the cross product
+  # (7 Graviton families x 6 sizes, x2 again for the local-NVMe `d` and
+  # network-optimized `n` variants) would be ~100 rows free to drift, so it
+  # is derived instead. Spot-checked against a live
+  # `aws ec2 describe-instance-types` in us-east-2 on 2026-08-08:
+  # c8g.8xlarge 32/64, m8g.4xlarge 16/64, m9gd.4xlarge 16/64, r8g.4xlarge
+  # 16/128, c9g.4xlarge 16/32 — all exact.
+  #
+  # WHY THIS MATTERS AND WHY IT WAS SILENT: `nixBuildOptsFor` fails safe to
+  # max-jobs=1 cores=1 on an unknown type. That is the right default for a
+  # type with no evidence, but it means a 16-vCPU Graviton box built
+  # SINGLE-THREADED with no error and no warning — the bake is simply
+  # inexplicably slow. Before this change the table knew only t3.* and
+  # c7i.*, so EVERY aarch64 bake hit the floor, including the existing k3s
+  # lineage whose aarch64 default is `t4g.medium`
+  # (blackmatter-kubernetes/lib/k3s-ami.nix). This was a latent fleet bug,
+  # not merely a gap for the new arm64 work.
+  vcpuForSize = {
+    "large" = 2; "xlarge" = 4; "2xlarge" = 8;
+    "4xlarge" = 16; "8xlarge" = 32; "12xlarge" = 48; "16xlarge" = 64;
   };
+  # GiB of RAM per vCPU. Compute-optimized 2, general-purpose 4,
+  # memory-optimized 8 — the invariant behind the c/m/r letters.
+  ramPerVcpuFor = { c = 2; m = 4; r = 8; };
+  # Graviton generations 7/8/9 plus the x86 c7i already in use. Variant
+  # suffixes: "" plain, "d" local NVMe, "n" network-optimized — none of
+  # which change vCPU or RAM, only storage/network, so they share sizing.
+  regularFamilies =
+    let
+      gravitonGens = [ "7g" "8g" "9g" ];
+      variants = [ "" "d" "n" ];
+    in
+    pkgs.lib.flatten (map (letter:
+      map (gen: map (v: "${letter}${gen}${v}") variants) gravitonGens
+    ) [ "c" "m" "r" ]) ++ [ "c7i" "m7i" "r7i" ];
+
+  mkFamilyRows = family:
+    let
+      letter = builtins.substring 0 1 family;
+      ratio = ramPerVcpuFor.${letter};
+    in
+    pkgs.lib.listToAttrs (pkgs.lib.mapAttrsToList (size: vcpu:
+      pkgs.lib.nameValuePair "${family}.${size}" {
+        inherit vcpu;
+        ramGb = vcpu * ratio;
+      }) vcpuForSize);
+
+  generatedSpecs =
+    pkgs.lib.foldl' (acc: f: acc // mkFamilyRows f) { } regularFamilies;
+
+  # Burstable (t-family) is NOT regular — t4g.medium is 2 vCPU/4 GiB
+  # (ratio 2) while t4g.large is 2 vCPU/8 GiB (ratio 4) — so it stays
+  # hand-listed. Deriving it would encode a pattern that does not exist.
+  burstableSpecs = {
+    "t3.small"     = { vcpu = 2; ramGb = 2;  };
+    "t3.medium"    = { vcpu = 2; ramGb = 4;  };
+    "t3.large"     = { vcpu = 2; ramGb = 8;  };
+    "t3.xlarge"    = { vcpu = 4; ramGb = 16; };
+    "t4g.small"    = { vcpu = 2; ramGb = 2;  };
+    "t4g.medium"   = { vcpu = 2; ramGb = 4;  };
+    "t4g.large"    = { vcpu = 2; ramGb = 8;  };
+    "t4g.xlarge"   = { vcpu = 4; ramGb = 16; };
+    "t4g.2xlarge"  = { vcpu = 8; ramGb = 32; };
+  };
+
+  amiBuilderInstanceSpecs = generatedSpecs // burstableSpecs;
 
   # Returns the literal `--option max-jobs N --option cores M` string
   # to interpolate into a `nixos-rebuild switch` invocation, sized to
