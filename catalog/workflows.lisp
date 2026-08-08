@@ -27,6 +27,27 @@
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 362)
 
+(defworkflow reusable-autoheal
+  :file      "reusable-autoheal.yml"
+  :pattern   gen-spec
+  :inputs    (artifact paths repair regen detect fix-hint runner git-credentials nix toolchain)
+  :outputs   ()
+  ; ★ BOT_PAT is CONSUMED but NOT DECLARED. The workflow reads
+  ; `secrets.BOT_PAT` at :202 and :208, yet its `workflow_call:` block declares
+  ; no `secrets:` at all — it relies on the caller writing `secrets: inherit`.
+  ; Listed here because the catalog's job is to state the real contract, and
+  ; the undeclared-ness is itself the contract's sharpest edge: on 2026-08-07
+  ; frost's autoheal failed with "Repository not found" because the runner got
+  ; an EMPTY BOT_PAT — pleme-io is on GitHub Free, where org secrets reach
+  ; public repos only, and frost is private with a private git dependency
+  ; (pleme-io/reedline). Had the secret been declared, the caller would have
+  ; had to pass it and its absence would have been visible instead of
+  ; surfacing as a missing-repository error six layers down. 58 other private
+  ; repos with private siblings are in the same state and have no repo-level
+  ; BOT_PAT.
+  :secrets   (BOT_PAT)
+  :consumers 5)
+
 (defworkflow reusable-gen-spec
   :file      "reusable-gen-spec.yml"
   :pattern   gen-spec
@@ -663,14 +684,6 @@
   :file      "rust-binary-auto-release.yml"
   :pattern   rust
   :inputs    (bump-type source-paths binary-name features no-default-features runner)
-  :outputs   ()
-  :secrets   (BOT_PAT)
-  :consumers 0)
-
-(defworkflow rust-private-auto-release
-  :file      "rust-private-auto-release.yml"
-  :pattern   rust
-  :inputs    (bump-type registry-name source-paths add-paths rename-prefix no-verify runner)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
