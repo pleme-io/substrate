@@ -108,8 +108,21 @@ let
     # gen then records the module as vendored, vendorHash resolves to null, and
     # buildGoModule fails the SAME "inconsistent vendoring" error one layer
     # later against a source tree that has no vendor/. Measured 2026-08-06.
-    # Non-vendored support belongs in gen-gomod's RealGoBuildEnv, which
-    # hardcodes -mod=vendor + GOPROXY=off and overrides any GOFLAGS set here.
+    # Non-vendored support belongs in gen-gomod's RealGoBuildEnv.
+    #
+    # CORRECTED 2026-08-08 — the previous sentence here read "which hardcodes
+    # -mod=vendor + GOPROXY=off and overrides any GOFLAGS set here", and that is
+    # FALSE. Verified at gen/crates/gen-gomod/src/interp.rs:82-89: RealGoBuildEnv
+    # PROBES for vendor/modules.txt and branches --
+    #     vendored   -> -mod=<configured>  GOPROXY=off
+    #     otherwise  -> -mod=mod           GOPROXY=https://proxy.golang.org,direct
+    # So it hardcodes neither, and in the NON-vendored case it reaches the public
+    # module proxy. The old comment asserted hermeticity exactly where the real
+    # behaviour is a network fetch, which is the wrong way round for anyone
+    # reasoning about sandboxing from this file -- and this file hosts the IFD
+    # path. Found by an adversarial review of the gen-Go plan; recorded rather
+    # than quietly reworded because the two in-tree models disagreed and this one
+    # was the one being reasoned from.
     gen build . > /dev/null
     if [ ! -f Go.build-spec.json ]; then
       echo "mkBuildSpec(go): gen build did not produce Go.build-spec.json" >&2
