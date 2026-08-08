@@ -274,6 +274,16 @@ let
     # Includes an anti-vacuity guard: mkEvalChecks computes `passed = results
     # == [ ]`, so an emptied vector table would build GREEN. Deleting the only
     # `above-fleet-toolchain` row fails the suite naming the uncovered arm.
+    # Which CGO_ENABLED contract this nixpkgs uses, PROBED not recorded — the
+    # contract inverts between nixpkgs revisions and a recorded per-consumer
+    # fact rots on the next flake update. Two of the 8 cases assert the probe
+    # THROWS on an unrecognised shape: guessing wrong leaves CGO_ENABLED unset,
+    # which links cgo into an image claiming to be static, and no later gate
+    # here would catch that.
+    "build/go/cgo-contract" = {
+      min = 8;
+      verdict = fromPassedTotal (import ../build/go/tests/cgo-contract-test.nix);
+    };
     "build/go/directive" = {
       min = 15;
       verdict = fromPassedTotal (import ../build/go/tests/directive-test.nix);

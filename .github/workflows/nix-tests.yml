@@ -391,6 +391,9 @@ jobs:
       - name: util/gen-pin-gate.nix (cross-file pin distinctness)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/gen-pin"; }'
 
+      - name: build/go/tests/cgo-contract-test.nix (8 assertions)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/cgo-contract"; }'
+
       - name: build/go/tests/directive-test.nix (15 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/directive"; }'
 
