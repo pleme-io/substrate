@@ -388,6 +388,9 @@ jobs:
       - name: build/rust/tests/cargo-nix-tie-test.nix (20 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/rust/cargo-nix-tie"; }'
 
+      - name: util/gen-pin-gate.nix (cross-file pin distinctness)
+        run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "util/gen-pin"; }'
+
       - name: build/go/tests/lockfile-delta-schema-test.nix (24 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/gen-lock-schema"; }'
 

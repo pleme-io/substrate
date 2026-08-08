@@ -8,6 +8,13 @@
 #   0) deltaSpec  = lockfile-delta.reconstruct src   (HIGHEST — IFD-free,
 #                   pure-Nix reconstruct from go.mod/go.sum + the slim
 #                   Go.gen.lock, with the D2 freshness gate).
+#                   NOTE 2026-08-08: this rung is REACHABLE BUT NEVER TAKEN —
+#                   gen-gomod's `write_gen_delta` has zero call sites, so no
+#                   `Go.gen.lock` exists anywhere (0 fleet-wide vs 425
+#                   `Cargo.gen.lock`). `reconstruct` returns null and the
+#                   ladder falls through. The rung is kept, and its reader is
+#                   now closed (delta-schema.nix), so wiring the producer
+#                   later cannot silently reconstruct an empty spec.
 #   1) Go.build-spec.json committed  → builtins.fromJSON (full spec).
 #   2) IFD via mk-build-spec.nix     → `gen build .` in a __noChroot sandbox.
 #
