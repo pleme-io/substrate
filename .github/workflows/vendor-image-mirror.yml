@@ -90,8 +90,20 @@ on:
         default: "${{ github.actor }}"
     secrets:
       ZOT_PASSWORD:
+        # required:false, deliberately — this is the same defect
+        # cargo-auto-release.yml already documents. GitHub validates the WHOLE
+        # reusable call graph at STARTUP, before any job `if:` is evaluated, so
+        # `required: true` fails the caller with zero jobs and no step output.
+        # On GitHub Free an ORG secret reaches PUBLIC repos only, so every
+        # PRIVATE caller's `secrets: inherit` passes nothing here and trips it
+        # — measured 2026-08-08 on pleme-io/caixa-url:
+        #   Error when evaluating 'secrets'. Secret ZOT_PASSWORD is required,
+        #   but not provided while calling.
+        # A startup failure names no repo and runs no step, which reads as
+        # "autorelease is broken". Absence is caught at USE time instead, where
+        # the error can name the secret and the repo missing it.
         description: "Zot push credential password"
-        required: true
+        required: false
       SOURCE_PASSWORD:
         description: "Password/token for source-registry (e.g. a GHCR read:packages PAT) -- only needed when the SOURCE image is private. Optional: absent keeps the public-source path unchanged."
         required: false
