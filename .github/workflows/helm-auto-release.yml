@@ -91,3 +91,47 @@ jobs:
         env:
           # ghcr.io accepts GITHUB_TOKEN as the OCI registry password
           GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+      # ── VERIFY THE ARTIFACT, NEVER THE EXIT CODE ──────────────────────────
+      #
+      # A publish step that exits 0 is not evidence a consumer can resolve the
+      # chart. Measured 2026-08-10 in pleme-io/ensaio: chart source sat at
+      # 0.1.4 while the registry held 0.1.2 and the cluster ran 0.1.2, with the
+      # HelmRelease reporting "Helm upgrade succeeded" on every reconcile. Four
+      # RBAC commits were unreachable — including the grant an ephemeral-
+      # environment qualification depends on — and nothing anywhere was red.
+      #
+      # That instance was a MISSING workflow, which this job cannot catch (see
+      # the note below). What it does catch is every way a PRESENT one still
+      # ships nothing:
+      #   - published to a registry no consumer reads (the reusable's default
+      #     differs from what several charts are actually consumed from, so
+      #     this is a live footgun, not a hypothetical),
+      #   - a push that reported success and stored nothing,
+      #   - a version skipped so consumers pin a tag that never existed.
+      #
+      # It re-reads Chart.yaml from the tree AFTER the bump commit, so it
+      # verifies the version that was actually shipped rather than the one the
+      # job started with.
+      - name: verify the published chart is resolvable
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          chart_yaml="$(git ls-files '*/Chart.yaml' 'Chart.yaml' | head -1)"
+          name="$(awk '/^name:/{print $2; exit}' "$chart_yaml")"
+          version="$(awk '/^version:/{print $2; exit}' "$chart_yaml")"
+          ref="oci://${{ inputs.registry }}/${name}"
+          echo "verifying ${ref} --version ${version}"
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if ! helm show chart "$ref" --version "$version" >/dev/null 2>&1; then
+            echo "::error::PUBLISH REPORTED SUCCESS BUT THE CHART IS NOT RESOLVABLE."
+            echo "::error::  ${ref} --version ${version}"
+            echo "::error::A consumer pinning this version gets the LAST published one and"
+            echo "::error::reports a green 'Helm upgrade succeeded' while running stale"
+            echo "::error::templates. Check that 'registry' matches the HelmRepository the"
+            echo "::error::cluster actually reads."
+            exit 1
+          fi
+          echo "resolvable: ${ref} --version ${version}"
