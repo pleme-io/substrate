@@ -82,8 +82,18 @@ on:
           When set (e.g. "embedded-amd64"), DERIVE the autobump tag instead of
           taking `tag` — `<autobumpArch>-r<HEAD committer epoch>-<sha>`.
 
-          Why this exists: the documented convention below used
-          `r${{ github.run_number }}` as the numeric sort key, which is a
+          NOTE FOR EDITORS: never write a `$`+`{{ … }}` expression in prose
+          inside this (or any) `description:`. GitHub parses `description` as a
+          template, not as text, so an expression here is EVALUATED against the
+          `workflow_call.inputs` context — where `github.run_number` does not
+          exist. The result is `failed to parse workflow: error parsing called
+          workflow`, which fails EVERY repo that calls this reusable, with zero
+          jobs and no logs. A `#` comment is safe (GitHub never parses it); a
+          description is not. Measured 2026-08-10: this exact line took down
+          ensaio's releases fleet-wide.
+
+          Why this exists: the documented convention below used the RUN NUMBER
+          (`r<run_number>`) as the numeric sort key, which is a
           property of the RUNNER, not of the software. Only GitHub Actions can
           mint a correctly-ordered tag that way, so a CI outage becomes a
           DELIVERY outage — the subscribing environment keeps working while
