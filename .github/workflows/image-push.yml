@@ -77,6 +77,32 @@ on:
         description: "Image tag to push"
         type: string
         default: "latest"
+      autobumpArch:
+        description: >
+          When set (e.g. "embedded-amd64"), DERIVE the autobump tag instead of
+          taking `tag` — `<autobumpArch>-r<HEAD committer epoch>-<sha>`.
+
+          Why this exists: the documented convention below used
+          `r${{ github.run_number }}` as the numeric sort key, which is a
+          property of the RUNNER, not of the software. Only GitHub Actions can
+          mint a correctly-ordered tag that way, so a CI outage becomes a
+          DELIVERY outage — the subscribing environment keeps working while
+          nothing can be produced for it to consume. Measured 2026-08-08: the
+          org's shared 5,000 req/hr credential was exhausted by an IaC
+          convergence, CI could not run, and the only way to ship was to guess
+          the next run number by hand.
+
+          HEAD's committer epoch is the same kind of key without that coupling:
+          numeric and monotonic on a branch, available at `fetch-depth: 1`
+          (unlike `rev-list --count`), and derivable identically on CI, a build
+          host, or a laptop via `git log -1 --format=%ct`.
+
+          Migration is automatic and needs no policy edit: an epoch (~1.7e9)
+          sorts permanently above any run number, and the tag still matches the
+          consumers' existing `^<arch>-r([0-9]+)-[0-9a-f]+$` ImagePolicy.
+        required: false
+        type: string
+        default: ""
       registry:
         description: "Target OCI registry"
         type: string
@@ -208,6 +234,16 @@ jobs:
       ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      # Derive the autobump tag when `autobumpArch` is set (see that input).
+      # `%ct` is HEAD's COMMITTER date, not the author date: a rebase or
+      # cherry-pick rewrites it, so the key advances with the branch rather
+      # than with when someone first wrote the patch — which is what makes it
+      # monotonic on main.
+      - id: autobump
+        if: inputs.autobumpArch != ''
+        run: |
+          set -euo pipefail
+          echo "tag=${{ inputs.autobumpArch }}-r$(git log -1 --format=%ct)-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # CORRECTED 2026-07-23 (see the "SECOND, independent layer" comment
       # below for the full mechanism): actions/checkout's git credentials
@@ -674,7 +710,7 @@ jobs:
         if: inputs.scanBeforePush
         uses: pleme-io/actions/image-scan@main
         with:
-          image-ref: ${{ inputs.registry }}/${{ inputs.imageName || github.repository }}:${{ inputs.tag }}
+          image-ref: ${{ inputs.registry }}/${{ inputs.imageName || github.repository }}:${{ steps.autobump.outputs.tag || inputs.tag }}
           local-archive: image.tar.gz
           fail-on-severity: ${{ inputs.scanFailOnSeverity }}
           ignore-unfixed: ${{ inputs.scanIgnoreUnfixed }}
@@ -709,7 +745,7 @@ jobs:
         env:
           REGISTRY: ${{ inputs.registry }}
           IMAGE:    ${{ inputs.imageName || github.repository }}
-          TAG:      ${{ inputs.tag }}
+          TAG:      ${{ steps.autobump.outputs.tag || inputs.tag }}
           ADDITIONAL_TAGS: ${{ inputs.additionalTags }}
           # Some self-hosted runners carry a baked nix with no flakes config
           # (see the "Install Nix" step's own NIX_CONFIG note above) —
