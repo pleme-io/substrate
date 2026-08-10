@@ -87,6 +87,24 @@
     extraBuildInputs ? [],
     extraPostInstall ? "",
     extraAttrs ? {},
+    # Rewrite a bare-minor `go 1.N` to `go 1.N.0` in go.mod at build time.
+    #
+    # OPT-IN, and it must stay opt-in. The bare-minor trace below exists to
+    # push the fix UPSTREAM, where it belongs and where it is one line. Turning
+    # this on fleet-wide would silence that signal for every repo we can
+    # actually fix, converting a tracked, counted class into an invisible one.
+    #
+    # It is for the case where upstream is genuinely unreachable: a third-party
+    # source we do not own and cannot push to. Set it there, with the reason at
+    # the call site, and nowhere else.
+    #
+    # CAVEAT, MEASURED NOT ASSUMED: this edits go.mod before vendoring, so it
+    # can in principle move `vendorHash`. `1.N` and `1.N.0` are the same
+    # minimum language version and select the same module-graph pruning, so
+    # resolution should be identical — but "should" is not evidence. A shift
+    # fails LOUDLY as a hash mismatch, never silently, so the failure mode is
+    # recoverable; recompute and pin.
+    normalizeGoDirective ? false,
     description ? "${pname} - Kubernetes tool",
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
@@ -196,12 +214,27 @@
           + "form that still clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a bare "
           + "'go ${lib.versions.majorMinor tool}' sorts BELOW it. "
           + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
+        else if verdict.verdict == "bare-minor" && normalizeGoDirective
+        # Normalized locally because upstream is unreachable. One line, not a
+        # paragraph: there is no action for a reader to take, so the long
+        # remediation text would be noise repeated per package.
+        then builtins.trace
+          "substrate.mkGoTool: ${pname} 'go ${req}' -> 'go ${req}.0' (normalized locally; upstream not ours)"
+          null
         else if verdict.verdict == "bare-minor"
         then builtins.trace
           ("substrate.mkGoTool: ${pname} declares a bare-minor 'go ${req}'. ${verdict.why} "
             + "This builds today; it fails under -mod=readonly/-mod=vendor. Fix is one line: 'go ${req}.0'.")
           null
         else null;
+
+      # The rewrite itself. Anchored to the directive line so it cannot touch a
+      # `go 1.N` appearing anywhere else (a require line, a comment), and a
+      # no-op when the directive is already patch-form.
+      goDirectiveNormalization =
+        lib.optionalString (normalizeGoDirective && req != null && verdict.verdict == "bare-minor") ''
+          sed -i -E 's|^go[[:space:]]+([0-9]+\.[0-9]+)$|go \1.0|' ''${modRoot:-.}/go.mod
+        '';
 
   in builtins.seq goVersionAssert (goOverlayLib.assertGoFloor { what = pname; drv = pkgs.buildGoModule ({
     inherit pname version src proxyVendor doCheck tags;
@@ -212,6 +245,11 @@
     ldflags = effectiveLdflags;
 
     postInstall = completionAttrs.postInstallScript + extraPostInstall;
+
+    # Runs before vendoring, which is exactly why it can move vendorHash — see
+    # the caveat on `normalizeGoDirective`. Empty string when the option is off
+    # or the directive is already patch-form, so the default path is untouched.
+    postPatch = goDirectiveNormalization + (extraAttrs.postPatch or "");
 
     meta = {
       inherit description license platforms;
