@@ -14,10 +14,33 @@ on:
         type: string
         required: false
         default: "ghcr.io/pleme-io/helm"
+      # Directory holding the chart's Chart.yaml, relative to the repo root.
+      #
+      # Until 2026-08-10 this workflow had no such input because helm-bump and
+      # helm-publish both read `Chart.yaml` from the process CWD — i.e. they
+      # assumed the chart sat at the REPO ROOT. Measured that day: of the 18
+      # pleme-io repos that ship Helm charts, the number with a root
+      # `Chart.yaml` is ZERO. Every one uses `charts/<name>/`. So this
+      # workflow's single-chart path could not serve any repo in the fleet,
+      # and the first repo to adopt it (ensaio) failed on its first run with
+      # `helm-bump: no Chart.yaml at repo root` — its chart stayed two
+      # versions behind source with nothing red.
+      chart-path:
+        description: "Directory holding Chart.yaml, relative to the repo root. '.' = repo root."
+        type: string
+        required: false
+        default: "."
+      # NOTE: resolved relative to `chart-path`, because that is the CWD the
+      # skip-detector's `git diff` runs in. Do NOT repeat the chart-path
+      # prefix here — the default below is already correct for a chart in a
+      # subdirectory. helm-bump fails loudly when none of these paths exists,
+      # so getting it wrong is a red run rather than a green no-op.
       source-paths:
         type: string
         required: false
         default: "templates values.yaml Chart.yaml"
+      # Unlike source-paths, these are repo-root-relative: git-commit-tag runs
+      # in the bump job's own CWD (the repo root), not inside the chart.
       add-paths:
         type: string
         required: false
@@ -60,6 +83,7 @@ jobs:
         with:
           bump-type: ${{ inputs.bump-type }}
           source-paths: ${{ inputs.source-paths }}
+          chart-path: ${{ inputs.chart-path }}
 
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-commit-tag@main
@@ -88,6 +112,7 @@ jobs:
       - uses: pleme-io/actions/helm-publish@main
         with:
           registry: ${{ inputs.registry }}
+          chart-path: ${{ inputs.chart-path }}
         env:
           # ghcr.io accepts GITHUB_TOKEN as the OCI registry password
           GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
@@ -119,9 +144,24 @@ jobs:
           GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          chart_yaml="$(git ls-files '*/Chart.yaml' 'Chart.yaml' | head -1)"
+          # Read the SAME Chart.yaml the bump and publish steps operated on.
+          # The previous form globbed for one (`git ls-files '*/Chart.yaml'
+          # 'Chart.yaml' | head -1`) which silently picks an arbitrary chart
+          # in a repo that has more than one — it would then verify a chart
+          # nobody published and pass. `chart-path` names it exactly.
+          chart_yaml="${{ inputs.chart-path }}/Chart.yaml"
+          if [ ! -f "$chart_yaml" ]; then
+            echo "::error::no Chart.yaml at '${chart_yaml}' — chart-path is wrong, and this"
+            echo "::error::verification would otherwise have nothing to check and pass."
+            exit 1
+          fi
           name="$(awk '/^name:/{print $2; exit}' "$chart_yaml")"
           version="$(awk '/^version:/{print $2; exit}' "$chart_yaml")"
+          if [ -z "$name" ] || [ -z "$version" ]; then
+            echo "::error::could not read name/version from ${chart_yaml} (got name='${name}' version='${version}')."
+            echo "::error::An empty version makes the resolvability check below vacuous."
+            exit 1
+          fi
           ref="oci://${{ inputs.registry }}/${name}"
           echo "verifying ${ref} --version ${version}"
           echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
