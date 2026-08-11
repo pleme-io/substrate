@@ -86,6 +86,28 @@
     exports = [ "mkInputOverlay" "mkFixOverlay" "mkFixCatalog" "mkUnstablePin" "composeLayers" ];
   };
 
+  overlayPolicy = {
+    file = "overlay-policy.nix";
+    tier = "extended";
+    maturity = "Working";
+    since = "2026-08-11";
+    description = "Scoped overlay governance — WHICH overlays a repo gets and how tightly each dep may be pinned, declared once per scope and resolved org < tag < repo. Sits ON TOP of composeLayers (it resolves to a layer-name list, which composeLayers already consumes); the overlay algebra is unchanged. The two axes compose differently on purpose: layers union, pins narrow monotonically. Carries its own denominator in `scopes`, so 'governed by nothing' is distinguishable from 'deliberately granted nothing'.";
+    subsumes = "Per-consumer hand-wired overlay layer lists — the three-lists-free-to-disagree shape (all repos get rust, GPU repos also get the wgpu fix, mado additionally gets a local patch) that the PRIME DIRECTIVE forbids one level up from the overlays themselves.";
+    dependsOn = [ "overlay" ];
+    exports = [ "mkOverlayPolicy" ];
+  };
+
+  repoTags = {
+    file = "repo-tags.nix";
+    tier = "extended";
+    maturity = "Working";
+    since = "2026-08-11";
+    description = "Derived tag membership with typed explicit overrides — the half mkOverlayPolicy deliberately does not decide, since membership is fleet DATA rather than build algebra. Derived-first so a new repo joins its tag by construction; overrides exist because a purely-derived predicate cannot express an exception without ceasing to mean its own name, and every override carries a mandatory reason. `tagsOf` feeds mkOverlayPolicy directly.";
+    subsumes = "Hand-listed tag rosters (`gpu = [ mado hibikine kagibako ]`), which drift silently the moment a new member lands and still read as authoritative — a coverage claim with no denominator.";
+    dependsOn = [ ];
+    exports = [ "mkRepoTags" ];
+  };
+
   manifest = {
     file = "manifest.nix";
     tier = "kernel";
