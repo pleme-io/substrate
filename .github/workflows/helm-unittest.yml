@@ -1,0 +1,158 @@
+# Reusable workflow: run every chart's `helm unittest` suites, plus `helm lint`.
+#
+# Usage (from a consumer repo):
+#
+#   jobs:
+#     charts:
+#       uses: pleme-io/substrate/.github/workflows/helm-unittest.yml@main
+#       with:
+#         chartsDir: charts            # default
+#         chartsWithTestsFloor: 7      # coverage floor, see below
+#         lintFailureCeiling: 0        # ratchet, see below
+#
+# ── Why this exists ──────────────────────────────────────────────────────
+# Measured 2026-08-11: substrate carried five `helm-*` reusables — publish,
+# auto-release, monorepo-auto-release, chart-release and the family
+# composer — and not one of them RUNS A CHART'S TESTS. helmworks, which
+# holds every authored chart in the fleet under ★★ HELM-NATIVE, had a
+# single workflow (auto-release.yml). So a chart could ship a complete
+# helm-unittest suite and nothing would ever execute it.
+#
+# That is the "a check nobody builds enforces nothing" class, and it is
+# worth naming precisely because it is invisible from inside the repo:
+# `helm unittest .` passes on a laptop, the suite sits in git, the chart
+# releases green, and the assertions have never once run in CI.
+#
+# ── `helm dependency update` is not optional ─────────────────────────────
+# A chart depending on a `file://` library chart does not lint until its
+# dependency is materialised — the include resolves to
+# `no template "pleme-lib.labels" associated with template "gotpl"`, which
+# reads like a broken chart and is not. Measured on helmworks: 25 of 148
+# charts "failed" lint for exactly this reason and zero were actually
+# broken. Skipping this step would have produced a 25-failure red wall on
+# day one and got the whole workflow disabled.
+#
+# ── Two bounds, because they fail differently ────────────────────────────
+# `chartsWithTestsFloor` guards COVERAGE. A discovery-driven job that finds
+# nothing is the same shape as the problem it exists to solve: it exits 0
+# and reads as "all charts pass". Set the floor below today's count
+# (roughly half) so adding a suite never demands an edit here, while a repo
+# that silently loses most of them still fails.
+#
+# `lintFailureCeiling` is a RATCHET, not a floor. It exists so this can be
+# adopted by a repo with pre-existing lint debt without either blocking on
+# a cleanup or quietly ignoring lint forever: today's count goes in, the
+# number may only come down, and a NEW lint break fails the job. Test
+# failures are never ratcheted — they gate at zero, always.
+
+name: helm-unittest
+
+on:
+  workflow_call:
+    inputs:
+      chartsDir:
+        description: "Directory containing chart directories, relative to the repo root"
+        type: string
+        default: "charts"
+      chartsWithTestsFloor:
+        description: >
+          Minimum number of charts that must carry a `tests/` suite. Guards
+          against a silent coverage collapse — a moved directory or a renamed
+          tests/ folder otherwise turns this job into a green no-op.
+        type: number
+        default: 1
+      lintFailureCeiling:
+        description: >
+          Maximum tolerated `helm lint` failures. A ratchet for adopting this
+          in a repo with existing lint debt: set today's count, and the number
+          may only go down. Test failures are NOT covered by this and always
+          gate at zero.
+        type: number
+        default: 0
+      runner:
+        description: "Runner label"
+        type: string
+        default: "ubuntu-24.04"
+
+jobs:
+  unittest:
+    name: helm lint + unittest
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Install helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.1.1
+
+      - name: Lint and test every chart
+        env:
+          CHARTS_DIR: ${{ inputs.chartsDir }}
+          TESTS_FLOOR: ${{ inputs.chartsWithTestsFloor }}
+          LINT_CEILING: ${{ inputs.lintFailureCeiling }}
+        run: |
+          set -uo pipefail
+          if [ ! -d "$CHARTS_DIR" ]; then
+            echo "::error::chartsDir '$CHARTS_DIR' does not exist — this job would scan nothing and pass"
+            exit 1
+          fi
+
+          scanned=0; linted=0; lint_failed=0; tested=0; test_failed=0
+          for chart in "$CHARTS_DIR"/*/; do
+            [ -f "${chart}Chart.yaml" ] || continue
+            scanned=$((scanned + 1))
+            name=$(basename "$chart")
+
+            # Materialise file:// library-chart deps, or every include
+            # through them lints as a missing template.
+            if grep -q '^dependencies:' "${chart}Chart.yaml"; then
+              helm dependency update "$chart" >/dev/null 2>&1 || true
+            fi
+
+            if helm lint "$chart" >/tmp/lint.log 2>&1; then
+              linted=$((linted + 1))
+            else
+              lint_failed=$((lint_failed + 1))
+              echo "::warning title=helm lint failed::$name"
+              sed -n '1,10p' /tmp/lint.log
+            fi
+
+            # A chart with no suite is not a failure — most charts have
+            # none — but it is not a pass either, which is what the counts
+            # below keep visible.
+            if [ -d "${chart}tests" ]; then
+              tested=$((tested + 1))
+              if ! helm unittest "$chart"; then
+                echo "::error title=helm unittest failed::$name"
+                test_failed=$((test_failed + 1))
+              fi
+            fi
+          done
+
+          echo "scanned=$scanned linted=$linted lint_failed=$lint_failed with-suites=$tested test_failed=$test_failed"
+
+          # THE DENOMINATOR. Without it, a wrong chartsDir, a moved tree or
+          # a glob that stops matching all yield "0 failures" — which is
+          # indistinguishable from every chart passing.
+          if [ "$scanned" -eq 0 ]; then
+            echo "::error::scanned 0 charts under '$CHARTS_DIR' — nothing was verified, so a pass here would mean nothing"
+            exit 1
+          fi
+          if [ "$tested" -lt "$TESTS_FLOOR" ]; then
+            echo "::error::only $tested chart(s) carry a tests/ suite, below the floor of $TESTS_FLOOR — suites were lost, or the floor is wrong"
+            exit 1
+          fi
+          if [ "$lint_failed" -gt "$LINT_CEILING" ]; then
+            echo "::error::$lint_failed chart(s) failed helm lint, above the ceiling of $LINT_CEILING. The ceiling is a ratchet: lower it as charts are fixed, never raise it to make a new break pass."
+            exit 1
+          fi
+          if [ "$test_failed" -gt 0 ]; then
+            echo "::error::$test_failed chart(s) failed helm unittest — never ratcheted, these gate at zero"
+            exit 1
+          fi
