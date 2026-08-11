@@ -15,14 +15,34 @@
 let
   inherit (builtins) fromJSON readFile pathExists map;
 
-  loadBuildSpec = src:
-    let path = src + "/Cargo.build-spec.json"; in
+  # Which spec file a build reads.
+  #
+  # gen bakes the RESOLVED feature set into the spec, and `rootFeatures`
+  # is not honored on this path — so the spec IS the feature decision,
+  # and a crate that needs two build variants needs two SPECS. This is
+  # the seam that lets a consumer name the second one:
+  #
+  #   gen build . --no-default-features --features a,b \
+  #       --out Cargo.noruby.build-spec.json
+  #
+  # then pass `specFile = "Cargo.noruby.build-spec.json"`.
+  #
+  # Defaults to the canonical name, so every existing consumer is
+  # unchanged.
+  defaultSpecFile = "Cargo.build-spec.json";
+
+  loadBuildSpecFrom = specFile: src:
+    let path = src + "/${specFile}"; in
     if pathExists path
     then fromJSON (readFile path)
     else throw ''
-      lockfile-builder: ${toString src}/Cargo.build-spec.json not found.
-      Run `gen build .` in the workspace root to produce it.
+      lockfile-builder: ${toString src}/${specFile} not found.
+      ${if specFile == defaultSpecFile
+        then "Run `gen build .` in the workspace root to produce it."
+        else "This is a VARIANT spec. Produce it with:\n        gen build . --no-default-features --features <list> --out ${specFile}"}
     '';
+
+  loadBuildSpec = loadBuildSpecFrom defaultSpecFile;
 
   # Strip any `?branch=…` / `?ref=…` query string from a git URL.
   #
@@ -229,6 +249,13 @@ let
     # `unexpected argument` when callers attach context for richer
     # error reporting.
     name ? "<unnamed-workspace>",
+    # Which gen spec to read. A VARIANT build (different resolved
+    # features) is a different SPEC, not a different argument — gen bakes
+    # the feature set in and `rootFeatures` is not honored here. Produce
+    # one with `gen build . --no-default-features --features <list>
+    # --out <specFile>` and name it here. Defaults to the canonical spec,
+    # so existing consumers are unchanged.
+    specFile ? defaultSpecFile,
     # Substrate guarantee: every fleet-wide buildRustCrate quirk in
     # plemeCrateOverrides applies by default. Callers can still pass an
     # explicit `defaultCrateOverrides` to extend — the merge order is
@@ -334,7 +361,7 @@ let
     #    deliberate `fromTOML` path the file header's "no fromTOML" note
     #    predates — the delta trades reconstruction for a smaller artifact.
     deltaSpec = (import ./lockfile-delta.nix { inherit lib; }).reconstruct src;
-    committedPath = src + "/Cargo.build-spec.json";
+    committedPath = src + "/${specFile}";
     committedSpec =
       if deltaSpec != null then deltaSpec
       else if builtins.pathExists committedPath
@@ -406,12 +433,12 @@ let
     specTarget =
       if deltaSpec != null then deltaSpec
       else if targetSpecDrv != null
-      then loadBuildSpec targetSpecDrv
-      else loadBuildSpec src;
+      then loadBuildSpecFrom specFile targetSpecDrv
+      else loadBuildSpecFrom specFile src;
     specHost =
       if deltaSpec != null then deltaSpec
       else if hostSpecDrv != null && hostSpecDrv != targetSpecDrv
-      then loadBuildSpec hostSpecDrv
+      then loadBuildSpecFrom specFile hostSpecDrv
       else specTarget;
 
     # `spec` retained for upstream callers that read it from the
@@ -1158,5 +1185,5 @@ let
     };
   };
 in {
-  inherit mkProject loadBuildSpec;
+  inherit mkProject loadBuildSpec loadBuildSpecFrom defaultSpecFile;
 }
