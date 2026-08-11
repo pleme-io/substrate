@@ -40,6 +40,7 @@ let
   packageModule = import ./package-module.nix { inherit lib; };
   overlay = import ./overlay.nix { inherit lib; };
   overlayPolicy = import ./overlay-policy.nix { inherit lib; };
+  repoTags = import ./repo-tags.nix { inherit lib; };
   manifest = import ./manifest.nix { inherit lib; };
   profile = import ./profile.nix { inherit lib; };
   shim = import ./shim.nix { inherit lib; };
@@ -72,6 +73,7 @@ core
 // packageModule
 // overlay
 // overlayPolicy
+// repoTags
 // manifest
 // profile
 // shim
