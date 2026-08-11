@@ -1,3 +1,16 @@
+# Reusable workflow: publish a Rust crate to crates.io from a tag.
+#
+# Usage (from a consumer repo):
+#
+#   jobs:
+#     publish:
+#       uses: pleme-io/substrate/.github/workflows/crates-publish.yml@main
+#       secrets:
+#         CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+#
+# The two non-obvious decisions here — why the secret is `required: false`
+# and why `runs-on` is an expression — are documented at each site below,
+# and both were paid for on 2026-08-08 rather than reasoned about.
 name: Publish to crates.io
 
 on:

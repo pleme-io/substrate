@@ -92,6 +92,8 @@ on:
       - 'lib/hm/**'
       - 'lib/iroha/**'
       - 'lib/kata/**'
+      - 'lib/ci/**'
+      - '.github/workflows/*.yml'
       - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
@@ -107,6 +109,8 @@ on:
       - 'lib/hm/**'
       - 'lib/iroha/**'
       - 'lib/kata/**'
+      - 'lib/ci/**'
+      - '.github/workflows/*.yml'
       - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
@@ -240,6 +244,16 @@ jobs:
 
       - name: checks.web-static-spa-image (lib/build/web — port rule, no libc, shaped /bin/sh)
         run: nix build --no-link -L '.#checks.x86_64-linux.web-static-spa-image'
+
+      # CATALOG REFLECTION for the reusable-workflow library itself — the one
+      # large substrate surface that had no catalog while lib/iroha and
+      # lib/util/eval-suites both did. Derived from this very directory, so
+      # editing ANY workflow here can move its verdict: hence the path filter
+      # addition below, without which this job would be the vacuous shape the
+      # header already warns about (a trigger that reads as coverage while the
+      # job reads nothing it watches).
+      - name: checks.workflow-catalog (.github/workflows — header + migration ratchets)
+        run: nix build --no-link -L '.#checks.x86_64-linux.workflow-catalog'
 
   # ══ Family C (see header) ══════════════════════════════════════════
   #

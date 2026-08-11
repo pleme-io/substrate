@@ -214,6 +214,34 @@
           # `testSystemDaemonGetsConfigEnvVar`, naming the defect.
           module-trio = import ./lib/tests/module-trio-test.nix { inherit pkgs; };
 
+          # WORKFLOW-CATALOG — CATALOG REFLECTION for the 89 reusable
+          # workflows, which were the one large substrate surface with no
+          # catalog while lib/iroha and lib/util/eval-suites both had one.
+          #
+          # Fully derived from `.github/workflows/`, so it cannot drift from
+          # the directory; what it gates is the header convention CLAUDE.md
+          # has always stated and nothing checked, plus a RATCHET on the two
+          # in-flight migrations (shell-free 44, tatara-script 4) so those
+          # counts may rise and may never silently fall back.
+          #
+          # NOT VACUOUS: the first draft accepted an indented comment as a
+          # header and reported 89/89 documented — a false green on
+          # crates-publish.yml, which had no header and matched a note inside
+          # its `secrets:` block. Requiring column 0 reports 88/89 and names
+          # the file.
+          workflow-catalog =
+            let
+              iroha' = import ./lib/iroha { lib = nixpkgs.lib; };
+            in
+            (iroha'.mkEvalChecks {
+              name = "workflow-catalog";
+              tests = import ./lib/ci/tests/workflow-catalog.nix {
+                lib = nixpkgs.lib;
+                workflowCatalog = import ./lib/ci/workflow-catalog.nix { lib = nixpkgs.lib; };
+              };
+            }).asCheck
+              pkgs;
+
           # MINIMAL-PRODUCTION-IMAGE — pure base-selection forcing-function
           # (no shell / no init / no libc in the minimal base). Runs on every
           # system incl. darwin.
