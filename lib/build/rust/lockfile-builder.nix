@@ -430,13 +430,28 @@ let
     # so one reconstructed spec serves both trees — the per-triple selection
     # happens downstream in target_resolves[triple], exactly as for the full
     # build-spec. So when deltaSpec is present it is BOTH trees' spec.
+    # The delta reconstructs the CANONICAL spec from Cargo.gen.lock, so it
+    # must not be used when the caller asked for a different one. A variant
+    # spec deliberately writes no delta (one Cargo.gen.lock cannot record a
+    # tie for two specs without leaving the D2 check unable to say which it
+    # judges) — so `deltaSpec` is non-null exactly when a variant build is
+    # happening, and letting it win means silently building the canonical
+    # feature set under the variant's name.
+    #
+    # That failure is invisible: the image builds, publishes, and carries
+    # every dependency the variant existed to remove. Measured 2026-08-11
+    # on pangea-operator — the `-noruby` image's binary still took
+    # pangea-ruby-eval, magnus and rb-sys as direct inputs, and the
+    # derivation hash did not move when the variant spec changed, which is
+    # what exposed it.
+    useDelta = deltaSpec != null && specFile == defaultSpecFile;
     specTarget =
-      if deltaSpec != null then deltaSpec
+      if useDelta then deltaSpec
       else if targetSpecDrv != null
       then loadBuildSpecFrom specFile targetSpecDrv
       else loadBuildSpecFrom specFile src;
     specHost =
-      if deltaSpec != null then deltaSpec
+      if useDelta then deltaSpec
       else if hostSpecDrv != null && hostSpecDrv != targetSpecDrv
       then loadBuildSpecFrom specFile hostSpecDrv
       else specTarget;

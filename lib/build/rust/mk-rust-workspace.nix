@@ -22,6 +22,10 @@
   src,
   crateOverrides ? {},
   buildRustCrateForPkgs ? (p: p.buildRustCrate),
+  # Which gen spec to build from. A build VARIANT (a different resolved
+  # feature set) is a different SPEC, not a different argument — see
+  # lockfile-builder's `specFile`. Defaults to the canonical spec.
+  specFile ? null,
 }: { pkgs, lib ? pkgs.lib }:
 let
   lockfileBuilder = import ./lockfile-builder.nix { inherit pkgs lib; };
@@ -31,12 +35,12 @@ let
   plemeCrateOverrides =
     (import ./pleme-crate-overrides.nix) pkgs.stdenv.hostPlatform.rust.rustcTarget;
 
-  project = lockfileBuilder.mkProject {
+  project = lockfileBuilder.mkProject ({
     inherit src;
     name = name;
     defaultCrateOverrides = pkgs.defaultCrateOverrides // plemeCrateOverrides // crateOverrides;
     inherit buildRustCrateForPkgs;
-  };
+  } // lib.optionalAttrs (specFile != null) { inherit specFile; });
 in {
   inherit (project) rootCrate workspaceMembers allWorkspaceMembers crates;
   /* Convenience: pull a specific member derivation by name. */
