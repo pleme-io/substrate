@@ -200,7 +200,27 @@
         # ./directive.nix and is driven by directive-vectors.json — the same
         # table gen's Rust half reads.
         verdict = directive.classify { directive = if req == null then "" else req; fleetGo = tool; };
-      in { inherit req tool verdict; };
+
+        # The normalized file, COMPUTED AT EVAL TIME rather than pattern-matched
+        # at build time. This used to be a `sed -i -E 's|^go 1.N$|go 1.N.0|'`
+        # in the build phase, and that shape cannot report its own failure:
+        # `sed -i` exits 0 when its pattern matches nothing, so any drift in
+        # the directive's spelling (a tab, a trailing comment, CRLF) would
+        # silently leave go.mod bare-minor while the phase reported success —
+        # the normalization's failure mode was identical to its success mode.
+        #
+        # Here the bytes are derived from the SAME `goLine` the classifier
+        # read, so "we normalized a line other than the one we classified" has
+        # no representation: there is exactly one string, matched by equality,
+        # and the phase is emitted only when that line was classified
+        # bare-minor. go.mod's grammar admits one `go` directive, so equality
+        # on the whole line is the anchor the regex was approximating.
+        normalizedGoMod =
+          pkgs.writeText "${pname}-go.mod"
+            (lib.concatStringsSep "\n"
+              (map (l: if l == goLine then "go ${req}.0" else l)
+                (lib.splitString "\n" read.value)));
+      in { inherit req tool verdict normalizedGoMod; };
 
     goVersionAssert =
       let
@@ -238,16 +258,18 @@
           null
         else null;
 
-      # The rewrite itself. Anchored to the directive line so it cannot touch a
-      # `go 1.N` appearing anywhere else (a require line, a comment), and a
-      # no-op when the directive is already patch-form.
+      # The rewrite itself: install the file computed above. The phase carries
+      # no pattern, no branch and no logic — it is 3-line glue placing bytes
+      # Nix already derived, which is the whole point of moving the decision to
+      # eval time. `install -m` (not `cp`) because the source is a read-only
+      # store path and the vendoring step that follows needs a writable go.mod.
       goDirectiveNormalization =
         lib.optionalString (
           normalizeGoDirective
           && goDirectiveFacts.req != null
           && goDirectiveFacts.verdict.verdict == "bare-minor"
         ) ''
-          sed -i -E 's|^go[[:space:]]+([0-9]+\.[0-9]+)$|go \1.0|' ''${modRoot:-.}/go.mod
+          install -m 0644 ${goDirectiveFacts.normalizedGoMod} ''${modRoot:-.}/go.mod
         '';
 
   in builtins.seq goVersionAssert (goOverlayLib.assertGoFloor { what = pname; drv = pkgs.buildGoModule ({
