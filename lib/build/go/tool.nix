@@ -174,7 +174,12 @@
     #
     # Reading go.mod is tryEval-guarded, so a non-path / unreadable src silently
     # skips the check rather than breaking the build.
-    goVersionAssert =
+    # The go.mod directive read + its verdict, bound ONCE. Both consumers — the
+    # eval-time assert below and `goDirectiveNormalization`'s rewrite — read
+    # this. They used to be two scopes: `req`/`verdict` lived inside
+    # `goVersionAssert`'s own `let`, so the normalization's guard referenced an
+    # undefined variable and every mkGoTool consumer failed to evaluate.
+    goDirectiveFacts =
       let
         directive = import ./directive.nix { inherit lib; };
         gomodPath = "${src}/${lib.optionalString (modRoot != null) (modRoot + "/")}go.mod";
@@ -195,6 +200,11 @@
         # ./directive.nix and is driven by directive-vectors.json — the same
         # table gen's Rust half reads.
         verdict = directive.classify { directive = if req == null then "" else req; fleetGo = tool; };
+      in { inherit req tool verdict; };
+
+    goVersionAssert =
+      let
+        inherit (goDirectiveFacts) req tool verdict;
       in
         # THROW SCOPED TO `above-fleet-toolchain` ONLY. cmd/go genuinely
         # refuses that one, and it has 0 fleet offenders today, so the throw
@@ -232,7 +242,11 @@
       # `go 1.N` appearing anywhere else (a require line, a comment), and a
       # no-op when the directive is already patch-form.
       goDirectiveNormalization =
-        lib.optionalString (normalizeGoDirective && req != null && verdict.verdict == "bare-minor") ''
+        lib.optionalString (
+          normalizeGoDirective
+          && goDirectiveFacts.req != null
+          && goDirectiveFacts.verdict.verdict == "bare-minor"
+        ) ''
           sed -i -E 's|^go[[:space:]]+([0-9]+\.[0-9]+)$|go \1.0|' ''${modRoot:-.}/go.mod
         '';
 
