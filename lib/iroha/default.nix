@@ -39,6 +39,7 @@ let
   daemon = import ./daemon.nix { inherit lib; };
   packageModule = import ./package-module.nix { inherit lib; };
   overlay = import ./overlay.nix { inherit lib; };
+  overlayPolicy = import ./overlay-policy.nix { inherit lib; };
   manifest = import ./manifest.nix { inherit lib; };
   profile = import ./profile.nix { inherit lib; };
   shim = import ./shim.nix { inherit lib; };
@@ -70,6 +71,7 @@ core
 // daemon
 // packageModule
 // overlay
+// overlayPolicy
 // manifest
 // profile
 // shim
