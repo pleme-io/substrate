@@ -589,9 +589,35 @@ let
     # Anything passed here runs under fakeroot with no real privilege, so it can
     # set metadata and cannot escape the build.
     extraFakeRootCommands ? "",
+    # OPT-IN LAYER CEILING. null (the default) omits the argument entirely, so
+    # dockerTools keeps its own default of 100 and every existing image builds
+    # byte-identically -- this parameter cannot re-digest anything that does not
+    # ask for it.
+    #
+    # That default is deliberate and it is the whole design. versions.nix has
+    # carried `maxLayers = 120` since before this parameter existed, unwired,
+    # with a note explaining why it was never flipped: raising the ceiling
+    # changes how a closure is split into layers, which changes every layer
+    # digest and therefore every image digest, across every builder at once --
+    # a fleet-wide rebuild and cache invalidation, not a config tweak.
+    #
+    # Per-image opt-in dissolves that objection instead of arguing with it. An
+    # image that has never published has no digest to churn, no consumer pinning
+    # it and no cache to invalidate, so raising ITS ceiling carries none of the
+    # stated cost. Measured case: hardened-images' cnpg-postgresql fails every
+    # release with
+    #   Error: usedLayers 101 layers to store 'fromImage' and 'extraCommands',
+    #          but only maxLayers=100 were allowed
+    # -- one layer over, and GHCR has returned "Package not found" for it since
+    # the row was added. Its barman-cloud dependency drags a ~90-path Python
+    # closure in, which is what pushes it past 100.
+    #
+    # `pending-maxlayers-wiring` in versions.nix still stands for the OTHER four
+    # builders; this closes nothing fleet-wide and is not a substitute for it.
+    maxLayers ? null,
   }: let
     imageContents = [ package ] ++ extraContents;
-  in (dockerTools.buildLayeredImage {
+  in (dockerTools.buildLayeredImage ({
     name = publishName;
     tag = publishTag;
     fromImage = base;
@@ -617,7 +643,7 @@ let
         "io.pleme.rebuild.service" = service;
       } // labels;
     };
-  }) // {
+  } // lib.optionalAttrs (maxLayers != null) { inherit maxLayers; })) // {
     # See the passthru-chain comment above `mkDistrolessStaticBase` — the
     # compression-blind-spot fix. `base.contents` carries the hardened
     # base's own real Nix packages forward so the closure covers the
