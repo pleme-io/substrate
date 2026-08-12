@@ -723,6 +723,12 @@ let
     extraContents ? [],
     writablePaths ? [],
     labels ? {},
+    # Forwarded verbatim to mkPackageImage; null (the default) omits it there,
+    # so this adds nothing to any existing image. An image with `shell = true`
+    # or `entrypointTools` reaches mkPackageImage through HERE, so the knob has
+    # to exist on both or the one image that needs it has no way to ask --
+    # cnpg-postgresql is exactly that shape (barman-cloud + a shell).
+    maxLayers ? null,
   }: let
     shellContents = lib.optional shell shDashShim;
     # Expand bundle names → packages; raw packages pass through. An unknown
@@ -740,7 +746,7 @@ let
   in mkPackageImage {
     inherit service package publishName publishTag entrypoint cmd
       exposedPorts volumes workdir user extraContents writablePaths
-      labels base;
+      labels base maxLayers;
     env = pathEnv ++ env;
   };
 
