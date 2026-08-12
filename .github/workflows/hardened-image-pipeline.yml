@@ -126,7 +126,29 @@ jobs:
       # `packages: read` already covers for its own packages — a narrower
       # credential than a PAT for the same job.
       source-registry: "ghcr.io"
-    secrets: inherit
+    # EXPLICIT, NOT `inherit` — and this is the one place in this file where
+    # that distinction is load-bearing.
+    #
+    # `secrets: inherit` forwards secrets BY NAME. vendor-image-mirror declares
+    # a secret called CA_CERT_TOKEN; no repo here has a secret by that name —
+    # the credential is BOT_PAT, and reaching the right one requires a RENAME,
+    # which inherit cannot express. Under inherit the input simply arrives
+    # empty.
+    #
+    # The failure is remote from the cause and reads like infrastructure:
+    # measured on hardened-images run 31604045212, the pull and the trivy scan
+    # both succeeded and the job then died in "Trust Zot's CA" with "No CA
+    # available … akeyless-k8s is PRIVATE — an unauthenticated fetch returns a
+    # 14-byte '404: Not Found' body, which is what this step used to install as
+    # a certificate." Nothing in that names a missing secret.
+    #
+    # The hand-written mirror jobs already carry this mapping, with a comment
+    # dated 2026-07-29 saying the omission broke the mirror then too. Same
+    # class, second occurrence — so it is written here once for every component
+    # rather than per job.
+    secrets:
+      ZOT_PASSWORD: ${{ secrets.ZOT_PASSWORD }}
+      CA_CERT_TOKEN: ${{ secrets.BOT_PAT }}
 
   # ── 3 · PROMOTE TO THE ENVIRONMENT ──────────────────────────────────────────
   # GITOPS-NATIVE: this writes a COMMIT to a pointer file and pushes. It does not
