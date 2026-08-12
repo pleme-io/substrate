@@ -1,0 +1,222 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# hardened-image-pipeline — one component's WHOLE delivery chain, as one job
+# definition per phase, driven entirely by a single `spec` input.
+#
+# The caller supplies one row of `pleme-io/actions/hardened-image-plan`'s
+# pipeline matrix and nothing else. Every condition this workflow branches on —
+# build / push / mirror / promote — has ALREADY been resolved to a boolean by
+# the plan action, so there is no lane logic here and none can be re-invented
+# here. That is the point: the workflow this replaces carries one hand-written
+# job per component per phase (measured on pleme-io/hardened-images at
+# 2026-08-12: 7027 lines, 109 jobs, 40 components), and the per-component `if:`
+# expressions were copied by hand often enough that 18 components ended up with
+# a typed catalog flag and no job to honour it — invisible, because nothing
+# fails when a flag is simply never read.
+#
+# NESTING. This is a reusable workflow that calls two reusable workflows, so a
+# caller sees depth 3 of GitHub's 4-level ceiling. That leaves exactly one level
+# for a caller that is itself reusable — worth knowing before adding a wrapper.
+#
+# PHASE ORDER IS A CHAIN, NOT A FAN. mirror needs build's bytes; promote needs
+# mirror's admission verdict AND its digest. Each phase therefore gates on the
+# previous phase's RESULT, not merely on its own spec boolean — a spec that says
+# doPromote against a build that failed must not promote yesterday's image.
+#
+# NO `run:` STEPS. The one imperative act in the promote leg (seeding a pointer
+# file that has never existed) goes through tatara-script, not shell.
+# ─────────────────────────────────────────────────────────────────────────────
+name: hardened-image-pipeline
+
+on:
+  workflow_call:
+    inputs:
+      spec:
+        description: >-
+          One row of hardened-image-plan's pipeline-matrix, as JSON. Carries the
+          component's identity (component, catalogKey), its derived app names
+          (releaseApp, grypeScanApp, vulnixScanApp, imageAttr), its refs
+          (publishName, release, scanRef, zotRepo) and the four resolved phase
+          booleans (doBuild, doPush, doMirror, doPromote). ONE input on purpose:
+          a new catalog field never edits this file.
+        required: true
+        type: string
+      promote-repo:
+        description: "Downstream repo holding the environment's promotion pointers. The promote leg writes a commit here; it never touches the environment directly."
+        required: false
+        type: string
+        default: "akeylesslabs/akeyless-main-repo"
+      promote-ref:
+        description: "Branch in promote-repo that the downstream reconciler watches."
+        required: false
+        type: string
+        default: "camelot/architecture"
+      promote-path:
+        description: "Directory in promote-repo holding one pointer file per admitted image."
+        required: false
+        type: string
+        default: "camelot/hardened-images/zot-admissions"
+      fail-on-severity:
+        description: >-
+          The CVE bar, applied at BOTH the build scan and the Zot admission scan.
+          Defaults to UNKNOWN, which is zero-tolerance — anything the scanner can
+          name at any severity fails the phase. Raising this per component is a
+          suppression by another name; the standing bar is a real zero with an
+          empty suppression surface, so a component that cannot meet it gets a
+          fix, not a threshold.
+        required: false
+        type: string
+        default: "UNKNOWN"
+
+jobs:
+  # ── 1 · BUILD + SCAN + PUBLISH ──────────────────────────────────────────────
+  # Delegates wholesale to the existing nix-image-auto-release, which already
+  # owns build, trivy, vulnix, grype, boot-check, SBOM, cosign and cartorio.
+  # Nothing about that chain is reimplemented here — this workflow's job is to
+  # decide WHETHER it runs and WITH WHICH component, not to redo it.
+  #
+  # The advisory-only flags are deliberately NOT plumbed from the spec and
+  # default to enforcing. In the workflow being replaced they live in YAML, per
+  # component, where they are easy to add and invisible afterwards. A component
+  # that genuinely needs advisory-only should carry it as catalog data so it
+  # shows up in the plan and in no-cve-suppression's count — until it does, the
+  # honest default is the bar everybody claims to hold.
+  build:
+    if: fromJSON(inputs.spec).doBuild
+    uses: ./.github/workflows/nix-image-auto-release.yml
+    with:
+      release-app: ${{ fromJSON(inputs.spec).releaseApp }}
+      image-attr: ${{ fromJSON(inputs.spec).imageAttr }}
+      runner: ${{ fromJSON(inputs.spec).runner }}
+      scan-before-push: true
+      scan-image-ref: ${{ fromJSON(inputs.spec).scanRef }}
+      scan-fail-on-severity: ${{ inputs.fail-on-severity }}
+      grype-scan: true
+      grype-scan-app: ${{ fromJSON(inputs.spec).grypeScanApp }}
+      grype-scan-advisory-only: false
+      vulnix-scan: true
+      vulnix-scan-app: ${{ fromJSON(inputs.spec).vulnixScanApp }}
+      vulnix-scan-advisory-only: false
+    secrets: inherit
+
+  # ── 2 · MIRROR INTO ZOT ─────────────────────────────────────────────────────
+  # Admission, not a copy: vendor-image-mirror re-scans the artifact on the way
+  # in and hands back `admitted` plus the digest Zot actually stored. The digest
+  # is what phase 3 pins, because it changes exactly when the bytes do.
+  #
+  # `always() &&` is required, not decorative: without it a SKIPPED build (a
+  # spec with doBuild=false, e.g. a mirror-only stage) would skip this job too,
+  # since a skipped dependency is not a success.
+  mirror:
+    needs: build
+    if: >-
+      always()
+      && fromJSON(inputs.spec).doMirror
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    uses: ./.github/workflows/vendor-image-mirror.yml
+    with:
+      ref: ${{ fromJSON(inputs.spec).publishName }}:${{ fromJSON(inputs.spec).release }}
+      zot-repo: ${{ fromJSON(inputs.spec).zotRepo }}
+      zot-tag: ${{ fromJSON(inputs.spec).release }}
+      fail-on-severity: ${{ inputs.fail-on-severity }}
+      runner: ${{ fromJSON(inputs.spec).runner }}
+      # Every pleme-io package this mirrors is PRIVATE, so an anonymous GHCR
+      # manifest pull returns 403 and the mirror fails with a bare
+      # "Not authorized". Naming the source registry routes credentials to the
+      # puller; substrate falls back to GITHUB_TOKEN, which the caller's
+      # `packages: read` already covers for its own packages — a narrower
+      # credential than a PAT for the same job.
+      source-registry: "ghcr.io"
+    secrets: inherit
+
+  # ── 3 · PROMOTE TO THE ENVIRONMENT ──────────────────────────────────────────
+  # GITOPS-NATIVE: this writes a COMMIT to a pointer file and pushes. It does not
+  # reach into the environment, and it holds no credential that could.
+  #
+  # Both the version and the digest are pinned, and the push fires if EITHER
+  # moved. Version alone is not enough — measured on run 30668156689, a promote
+  # reported success, wrote nothing and fired no downstream run while genuinely
+  # different bytes sat admitted in Zot, because release-promote is idempotent
+  # on version and the version had not changed. The digest changes exactly when
+  # the bytes do, so delivery tracks the artifact rather than a string someone
+  # forgot to bump.
+  promote:
+    needs: [build, mirror]
+    if: >-
+      always()
+      && fromJSON(inputs.spec).doPromote
+      && needs.mirror.result == 'success'
+      && needs.mirror.outputs.admitted == 'true'
+    runs-on: ${{ fromJSON(inputs.spec).runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the downstream promotion branch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.promote-repo }}
+          ref: ${{ inputs.promote-ref }}
+          token: ${{ secrets.AKEYLESS_REPO_PAT || secrets.BOT_PAT }}
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: ${{ inputs.promote-path }}
+          sparse-checkout-cone-mode: true
+
+      # A component promoting for the FIRST time has no pointer file, and
+      # release-promote edits rather than creates. Seeding it at 0.0.0 with an
+      # empty digest means the very next step is a real change, so a first
+      # delivery is not silently a no-op.
+      - name: Seed the pointer if this image has never been promoted
+        uses: pleme-io/actions/tatara-script@main
+        env:
+          POINTER: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          ZOT_REPO: ${{ fromJSON(inputs.spec).zotRepo }}
+        with:
+          script: |
+            (define pointer (env-get "POINTER" ""))
+            (define repo (env-get "ZOT_REPO" ""))
+            (if (path-exists? pointer)
+              (print-line (string-format "[seed] {} exists -- leaving it alone" pointer))
+              (begin
+                (write-file pointer
+                  (string-format "image: {}\nzotRepo: {}\nversion: 0.0.0\ndigest: \"\"\n" repo repo))
+                (print-line (string-format "[seed] created {} at 0.0.0 -- first delivery" pointer))))
+
+      - name: Pin the admitted version into the pointer
+        id: pointer
+        uses: pleme-io/actions/release-promote@main
+        with:
+          kind: helm-chart-version
+          values-file: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          yaml-path: .version
+          version: ${{ fromJSON(inputs.spec).release }}
+          target-env: 2f
+          commit: "true"
+          push: "false"
+
+      # Guarded on a non-empty digest. An enrichment must never be able to fail
+      # the thing it enriches: measured on run 30669854126, an unguarded digest
+      # step handed release-promote an empty value, it correctly refused
+      # ("version is required"), and it took the working .version write down with
+      # it. Guarded, a missing digest degrades to version-only idempotency —
+      # strictly no worse than before the digest existed.
+      - name: Pin the admitted DIGEST into the pointer
+        id: pointer-digest
+        if: needs.mirror.outputs.zot-digest != ''
+        uses: pleme-io/actions/release-promote@main
+        with:
+          kind: helm-chart-version
+          values-file: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          yaml-path: .digest
+          version: ${{ needs.mirror.outputs.zot-digest }}
+          target-env: 2f
+          commit: "true"
+          push: "false"
+
+      - name: Push the pointer (fires the downstream promotion)
+        if: steps.pointer.outputs.committed == 'true' || steps.pointer-digest.outputs.committed == 'true'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.AKEYLESS_REPO_PAT || secrets.BOT_PAT }}
+          branch: ${{ inputs.promote-ref }}
+          push-tags: "false"
