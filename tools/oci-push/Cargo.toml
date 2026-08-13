@@ -30,6 +30,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Typed DocaConfig (YAML authoring + config-show).
 serde_yaml = "0.9"
+# XDG resolution that enforces "absolute or ignored" at the boundary. Added for
+# `config_path()`, which used to take `$XDG_CONFIG_HOME` verbatim: a relative or
+# empty value made the config file resolve against the process cwd. okiba's
+# `Tier::Config` resolves to exactly the same place for every VALID value
+# ($XDG_CONFIG_HOME, else $HOME/.config), so nothing that worked before moves --
+# it only refuses to resolve a relative override instead of honouring it.
+# Zero dependencies and no build script, so the C-light closure documented above
+# is unchanged. PINNED TO 0.2 deliberately: 0.3 changes the return types to
+# `AbsPath`, which is a migration to make on purpose rather than drift into.
+okiba = "0.2"
 
 [profile.release]
 opt-level = "z"

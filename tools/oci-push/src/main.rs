@@ -868,6 +868,8 @@ impl DocaConfig {
     /// Discover + load: `$OCI_PUSH_CONFIG`, else
     /// `$XDG_CONFIG_HOME/oci-push/oci-push.yaml` (or `~/.config/…`), else the
     /// prescribed default. A present-but-unparseable file is a typed error.
+    /// A non-absolute `$OCI_PUSH_CONFIG` or `$XDG_CONFIG_HOME` is IGNORED
+    /// rather than resolved against the cwd — see [`config_path_from`].
     fn load() -> Result<DocaConfig, PushError> {
         match config_path() {
             Some(p) if p.exists() => {
@@ -883,13 +885,43 @@ impl DocaConfig {
 }
 
 fn config_path() -> Option<PathBuf> {
-    if let Some(p) = env::var_os("OCI_PUSH_CONFIG") {
-        return Some(PathBuf::from(p));
+    config_path_from(
+        &okiba::Okiba::for_app("oci-push"),
+        env::var_os("OCI_PUSH_CONFIG").map(PathBuf::from),
+    )
+}
+
+/// The resolution behind [`config_path`], over an explicit resolver + override.
+///
+/// Split out so the invariant below can be pinned by a test that supplies its
+/// own environment instead of mutating `std::env`, which races under the
+/// parallel test harness.
+///
+/// # Every arm is absolute-or-ignored
+///
+/// This chain used to take all three of its variables verbatim, and the only
+/// arm that could not produce a relative path was the terminal `None` -- so it
+/// READ as safe (the prescribed default is right there) while every arm an
+/// operator actually sets was raw. `XDG_CONFIG_HOME=rel/cfg` resolved the
+/// config file against the process cwd, and an EMPTY `XDG_CONFIG_HOME` -- what
+/// a `${VAR}` expansion yields when VAR is unset, which is the ordinary way to
+/// get one in a shell or a CI matrix -- collapsed the whole path to
+/// `oci-push/oci-push.yaml`, read from whatever directory the push happened to
+/// run in (in CI, the checkout).
+///
+/// The damage is silent in both directions: a missing file at a cwd-relative
+/// path is indistinguishable from "no config", so oci-push drops to the
+/// prescribed default and pushes to the wrong registry without a word -- and a
+/// checkout that happens to CONTAIN that relative path gets read as though the
+/// operator had chosen it. Both arms therefore ignore a non-absolute value
+/// rather than resolving it, which is the same rule okiba applies to the tier
+/// arm; a relative override falls through to `$HOME/.config` exactly as an
+/// unset one does.
+fn config_path_from(resolver: &okiba::Okiba, explicit: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = explicit.filter(|p| p.is_absolute()) {
+        return Some(p);
     }
-    let base = env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("oci-push").join("oci-push.yaml"))
+    resolver.try_path(okiba::Tier::Config, "oci-push.yaml").ok()
 }
 
 fn non_empty(s: String) -> Option<String> {
@@ -3403,6 +3435,93 @@ mod upload_plan_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A resolver over a FIXED environment — no `std::env` mutation, so these
+    /// run safely under the parallel harness. okiba exposes `from_env` for
+    /// exactly this reason.
+    fn resolver(pairs: &[(&str, &str)]) -> okiba::Okiba {
+        let owned: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        okiba::Okiba::from_env("oci-push", move |k| {
+            owned.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone())
+        })
+    }
+
+    /// THE MASKED BRANCH. Every arm of the config chain is absolute-or-ignored.
+    ///
+    /// The defect this pins: only the terminal `None` arm could not yield a
+    /// relative path, so the chain read as safe while both `$OCI_PUSH_CONFIG`
+    /// and `$XDG_CONFIG_HOME` — the arms an operator actually sets — were taken
+    /// verbatim and resolved against the process cwd.
+    #[test]
+    fn every_config_arm_is_absolute_or_ignored() {
+        let home = resolver(&[("HOME", "/home/op")]);
+        let expected = Some(PathBuf::from("/home/op/.config/oci-push/oci-push.yaml"));
+
+        // The explicit override, relative → ignored, NOT resolved against cwd.
+        assert_eq!(
+            config_path_from(&home, Some(PathBuf::from("rel/oci-push.yaml"))),
+            expected,
+            "a relative $OCI_PUSH_CONFIG must fall through, not become a cwd path",
+        );
+
+        // An EMPTY $XDG_CONFIG_HOME — what `${VAR}` expands to when VAR is
+        // unset — must not collapse the path to `oci-push/oci-push.yaml`.
+        assert_eq!(
+            config_path_from(&resolver(&[("HOME", "/home/op"), ("XDG_CONFIG_HOME", "")]), None),
+            expected,
+            "an empty $XDG_CONFIG_HOME must fall back to $HOME/.config",
+        );
+
+        // A RELATIVE $XDG_CONFIG_HOME — the value a bare `!is_empty()` check
+        // lets straight through. This is the partial-guard sub-family.
+        assert_eq!(
+            config_path_from(
+                &resolver(&[("HOME", "/home/op"), ("XDG_CONFIG_HOME", "rel/cfg")]),
+                None,
+            ),
+            expected,
+            "a relative $XDG_CONFIG_HOME must be ignored, not joined",
+        );
+
+        // Nothing absolute anywhere → no config at all, never a cwd-relative
+        // one. The caller reads `None` as "use the prescribed default".
+        assert_eq!(
+            config_path_from(&resolver(&[("HOME", "rel/home")]), None),
+            None,
+            "a relative $HOME leaves no base; inventing one is the bug",
+        );
+    }
+
+    /// The other half of the rule, and the one that constrains the FIX: a valid
+    /// configuration must resolve exactly where it did before. These three are
+    /// the pre-fix behaviour, byte for byte — routing through okiba is only
+    /// legitimate because its `Tier::Config` is the same `$XDG_CONFIG_HOME`,
+    /// else `$HOME/.config` this function already computed by hand.
+    #[test]
+    fn valid_config_resolves_where_it_always_did() {
+        let home = resolver(&[("HOME", "/home/op")]);
+        assert_eq!(
+            config_path_from(&home, Some(PathBuf::from("/etc/oci-push.yaml"))),
+            Some(PathBuf::from("/etc/oci-push.yaml")),
+            "an absolute override still wins outright",
+        );
+        assert_eq!(
+            config_path_from(&home, None),
+            Some(PathBuf::from("/home/op/.config/oci-push/oci-push.yaml")),
+            "the $HOME fallback is unchanged",
+        );
+        assert_eq!(
+            config_path_from(
+                &resolver(&[("HOME", "/home/op"), ("XDG_CONFIG_HOME", "/xdg")]),
+                None,
+            ),
+            Some(PathBuf::from("/xdg/oci-push/oci-push.yaml")),
+            "an absolute $XDG_CONFIG_HOME is unchanged",
+        );
+    }
 
     /// `error_chain` must reach EVERY level, not just the first cause.
     ///
