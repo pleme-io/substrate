@@ -367,14 +367,32 @@ jobs:
     # yanks. Same caller-visibility expression family as the runner routing
     # above (in a workflow_call the github context is the CALLER's run).
     # Nothing depends on this job, so a visibility-skip fails nothing downstream.
-    # The test result is asserted EXPLICITLY, never inferred from `needs:`.
-    # A job-level `if:` REPLACES the implicit `success()` (unlike a step-level
-    # one, which ANDs it), so this job's previous condition — carrying no
-    # `success()` and no mention of a test — would have let a SKIPPED test job
-    # satisfy `needs:` and publish anyway. `needs:` alone closes nothing here.
-    # The second arm is the waiver path: with require-tests false the gate is
-    # skipped by design, and the `waiver` job below has already refused the run
-    # if no typed reason was given.
+    # The test result is asserted EXPLICITLY rather than left to `needs:`.
+    #
+    # CORRECTED 2026-08-12 — the reason previously given here was FALSE. It
+    # claimed a job-level `if:` REPLACES the implicit `success()`. It does not.
+    # GitHub: "A default status check of `success()` is applied unless you
+    # include one of these functions" (success/failure/always/cancelled). This
+    # expression names none of them, so the default `success()` still applies
+    # ON TOP of it. Getting this backwards is easy and consequential: it is the
+    # difference between `always()` (ignores every `needs:` result — never the
+    # right guard here) and `!cancelled() &&` (keeps the explicit assertions
+    # below load-bearing).
+    #
+    # CONSEQUENCE, believed but NOT verified live: because the default
+    # `success()` applies and a skipped dependency does not satisfy it, the
+    # second arm — the `require-tests == false` waiver path — is probably
+    # UNREACHABLE. `needs.test.result == 'skipped'` can only be read by a job
+    # that still runs when `test` skipped, which this one does not. It has
+    # never been exercised either way: 0 of the 52 consumers set
+    # `require-tests`, which is why nothing has surfaced it.
+    #
+    # Do NOT "fix" that by reaching for `always()`; it would drop the
+    # `bumped`/visibility guards with it. Establishing the real behaviour wants
+    # a throwaway-repo experiment, not a reasoned edit to the path every
+    # consumer releases through — a previous attempt to harden this was
+    # reverted for exactly that reason.
+    # pending-release-path: waiver-arm reachability (needs a live experiment)
     if: >-
       needs.bump.outputs.bumped == 'true'
       && !github.event.repository.private
