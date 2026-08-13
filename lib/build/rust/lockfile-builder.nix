@@ -239,6 +239,8 @@ let
   # `gen-cargo/src/quirks.rs::REGISTRY` (Rust source of truth).
   quirkApply = import ./quirk-apply.nix { inherit lib; };
   overrideCompose = import ./crate-override-compose.nix { inherit lib; };
+  # I2 corollary — the host tree's resolve section (see `hostBuildSection`).
+  hostTreeClosure = import ./host-tree-closure.nix { inherit lib; };
   mkProject = {
     src,
     # Optional human-readable workspace identifier used in error
@@ -841,9 +843,8 @@ let
         then { crates = tr.base // ((tr.targets.${triple} or {}).overrides or {}); }
         else tr.${triple} or null;
 
-    depsFor = treeSpec: triple: key: crate:
+    depsFor = section: key: crate:
       let
-        section = sectionFor treeSpec triple;
         edges = if section != null then section.crates.${key} or null else null;
       in
         if edges != null
@@ -884,7 +885,13 @@ let
           { }
           renames;
 
-    mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor }:
+    # `section` is the resolved `{ crates = <key→edges>; }` view this tree
+    # iterates and reads its edges/features from. It defaults to the tree's
+    # own triple section; `builtBuild` passes a WIDENED one (see
+    # `hostBuildSection`) because the host tree's universe must be closed
+    # under whatever the target tree routes into it.
+    mkBuiltTree = { treeSpec, triple, buildRustCrate, depFor, buildDepFor
+                  , section ? sectionFor treeSpec triple }:
       let
         # Multi-target spec (#25): iterate only crates ACTUALLY REACHABLE
         # for the current target — restricts `built` to the per-target
@@ -901,8 +908,6 @@ let
         # closes the leak. Old specs (no target_resolves) fall back to
         # spec.crates — the legacy single-target behavior.
         targetCrates =
-          let section = sectionFor treeSpec triple;
-          in
             if section != null
             then builtins.intersectAttrs section.crates treeSpec.crates
             else treeSpec.crates;
@@ -931,7 +936,7 @@ let
         isCoFreshLeaf = name: lib.any (p: lib.hasPrefix p name) coFreshLeafPrefixes;
       in
       lib.mapAttrs (key: crate: let
-        deps = depsFor treeSpec triple key crate;
+        deps = depsFor section key crate;
         # Per-target features (schema v5+): cargo's resolver computes
         # different features per target due to cfg-conditional feature
         # activations (e.g. macos_fsevent on apple-only). Without this,
@@ -940,7 +945,6 @@ let
         # Fall back to crate.features for old specs.
         featuresFor =
           let
-            section = sectionFor treeSpec triple;
             sectionCrate = if section != null then section.crates.${key} or null else null;
           in
             if sectionCrate != null && sectionCrate ? features
@@ -1176,11 +1180,44 @@ let
       buildDepFor = d: builtBuild.${d.package_key};
     };
 
+    # I2 COROLLARY — the host tree's universe is closed under whatever the
+    # TARGET tree routes into it. `built` sends every `tree == "host"` edge
+    # and every build_dependency to `builtBuild`, so the set of keys the
+    # host tree must be able to answer for is a property of the TARGET
+    # triple's resolve, not the host's. Filtering the host tree by the host
+    # triple's section alone is therefore not merely narrow — it is wrong
+    # whenever a proc-macro or build-dep is reachable on the target and not
+    # on the host, and it fails as a bare `attribute '<key>' missing` from
+    # `builtBuild.${d.package_key}` with nothing naming the tree split.
+    #
+    # Measured on ensaio, aarch64-darwin → aarch64-unknown-linux-musl: the
+    # host-routed closure is 59 crates, of which THREE are absent from the
+    # darwin section — `openssl-macros-0.1.1` (a proc-macro of the
+    # linux-only `openssl`) plus `pkg-config-0.3.33` and `vcpkg-0.2.15`
+    # (build-deps of `openssl-sys`). Identical on the gnu and x86_64 musl
+    # targets. Every `substrate.rust.*` consumer that cross-builds a linux
+    # artifact from darwin and pulls native-tls hits it; `nix flake check`
+    # on darwin is the surface that always does, since it evaluates every
+    # `<tool>-<target>` output.
+    #
+    # The merge rule and the closure predicate that says whether the result
+    # is sufficient both live in ./host-tree-closure.nix — one home, and
+    # gated by `checks.<system>.rust-host-tree-closure`. Adding keys is
+    # free: `mkBuiltTree` is a `lib.mapAttrs`, so a key the target tree
+    # never routes to host is never forced. In particular this does NOT
+    # undo the apple-only-crates-in-a-linux-tree fix documented at
+    # `targetCrates` — that one is about the TARGET tree, untouched here.
+    hostBuildSection = hostTreeClosure.mergeHostSection {
+      hostSection = sectionFor specHost hostTriple;
+      targetSection = sectionFor specTarget targetTriple;
+    };
+
     # Host tree: build/native arch + host-filtered dep edges (I4).
     # Transitively all-host.
     builtBuild = mkBuiltTree {
       treeSpec = specHost;
       triple = hostTriple;
+      section = hostBuildSection;
       buildRustCrate = buildRustCrateHost;
       depFor = d: builtBuild.${d.package_key};
       buildDepFor = d: builtBuild.${d.package_key};

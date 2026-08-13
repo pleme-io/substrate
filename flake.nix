@@ -366,6 +366,24 @@
           rust-determinism-flags =
             (import ./lib/build/rust/tests/determinism-flags-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── The two-tree split had no gate at all ──────────────────────
+          # `lockfile-builder.nix` resolves every `tree == "host"` edge and
+          # every build_dependency of the TARGET tree inside the HOST tree,
+          # and until 2026-08-13 it filtered the host tree by the host
+          # triple's resolve section alone. Any proc-macro or build-dep
+          # reachable on the target and not on the host was therefore absent,
+          # and surfaced as a bare `attribute '<key>' missing` naming neither
+          # tree nor triple. Measured on ensaio (aarch64-darwin →
+          # aarch64-unknown-linux-musl): openssl-macros + pkg-config + vcpkg.
+          #
+          # NOT VACUOUS: `pre-fix-host-section-is-not-closed` asserts the OLD
+          # behaviour leaves exactly those three keys unanswerable, so it and
+          # `merged-host-section-is-closed` cannot both pass by accident.
+          # Red-run 2026-08-13 by reverting the merge — 2 tests fail, naming
+          # the closure and the fill-in.
+          rust-host-tree-closure =
+            (import ./lib/build/rust/tests/host-tree-closure-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were
