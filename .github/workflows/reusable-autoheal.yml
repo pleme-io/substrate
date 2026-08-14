@@ -213,8 +213,23 @@ jobs:
         if: inputs.nix
         with:
           github-token: ${{ secrets.BOT_PAT }}
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-        if: inputs.nix
+      # magic-nix-cache-action REMOVED 2026-08-14 — the same drop
+      # nix-devshell-cargo-test.yml and pangea-operator's ci.yml already made
+      # on 2026-07-25, applied to the two sites that were missed. It is EOL'd
+      # upstream (repo-scoped, so it cannot carry a fleet closure anyway) and
+      # outright broken on our self-hosted ARC runners, where unpacking its
+      # own cache blob dies on `xz: not found`.
+      #
+      # Measured cost of missing this site: a fleet CI sweep (2026-08-14, 903
+      # active repos) found 62 red `gen-spec` runs, ALL of them failing on
+      #
+      #   Error: Command failed: cat ".../magic-nix-cache" | xz -d
+      #                          | nix-store --import
+      #
+      # reusable-gen-spec.yml calls THIS workflow, so one dead step two hops
+      # up was the entire bucket. Dropped rather than patched, per precedent:
+      # sui is the fleet's sole cache plane (Attic retired 2026-07-31), and a
+      # repo-scoped third-party cache is not a substitute for it.
 
       # The cheap offline verdict, BEFORE the expensive regen. It names the
       # actual state; the PR diff below can only say "the regen changed
