@@ -138,8 +138,35 @@ jobs:
           override: ${{ inputs.runner }}
           public-runner-default: "ubuntu-latest"
 
-  bump:
+  # The routing precondition, asserted rather than documented.
+  #
+  # This file's header has said "For workspace repos use
+  # rust-auto-release.yml instead" since it was written, and a header cannot
+  # fail a build. A fleet CI sweep (2026-08-14, 903 active repos, 534 red
+  # workflows) found seven repos whose shim named THIS workflow over a
+  # [workspace] root. Every release run died at
+  #
+  #     ERROR cargo-publish-crate: package.name not found in Cargo.toml
+  #
+  # — a true statement about the manifest (a workspace root has no [package]
+  # by definition) that says nothing about the actual mistake, which was one
+  # line in a shim two repos away.
+  #
+  # The check is one call with a value; the comparison, the message and the
+  # exit live in pleme-io/actions/detect-repo-type behind its `expect` input,
+  # so any workflow with a shape precondition states it the same way.
+  precondition:
+    name: repo shape
     needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/detect-repo-type@main
+        with:
+          expect: rust-single-crate
+
+  bump:
+    needs: [resolve-runner, precondition]
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
     # Skip when the bot itself pushed (avoids tag-push → bump → tag-push
     # loops) and on a scheduled tick: a schedule is a capacity-ride for the
