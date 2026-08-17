@@ -1,0 +1,64 @@
+# Case table for substrate/.github/workflows/pleme-publish.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS WORKFLOW IS: a tier-2 fan-out. Five jobs, each a bare
+# `inputs.target == '<name>'` equality, no `needs`, no toggle inputs, no
+# `contains()`/`fromJSON()`. So the only axis is `target`, and the table gives
+# it one row per arm plus the two boundary rows below.
+#
+# WHAT ROWS 1-5 PIN — MUTUAL EXCLUSION, and it is load-bearing rather than
+# tidy. Every one of the five arms is a mutating publish path: action-release
+# publishes an action, compliance-attest writes an attestation,
+# npm-auto-release and python-auto-release publish packages, reusable-gen-spec
+# commits a regenerated Cargo.gen.lock. Two arms selecting on one input would
+# be a double-publish, so each row asserts its arm runs AND names all four
+# others as skipped. Equality dispatch makes that structurally impossible
+# today; the table is what keeps it impossible if a condition is ever widened
+# (a `startsWith`, an `||`, a `contains`).
+#
+# WHAT ROWS 6-7 PIN — THAT THERE IS NO CATCH-ALL, and this is the row that
+# matters most here. This workflow has no fallback job and no arm that fails
+# an unrecognized target. Hand it a name it does not know and ALL FIVE JOBS
+# SKIP, the workflow reports SUCCESS, and nothing at all was dispatched. That
+# is precisely the shape that made graphql-synthesizer's green tick a lie on
+# 2026-08-08: a deliberate skip and a broken skip render identically.
+#
+# The two rows do NOT assert that this is good. They assert it is the CURRENT
+# behavior, so that (a) nobody reads a green run as evidence that something
+# published, and (b) if someone later adds a guard job that fails on an
+# unknown target, these two rows go red and they must consciously say so here
+# rather than silently changing what a bad input does.
+#
+# Row 6 uses `cargo-ci` rather than a nonsense string on purpose. cargo-ci is
+# a REAL reusable in the catalogue that is deliberately absent from this
+# composer — the workflow's own header explains it nests, so it is dispatched
+# straight from pleme.yml to stay inside GHA's 4-level cap. So `cargo-ci` is
+# the plausible mistake, not a synthetic one: a caller reads the catalogue,
+# routes a nesting reusable through the family composer, and is told SUCCESS.
+#
+# Row 7 is the distinct empty case — an upstream that computed a target and
+# produced nothing (an unset matrix value, an expression resolving to ""),
+# which is a different state from any named target and is exactly where a
+# catch-all would be expected to earn its keep.
+#
+# `target` is `required: true`, which stops a caller OMITTING it. It does not
+# stop a caller passing a wrong or empty one, so required-ness closes neither
+# of these two rows.
+
+action-release	inputs.target=action-release	action-release	compliance-attest,npm-auto-release,python-auto-release,reusable-gen-spec
+
+compliance-attest	inputs.target=compliance-attest	compliance-attest	action-release,npm-auto-release,python-auto-release,reusable-gen-spec
+
+npm-auto-release	inputs.target=npm-auto-release	npm-auto-release	action-release,compliance-attest,python-auto-release,reusable-gen-spec
+
+python-auto-release	inputs.target=python-auto-release	python-auto-release	action-release,compliance-attest,npm-auto-release,reusable-gen-spec
+
+reusable-gen-spec	inputs.target=reusable-gen-spec	reusable-gen-spec	action-release,compliance-attest,npm-auto-release,python-auto-release
+
+# THE CATCH-ALL PROBE. A real-but-unrouted reusable name selects NOTHING and
+# the run still reports success. Intended today; pinned so it stays a choice.
+unknown-target-dispatches-NOTHING	inputs.target=cargo-ci		action-release,compliance-attest,npm-auto-release,python-auto-release,reusable-gen-spec
+
+# "Detect ran but produced nothing" — distinct from any named arm.
+empty-target-dispatches-NOTHING	inputs.target=		action-release,compliance-attest,npm-auto-release,python-auto-release,reusable-gen-spec

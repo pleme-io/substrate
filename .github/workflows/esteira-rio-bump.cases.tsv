@@ -1,0 +1,59 @@
+# Case table for substrate/.github/workflows/esteira-rio-bump.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS PINS. The workflow has exactly one job, `bump`, and it is the job
+# that TAGS AND PUSHES. Its whole selection turns on one context path:
+#
+#     if: github.actor != 'github-actions[bot]'
+#
+# That is a loop-breaker, and it is load-bearing in a way the YAML does not
+# say out loud. The job's own final step configures git as
+# `github-actions[bot]` and pushes a tag with BOT_PAT specifically SO THAT
+# downstream workflows trigger (a GITHUB_TOKEN-pushed tag does not). A lane
+# built to make its own pushes retrigger things needs one guard stopping it
+# from retriggering ITSELF, and this `if:` is that guard, alone.
+#
+# The failure this table exists to make loud: if that condition ever inverts,
+# widens, or is rewritten as an allow-list, the run still reports SUCCESS.
+# A bump that correctly declines to run and a bump that can NEVER run are the
+# same green tick without an assertion — which is exactly the graphql-synthesizer
+# shape that put job-selection-lint in the fleet.
+#
+# THE PUBLISH AXIS (do-it / don't-do-it), stated because this job pushes:
+#   row 1 `human-push-tags-and-pushes`  = the DO-IT case, and it is intended.
+#   row 2 `bot-rerun-is-the-loop-breaker` = the DON'T-DO-IT case, and it is
+#          intended. A self-triggered rerun must NOT cut a second tag.
+#
+# Rows 3 and 4 are the boundary rows that would otherwise rot silently:
+#   row 3 proves the guard is an EXACT-MATCH DENY of one identity, not a
+#         "no bots" rule — dependabot[bot] and every other bot DO bump here.
+#         Someone tightening this to a substring/`contains()` test would
+#         change fleet behaviour with no red anywhere; this row goes NOT-RUN.
+#   row 4 proves the guard FAILS OPEN. An unresolved/empty actor bumps. That
+#         is the property that flips if the condition is ever rewritten as an
+#         allow-list (`github.actor == '...'`), which would look like a
+#         hardening and would silently make the lane never bump again.
+#
+# `github.actor` is the ONLY context path any condition in this workflow reads,
+# so it is the only key any row declares. `runs-on: ${{ inputs.runner }}` and
+# the three `workflow_call` inputs are not job conditions and are out of scope.
+#
+# NOT ASSERTABLE HERE, on purpose: the skip-paths gate and the bump-type
+# dispatch (patch/minor/major) live in STEP conditions
+# (`steps.changes.outputs.skip == 'false'`) and in shell inside the steps.
+# job-selection-lint asserts job selection only, so "bump ran but deliberately
+# cut no tag" and "bump ran and cut a tag" are the same verdict at this
+# granularity. That is the same silence one level down, and it needs a
+# different layer — do not fake it with a context key here.
+
+human-push-tags-and-pushes	github.actor=human	bump
+
+# THE LOOP-BREAKER. The one case where the tagging job must not select.
+bot-rerun-is-the-loop-breaker	github.actor=github-actions[bot]		bump
+
+# The guard denies ONE identity, not bots in general.
+other-bot-still-bumps	github.actor=dependabot[bot]	bump
+
+# Fail-open: an unresolved actor still bumps. An allow-list rewrite breaks this.
+unresolved-actor-fails-open	github.actor=	bump

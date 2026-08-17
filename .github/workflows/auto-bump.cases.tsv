@@ -1,0 +1,109 @@
+# Case table for substrate/.github/workflows/auto-bump.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHY THIS FILE EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran
+# cargo-auto-release. The run reported SUCCESS: `bump` bumped, tagged and
+# pushed; `ship` was SKIPPED; nothing was published; nothing said so. The
+# condition doing the skipping was correct — the failure was that nobody had
+# written down WHICH JOBS MUST RUN for a given input, so a deliberate skip and
+# a broken skip produced the same green tick. These rows are that missing
+# statement for auto-bump.
+#
+# WHAT auto-bump IS. Substrate's self-bump: every push to main tags the repo so
+# consumers of its reusable workflows can pin a revision instead of floating on
+# @main. One job, `bump`, and exactly one axis in its `if:` —
+#
+#   if: github.actor != 'github-actions[bot]'
+#
+# That single guard is the LOOP BRAKE. `bump`'s last step pushes a tag as
+# github-actions[bot]; without the guard the resulting push re-enters this
+# workflow and tags again, forever. Rows 1-2 are the two arms of that guard and
+# are the only rows here that assert anything a condition actually reads.
+#
+# WHY THE NEAR-MISS ROWS (3-5) ARE NOT PADDING. The guard is an exact-string
+# `!=` against one login, so it is a WHITELIST OF ONE FAILURE. Every other
+# identity — a human, another bot, or no actor at all — falls through to
+# "run". Rows 3-5 pin that fall-through in the three shapes most likely to
+# change under someone's fingers:
+#   - `github-actions` without the `[bot]` suffix, the login people write from
+#     memory. If the literal in the workflow is ever "corrected" to the bare
+#     form, row 4 goes NOT-RUN and the loop brake is proven unhooked BEFORE it
+#     is a runaway tag loop in production.
+#   - `dependabot[bot]`, a second bot that legitimately pushes to main. It must
+#     still get a tag; the brake is scoped to the bot this workflow itself
+#     creates, not to bots in general. If the guard is ever widened to
+#     `!endsWith(github.actor, '[bot]')` — or to any construct at all — row 5
+#     turns NOT-RUN or EVAL and the widening lands as a decision.
+#   - the EMPTY actor. GitHub yields empty for an unpopulated context, and
+#     empty is a distinct state from both a name and the bot: `'' !=
+#     'github-actions[bot]'` is TRUE, so an unknown identity TAGS rather than
+#     stopping. Row 3 records that this workflow is fail-OPEN on identity. That
+#     is the right posture for a tagger (a missed tag is worse than an extra
+#     one) but it is a posture, and an unwritten posture is an accident.
+#
+# WHAT THIS TABLE CANNOT SEE, stated so its green is never read as broader than
+# it is. `bump` RUNNING IS NOT A TAG BEING PUSHED. Everything that decides
+# whether this workflow actually does its job is STEP-level and therefore below
+# this linter's resolution entirely:
+#   - `steps.changes.outputs.skip == 'false'` gates both "Compute next tag" and
+#     "Create + push tag". A push touching only e.g. README lands here with
+#     skip=true, and the run is green with no tag — the exact silent-no-op
+#     shape this family exists to name, one layer down where nothing here can
+#     reach it. A step-selection oracle would be needed; this is not one.
+#   - the `case "$bump" in major|minor|patch|*)` dispatch inside "Compute next
+#     tag" is shell, not job selection. Its arms are NOT job-visible.
+# So "bump ran" means "the job was selected", never "substrate got a new tag".
+#
+# WHY ROWS 6-7 EXIST ANYWAY, and what they are honestly worth. `inputs.bump-type`
+# is this workflow's only input and the first thing a reader will ask about, so
+# the table answers rather than staying silent. NO `if:` READS IT TODAY — these
+# two rows assert nothing about the shell `case` above and select identically to
+# row 1. They are TRIPWIRES, kept for the day someone gates the job on it (the
+# realistic edit: "a major bump only from workflow_dispatch"), at which point
+# they diverge from row 1 and force the new gate to be written down here instead
+# of acquired silently. Row 6 is the named-arm dispatch; row 7 is a value
+# matching no arm, which the shell silently treats as `patch`. Row 1's empty
+# value is the third state — a `push` event, where `inputs` does not exist at
+# all — and it is the production path, not an edge case.
+
+# 1. THE PRODUCTION PATH. A human pushes to main; `inputs` is absent because the
+# trigger is `push`, so bump-type is empty and the shell defaults it to patch.
+# The job selects. If this row ever goes NOT-RUN, substrate has stopped tagging
+# and its consumers have nothing new to pin.
+push-by-human	github.actor=drzzln;inputs.bump-type=	bump
+
+# 2. THE LOOP BRAKE. `bump` pushed the tag as github-actions[bot]; that push
+# re-enters this workflow. The second pass must select NOTHING. This is the only
+# row in which any job skips, and it is the whole reason the `if:` is there.
+bot-actor-no-tag-loop	github.actor=github-actions[bot];inputs.bump-type=		bump
+
+# 3. FAIL-OPEN ON AN UNKNOWN IDENTITY. Empty actor is a distinct state from both
+# a login and the bot; `'' != 'github-actions[bot]'` is true, so the job runs.
+# Pinned deliberately: this workflow tags rather than stops when it cannot tell
+# who pushed, and that choice should be visible.
+actor-empty-still-tags	github.actor=;inputs.bump-type=	bump
+
+# 4. NEAR-MISS LOGIN. `github-actions` without the `[bot]` suffix is NOT the
+# actor GitHub reports for a bot push, so it must still tag. If the literal in
+# the workflow is ever shortened to this form, the real bot stops matching and
+# this row goes NOT-RUN — catching an unhooked loop brake at lint time instead
+# of at tag v0.9999.0.
+near-miss-bot-login-still-tags	github.actor=github-actions;inputs.bump-type=	bump
+
+# 5. A DIFFERENT BOT. dependabot[bot] pushes real changes to main and those
+# changes deserve a tag: the brake is scoped to the one bot this workflow itself
+# creates, not to bots as a class. Widening the guard to match any `[bot]` login
+# turns this row NOT-RUN (or EVAL, since endsWith/contains are refused).
+other-bot-still-tags	github.actor=dependabot[bot];inputs.bump-type=	bump
+
+# 6. TRIPWIRE, asserts nothing today. workflow_dispatch with an explicit named
+# arm. No `if:` reads bump-type, so this selects exactly like row 1; it exists so
+# that a future job-level bump-type gate cannot land silently.
+dispatch-major	github.actor=drzzln;inputs.bump-type=major	bump
+
+# 7. TRIPWIRE, asserts nothing today. A bump-type matching no arm of the shell
+# `case`, which silently falls through to `patch`. That fall-through is NOT
+# job-visible and is not asserted here — the row pins only that an unrecognized
+# input does not change job selection, and turns red the day it starts to.
+dispatch-unrecognized-bump-type	github.actor=drzzln;inputs.bump-type=weekly	bump

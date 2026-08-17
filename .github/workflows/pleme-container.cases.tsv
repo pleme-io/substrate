@@ -1,0 +1,76 @@
+# Case table for substrate/.github/workflows/pleme-container.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. pleme-container is a tier-2 family composer: it holds no
+# logic of its own, only a two-arm dispatch on `inputs.target` into
+# image-push.yml and vendor-image-mirror.yml. Its entire contract is therefore a
+# SELECTION contract — exactly the thing a unit test cannot see and actionlint
+# will not read. The rows below assert that the two arms are mutually exclusive
+# (a broken `==` that matched both would double-dispatch a push AND a mirror
+# from one call) and that each arm is genuinely reachable (a typo'd literal
+# would make its job `NEVER`, which looks identical to a job that works).
+#
+# BOTH JOBS PUSH BYTES SOMEWHERE — this is not a table over harmless work.
+# `image-push` builds and pushes an image; `vendor-image-mirror` copies a vendor
+# image into our registry. So each row states which of the two publishing acts
+# is INTENDED for that input, and the two non-matching rows below state that
+# NEITHER is intended. A regression that made both arms fire would publish an
+# unrequested artifact while the run stayed green.
+#
+# THE AXIS AND ITS BOUNDARIES. `inputs.target` is the only context path any
+# condition in this file reads, so the axis is total: one row per named arm,
+# plus the two boundary rows that would otherwise rot.
+#
+#   * `unknown-target` — a real reusable name from a DIFFERENT family. This
+#     workflow has NO catch-all job, so an unrecognised target selects nothing
+#     and the run reports success having dispatched no work. That is a finding
+#     about the workflow, recorded here rather than papered over: the row pins
+#     today's behaviour (both arms quiet) so that if a catch-all is ever added,
+#     this row goes red and forces the new job to be asserted instead of
+#     acquired silently.
+#
+#   * `empty-target` — `target: ""`. GitHub's `required: true` enforces that the
+#     key is PRESENT, never that it is non-empty, and pleme.yml passes the value
+#     straight through as `target: "${{ inputs.target }}"`, so a caller
+#     interpolating an unset variable lands here with the empty string. "the
+#     caller computed nothing" is a distinct state from any named target and is
+#     exactly where a catch-all added later would need to catch.
+#
+# WHY THE TWO BOUNDARY ROWS ARE REACHABLE AT ALL, given pleme.yml validates.
+# pleme.yml's `validate` job greps this very file for `inputs.target == '<t>'`
+# and fails an unknown target before `container` runs — so on the pleme.yml
+# path, rows 3 and 4 are unreachable. But this workflow's own header states it
+# is directly callable ("Calling it directly also works and simply spends one
+# fewer chain level"), and on THAT path there is no validate job in front of it.
+# The boundary rows cover the unguarded entry point, which is the one where a
+# green-over-nothing run is possible.
+#
+# WHAT THIS FILE CANNOT SEE. Both arms are `uses:` dispatches. This linter
+# models dispatch only and never descends into the called workflow's own
+# conditions — image-push.yml has its own `resolve-runner`/`push` pair and
+# vendor-image-mirror.yml its own `mirror` job, each with gates of their own.
+# "image-push ran" here means "the reusable was invoked", never "an image was
+# pushed". Those two workflows need their own tables; this one does not cover
+# them.
+
+# Arm 1. The push family's build-and-push leaf is dispatched; the mirror stays
+# quiet. INTENDED PUBLISH: an image push, and nothing else.
+image-push	inputs.target=image-push	image-push	vendor-image-mirror
+
+# Arm 2. The vendor mirror is dispatched; the push stays quiet. INTENDED
+# PUBLISH: a vendor-image mirror, and nothing else.
+vendor-image-mirror	inputs.target=vendor-image-mirror	vendor-image-mirror	image-push
+
+# Boundary: a target this composer does not serve. `cargo-ci` is a real
+# catalogued reusable — one of the nine that nest and are dispatched directly
+# from pleme.yml — so this is the realistic mistype/mis-route, not a fictional
+# string. INTENDED PUBLISH: none. Today no job selects and the run is green
+# having done nothing; see the header for why that is recorded rather than
+# asserted away.
+unknown-target	inputs.target=cargo-ci	 	image-push,vendor-image-mirror
+
+# Boundary: the caller supplied an empty string (an unset variable interpolated
+# through pleme.yml's `with: { target: "${{ inputs.target }}" }`). Distinct from
+# any named target and from a missing key. INTENDED PUBLISH: none.
+empty-target	inputs.target=	 	image-push,vendor-image-mirror

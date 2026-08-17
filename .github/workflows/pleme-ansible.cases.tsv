@@ -1,0 +1,93 @@
+# Case table for substrate/.github/workflows/pleme-ansible.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHY ANY OF THESE TABLES EXIST. On 2026-08-08 pleme-io/graphql-synthesizer ran
+# cargo-auto-release. The run reported SUCCESS, bumped + tagged + pushed, and
+# published nothing, because `ship` carried a `!private` guard that is entirely
+# correct and that nobody had written down. A deliberate skip and a broken skip
+# produced the same green tick. A table states which jobs MUST run for a given
+# input, so the two stop looking alike.
+#
+# WHAT pleme-ansible IS. A pure TIER-2 DISPATCHER: ten sibling jobs, zero
+# `needs:` edges, each gated on `inputs.target == '<its own id>'` and doing
+# nothing but `uses:` the matching flat leaf. `inputs.target` is the ONLY
+# context path any condition reads, so it is the only key declared per row. No
+# condition calls always()/success()/failure()/cancelled(), and with no `needs:`
+# anywhere, needs-propagation has nothing to propagate through — every verdict
+# below is one `==` against one string.
+#
+# THE PROPERTY PINNED IS EXACTLY-ONE-SELECTS, which is why every row names all
+# ten jobs — the nine that must skip as well as the one that must run. A row
+# naming only its own arm cannot see a SECOND arm firing, and a dispatcher whose
+# arms overlap silently runs two pipelines over one repo. The ten arm rows are
+# deliberately mechanical: the claim is the whole ten-by-ten grid, not any one
+# row.
+#
+# THE LAST TWO ROWS MATTER MOST, AND THEY RECORD A REAL HOLE. Nothing in this
+# file is a catch-all: when `target` matches no arm, all ten jobs skip and the
+# workflow reports SUCCESS having done nothing — the graphql-synthesizer shape
+# exactly. Through the intended front door that is caught upstream, not here:
+# pleme.yml's `validate` job greps THIS FILE for the literal
+# `inputs.target == '<t>'` and exits 1 when it is absent, and rejects an empty
+# target outright. But this composer's own header invites direct calls
+# ("Calling it directly also works and simply spends one fewer chain level"),
+# and on that path there is no `validate` at all. So `unknown-target-*` and
+# `empty-target-*` are not hypotheticals — they are the direct-call posture,
+# recorded rather than assumed. If a fail-loud catch-all job is ever added here,
+# both rows go red and must be rewritten to expect it. That is the correct
+# outcome, not a nuisance.
+#
+# CROSS-FAMILY IS THE REALISTIC UNKNOWN. pleme.yml takes `family` and `target`
+# as two independent strings, so `family=ansible` paired with a rust target is a
+# reachable operator slip rather than an invented value. The unknown row uses
+# `cargo-auto-release` — a genuine target of another family — instead of a
+# nonsense string, so the row models the mistake someone will actually make.
+#
+# PUBLISH / PUSH POSTURE. Two arms have outward-facing effects:
+# `ansible-collection-release` builds the collection and publishes it to Ansible
+# Galaxy, and `ansible-collection-auto-bump` commits, tags and pushes. The
+# do-it input for each is its own arm row; the don't-do-it inputs are the other
+# eleven rows, where both ids sit in expect-skip. Intended: selecting any other
+# target must not publish to Galaxy and must not push a tag. Note that
+# `ansible-collection-integration-live` reads outward-facing and is not — it is
+# backed by a stdlib mock gateway, no external service is touched.
+#
+# WHAT IS DELIBERATELY ABSENT. No near-miss / substring row (e.g.
+# `ansible-collection-ci-extra`). Under today's `==` it asserts nothing the arm
+# rows do not, and if an arm were ever loosened to startsWith()/contains() the
+# linter REFUSES with an EVAL error naming the construct — on every row, not
+# only a near-miss one. A row that cannot fail for its stated reason is a row
+# the next person deletes.
+
+# ── THE TEN ARM ROWS ───────────────────────────────────────────────────────
+# One per catalogued target of the `ansible` family. Each asserts its own arm
+# runs AND that the other nine do not. Together they prove the arm set is a
+# partition: total (every catalogued target reaches a leaf) and disjoint (no
+# target reaches two).
+target-ansible-test	inputs.target=ansible-collection-ansible-test	ansible-collection-ansible-test	ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-auto-bump	inputs.target=ansible-collection-auto-bump	ansible-collection-auto-bump	ansible-collection-ansible-test,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-auto-merge	inputs.target=ansible-collection-auto-merge	ansible-collection-auto-merge	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-ci	inputs.target=ansible-collection-ci	ansible-collection-ci	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-docs-lint	inputs.target=ansible-collection-docs-lint	ansible-collection-docs-lint	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-integration-live	inputs.target=ansible-collection-integration-live	ansible-collection-integration-live	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-matrix	inputs.target=ansible-collection-matrix	ansible-collection-matrix	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+target-published-install	inputs.target=ansible-collection-published-install	ansible-collection-published-install	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-release,ansible-collection-upstream-watch
+target-release	inputs.target=ansible-collection-release	ansible-collection-release	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-upstream-watch
+target-upstream-watch	inputs.target=ansible-collection-upstream-watch	ansible-collection-upstream-watch	ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release
+
+# ── THE CATCH-ALL PAIR ─────────────────────────────────────────────────────
+# A target belonging to a different family. Reachable because pleme.yml takes
+# `family` and `target` as independent strings, and on a DIRECT call to this
+# composer nothing validates the pairing at all. Ten skips, green run, no work
+# done: the posture as it stands today, written down so that adding a fail-loud
+# catch-all is a deliberate edit here rather than an unnoticed behaviour change.
+unknown-target-cross-family	inputs.target=cargo-auto-release		ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch
+
+# The empty value is a DISTINCT state from any named target and from an unknown
+# one: it is "the caller resolved `target` to nothing" — an unset `with:`, a
+# `${{ inputs.target }}` that came through empty — rather than "the caller named
+# something wrong". `target` is declared `required: true`, which GitHub enforces
+# as present-but-possibly-empty, not as non-empty; pleme.yml adds the non-empty
+# check itself, and a direct caller gets none. Same ten skips, same green run.
+empty-target-selects-nothing	inputs.target=		ansible-collection-ansible-test,ansible-collection-auto-bump,ansible-collection-auto-merge,ansible-collection-ci,ansible-collection-docs-lint,ansible-collection-integration-live,ansible-collection-matrix,ansible-collection-published-install,ansible-collection-release,ansible-collection-upstream-watch

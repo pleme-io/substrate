@@ -1,0 +1,88 @@
+# Case table for substrate/.github/workflows/pleme-ruby.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. pleme-ruby is a TIER-2 DISPATCHER: three jobs, no `needs:`,
+# no toggles, no status functions, and exactly one axis deciding all of them —
+#   gem-auto-bump  if: inputs.target == 'gem-auto-bump'
+#   gem-ci         if: inputs.target == 'gem-ci'
+#   gem-release    if: inputs.target == 'gem-release'
+# The arms are mutually exclusive by construction (three equality tests against
+# one string), so every row asserts one runner and two skips — and the table's
+# real job is to hold the ROUTING still: each target reaches its own leaf and
+# no other. A dispatcher is the file nobody opens, so a mis-typed arm here
+# would silently route a release to nothing.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing — its ship job was skipped by a condition that is entirely correct.
+# A deliberate skip and a broken skip produced the same green tick, because
+# nobody had written down which jobs must run for a given input.
+#
+# ── READ ROWS 4 AND 5 BEFORE CHANGING ANYTHING ───────────────────────────────
+#
+# THIS WORKFLOW HAS NO CATCH-ALL, AND THAT IS THE POINT OF THOSE TWO ROWS.
+# Every job is `if:`-gated and there is no `else` arm, so a target matching no
+# arm selects ZERO jobs and the run reports SUCCESS having done nothing —
+# precisely the green-over-nothing shape this linter was built for. Rows 4 and
+# 5 assert that outcome deliberately rather than leaving it undiscovered.
+#
+# The guard is real but it lives ONE LEVEL UP, in pleme.yml's `validate` job,
+# which greps this very file for `inputs.target == '<t>'` and exits 1 when the
+# target is not a member. That guard is reached ONLY when pleme-ruby is called
+# through pleme.yml. This file's own header says calling it directly "also
+# works and simply spends one fewer chain level" — and a direct caller gets NO
+# validation at all. So the unguarded path is not hypothetical; it is a
+# documented, supported entry point.
+#
+# Consequence for anyone editing: if a catch-all/fail-loud job is ever added
+# here, rows 4 and 5 go RED and the change has to be argued for rather than
+# absorbed. That is the intended behaviour of those rows, not a bug in them.
+# Conversely, if an arm is renamed without pleme.yml's list being updated,
+# rows 1–3 catch it here before a consumer's release silently no-ops.
+#
+# ── WHAT PUBLISHES, AND WHERE THE DO-IT / DON'T-DO-IT PAIR IS ────────────────
+#
+#   gem-release    PUBLISHES — tag-triggered push to the public RubyGems
+#                  index. Outward-facing and effectively irreversible (a yank
+#                  does not un-publish). Row 3 is the intended do-it case; rows
+#                  1, 2, 4 and 5 are its don't-do-it cases, each asserting
+#                  gem-release SKIPS. Four don't-do-it rows against one do-it
+#                  row is the correct asymmetry for a public publish.
+#   gem-auto-bump  PUSHES — a bump commit back to the consumer's main branch.
+#                  Row 1 do-it; rows 2–5 don't-do-it.
+#   gem-ci         read-only (nix flake check). Row 2 do-it.
+#
+# INPUT MODELLING. `target` is declared `required: true`, so GitHub will refuse
+# a call that omits it entirely — but "required" does not mean "non-empty": a
+# caller passing `target: "${{ steps.detect.outputs.family-target }}"` from a
+# step that produced nothing supplies the empty string and satisfies the
+# requirement. That is what row 5 models, and it is a DISTINCT state from row
+# 4's wrong-but-present value: row 4 is a misroute, row 5 is a detect that ran
+# and found nothing. They happen to select the same (empty) job set today;
+# asserting both is what proves that stays true if an arm is ever weakened to
+# a truthiness test, where '' and 'cargo-ci' would part ways.
+
+# 1. The bump arm. gem-auto-bump pushes a commit; the other two must not fire.
+target-gem-auto-bump	inputs.target=gem-auto-bump	gem-auto-bump	gem-ci,gem-release
+
+# 2. The CI arm — the only read-only leaf. Pinned mainly so a routing typo
+#    cannot quietly turn a CI request into a release request.
+target-gem-ci	inputs.target=gem-ci	gem-ci	gem-auto-bump,gem-release
+
+# 3. The publish arm. This is the ONE row in which anything reaches RubyGems.
+target-gem-release	inputs.target=gem-release	gem-release	gem-auto-bump,gem-ci
+
+# 4. A target matching NO arm — modelled with a real target from a DIFFERENT
+#    family ('cargo-ci' belongs to pleme-rust / the direct list), because a
+#    cross-family misroute is the realistic typo, not a nonsense string. All
+#    three jobs skip and the run goes green having done nothing. See the header:
+#    the only thing that turns this into a failure is pleme.yml's validate job,
+#    which a direct caller bypasses entirely.
+target-unknown-selects-nothing	inputs.target=cargo-ci		gem-auto-bump,gem-ci,gem-release
+
+# 5. "Detect ran but produced nothing" — the empty string, which satisfies
+#    `required: true` and is NOT the same state as row 4's wrong value. Same
+#    empty selection today; asserted separately so the two cannot silently
+#    diverge under a future truthiness-shaped condition.
+target-empty-selects-nothing	inputs.target=		gem-auto-bump,gem-ci,gem-release

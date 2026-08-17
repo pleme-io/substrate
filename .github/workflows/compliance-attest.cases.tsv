@@ -1,0 +1,97 @@
+# Case table for substrate/.github/workflows/compliance-attest.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS FILE PINS. compliance-attest is the supply-chain attestation chain
+# a repo calls to ship SLSA-attested artifacts. Five jobs in one dependency
+# spine, and exactly ONE input decides how much of that spine runs:
+#
+#   sbom              (no if, no needs)          — always the root
+#     └─ sign         (no if, needs sbom)        — provenance-attest
+#          ├─ slsa    (no if, needs sign)        — slsa-attest
+#          ├─ scan    (if image-ref != '')       — image-scan, the severity gate
+#          └─ verify-and-attest
+#                     (if always() && image-ref != '', needs [slsa, scan])
+#                     — cosign-verify of the image
+#
+# The failure class this table exists for is the one that made
+# graphql-synthesizer bump, tag, push and publish NOTHING on a green tick: a
+# job whose condition is entirely correct silently selecting itself out, with
+# a deliberate skip and a broken skip rendering as the same green check. Here
+# that shape is the two image-gated jobs — a consumer that passes an image-ref
+# and gets no `scan` gets an UNSCANNED image with a green attestation run, and
+# nothing in the run says so.
+#
+# THE ONE AXIS: inputs.image-ref, empty vs non-empty.
+#   non-empty -> all five jobs (rows 1, 3)
+#   empty     -> the artifact-only chain; scan and verify-and-attest skip
+#                (rows 2, 4)
+# There is no third arm: the guard is a `!= ''` emptiness test, not a value
+# dispatch, so every non-empty string takes the same branch and there is no
+# catch-all to cover. Row 2 is the toggle-OFF row that proves image-ref is
+# load-bearing rather than decorative.
+#
+# CONTEXT PATHS. The conditions read exactly two — inputs.image-ref and
+# always() — so both are declared in EVERY row, including rows where the value
+# does not change the outcome. An undeclared path is an ERROR by design: a row
+# that omits one is an incomplete case wearing a confident verdict.
+#
+# always() IS DECLARED true IN EVERY ROW AND NEVER false. GitHub's always()
+# returns true even for a cancelled run; a false value would model no reachable
+# state, and inventing one to move a verdict is exactly the fake this table
+# must not contain. Its effect on SELECTION here is a non-effect, and row 2 is
+# what proves that: an always() job is the classic shape that fires when
+# everything it needs skipped, and the `&& inputs.image-ref != ''` half is the
+# only thing stopping verify-and-attest from running cosign-verify against an
+# empty reference. Delete that half and row 2 goes red.
+#
+# WHAT always() IS ACTUALLY FOR HERE IS NOT ASSERTABLE. Its real job is failure
+# propagation: when `scan` FAILS its severity gate, verify-and-attest still
+# runs and still attests. This linter models selected-vs-skipped, not
+# passed-vs-failed, so no row can express "scan ran and went red". Read the two
+# image-ref rows as coverage of selection only — they are not evidence that a
+# vulnerable image is refused. That the chain attests over a failed scan is the
+# workflow's genuine behavior and is called out here rather than left to be
+# rediscovered.
+#
+# fail-on-severity AND ignore-file ARE DECLARED BUT INERT. No condition reads
+# them, so the linter never evaluates them; they are here because they carry
+# the workflow's stated postures — default HIGH versus the hardened-image
+# zero-tolerance UNKNOWN, and a tracked-exceptions file — and rows 3 and 4
+# pin that neither posture changes WHICH jobs run. A future edit that gates
+# scan on either one (say `image-ref != '' || ignore-file != ''`) is then
+# caught by row 4 turning red, not merely by every row erroring out.
+#
+# inputs.artifact-path is deliberately absent: it is `required: true`, no
+# condition reads it, and it therefore has no empty arm to cover.
+#
+# NOT COVERED, by construction: the `runs-on` privacy ternary
+# (`github.event.repository.private && 'camelot-builder-pleme-eks' || …`) that
+# every job carries. The linter reads `if:` and `needs:` only — runs-on is not
+# a selection condition — so a green table says nothing about whether a private
+# consumer lands on the metered label. Same for anything inside the called
+# actions.
+
+# ── 1: the full chain. An image-ref is supplied, so all five jobs select and
+# ── nothing skips. This is the row that would go red if the image-gated half
+# ── of the pipeline ever silently stopped selecting.
+image-supplied	inputs.image-ref=ghcr.io/pleme-io/example@sha256:deadbeef;inputs.fail-on-severity=HIGH;inputs.ignore-file=;always()=true	sbom,sign,slsa,scan,verify-and-attest
+
+# ── 2: THE TOGGLE-OFF ROW. No image-ref — the artifact-only consumer. sbom,
+# ── sign and slsa still run (an artifact still gets its SBOM, provenance and
+# ── SLSA attestation); scan and verify-and-attest correctly do not. This also
+# ── pins the always() guard: verify-and-attest must NOT fire here despite
+# ── always(), because there is no image to cosign-verify.
+no-image	inputs.image-ref=;inputs.fail-on-severity=HIGH;inputs.ignore-file=;always()=true	sbom,sign,slsa	scan,verify-and-attest
+
+# ── 3: the hardened-image posture — zero-tolerance UNKNOWN plus a tracked
+# ── .trivyignore. Selection is identical to row 1: severity and exceptions
+# ── change what `scan` DOES, never whether it runs. Pinned so a future edit
+# ── that makes the strict posture opt out of a job has to face a red row.
+image-zero-tolerance	inputs.image-ref=ghcr.io/pleme-io/example@sha256:deadbeef;inputs.fail-on-severity=UNKNOWN;inputs.ignore-file=.trivyignore;always()=true	sbom,sign,slsa,scan,verify-and-attest
+
+# ── 4: an ignore-file with no image is INERT. A .trivyignore names exceptions
+# ── for a scan that is not going to happen, and that must not resurrect the
+# ── scan job — the image-ref emptiness test is the sole gate. Catches the
+# ── plausible mis-edit `image-ref != '' || ignore-file != ''`.
+no-image-with-ignore-file	inputs.image-ref=;inputs.fail-on-severity=UNKNOWN;inputs.ignore-file=.trivyignore;always()=true	sbom,sign,slsa	scan,verify-and-attest

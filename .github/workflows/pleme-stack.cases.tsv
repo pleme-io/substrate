@@ -1,0 +1,80 @@
+# Case table for substrate/.github/workflows/pleme-stack.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. pleme-stack is the ULTIMATE single-file consumer shim: a repo
+# adopting it gets seven jobs and never writes yaml again. Six of the seven are
+# gated by ONE expression shape — `github.event_name == '<arm>'` — so the whole
+# workflow is a three-way dispatch on the trigger, with a fourth job stacked
+# behind an AND of two inputs:
+#
+#   pull_request  ->  pre-merge, security-pr, caixa-drift-check
+#   push          ->  release, caixa-render  (+ container, conditionally)
+#   schedule      ->  security-scheduled
+#
+# The three claims worth holding still:
+#   1. PR-time is SIGNAL-ONLY. Nothing on the pull_request arm releases, opens a
+#      meta-PR, or builds an image. caixa-drift-check passes open-pr:"false"
+#      where its push-time twin caixa-render passes "true", and the two are
+#      separate jobs precisely so the event decides which behaviour you get.
+#      Row `pull-request-with-container-inputs` is the load-bearing one: it
+#      hands the PR arm a fully-armed container config and asserts `container`
+#      still does not select. A container build pushes an image; PR-time must
+#      never be the do-it side of that.
+#      MEASURED LIMIT on that row, so nobody over-reads it: deleting
+#      `github.event_name == 'push'` from container's own `if:` produces ZERO
+#      violations. `needs: release` already skips container on every non-push
+#      arm, because release's condition is the same event test — the guard is
+#      doubled, and no case can separate the two. This table therefore pins the
+#      OUTCOME (no image build on a PR) and cannot pin WHICH guard delivers it.
+#      That is not fixable by adding a row: a case where release selects on a
+#      non-push event does not exist, by construction.
+#   2. `container` needs BOTH inputs, not either. Its condition ANDs the toggle
+#      with a non-empty image, so three rows exist where one would look like
+#      enough: toggle-off-with-image, toggle-on-without-image, and both-set.
+#      Without the first two, a condition degraded to a single term would still
+#      go green.
+#   3. THERE IS NO CATCH-ALL. Every job names its event explicitly, so a
+#      consumer who adds a fourth trigger — workflow_dispatch, release,
+#      issue_comment — gets a workflow where LITERALLY NOTHING RUNS and the run
+#      is green. Rows `unrecognised-event` and `empty-event` are that state
+#      written down: `empty-event` is separate on purpose, because "the trigger
+#      resolved to nothing" is a distinct failure from "the trigger was some
+#      other named event", and it is the one a caller's own broken expression
+#      produces.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing — its ship job was silently skipped by a condition that was entirely
+# correct. A deliberate skip and a broken skip were the same green tick, because
+# nobody had written down which jobs must run for a given input.
+#
+# `github.event.repository.private` IS DECLARED IN EVERY ROW THOUGH NO `if:`
+# READS IT, for two reasons, and both matter to the next reader:
+#   (a) pleme-stack reads it twice, in caixa-drift-check's and caixa-render's
+#       `runs-on`, to pick a self-hosted label so a private consumer is not
+#       billed for metered minutes. That is a RUNNER SELECTOR, never a
+#       selection gate — the job runs either way, somewhere else.
+#   (b) It IS a selection gate one level down, inside auto-release.yml's ship
+#       job, which pleme-stack reaches via `release`. Row `push-private-repo`
+#       pins that privacy changes nothing HERE, so nobody reads a green table as
+#       evidence the private path publishes.
+#
+# LIMIT, STATED SO IT IS NOT MISREAD. Five of these seven jobs are
+# `uses:`-calls into other reusable workflows (pre-merge-gate, security-gate,
+# auto-release, container-stack). This oracle does not model reusable-workflow
+# `with:` propagation, so a job SELECTING here says the call is reachable and
+# dispatched — it says nothing about which jobs run inside the called workflow.
+# auto-release.yml and container-stack.yml need their own tables; the ones that
+# have them (auto-release.cases.tsv) are checked by the same selftest.
+#
+pull-request	github.event_name=pull_request;inputs.build-container=false;inputs.image=;github.event.repository.private=false	pre-merge,security-pr,caixa-drift-check	release,caixa-render,container,security-scheduled
+pull-request-with-container-inputs	github.event_name=pull_request;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=true	pre-merge,security-pr,caixa-drift-check	release,caixa-render,container,security-scheduled
+push-no-container	github.event_name=push;inputs.build-container=false;inputs.image=;github.event.repository.private=false	release,caixa-render	pre-merge,security-pr,caixa-drift-check,container,security-scheduled
+push-container	github.event_name=push;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=false	release,caixa-render,container	pre-merge,security-pr,caixa-drift-check,security-scheduled
+push-container-toggle-off	github.event_name=push;inputs.build-container=false;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=false	release,caixa-render	pre-merge,security-pr,caixa-drift-check,container,security-scheduled
+push-container-toggle-on-no-image	github.event_name=push;inputs.build-container=true;inputs.image=;github.event.repository.private=false	release,caixa-render	pre-merge,security-pr,caixa-drift-check,container,security-scheduled
+push-private-repo	github.event_name=push;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=true	release,caixa-render,container	pre-merge,security-pr,caixa-drift-check,security-scheduled
+schedule	github.event_name=schedule;inputs.build-container=false;inputs.image=;github.event.repository.private=false	security-scheduled	pre-merge,security-pr,caixa-drift-check,release,caixa-render,container
+unrecognised-event	github.event_name=workflow_dispatch;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=false		pre-merge,security-pr,caixa-drift-check,release,caixa-render,container,security-scheduled
+empty-event	github.event_name=;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=false		pre-merge,security-pr,caixa-drift-check,release,caixa-render,container,security-scheduled

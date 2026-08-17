@@ -1,0 +1,121 @@
+# Case table for substrate/.github/workflows/ansible-collection-auto-bump.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS FILE PINS. The workflow has exactly ONE job, `bump`, with exactly
+# one condition and no `needs:` graph:
+#
+#     if: github.actor != 'github-actions[bot]'
+#
+# So the entire job-selection surface is a single exact-match inequality
+# against one literal actor name, and every row below is an arm of it. That
+# makes the table small; it does not make it idle. `bump` COMMITS A VERSION
+# BUMP TO main, PUSHES IT, PUSHES A TAG, and then dispatches release.yml on
+# that tag — i.e. it is the first domino of an Ansible Galaxy publish. Whether
+# it was selected or skipped is the difference between a collection version
+# shipping and nothing happening, and BOTH outcomes report a green tick.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing: its `ship` job was skipped by a condition that is entirely correct.
+# Nobody had written down WHICH JOBS MUST RUN for a given input, so a deliberate
+# skip and a broken skip were the same green tick. Unit tests cannot see that
+# (the condition is in no action's code) and actionlint cannot (the expression
+# is valid). This file is that missing statement for this workflow.
+#
+# ── THE DO-IT / DON'T-DO-IT PAIR (this job publishes, so it is named out loud)
+#
+#   Row 1 is the intended DO-IT case: a non-bot actor pushed to main, so the
+#   collection bumps, tags, pushes and dispatches the release.
+#
+#   Row 2 is the intended DON'T-DO-IT case, and it is the load-bearing row.
+#   `bump` configures git as `github-actions[bot]` and pushes its own commit
+#   under that identity. If that push re-selected this job, the workflow would
+#   bump forever. This `if:` is the only thing standing between the lane and an
+#   infinite self-triggered bump loop — the guard is a SINGLE line with no
+#   backup, so row 2 must go red the moment it is removed, inverted, or has its
+#   literal actor name edited.
+#
+# ── THE BOUNDARY ROWS, and what each would otherwise let rot ────────────────
+#
+#   Row 3 (private repo) is a TRIPWIRE, not an assertion.
+#   `github.event.repository.private` appears exactly once in this workflow and
+#   it is in `runs-on` — it picks a billing label (`camelot-builder-pleme-eks`
+#   for private callers, `ubuntu-latest` for public), never a job. No `if:`
+#   reads it today, so row 3 must select IDENTICALLY to row 1. It is declared
+#   anyway: the day someone appends `&& !github.event.repository.private` to
+#   the job condition — the exact edit shape that made graphql-synthesizer ship
+#   nothing while reporting success — row 3 turns NOT-RUN and the new posture
+#   has to be written down rather than acquired in silence.
+#
+#   Row 4 (a different bot) pins that the guard is an EXACT-MATCH DENY OF ONE
+#   IDENTITY, not a "no bots" rule. dependabot[bot], renovate and any
+#   PAT-authenticated bot account DO select `bump` and DO cut a Galaxy release
+#   here. That is the workflow's real behaviour, recorded as a FINDING rather
+#   than discovered by a dependabot push tagging a collection. Rewriting the
+#   guard as a substring or `contains()` test is a real fleet-behaviour change;
+#   it turns this row red, which is the point.
+#
+#   Row 5 (empty actor) is the "the field resolved and produced NOTHING" state,
+#   which is distinct from any named actor and is where guards break. Empty is
+#   not the bot literal, so the job is selected — the guard FAILS OPEN. That
+#   property inverts the instant the condition is rewritten as an allow-list
+#   (`github.actor == 'somebody'`), an edit that reads like a hardening and
+#   would silently make this lane never bump again. Row 1 would stay green;
+#   row 5 is the one that catches it.
+#
+# ── WHAT THIS TABLE DELIBERATELY DOES NOT COVER ─────────────────────────────
+#    (stated so nobody reads the green as broader than it is)
+#
+#   THE REAL DECISION IS A STEP, AND IT IS INVISIBLE HERE. Whether anything
+#   under plugins/, meta/ or galaxy.yml changed since the previous tag is
+#   computed by the `changes` step and gates the four steps that configure git,
+#   bump, push and dispatch (`steps.changes.outputs.skip == 'false'`). This
+#   linter models JOB selection only. "bump ran" in this table therefore means
+#   "the job was selected", NEVER "a version was bumped" or "a tag was pushed":
+#   a repo whose only change was a README edit selects `bump` and then
+#   correctly does nothing inside it. That gap is not closable at this layer —
+#   it needs a step-level oracle or a test of the `changes` script itself.
+#
+#   THE DISPATCH-OR-NOT AXIS IS UNASSERTABLE HERE. The final step is gated on
+#   `steps.changes.outputs.skip == 'false' && env.HAS_BOT_PAT != 'true'`, where
+#   HAS_BOT_PAT is derived from `secrets.BOT_PAT != ''`. That is a genuine
+#   do-it/don't-do-it decision (with a PAT the tag push already triggered
+#   release.yml, so dispatching again would duplicate the release), but it is
+#   step-level AND secret-derived. Modelling it with a context key would read
+#   as coverage and be none.
+#
+#   `inputs.bump-type` IS NOT A SELECTOR. It is forwarded to substrate-bump as
+#   a `with:` value; no condition reads it. Neither is the BOT_PAT secret at
+#   job level — it only chooses which token checkout and push use.
+#
+#   There is no type/kind dispatch and no toggle input in this workflow, so
+#   there are no per-arm or catch-all rows to write. `github.actor` is the only
+#   context path any condition reads, and it is the only key any row declares
+#   beyond the privacy tripwire.
+
+# 1. DO-IT. A human pushed to main; the collection bumps, commits, tags,
+#    pushes, and dispatches release.yml. This is the only intended path to a
+#    Galaxy publish.
+human-push-bumps	github.actor=drzzln;github.event.repository.private=false	bump
+
+# 2. DON'T-DO-IT / THE LOOP GUARD. `bump` pushes its own commit as
+#    github-actions[bot]. If that push re-selected this job the workflow would
+#    bump forever. This row is the reason the `if:` exists and must stay red if
+#    the guard is ever removed or its literal actor name changed.
+bot-push-is-the-loop-guard	github.actor=github-actions[bot];github.event.repository.private=true		bump
+
+# 3. TRIPWIRE (see header). A PRIVATE consumer: privacy only picks the runner
+#    label, so selection is identical to row 1. If this row ever disagrees with
+#    row 1, a privacy gate reached the job condition and that decision has to
+#    be stated here.
+private-repo-still-bumps	github.actor=drzzln;github.event.repository.private=true	bump
+
+# 4. A DIFFERENT bot still bumps. The guard denies ONE literal identity, not
+#    bots in general — pinned as a finding, not an endorsement.
+other-bot-actor-still-bumps	github.actor=dependabot[bot];github.event.repository.private=false	bump
+
+# 5. FAIL-OPEN. Actor resolved but EMPTY — distinct from any named actor.
+#    Empty != the bot literal, so `bump` is selected. Breaks loudly if the
+#    guard is ever rewritten as an allow-list or a truthiness test.
+empty-actor-still-bumps	github.actor=;github.event.repository.private=false	bump

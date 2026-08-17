@@ -1,0 +1,86 @@
+# Case table for substrate/.github/workflows/ai-stack.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. Three jobs, and only two facts decide which of them run:
+#   hf-upload     if: inputs.hf-repo != ''                    (no needs)
+#   modal-deploy  if: inputs.modal-entry != ''                (needs: hf-upload)
+#   posthog       if: always()                                (needs: both)
+# Both gates are bare non-empty tests on optional string inputs that DEFAULT TO
+# "", so the default call of this workflow — `uses:` it with no `with:` at all —
+# runs the notifier and nothing else. The table's job is to hold four claims
+# still: each stage fires only when its input is supplied, the notifier fires
+# unconditionally, and — row 4 — asking for a deploy WITHOUT an upload silently
+# gets you neither.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing — its ship job was skipped by a condition that is entirely correct.
+# A deliberate skip and a broken skip were the same green tick, because nobody
+# had written down which jobs must run for a given input. Both outward-facing
+# jobs here (hf-upload pushes to the HuggingFace Hub, modal-deploy deploys to
+# Modal) are exactly that shape: gated by a caller-supplied string, skipped in
+# silence, and reported as a green run either way. Rows 1 and 5 assert the
+# do-it and the don't-do-it ends of both, so neither can drift into the other.
+#
+# READ ROW 4 BEFORE CHANGING ANY `needs:`. modal-deploy's OWN condition is true
+# when a caller passes modal-entry but no hf-repo — and it still does not run,
+# because it needs hf-upload and hf-upload was skipped. That is the whole point
+# of the row: the two inputs read as independent knobs in the `on.workflow_call`
+# block, and they are not. A caller deploying a model already on the Hub gets a
+# fully green run in which nothing deployed. If that ordering is ever meant to
+# be optional, the fix is `if: always() && inputs.modal-entry != ''` (always()
+# is precisely what lifts a job out of skip-propagation) — and this row goes red
+# first, which is the intent. Do not "fix" the row to match a new `needs:`
+# without deciding that question out loud.
+#
+# READ ROW 2 BEFORE ADDING A PRIVACY GUARD. github.event.repository.private is
+# declared in every case even though no `if:` reads it. This workflow reads it
+# three times and every one is inside `runs-on`, picking a self-hosted label so
+# a private consumer is not billed metered minutes — a runner SELECTOR, never a
+# selection gate. The sibling cargo-auto-release carries the same expression in
+# an `if:`, where it is a gate, and that difference is deliberate: cargo publish
+# pushes to a public index where a private repo would leak its source, while
+# hf-repo names a Hub repo the caller chose and may itself be private. Row 2
+# duplicates row 1 with private=true to state that this workflow's selection is
+# privacy-INVARIANT. If a `&& !github.event.repository.private` is ever added to
+# either publishing job, row 2 goes red and the change has to be argued for
+# rather than absorbed.
+#
+# always()=true IN EVERY ROW, and there is no false row, because always() is
+# never false on GitHub — it is true on success, failure and cancellation alike.
+# A row declaring it false would be a context value the runner cannot produce.
+# Note the limit that follows: the linter models SKIP-propagation, not failure,
+# so these rows prove posthog is selected when its dependencies skip; they do
+# not prove it still fires when an upload FAILS. always() covers both at runtime
+# and only the first is asserted here.
+#
+# NOT ASSERTED, deliberately: whether posthog actually emits an event. The job
+# selects unconditionally, but its only step is gated `if: env.POSTHOG_API_KEY
+# != ''` — a STEP-level condition on a job-env copy of a secret, which this
+# linter does not evaluate (secrets are unavailable in a job-level `if:`, which
+# is why the workflow is written that way). A caller with no POSTHOG_API_KEY
+# gets a selected, green, no-op posthog job in every row below.
+
+# 1. Everything configured: the full train → push → deploy → notify pipeline.
+full-pipeline	inputs.hf-repo=my-org/my-model;inputs.modal-entry=app.py;github.event.repository.private=false;always()=true	hf-upload,modal-deploy,posthog
+
+# 2. THE PRIVACY-INVARIANCE ROW. Same inputs as row 1 on a PRIVATE consumer:
+#    identical selection, only the runner label changes. See the header — this
+#    is where a cargo-auto-release-style guard would be caught if it landed.
+full-pipeline-private	inputs.hf-repo=my-org/my-model;inputs.modal-entry=app.py;github.event.repository.private=true;always()=true	hf-upload,modal-deploy,posthog
+
+# 3. Upload only — the caller ships a model but runs no Modal app. Keeps
+#    modal-deploy's gate from being weakened to always() or dropped.
+upload-only	inputs.hf-repo=my-org/my-model;inputs.modal-entry=;github.event.repository.private=false;always()=true	hf-upload,posthog	modal-deploy
+
+# 4. THE TRAP: deploy requested, upload not. modal-deploy's own condition is
+#    TRUE and it is still skipped, by needs-propagation from hf-upload. The
+#    caller asked for a deploy and got a green run that deployed nothing.
+deploy-without-upload	inputs.hf-repo=;inputs.modal-entry=app.py;github.event.repository.private=false;always()=true	posthog	hf-upload,modal-deploy
+
+# 5. The DEFAULT call — `uses:` this workflow with no `with:` at all, since both
+#    inputs default to "". Neither outward-facing job fires; the notifier still
+#    does. This is the don't-do-it end of both publish paths, and the row that
+#    proves each input is load-bearing rather than decorative.
+no-inputs-notifier-only	inputs.hf-repo=;inputs.modal-entry=;github.event.repository.private=false;always()=true	posthog	hf-upload,modal-deploy

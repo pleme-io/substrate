@@ -1,0 +1,97 @@
+# Case table for substrate/.github/workflows/pleme.yml — THE UNIVERSAL COMPOSER.
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS PINS. pleme.yml is a 20-job dispatcher and nothing else: one
+# `validate` job plus 19 mutually-exclusive `uses:` arms, gated either on
+# `inputs.family` (the ten tier-2 family composers) or on
+# `inputs.family == 'direct' && inputs.target == '<one of the 9 that nest>'`.
+# Its entire correctness IS the selection — exactly one arm per (family,
+# target), and no arm at all for an input nobody catalogued. actionlint cannot
+# see that (every expression is valid) and no unit test can (there is no code
+# here), which is the same blind spot that let a green run publish nothing.
+#
+# EVERY ROW IS A COMPLETE PARTITION — run + skip together name all 20 jobs.
+# That is deliberate. A dispatcher's failure mode is rarely "my arm did not
+# fire"; it is "somebody else's arm fired too". A row asserting only its own
+# arm would not notice a sibling whose guard lost its `inputs.family` half.
+#
+# THE FIVE BOUNDARY ROWS AT THE BOTTOM ARE THE POINT, not padding. In four of
+# them ZERO arms select and only `validate` runs: an uncatalogued family, an
+# empty family, a `direct` target that is really a flat leaf, an empty target.
+# The dispatch surface goes completely quiet, and the ONLY thing between that
+# silence and a green run that did no work is `validate`'s tatara-script
+# exiting 1. This table cannot assert that exit — job selection is not step
+# outcome — so it asserts the half that makes the exit load-bearing. If
+# `validate` is ever softened to a warning, the silence it would expose is
+# already written down here.
+#
+# PUBLISH COVERAGE. The `direct` arms reach the fleet's releasing reusables
+# (cargo-release, auto-release, auto-release-min, helm-chart-release,
+# release-pipeline). Do-it and don't-do-it are both asserted for each: it runs
+# in exactly its own row and is expected SKIPPED in the other 23.
+#
+# No status functions appear below because no condition in pleme.yml calls one.
+# Every arm is a plain equality on `inputs`, and since `validate` is
+# unconditional, needs-propagation never subtracts anything — so the two
+# `inputs.*` paths are the whole context, and both are declared in every row.
+#
+# `inputs.runner` is deliberately absent: it feeds `runs-on`, never an `if:`,
+# so it cannot change which jobs select.
+
+# ── the ten family arms: one row each, family target values are real leaves ──
+family-rust	inputs.family=rust;inputs.target=cargo-auto-release	validate,rust	ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-ruby	inputs.family=ruby;inputs.target=gem-auto-bump	validate,ruby	rust,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-go	inputs.family=go;inputs.target=go-auto-release	validate,go	rust,ruby,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-ansible	inputs.family=ansible;inputs.target=ansible-collection-ansible-test	validate,ansible	rust,ruby,go,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-caixa	inputs.family=caixa;inputs.target=caixa-auto-release	validate,caixa	rust,ruby,go,ansible,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-iac	inputs.family=iac;inputs.target=crossplane-function-auto-release	validate,iac	rust,ruby,go,ansible,caixa,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-helm	inputs.family=helm;inputs.target=helm-auto-release	validate,helm	rust,ruby,go,ansible,caixa,iac,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-container	inputs.family=container;inputs.target=image-push	validate,container	rust,ruby,go,ansible,caixa,iac,helm,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-publish	inputs.family=publish;inputs.target=action-release	validate,publish	rust,ruby,go,ansible,caixa,iac,helm,container,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+family-ops	inputs.family=ops;inputs.target=ai-stack	validate,ops	rust,ruby,go,ansible,caixa,iac,helm,container,publish,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# ── the nine that nest, dispatched directly (a tier-2 hop would make the ─────
+# ── reusable chain 5 deep and the run would refuse to start) ────────────────
+direct-cargo-ci	inputs.family=direct;inputs.target=cargo-ci	validate,direct-cargo-ci	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+direct-pre-merge-gate	inputs.family=direct;inputs.target=pre-merge-gate	validate,direct-pre-merge-gate	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+direct-cargo-release	inputs.family=direct;inputs.target=cargo-release	validate,direct-cargo-release	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+direct-helm-chart-release	inputs.family=direct;inputs.target=helm-chart-release	validate,direct-helm-chart-release	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# THE PREFIX PAIR. 'auto-release' and 'auto-release-min' are guarded by `==`,
+# not startsWith(), so the shorter name must NOT drag the longer arm in with
+# it. These two rows are the only proof of that; deleting either restores a
+# defect that would look green.
+direct-auto-release	inputs.family=direct;inputs.target=auto-release	validate,direct-auto-release	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+direct-auto-release-min	inputs.family=direct;inputs.target=auto-release-min	validate,direct-auto-release-min	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+direct-release-pipeline	inputs.family=direct;inputs.target=release-pipeline	validate,direct-release-pipeline	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-pleme-stack,direct-super-cache-ci-build-matrix
+direct-pleme-stack	inputs.family=direct;inputs.target=pleme-stack	validate,direct-pleme-stack	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-super-cache-ci-build-matrix
+direct-super-cache-ci-build-matrix	inputs.family=direct;inputs.target=super-cache-ci-build-matrix	validate,direct-super-cache-ci-build-matrix	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack
+
+# ── boundaries ───────────────────────────────────────────────────────────────
+
+# A family arm is NOT target-gated: it forwards whatever `target` it was given
+# to the tier-2 composer, so `rust` still selects on an empty target and the
+# emptiness is caught one layer down (or by `validate`). Asserting it here
+# records where the target check actually lives, so nobody "fixes" it by
+# bolting a target guard onto the family arms.
+family-arm-is-not-target-gated	inputs.family=rust;inputs.target=	validate,rust	ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# Catch-all: a family nobody catalogued. Zero arms select. The run is green
+# unless `validate` fails it — which is exactly what `validate` is for.
+unknown-family-selects-nothing	inputs.family=cobol;inputs.target=cargo-auto-release	validate	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# Empty family — distinct from "unknown". A caller that computed `family` from
+# an earlier step and got nothing back lands here, and it is the state most
+# likely to be mistaken for a healthy no-op.
+empty-family-selects-nothing	inputs.family=;inputs.target=	validate	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# The trap pleme.yml's own comment names: `direct` with a FLAT leaf as target.
+# `cargo-auto-release` is a real, heavily-adopted reusable — it is simply not
+# one of the nine that nest, so no arm matches and the whole dispatcher goes
+# silent. This is the row most likely to be produced by a real caller typo.
+direct-with-flat-leaf-target-selects-nothing	inputs.family=direct;inputs.target=cargo-auto-release	validate	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix
+
+# `direct` with nothing to dispatch to: "detect ran and produced nothing".
+direct-with-empty-target-selects-nothing	inputs.family=direct;inputs.target=	validate	rust,ruby,go,ansible,caixa,iac,helm,container,publish,ops,direct-cargo-ci,direct-pre-merge-gate,direct-cargo-release,direct-helm-chart-release,direct-auto-release,direct-auto-release-min,direct-release-pipeline,direct-pleme-stack,direct-super-cache-ci-build-matrix

@@ -1,0 +1,86 @@
+# Case table for substrate/.github/workflows/pleme-helm.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHY THIS FILE EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran
+# cargo-auto-release. The run reported SUCCESS: `bump` bumped, tagged and
+# pushed; `ship` was SKIPPED; the crate was never published; nothing said so.
+# The condition that skipped it was correct and deliberate. The failure was
+# that nobody had written down WHICH JOBS MUST RUN for a given input, so a
+# deliberate skip and a broken skip produced the same green tick.
+#
+# WHAT THIS WORKFLOW IS. pleme-helm is a TIER-2 COMPOSER for the `helm` family:
+# three jobs, zero `needs`, zero steps of its own, each job a bare `uses:`
+# gated only by `inputs.target == '<that job's own name>'`. The entire file is
+# one switch on one string. So the only axis is `inputs.target`, and the table
+# is one row per arm plus the two rows no arm covers.
+#
+# THE FAILURE THIS TABLE IS AGAINST is a SHARPER version of the
+# graphql-synthesizer one, not a milder one. A pure dispatcher has no
+# catch-all and no default: hand it a target that matches no `if:` and all
+# three jobs skip, the workflow finishes having done nothing at all, and
+# GitHub reports SUCCESS. There is not even a `bump` that ran to make the run
+# look half-alive — the run is entirely empty and entirely green. Rows 4 and 5
+# write that state down, so "dispatched nothing" stops being indistinguishable
+# from "dispatched something".
+#
+# WHY ALL THREE JOBS PUBLISH AND THIS TABLE STILL CARRIES NO PRIVACY KEY.
+# Every leaf here ships artifacts — helm-auto-release and
+# helm-monorepo-auto-release package and push charts to the OCI registry,
+# helm-publish publishes. None of that is gated HERE: pleme-helm reads no
+# `github.event.repository.private`, no toggle input, nothing but `target`.
+# The do-it / don't-do-it pair for THIS file is therefore
+# target-selects-a-leaf (rows 1-3) versus target-selects-nothing (rows 4-5).
+# Adding a visibility key would mean inventing a context value that no
+# condition in this workflow reads. The privacy question is real but belongs
+# to each leaf's own table — helm-auto-release.cases.tsv answers it there, and
+# records that `ship` publishes from a private caller too.
+#
+# ROW 4 IS THE ROW THAT WOULD ROT IF LEFT OUT. `helm-chart-release` is a REAL
+# substrate reusable and an entirely plausible thing to pass alongside
+# `family: helm` — but it is deliberately NOT a member of this composer. It
+# nests a reusable of its own, so routing it through a tier-2 composer would
+# make the call chain 5 deep and GitHub would refuse to start the run; pleme.yml
+# dispatches it directly instead (`direct-helm-chart-release`). Row 4 pins that
+# a caller who guesses wrong gets a silent empty green, and the day someone
+# adds a fourth job for it here, row 4 flips to RAN and the change lands as a
+# decision. `helm-unittest` is a second non-member of the same kind.
+#
+# TABLE RULES, restated because they are what make these rows look redundant
+# on purpose:
+#   - every context path any condition reads must be declared in EVERY case;
+#     an undeclared path is an ERROR, never an empty default, so an incomplete
+#     case can never turn into a confident verdict;
+#   - an EMPTY value (`inputs.target=`) is a distinct state from any named
+#     value. Here it models the caller's own detect/route step producing
+#     nothing, which is precisely the input a switch with no catch-all handles
+#     worst — and `target` being `required: true` does not save it, because
+#     GitHub accepts an empty string for a required string input.
+#
+# NOT ASSERTED, because it is outside what job selection can see: that the
+# selected leaf file exists, that the leaf's own jobs then select correctly
+# (its own table's problem), or that the 4-level nesting cap still holds. This
+# table proves WHICH of the three jobs is selected, and nothing past that.
+
+# 1. The helm-auto-release arm. Its two siblings must skip — a composer that
+#    fans out to more than one leaf per target would double-publish.
+target-helm-auto-release	inputs.target=helm-auto-release	helm-auto-release	helm-monorepo-auto-release,helm-publish
+
+# 2. The helm-monorepo-auto-release arm.
+target-helm-monorepo-auto-release	inputs.target=helm-monorepo-auto-release	helm-monorepo-auto-release	helm-auto-release,helm-publish
+
+# 3. The helm-publish arm.
+target-helm-publish	inputs.target=helm-publish	helm-publish	helm-auto-release,helm-monorepo-auto-release
+
+# 4. The catch-all that does not exist. `helm-chart-release` is a real
+#    reusable, deliberately dispatched from pleme.yml directly rather than
+#    from here (it nests, so chain depth would hit 5). Passing it as this
+#    composer's target selects NOTHING and the run is green. Intended
+#    behaviour today; asserted so a future fourth job is a visible decision.
+target-unrouted-sibling	inputs.target=helm-chart-release		helm-auto-release,helm-monorepo-auto-release,helm-publish
+
+# 5. Empty target — "the caller routed, but produced no target". Distinct from
+#    any named value and from row 4: nothing was mistyped, nothing was chosen.
+#    All three skip, the run is green, and this row is the only place that
+#    says so.
+target-empty	inputs.target=		helm-auto-release,helm-monorepo-auto-release,helm-publish

@@ -1,0 +1,107 @@
+# Case table for substrate/.github/workflows/gem-auto-bump.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. gem-auto-bump is a ONE-JOB workflow — `bump` — and that
+# one job carries exactly one condition:
+#
+#     if: github.actor != 'github-actions[bot]'
+#
+# So the whole job-selection surface is a single equality test against a single
+# literal actor name, and every row below is an arm of it. There is no `needs:`
+# graph, no status function, no toggle input, and no second job to interleave
+# with. That makes the table small; it does not make it pointless — `bump`
+# PUSHES A COMMIT AND A TAG to the consumer's main branch, so the difference
+# between "this job ran" and "this job skipped" is the difference between a
+# release being cut and nothing happening, and both outcomes report SUCCESS.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing — its ship job was skipped by a condition that is entirely correct.
+# A deliberate skip and a broken skip produce the same green tick, because
+# nobody had written down which jobs must run for a given input. This file is
+# that statement for gem-auto-bump.
+#
+# ── THE DO-IT / DON'T-DO-IT PAIR ─────────────────────────────────────────────
+#
+#   `bump` PUSHES. It commits a version bump to `main` and pushes a tag, and
+#   with a consumer-supplied BOT_PAT that tag push is what TRIGGERS the gem
+#   release workflow — i.e. this job is the first domino of a public RubyGems
+#   publish. It is outward-facing and effectively irreversible (a yank does not
+#   un-publish a gem version).
+#
+#   Row 1 is the intended DO-IT case: a human (or any non-bot actor) pushed to
+#   main, so the gem bumps.
+#
+#   Row 2 is the DON'T-DO-IT case, and it is the load-bearing one: the actor is
+#   `github-actions[bot]`, which is precisely the actor this workflow's own
+#   bump commit pushes as. Without that skip the workflow re-triggers on its
+#   own push and bumps forever. Row 2 pins the loop guard. Delete the `if:` and
+#   row 2 goes red before an infinite bump loop reaches a consumer.
+#
+# ── WHAT THE ROWS DELIBERATELY DO NOT COVER, stated so nobody reads the green
+#    as broader than it is ──────────────────────────────────────────────────
+#
+#   EVERYTHING BELOW THE JOB IS INVISIBLE HERE. The real decision this
+#   workflow makes — "did anything under lib/ or the gemspec change since the
+#   last tag?" — lives in the `changes` STEP (`steps.changes.outputs.skip`) and
+#   gates the three steps that actually bump, push and tag. This linter models
+#   JOB selection only; step-level `if:` is below its resolution entirely. So
+#   "bump ran" in this table means "the job was selected", NEVER "a version was
+#   bumped" or "a tag was pushed". A repo whose only change was a README edit
+#   selects `bump` here and then does nothing inside it, correctly. That gap is
+#   not closable at this layer; it needs a step-level oracle or a test of the
+#   `changes` script itself.
+#
+#   BOT_PAT IS NOT A SELECTOR. The optional `BOT_PAT` secret changes WHICH
+#   token checkout and push use (and therefore whether the tag push triggers
+#   the downstream release workflow), but no `if:` in this file reads it, so
+#   there is no honest job-selection assertion to make about it. Modelling it
+#   as a case key would read as coverage and be none.
+#
+#   `inputs.bump-type` IS NOT A SELECTOR EITHER. It is forwarded to
+#   substrate-bump as a `with:` value; no condition reads it.
+#
+# ── THE PRIVACY KEY IS A TRIPWIRE, NOT AN ASSERTION ──────────────────────────
+#
+#   `github.event.repository.private` appears exactly once in this workflow and
+#   it is in `runs-on` — it selects a billing label
+#   (`camelot-builder-pleme-eks` for private callers, `ubuntu-latest` for
+#   public), not a job. No `if:` reads it today, so rows 1 and 3 select
+#   identically. It is declared in every case ON PURPOSE: the day someone adds
+#   `&& !github.event.repository.private` to the job condition — the exact edit
+#   shape that made graphql-synthesizer ship nothing while reporting success —
+#   row 3 turns red with NOT-RUN and the posture has to be written down rather
+#   than acquired silently. Today it costs nothing and asserts nothing; it is
+#   here so that tomorrow it does.
+
+# 1. DO-IT. A human pushed to main; the gem bumps, commits, tags and pushes.
+#    This is the only intended path to a release.
+human-push-bumps	github.actor=drzzln;github.event.repository.private=false	bump
+
+# 2. DON'T-DO-IT / THE LOOP GUARD. `bump` pushes its own commit as
+#    github-actions[bot]; if that push re-selected this job the workflow would
+#    bump forever. This row is the reason the `if:` exists — it must stay red
+#    if the guard is ever removed or its literal actor name changed.
+bot-push-is-the-loop-guard	github.actor=github-actions[bot];github.event.repository.private=true		bump
+
+# 3. TRIPWIRE ROW (see header). A PRIVATE consumer: privacy only picks the
+#    runner label, so selection is identical to row 1. If this row ever
+#    disagrees with row 1, a privacy gate was added to the job condition and
+#    that decision must be stated here.
+private-repo-still-bumps	github.actor=drzzln;github.event.repository.private=true	bump
+
+# 4. A DIFFERENT bot. The guard names ONE literal actor, so any other bot
+#    identity — dependabot, a renovate app, a PAT-authenticated bot account —
+#    still selects `bump` and still cuts a release. That is the workflow's
+#    actual behaviour, pinned here as a FINDING rather than left to be
+#    discovered by a dependabot push tagging a gem. Widening the guard to all
+#    bots is a real design change; it turns this row red, which is correct.
+other-bot-actor-still-bumps	github.actor=dependabot[bot];github.event.repository.private=false	bump
+
+# 5. Actor present but EMPTY — the "the field was resolved and produced
+#    nothing" state, distinct from any named actor. Empty != the bot literal,
+#    so `bump` is selected. Asserted separately so that if the guard is ever
+#    weakened to a truthiness test (`if: github.actor`), '' and 'drzzln' part
+#    ways and this row catches it while row 1 stays green.
+empty-actor-still-bumps	github.actor=;github.event.repository.private=false	bump

@@ -1,0 +1,72 @@
+# Case table for substrate/.github/workflows/pleme-iac.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE IS. pleme-iac is a TIER-2 COMPOSER: five sibling jobs, no
+# `needs:` edges between them, each gated by a single equality on the one input
+# the workflow takes. Every arm is a pure router — it does no work itself, it
+# selects one leaf reusable and hands off. `inputs.target` is therefore the ONLY
+# context path any condition here reads, which is why every case below declares
+# exactly that one key and nothing else.
+#
+# WHAT IT PINS, and why a router of all things needs pinning:
+#
+#  1. EACH ARM IS REACHABLE. Rows 1-5 give one row per arm. A typo in any `if:`
+#     string, or a job renamed without its condition following, turns that arm
+#     into a job that can never select — and a router with a dead arm looks
+#     exactly like a router that works, because the other four still fire. The
+#     linter calls that NEVER; these five rows are what make it callable.
+#
+#  2. AN UNROUTABLE TARGET SELECTS NOTHING, AND THAT IS ALL IT DOES. Rows 6-7
+#     are the boundary. This composer has NO catch-all arm and no validation job
+#     of its own: hand it a name it does not know and all five conditions are
+#     simply false, every job skips, and the workflow reports SUCCESS having
+#     published nothing. All five leaves here publish or release something (a
+#     Crossplane function, a Crossplane provider, a Pulumi provider, a Steampipe
+#     plugin, a Terraform provider), so "no arm selected" is precisely the
+#     green-tick-over-nothing shape this linter exists for, one composition level
+#     up from the graphql-synthesizer run that motivated it.
+#
+#     That is DELIBERATE and stays deliberate: the guard lives in the caller.
+#     pleme.yml's `validate` job greps this very file for the literal
+#     `inputs.target == '<t>'` and fails the run before dispatching. But
+#     pleme-iac's own header invites direct calls ("calling it directly also
+#     works and simply spends one fewer chain level"), and a direct caller
+#     bypasses `validate` entirely. Rows 6-7 write that down so the next reader
+#     inherits the fact instead of rediscovering it from a silent run. If a
+#     catch-all/fail-loud arm is ever added here, these two rows are the ones
+#     that must change — they are the intent, not an accident of the current
+#     shape.
+#
+# Row 6 uses a REAL reusable from a different family (cargo-auto-release, a
+# `rust` leaf) rather than an invented string: mis-routing a valid target into
+# the wrong family composer is the realistic form of this mistake, not a typo
+# nobody would type. Row 7 is the empty value, which models "the caller computed
+# a target and produced nothing" — a distinct state from any named value, and
+# the one a catch-all written as an `else` would most likely get wrong.
+#
+# No condition here calls always()/success()/failure()/cancelled(), and none uses
+# contains()/startsWith()/fromJSON()/hashFiles(), so nothing in this workflow is
+# unassertable.
+
+# ── 1-5: one row per arm. Each proves its own arm reachable AND proves the
+#         other four are gated off by the same value, which is what makes the
+#         dispatch exclusive rather than merely functional.
+crossplane-function	inputs.target=crossplane-function-auto-release	crossplane-function-auto-release	crossplane-provider-publish,pulumi-provider-publish,steampipe-plugin-publish,terraform-provider-publish
+
+crossplane-provider	inputs.target=crossplane-provider-publish	crossplane-provider-publish	crossplane-function-auto-release,pulumi-provider-publish,steampipe-plugin-publish,terraform-provider-publish
+
+pulumi-provider	inputs.target=pulumi-provider-publish	pulumi-provider-publish	crossplane-function-auto-release,crossplane-provider-publish,steampipe-plugin-publish,terraform-provider-publish
+
+steampipe-plugin	inputs.target=steampipe-plugin-publish	steampipe-plugin-publish	crossplane-function-auto-release,crossplane-provider-publish,pulumi-provider-publish,terraform-provider-publish
+
+terraform-provider	inputs.target=terraform-provider-publish	terraform-provider-publish	crossplane-function-auto-release,crossplane-provider-publish,pulumi-provider-publish,steampipe-plugin-publish
+
+# ── 6: a valid target of ANOTHER family. Nothing publishes. Intended: the caller
+#       (pleme.yml validate) is what rejects this; called directly, it is a
+#       silent no-op by design.
+foreign-family-target-publishes-nothing	inputs.target=cargo-auto-release		crossplane-function-auto-release,crossplane-provider-publish,pulumi-provider-publish,steampipe-plugin-publish,terraform-provider-publish
+
+# ── 7: the caller resolved a target and produced nothing. Distinct from any
+#       named value; also nothing publishes.
+empty-target-publishes-nothing	inputs.target=		crossplane-function-auto-release,crossplane-provider-publish,pulumi-provider-publish,steampipe-plugin-publish,terraform-provider-publish

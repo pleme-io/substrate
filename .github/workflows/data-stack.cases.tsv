@@ -1,0 +1,75 @@
+# Case table for substrate/.github/workflows/data-stack.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. data-stack is a three-job chain — dbt build, then an
+# OPTIONAL dagster materialize, then a notify that reports on both. It has
+# exactly one selection axis, `inputs.dagster-asset`, and exactly one job that
+# is allowed to be absent from a run. Everything asserted below is one of two
+# claims:
+#
+#   1. dagster is OPTIONAL-BUT-REACHABLE. `if: inputs.dagster-asset != ''` is a
+#      total two-arm partition of a string input whose declared default is "",
+#      so the common invocation skips it deliberately. That is exactly the shape
+#      the graphql-synthesizer incident wore: a correct condition producing a
+#      deliberate skip that is indistinguishable from a broken one. The
+#      `asset-provided` row is what makes the skip in `asset-empty-default`
+#      readable as intent rather than breakage — without a row proving dagster
+#      CAN select, the whole middle of this pipeline could rot to never-runs and
+#      every run would stay green.
+#
+#   2. notify's always() is LOAD-BEARING, in both directions. notify needs
+#      [dbt, dagster], so under GitHub's needs-propagation a skipped dagster
+#      would skip notify too, and a data run would silently report nothing. The
+#      two rows below pin notify running with dagster present AND with dagster
+#      skipped. Delete the `if: always()` and `asset-empty-default` turns red on
+#      NOT-RUN — which is the entire reason it is written that way.
+#
+# WHY THERE IS NO PRIVACY ROW. `github.event.repository.private` appears three
+# times in this workflow and all three are in `runs-on` — they pick a billing
+# label, not a job. No `if:` here reads privacy, so no job here can be
+# privacy-skipped, and asserting one would be a row that reads as coverage and
+# is not. (Unlike auto-release-min.cases.tsv, the key is not declared as a
+# tripwire either: this linter ERRORS on a context path a condition does not
+# read only in the other direction — an undeclared path that IS read — so a
+# never-read key here would sit inert without even that much value.)
+#
+# WHY always() IS TRUE IN EVERY ROW. GitHub's always() is true unconditionally;
+# there is no input that makes it false. A row setting always()=false would
+# model a state the platform cannot produce, and a green table full of
+# impossible states is the failure mode this tool exists to prevent.
+#
+# WHAT THIS FILE CANNOT SEE, stated so nobody reads its green as broader than it
+# is. notify is the only job with an outward-facing side effect — it posts a
+# Datadog event and a Grafana annotation — and BOTH are gated at STEP level on
+# `env.DD_API_KEY != ''` / `env.GRAFANA_URL != ''`, hoisted from secrets. Step
+# conditions are below this linter's resolution entirely. "notify ran" below
+# means the JOB selected, never that a notification was sent; a consumer that
+# passes no DD_API_KEY gets a green notify job that posts nothing, and no row
+# here can tell you that. The do-it / don't-do-it axis for the notification
+# needs its own layer of testing.
+#
+# Likewise unassertable: a whitespace-only asset key. GitHub does not trim, so
+# `dagster-asset: " "` selects dagster and materializes a bogus key — a real
+# trap — but jsl:ctx-of string-trims every value, so " " and "" are the same row
+# to this tool. Faking it with a placeholder would pin a claim the oracle is not
+# actually making.
+
+# The full fan-out: a caller that names an asset gets all three jobs. This row
+# is what proves dagster is reachable at all — the denominator for the skip row.
+asset-provided	inputs.dagster-asset=analytics/daily_revenue;always()=true	dbt,dagster,notify
+
+# THE DEFAULT INVOCATION. `dagster-asset` defaults to "", so a caller that only
+# wants dbt lands here: dagster skips ON PURPOSE, and notify must STILL run so
+# the dbt result is reported. This is the row that fails if always() is ever
+# dropped from notify, and the row that fails if the `!=` is ever inverted.
+asset-empty-default	inputs.dagster-asset=;always()=true	dbt,notify	dagster
+
+# TRIPWIRE ROW. Selection is identical to `asset-provided` today, on purpose.
+# The condition is a string COMPARISON against '', not a truthiness test, so an
+# asset key literally spelled `false` (or `0`) is a legitimate non-empty value
+# and dagster runs. Rewrite the gate as bare `inputs.dagster-asset` — the
+# tempting simplification — and GitHub's falsy-string rule silently skips
+# dagster for these keys while every other row stays green. This row is the only
+# thing that would say so.
+asset-key-falsy-literal	inputs.dagster-asset=false;always()=true	dbt,dagster,notify

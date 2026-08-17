@@ -1,0 +1,102 @@
+# Case table for substrate/.github/workflows/cd-stack.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. cd-stack is three jobs on two independent string
+# toggles: `deploy` (unconditional), `reconcile` (gated on
+# `reconcile-after == 'true'`), and `notify` (gated on
+# `always() && notify-slack == 'true'`). The rows below cross both toggles —
+# off/off, on/off, off/on, on/on — because the two gates are independent and a
+# single-axis table would let one arm rot behind the other. Both toggles
+# default to "false", so the off/off row IS the shape every consumer that
+# copies the README snippet gets.
+#
+# THE ROW THAT MATTERS MOST is `notify-without-reconcile`. `notify` declares
+# `needs: [deploy, reconcile]`, so when `reconcile-after` is false its
+# dependency SKIPS, and by GitHub's needs-propagation rule notify would skip
+# with it — silently, on the exact input every default consumer uses. The only
+# thing preventing that is the `always()` in notify's condition. That is
+# load-bearing and invisible: delete `always() && ` and the workflow still
+# parses, still lints, still goes green, and simply stops posting deploy
+# outcomes for every consumer who did not also enable flux reconciliation.
+# That row is the tripwire on it — it turns NOT-RUN the moment always() is
+# dropped.
+#
+# THE `deploy` JOB IS UNCONDITIONAL AND STAYS THAT WAY. It is the job that
+# actually mutates a cluster (`helm upgrade --install --wait`), and there is no
+# dry-run / skip-deploy input to gate it — being called at all IS the intent to
+# deploy. So there is no "don't-do-it" row for deploy: the honest assertion is
+# that it selects in EVERY case, which all six rows below make. If someone
+# later adds a gate to it, the first row to disagree names it.
+#
+# WHY THE `== 'true'` ROWS ARE NOT REDUNDANT. Both toggles are typed `string`,
+# not `boolean`, so the caller can pass anything and GitHub will not object.
+# `not-true-truthy` passes values that are TRUTHY to GitHub (`yes`, `1`) but
+# are not the literal string `true`. Both jobs must stay skipped. That row
+# pins the comparison as exact-string rather than truthiness — the difference
+# only shows up when a consumer writes `reconcile-after: yes` and wonders why
+# nothing reconciled, or (worse) when someone "fixes" the condition to a bare
+# `inputs.reconcile-after` and every caller who passed `"false"` as a string
+# starts force-converging production. `empty-toggles` covers the same axis from
+# the other end: an expression that resolved to nothing (a caller interpolating
+# an unset variable) must land on the off arm, not between the arms.
+#
+# WHAT THIS FILE CANNOT SEE — stated so its green is not read as broader.
+#
+#  1. FAILURE. The whole reason `notify` carries `always()` is to post an
+#     outcome when `deploy` FAILED — the notify step formats
+#     `needs.deploy.outputs.deployed == 'true' && 'deployed' || 'FAILED'`, so
+#     the failure path is a designed, user-visible behaviour. This linter has
+#     no failure state: a job is selected or it is not, and there is no way to
+#     say "deploy ran and exited 1". So `always()` is asserted here only
+#     against the SKIPPED-dependency half of its job, never the failed-
+#     dependency half. Declaring `always()=false` to fake it would be a lie —
+#     always() is true by definition, including on cancellation — so it is
+#     declared `true` in every row and the second half is left uncovered
+#     rather than faked.
+#
+#  2. THE SECRETS. `KUBECONFIG_B64` is deliberately `required: false` (see the
+#     comment in the workflow), so a caller that inherits nothing still starts
+#     every job — and `deploy` then fails at the `base64 -d` step. That is a
+#     STEP-level outcome, below this tool's resolution entirely. "deploy ran"
+#     here means the job was selected, never that a kubeconfig existed.
+#
+#  3. `runs-on`. `github.event.repository.private` appears three times in this
+#     workflow and all three are in `runs-on` — they pick a billing label, not
+#     a job. No `if:` reads privacy, so no job here can be privacy-skipped and
+#     there is nothing honest to assert as one. Unlike auto-release-min's
+#     table, the key is NOT declared as a tripwire here: this linter errors on
+#     an undeclared path only when a condition READS it, so a declared-but-
+#     unread key is inert, and the day someone gates a job on privacy the
+#     undeclared-path ERROR fires on every row anyway — which is a louder
+#     signal than a row quietly agreeing with its neighbour.
+
+# The default shape: both toggles at their declared default. Deploy runs;
+# nothing else does. Every consumer that copies the README snippet gets this.
+default-deploy-only	inputs.reconcile-after=false;inputs.notify-slack=false;always()=true	deploy	reconcile,notify
+
+# reconcile-after on, notify off. Proves the reconcile gate is load-bearing in
+# the positive direction, and that turning it on does not drag notify in.
+reconcile-only	inputs.reconcile-after=true;inputs.notify-slack=false;always()=true	deploy,reconcile	notify
+
+# THE always() TRIPWIRE. notify's dependency `reconcile` is SKIPPED here, so
+# needs-propagation would skip notify too if its condition did not call
+# always(). Drop the `always() && ` and this row goes NOT-RUN — which is
+# exactly the silent regression it exists to catch, since it fires on the
+# DEFAULT reconcile setting and would therefore hit almost every consumer.
+notify-without-reconcile	inputs.reconcile-after=false;inputs.notify-slack=true;always()=true	deploy,notify	reconcile
+
+# Both toggles on: the full advertised pipeline, all three jobs selecting.
+# The only row in which nothing is expected to skip.
+full-pipeline	inputs.reconcile-after=true;inputs.notify-slack=true;always()=true	deploy,reconcile,notify
+
+# Neither toggle resolved to anything — a caller interpolating an unset var, or
+# an upstream step that produced no output. Distinct from the literal string
+# "false" and must land on the same off arm rather than falling between arms.
+empty-toggles	inputs.reconcile-after=;inputs.notify-slack=;always()=true	deploy	reconcile,notify
+
+# THE CATCH-ALL. Values GitHub considers TRUTHY but which are not the literal
+# string `true`. Both gates compare `== 'true'`, so both jobs must stay
+# skipped. Red-flags any "simplification" of either condition to a bare
+# truthiness test, which would flip every string-typed caller's meaning.
+not-true-truthy	inputs.reconcile-after=yes;inputs.notify-slack=1;always()=true	deploy	reconcile,notify

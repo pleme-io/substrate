@@ -1,0 +1,71 @@
+# Case table for substrate/.github/workflows/pleme-ops.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS PINS. pleme-ops is a TIER-2 composer: 17 sibling jobs, no `needs`,
+# no status functions, each gated on one equality against `inputs.target`. The
+# whole contract is a dispatch table, so the whole contract is: exactly one arm
+# selects, and it is the arm named. Every row therefore asserts the FULL skip
+# set rather than only the arm under test — a dispatcher's characteristic
+# defect is a copy-pasted condition (`data-stack: if: inputs.target ==
+# 'cd-stack'`), which a partial row would catch once and a full row catches
+# from both sides. 272 skip assertions is the price of that; it is paid by a
+# generator, not by hand.
+#
+# THE BOUNDARY ROW IS `empty-target`. `target` is `required: true`, so a caller
+# cannot omit it — but pleme.yml passes it through by interpolation, and an
+# interpolation that resolves to nothing yields the empty string, not an error.
+# Every arm then compares false, all 17 jobs skip, and the composer reports
+# SUCCESS having dispatched nothing. That is the graphql-synthesizer shape
+# exactly: a green tick over an empty selection. It is asserted here so a
+# no-op dispatch is a written-down expectation instead of an indistinguishable
+# one. `unknown-target` is its sibling — a live-but-unrecognised value, which
+# is what a renamed leaf or a stale caller sends, and which this workflow
+# deliberately has NO catch-all for.
+#
+# NO TOGGLE ROWS: the workflow has exactly one input and no boolean gate, so
+# there is no toggle to prove load-bearing.
+#
+# SCOPE LIMIT, stated so nobody reads more into a green run than it carries:
+# this asserts which `uses:` DISPATCHES select. The linter does not model
+# reusable-workflow `with:` propagation into a called workflow's own
+# conditions, so a green row proves the leaf was invoked, never that the leaf's
+# own jobs ran. Each leaf carries (or needs) its own table.
+#
+# ROWS THAT TRIGGER A SIDE EFFECT downstream — each appears once as do-it and
+# 18 times as don't-do-it, which is the intended posture: this composer fires
+# one and only one of them per call.
+#   crates-publish: publishes crates to crates.io
+#   esteira-rio-bump: pushes a bump commit
+#   esteira-rio-release: cuts + pushes a release
+#   mac-autobump-release: bumps + publishes a mac artifact
+#   observability-deploy: deploys to a live observability stack
+#   reusable-flakehub: publishes a flake to FlakeHub
+#   super-cache-ci-build: pushes build artifacts to the cache
+
+t-ai-stack	inputs.target=ai-stack	ai-stack	auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-auto-release-verify	inputs.target=auto-release-verify	auto-release-verify	ai-stack,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-cd-stack	inputs.target=cd-stack	cd-stack	ai-stack,auto-release-verify,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-comment-command-dispatch	inputs.target=comment-command-dispatch	comment-command-dispatch	ai-stack,auto-release-verify,cd-stack,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-container-stack	inputs.target=container-stack	container-stack	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-crates-publish	inputs.target=crates-publish	crates-publish	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-cse-audit	inputs.target=cse-audit	cse-audit	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-data-stack	inputs.target=data-stack	data-stack	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-esteira-rio-bump	inputs.target=esteira-rio-bump	esteira-rio-bump	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-esteira-rio-release	inputs.target=esteira-rio-release	esteira-rio-release	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-ios-game-ci	inputs.target=ios-game-ci	ios-game-ci	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-mac-autobump-release	inputs.target=mac-autobump-release	mac-autobump-release	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-observability-deploy	inputs.target=observability-deploy	observability-deploy	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+t-reusable-flakehub	inputs.target=reusable-flakehub	reusable-flakehub	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,security-gate,super-cache-ci-build,web3-stack
+t-security-gate	inputs.target=security-gate	security-gate	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,super-cache-ci-build,web3-stack
+t-super-cache-ci-build	inputs.target=super-cache-ci-build	super-cache-ci-build	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,web3-stack
+t-web3-stack	inputs.target=web3-stack	web3-stack	ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build
+
+# A live value matching no arm. No catch-all exists, and that is the design:
+# an unrecognised target must dispatch NOTHING rather than guess an arm.
+unknown-target	inputs.target=not-a-family-member		ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack
+
+# Detect-ran-but-produced-nothing. An upstream interpolation that resolved to
+# empty is indistinguishable from a successful dispatch at the caller; here it
+# is pinned as a total no-op.
+empty-target	inputs.target=		ai-stack,auto-release-verify,cd-stack,comment-command-dispatch,container-stack,crates-publish,cse-audit,data-stack,esteira-rio-bump,esteira-rio-release,ios-game-ci,mac-autobump-release,observability-deploy,reusable-flakehub,security-gate,super-cache-ci-build,web3-stack

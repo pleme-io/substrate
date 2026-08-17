@@ -1,0 +1,95 @@
+# Case table for substrate/.github/workflows/pleme-caixa.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. pleme-caixa is a pure DISPATCHER: six jobs, no `needs:`, and
+# every one of them gated by the same single fact —
+#
+#   <job>  if: inputs.target == '<job>'      (uses: ./.github/workflows/<job>.yml)
+#
+# There is no other axis. `inputs.target` is the ONLY context path any
+# condition reads, so it is the only key any case declares. The table holds
+# three claims still: each named target selects EXACTLY ONE arm, an unknown
+# target selects NONE, and an empty target selects none either.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran
+# cargo-auto-release, reported SUCCESS, and published nothing — a correct `if:`
+# skipped its ship job and a deliberate skip looked exactly like a broken one.
+# A dispatcher is the sharpest form of that hazard: EVERY job here is `if:`-
+# gated and none is a catch-all, so a target this file does not name produces a
+# run in which all six jobs skip, no step executes, and the workflow reports
+# green. Rows 7 and 8 are that state, asserted deliberately rather than
+# discovered.
+#
+# ROWS 7 AND 8 ARE NOT A BUG REPORT — READ BEFORE "FIXING" THEM. The
+# green-over-nothing guard for this family lives one tier up, in pleme.yml's
+# `validate` job, which greps THIS FILE for the literal `inputs.target ==
+# '<t>'` and exits 1 when it is absent. So a target typo arriving through
+# pleme.yml fails loudly and never reaches here. It is the OTHER entry point
+# that rows 7-8 cover: this file's own header states that calling it directly
+# works and spends one fewer chain level, and a direct caller gets no
+# `validate`. All-six-skip is therefore the honest, currently-intended
+# behaviour of a direct call with a bad target — pinned so that if a catch-all
+# failure arm is ever added, these two rows go red and the change is argued
+# for rather than absorbed.
+#
+# ROW 8 IS DISTINCT FROM ROW 7, not a duplicate of it. `inputs.target` is
+# `required: true`, but "required" only means the caller must pass the key —
+# `with: { target: "${{ inputs.target }}" }` in pleme.yml forwards an EMPTY
+# string perfectly happily when its own input is empty. "the caller computed a
+# target and produced nothing" is a different upstream failure from "the caller
+# sent a name I do not know", and the two are worth separating because a future
+# catch-all would very plausibly handle one and miss the other.
+#
+# THE PREFIX PAIR IS COVERED BOTH WAYS ON PURPOSE. `caixa-publish` is a strict
+# prefix of `caixa-publish-tlisp`. Today both arms use `==`, so neither can fire
+# on the other's value — rows 3 and 4 assert exactly that, in both directions.
+# If either condition is ever loosened to a `startsWith()`/`contains()`, this
+# table stops being able to judge it at all: the linter REFUSES those functions
+# with an EVAL error rather than guessing. That refusal turning up here is a
+# signal to rewrite the condition, not to delete the row.
+#
+# EVERY ARM PUBLISHES OR MUTATES SOMETHING (auto-release tags and pushes;
+# publish/publish-tlisp push artifacts; forge generates; validate is the one
+# read-only arm), so the "do-it / do-not-do-it" input this family turns on IS
+# the target string itself. That is why all six named arms get a row and both
+# no-op inputs get one: there is no separate toggle to hold off.
+
+# 1. The bump-tag-push arm. Every other arm must stay silent — a dispatcher
+#    that fires two leaves for one target is as wrong as one that fires none.
+target-caixa-auto-release	inputs.target=caixa-auto-release	caixa-auto-release	caixa-forge,caixa-publish-tlisp,caixa-publish,caixa-tlisp-auto-release,caixa-validate
+
+# 2. Generation arm.
+target-caixa-forge	inputs.target=caixa-forge	caixa-forge	caixa-auto-release,caixa-publish-tlisp,caixa-publish,caixa-tlisp-auto-release,caixa-validate
+
+# 3. The LONGER half of the prefix pair. Asserting caixa-publish skips here is
+#    the load-bearing half: `caixa-publish` is a strict prefix of this value, so
+#    a condition loosened to startsWith()/contains() would fire BOTH arms and
+#    publish twice. Under `==` it cannot, and this row is what says so.
+target-caixa-publish-tlisp	inputs.target=caixa-publish-tlisp	caixa-publish-tlisp	caixa-auto-release,caixa-forge,caixa-publish,caixa-tlisp-auto-release,caixa-validate
+
+# 4. The SHORTER half of the same pair, asserted in the opposite direction:
+#    the tlisp arm must not ride along on the plain publish target.
+target-caixa-publish	inputs.target=caixa-publish	caixa-publish	caixa-auto-release,caixa-forge,caixa-publish-tlisp,caixa-tlisp-auto-release,caixa-validate
+
+# 5. The tlisp release arm — likewise not reachable from caixa-auto-release.
+target-caixa-tlisp-auto-release	inputs.target=caixa-tlisp-auto-release	caixa-tlisp-auto-release	caixa-auto-release,caixa-forge,caixa-publish-tlisp,caixa-publish,caixa-validate
+
+# 6. The one read-only arm. It gets a row for the same reason as the rest: a
+#    validate that silently stopped selecting would look like a clean repo.
+target-caixa-validate	inputs.target=caixa-validate	caixa-validate	caixa-auto-release,caixa-forge,caixa-publish-tlisp,caixa-publish,caixa-tlisp-auto-release
+
+# 7. THE CATCH-ALL ROW: a target this composer does not name. No arm matches,
+#    nothing runs, the workflow is green. Intended for a call arriving via
+#    pleme.yml (whose validate job already failed the run before this file was
+#    reached); pinned here because a DIRECT caller has no such guard. The value
+#    is a plausible near-miss rather than nonsense — `caixa-release` is what
+#    somebody reaches for when they half-remember `caixa-auto-release`.
+unknown-target-selects-nothing	inputs.target=caixa-release		caixa-auto-release,caixa-forge,caixa-publish-tlisp,caixa-publish,caixa-tlisp-auto-release,caixa-validate
+
+# 8. THE EMPTY ROW: the caller forwarded a target it computed and the
+#    computation produced nothing. `required: true` does not prevent this — it
+#    requires the KEY, not a non-empty value, and pleme.yml forwards
+#    `${{ inputs.target }}` verbatim. Distinct state from row 7 and kept
+#    separate: a future catch-all arm could easily catch one and miss the other.
+empty-target-selects-nothing	inputs.target=		caixa-auto-release,caixa-forge,caixa-publish-tlisp,caixa-publish,caixa-tlisp-auto-release,caixa-validate

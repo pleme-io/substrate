@@ -1,0 +1,82 @@
+# Case table for substrate/.github/workflows/devshell-cargo-test-selftest.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS WORKFLOW IS. The in-repo caller of the fleet reusable
+# nix-devshell-cargo-test.yml, added because a shared reusable with no caller
+# inside substrate cannot go red before its blast radius does — on 2026-07-27 a
+# new `cargo-test` leg's first execution anywhere was in somebody else's CI. It
+# runs BOTH directions of that gate: `green` calls the real reusable against a
+# supported devShell, `green_evidence` proves the tests genuinely executed
+# (cargo exits 0 on a suite that ran zero tests), `red` drives the preflight at
+# a devShell that does not exist and asserts it refuses, and `verdict` fails the
+# run unless all three actually succeeded.
+#
+# THIS WORKFLOW HAS NO SELECTION AXIS. Measured, not assumed: three of its four
+# jobs carry no `if:` at all, and the fourth carries `if: always()`. There are
+# no workflow inputs (`workflow_dispatch` declares none), no repo-type dispatch,
+# no toggle, and no `github.*` read in any condition. So the single row below is
+# not a sample of the input space — it IS the input space, and it is the
+# denominator every future finding is measured against.
+#
+# WHAT THE ONE ROW THEREFORE PINS. That all four jobs select on every trigger.
+# Any `if:` added to any job from here on makes this row red in one of two ways:
+# the condition reads a context path this row does not declare (EVAL error), or
+# it changes the selected set (NOT-RUN / RAN). That is the entire point, and the
+# edit it is aimed at is a specific and tempting one — this workflow's own
+# header notes it "burns two nix installs, so it is not on every push", and the
+# obvious next economy is gating `red` or `green_evidence` behind
+# `github.event_name == 'workflow_dispatch'`. That edit leaves the on-push and
+# on-PR runs proving ONE direction while staying green, which is precisely the
+# both-directions guarantee this selftest exists to hold. This row is what says
+# so.
+#
+# WHY ONLY always() IS DECLARED. This linter errors on a context path a
+# condition READS and the case does not declare; a declared path nothing reads
+# is inert. So the shortest honest context is the strongest tripwire — adding a
+# speculative `github.event_name=push` key here would buy nothing and would
+# pre-absorb exactly the failure described above.
+#
+# WHY always() IS TRUE. GitHub's always() is unconditionally true; no input
+# makes it false. A row setting always()=false would model a state the platform
+# cannot produce, and an impossible state asserted green is the failure mode
+# this tool exists to prevent.
+#
+# ── WHAT THIS TABLE CANNOT SEE, so its green is not read as broader ─────────
+#
+# 1. DROPPING `if: always()` FROM `verdict` IS NOT CAUGHT, and this is the
+#    honest limit worth knowing before trusting the row. verdict needs
+#    [green, green_evidence, red], none of which has an `if:`, so all three
+#    always select, needs-propagation never bites, and verdict selects with or
+#    without always(). The always() here is load-bearing for the FAILED-
+#    dependency half of its job — the half that makes a broken direction fail
+#    the run instead of vanishing — and this linter has no failure state: a job
+#    is selected or it is not, and there is no way to say "red ran and exited
+#    1". Asserting that half would require faking always()=false, which is a
+#    lie about the platform, so it is left unasserted rather than counterfeited.
+#
+# 2. `needs.green.result` / `.green_evidence.result` / `.red.result` are read
+#    only inside verdict's `run:` block, never in an `if:`. Step bodies are
+#    below this linter's resolution entirely. "verdict ran" below means the JOB
+#    selected — never that its three `[ … ] || exit 1` assertions passed.
+#
+# 3. `green` is `uses:` a reusable. This row asserts the CALL is made and
+#    nothing about what happens inside nix-devshell-cargo-test.yml, which has no
+#    .cases.tsv of its own today (one unconditional job, `cargo-test`).
+#
+# 4. The push/pull_request `paths:` filters decide whether the workflow is
+#    TRIGGERED at all. Trigger filtering is not job selection; no row here can
+#    say "this workflow did not start".
+#
+# 5. NO JOB HERE PUBLISHES, DEPLOYS OR PUSHES — nothing is bumped, tagged,
+#    released or written outside the runner; `red`'s only side effect is a
+#    `nix eval` and verdict's is an `echo`. So the mandatory do-it /
+#    don't-do-it publish rows of the sweep have no counterpart here. That
+#    absence is itself a claim this header pins, so the next reader does not go
+#    hunting for a row that should not exist.
+
+# THE ONLY REACHABLE SHAPE. Both directions plus the evidence job plus the
+# verdict, on every one of the three triggers. If this row ever needs a sibling,
+# a condition was added to this workflow and the sibling is the proof it was
+# added deliberately.
+every-trigger-runs-both-directions	always()=true	green,green_evidence,red,verdict

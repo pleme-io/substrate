@@ -1,0 +1,42 @@
+# Case table for substrate/.github/workflows/pleme-go.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. pleme-go is a TIER-2 COMPOSER: it is a pure dispatcher whose
+# entire behaviour is 'exactly one of three jobs runs, chosen by inputs.target'.
+# `inputs.target` is the only context path any condition here reads, so it is
+# the only key declared. No job has `needs:`, and no condition uses a status
+# function, contains() or fromJSON() — nothing in this file is unassertable.
+#
+# The mutual exclusivity is asserted POSITIVELY: every arm names the other two
+# in expect-skip. That is what catches an arm whose `if:` is dropped (a job with
+# no `if:` selects unconditionally, and as a dispatcher that would fan one
+# request out to three releases), or a condition flipped to `!=`.
+#
+# ALL THREE ARMS PUBLISH — go-auto-release tags and releases, go-binary-release
+# publishes binaries, go-gen-spec commits a regenerated Go.gen.lock through
+# reusable-autoheal. So the do-it/don't-do-it pair the standard asks for is the
+# recognised-target rows versus the last two rows, and the intended behaviour of
+# the last two is DO NOTHING.
+#
+# Rows 4 and 5 are the reason this file is worth more than three lines. This
+# composer has NO catch-all job: a target it does not recognise selects nothing
+# and the run reports SUCCESS having done nothing — the exact shape of the
+# graphql-synthesizer silent skip. That no-op is the intended behaviour (the
+# caller, pleme.yml, owns validating the name), so it is pinned rather than
+# fixed: if a later edit makes an unrecognised or empty target fall into a real
+# arm, these rows go red instead of a repo getting a release it never asked for.
+
+dispatch-go-auto-release	inputs.target=go-auto-release	go-auto-release	go-binary-release,go-gen-spec
+
+dispatch-go-binary-release	inputs.target=go-binary-release	go-binary-release	go-auto-release,go-gen-spec
+
+dispatch-go-gen-spec	inputs.target=go-gen-spec	go-gen-spec	go-auto-release,go-binary-release
+
+# A plausible near-miss — no arm matches, and there is no fuzzy/prefix matching
+# to save it. Silent, green, and a no-op. Pinned so it stays that way.
+unknown-target-runs-nothing	inputs.target=go-release		go-auto-release,go-binary-release,go-gen-spec
+
+# Distinct from 'no arm matched': the caller resolved a target and produced
+# NOTHING. Empty must not be read as a default arm.
+empty-target-runs-nothing	inputs.target=		go-auto-release,go-binary-release,go-gen-spec

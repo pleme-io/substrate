@@ -1,0 +1,79 @@
+# Case table for substrate/.github/workflows/pleme-rust.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS PINS. pleme-rust is a TIER-2 composer: 9 sibling jobs, each gated on
+# `inputs.target == '<its own name>'`, no needs, no status functions. The whole
+# contract is EXACTLY-ONE DISPATCH — one arm selects, the other eight skip — and
+# that contract is invisible to every other layer. actionlint sees 9 valid
+# expressions; unit tests see no code at all; a run where the wrong arm fired,
+# or where none did, is a green tick either way. So every arm gets a row, and
+# each row asserts the negative too: naming the other eight in expect-skip is
+# what turns a duplicated or typo'd string literal into a finding instead of a
+# second job quietly riding along.
+#
+# `inputs.target` is the ONLY context path any condition in this file reads, so
+# it is the only key declared. Nothing here depends on the event, the actor, the
+# repo's privacy, or an upstream job's outputs.
+#
+# THE TWO BOUNDARY ROWS, which are the ones that would otherwise rot:
+#
+#   unknown-target — a value matching no arm. This composer has no catch-all
+#   and no default job, so an unrecognised target is a full no-op that reports
+#   SUCCESS. That is intended (pleme.yml owns routing; a bad name is the
+#   caller's bug, and failing here would just move the error one level away
+#   from its cause) — but "intended" and "broken" render identically in the
+#   Actions UI, which is the exact failure this whole layer exists for. Pinned
+#   so that adding a catch-all later is a deliberate table edit, not a drift.
+#
+#   empty-target — target computed but empty: "detect ran and produced
+#   nothing", a distinct state from any named type and from an unknown name.
+#   `inputs.target` is `required: true`, which stops a caller OMITTING it but
+#   does not stop one passing "". This is the row a future catch-all would
+#   break on first, because a naive `else` arm fires on empty just as readily
+#   as on a real miss.
+#
+# PUBLISH POSTURE. Eight of the nine arms dispatch to something that releases,
+# publishes or pushes (the ninth, nix-devshell-cargo-test, only tests). There is
+# no separate do-it / don't-do-it toggle to exercise: the don't-do-it input for
+# any given publisher IS every other row in this file. Read the table as the
+# claim that ONE call to pleme-rust can trigger AT MOST ONE publish path, and
+# that a call carrying an unknown or empty target triggers NONE.
+#
+# LIMIT, stated rather than papered over: the linter evaluates this workflow as
+# written and does not model reusable-workflow `with:`/`secrets:` propagation
+# into a called workflow's own conditions. A row here asserts that the reusable
+# was INVOKED, never that its internal jobs selected. Those leaves carry their
+# own <workflow>.cases.tsv beside them.
+
+cargo-auto-release	inputs.target=cargo-auto-release	cargo-auto-release	cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+cargo-gate-ci	inputs.target=cargo-gate-ci	cargo-gate-ci	cargo-auto-release,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+# Longest literal in the file, and a strict prefix-superset of no other arm —
+# but `cargo-auto-release` IS a substring of it, so this row is what proves the
+# dispatch matches whole strings rather than containing them.
+cargo-publish-each-member-auto-release	inputs.target=cargo-publish-each-member-auto-release	cargo-publish-each-member-auto-release	cargo-auto-release,cargo-gate-ci,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+# The only non-publishing arm.
+nix-devshell-cargo-test	inputs.target=nix-devshell-cargo-test	nix-devshell-cargo-test	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+nix-image-auto-release	inputs.target=nix-image-auto-release	nix-image-auto-release	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+# rust-auto-release / rust-binary-auto-release / rust-binary-release / rust-release
+# are four near-identical names differing by one segment. They are the arms most
+# likely to be crossed by a copy-paste edit, and the four rows below are the
+# only thing in the repo that would notice.
+rust-auto-release	inputs.target=rust-auto-release	rust-auto-release	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+rust-binary-auto-release	inputs.target=rust-binary-auto-release	rust-binary-auto-release	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-release,rust-release
+
+rust-binary-release	inputs.target=rust-binary-release	rust-binary-release	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-release
+
+rust-release	inputs.target=rust-release	rust-release	cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release
+
+# BOUNDARY: no arm matches. Whole workflow no-ops and reports success, on purpose.
+unknown-target	inputs.target=helm-chart-release		cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
+
+# BOUNDARY: target computed but empty. Distinct state from unknown-target.
+empty-target	inputs.target=		cargo-auto-release,cargo-gate-ci,cargo-publish-each-member-auto-release,nix-devshell-cargo-test,nix-image-auto-release,rust-auto-release,rust-binary-auto-release,rust-binary-release,rust-release
