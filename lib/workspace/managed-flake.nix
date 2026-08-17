@@ -29,10 +29,21 @@
 #    splices over the matched span so a spacing variant cannot no-op
 #    (forge@e87559f, 3211 tests green).
 #
-# ALSO NOTE: this file string-concatenates Nix syntax to emit a flake, which
-# ★ NixAST forbids (a Nix-emitting renderer builds a typed NixValue and renders
-# through one pretty-printer). If a workspace flake generator is ever wanted
-# again, it is a NixAST rebuild — not a revival of this.
+# 3. IT DOES NOT EVALUATE. The strongest reason, and it means this generator has
+#    never run and cannot: `nix-instantiate` on this file fails with
+#      error: undefined variable 'ws'  (at the Dir.glob line in gem-versions)
+#    Confirmed present BEFORE the comment above was added, so it is the file's
+#    own defect and not a side effect of documenting it. Cause: `ws` is bound at
+#    `ws = "$PWD";` INSIDE the emitted flake's text, so every `${ws}` in the
+#    template must be escaped `''${ws}` to survive to the generated file. At
+#    least one is not, so nix resolves it at GENERATION time, where no `ws` is
+#    in scope. That is the string-templating hazard item 4 describes, caught in
+#    the act — and precisely the class a typed NixValue renderer cannot have.
+#
+# 4. IT STRING-CONCATENATES NIX SYNTAX to emit a flake, which ★ NixAST forbids
+#    (a Nix-emitting renderer builds a typed NixValue and renders through one
+#    pretty-printer). If a workspace flake generator is ever wanted again, it is
+#    a NixAST rebuild — not a revival of this.
 #
 # Generates a flake.nix file that can be placed at a target directory
 # via home-manager activation (not symlink — real file copy).
