@@ -23,6 +23,48 @@ let
   # and build/rust/cargo-nix-tie.nix.
   tie = import ../shared/freshness-tie.nix { };
 
+  # ── ★ THE READER REFUSES TO GUESS ──────────────────────────────────────
+  #
+  # `tie.held` answers "is this delta still describing its Cargo.lock?" It is
+  # structurally blind to "is this delta the SHAPE this reader expects?" — and
+  # this file used to answer the second question with bare `or` defaults, which
+  # is a green verdict over a reconstruction that dropped everything.
+  #
+  # Concretely, before this: `delta.per_crate or { }` meant a delta that had
+  # lost its payload reconstructed to a crate set built entirely from
+  # `crateDefaults`, behind a GREEN D2 tie, with no throw and no warning. That
+  # exact failure was MEASURED on the Go reader (see ../shared/freshness-tie.nix
+  # §schemaViolation) and Go was hardened for it; this reader kept the
+  # permissive shape while carrying 425 live consumers to Go's zero.
+  #
+  # The validator is shared (../shared/delta-contract.nix); only this table is
+  # Rust-specific.
+  contract = import ../shared/delta-contract.nix { inherit lib; } {
+    subject = "lockfile-delta(rust)";
+    artifact = "Cargo.gen.lock";
+    adapter = "gen-cargo (pleme-io/gen)";
+    schemaPath = "lockfile-delta.nix";
+    regenCommand = "cd <that workspace> && gen build && git commit Cargo.gen.lock";
+  };
+
+  # ── The field table ────────────────────────────────────────────────────
+  #
+  # `required` is MEASURED, not chosen: every key below marked required was
+  # present in 433 of 433 committed `Cargo.gen.lock` files in the fleet on
+  # 2026-08-17, so hardening them breaks no repo. `manifest_sha256` was
+  # present in 191 of 433, so it carries an explicit documented default
+  # instead — that is the difference between a real optional field and a
+  # "default it and hope".
+  topLevel = {
+    schema_version    = { required = false; default = 10; note = "delta format version; 10 is the shipped value"; };
+    cargo_lock_sha256 = { required = true;  note = "the D2 tie subject — without it there is no freshness check at all"; };
+    per_crate         = { required = true;  note = "the payload: absent means every crate silently falls back to defaults"; };
+    target_resolves   = { required = true;  note = "the resolved graph; the crate SET is derived from it, so absent means an empty build"; };
+    git_nar_sha256    = { required = true;  note = "git source hashes; absent means every git dep loses its pinned NAR"; };
+    flake_metadata    = { required = true;  note = "consumed verbatim by lockfile-builder"; };
+    manifest_sha256   = { required = false; default = null; note = "KNOWN-BUT-UNUSED here; present in 191/433 deltas, so genuinely optional"; };
+  };
+
   stripQuery = url:
     let m = match "([^?]+)\\?.*" url;
     in if m == null then url else head m;
@@ -91,8 +133,12 @@ let
         delta = fromJSON (readFile genLockPath);
         lock = fromTOML (readFile cargoLockPath);
         toml = fromTOML (readFile cargoTomlPath);
-        perCrate = delta.per_crate or { };
-        gitNar = delta.git_nar_sha256 or { };
+        where = tie.hint src;
+        # Every top-level read goes through the table; a bare `or` here is
+        # the defect this contract exists to prevent.
+        closedTop = contract.closed topLevel delta where "Cargo.gen.lock top level";
+        perCrate = contract.field topLevel delta where "per_crate";
+        gitNar = contract.field topLevel delta where "git_nar_sha256";
         pkgs = lock.package or [ ];
 
         # ── D2 freshness gate — hard eval throw on stale delta ──────────
@@ -199,7 +245,7 @@ let
         # wasm-*, …) that the build-spec excludes. Derive the set from
         # target_resolves: edge OWNERS (base + per-target override keys) ∪
         # edge TARGETS (every runtime/build edge `package_key`) ∪ members.
-        tr = delta.target_resolves or { };
+        tr = contract.field topLevel delta where "target_resolves";
         edgeMaps = [ (tr.base or { }) ]
           ++ lib.mapAttrsToList (_: t: t.overrides or { }) (tr.targets or { });
         edgeOwnerKeys = lib.concatMap builtins.attrNames edgeMaps;
@@ -244,14 +290,14 @@ let
           (k: { name = k; value = mkCrate k lockByKey.${k}; })
           (builtins.filter (k: builtins.hasAttr k lockByKey) resolvedKeys));
       in
-      seq d2ok {
+      seq d2ok (seq closedTop {
         version = 10;
         workspace = { root = toString src; members = [ ]; };
         inherit crates root_crate workspace_members;
-        flake_metadata = delta.flake_metadata or { };
+        flake_metadata = contract.field topLevel delta where "flake_metadata";
         target_resolves = delta.target_resolves;
-        cargo_lock_sha256 = delta.cargo_lock_sha256;
-      };
+        cargo_lock_sha256 = contract.field topLevel delta where "cargo_lock_sha256";
+      });
 in
 {
   inherit reconstruct mkSource expandMember;

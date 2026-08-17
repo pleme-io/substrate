@@ -85,95 +85,29 @@ let
     quirks              = { required = false; default = [ ]; note = "empty is a real value"; };
   };
 
-  refuse = { where, field, expected, got, cause, fix }:
-    tie.schemaViolation {
-      subject = "delta-schema(go)";
-      artifact = "Go.gen.lock";
-      inherit where field adapter expected got cause fix;
-    };
-
-  # field :: schema -> attrs -> where -> name -> value | throw
+  # ── The mechanism is SHARED, not local ────────────────────────────────
   #
-  # The ONLY way this reader reads a key. A required key that is absent
-  # throws naming the field and the producer; an optional key that is absent
-  # yields its documented default.
-  field = schema: attrs: where: name:
-    let spec = schema.${name} or null; in
-    if spec == null then
-      refuse {
-        inherit where;
-        field = name;
-        expected = "a field declared in delta-schema.nix";
-        got = "a read for an undeclared field";
-        cause = ''
-          This reader asked for a field the schema does not declare. That is a
-          bug in the reader, not in the artifact: every read must be declared
-          so that `closed` can tell producer additions from reader mistakes.'';
-        fix = "add `${name}` to delta-schema.nix, or stop reading it";
-      }
-    else if attrs ? ${name} then attrs.${name}
-    else if spec.required then
-      refuse {
-        inherit where;
-        field = name;
-        expected = "present (${spec.note})";
-        got = "absent";
-        cause = ''
-          A required field is missing, which means the producer's shape and
-          this reader's shape have diverged. Reconstructing anyway would
-          produce a build spec that is silently missing part of itself while
-          every other gate reports green.'';
-        fix = "cd <that workspace> && gen build && git commit Go.gen.lock";
-      }
-    else spec.default;
-
-  # closed :: schema -> attrs -> where -> label -> true | throw
+  # `refuse` / `field` / `closed` / `nonEmpty` used to live here in full. They
+  # are language-agnostic — only the artifact name, the producing adapter and
+  # the regen command differ — so they moved to ../shared/delta-contract.nix
+  # and Rust's reader now consumes the SAME validator instead of a second
+  # hand-rolled copy. What stays here is this language's FIELD TABLE, which is
+  # the only genuinely Go-specific half.
   #
-  # Refuses a key the schema does not declare. This is the half that catches
-  # a PRODUCER addition — a new field gen starts emitting that this reader
-  # would otherwise ignore forever.
-  closed = schema: attrs: where: label:
-    let
-      declared = builtins.attrNames schema;
-      present = builtins.attrNames attrs;
-      unknown = builtins.filter (k: !(builtins.elem k declared)) present;
-    in
-    if unknown == [ ] then true
-    else
-      refuse {
-        inherit where;
-        field = builtins.concatStringsSep ", " unknown;
-        expected = "only: ${builtins.concatStringsSep ", " declared}";
-        got = "${label} carries undeclared key(s): ${builtins.concatStringsSep ", " unknown}";
-        cause = ''
-          The producer emits a field this reader does not know about. Ignoring
-          it is how a contract drifts silently: the field exists, something
-          upstream depends on it, and nothing here ever reads it.'';
-        fix = "add the field to delta-schema.nix and consume it, or stop emitting it in gen-gomod";
-      };
+  # Extracted 2026-08-17 on the second consumer, and the asymmetry is why:
+  # this reader was the strict one with zero live consumers, while Rust's had
+  # 17 bare `or`s and 425. A third hand-rolled copy would have inherited
+  # whichever half its author happened to read first.
+  contract = import ../shared/delta-contract.nix { inherit lib; } {
+    subject = "delta-schema(go)";
+    artifact = "Go.gen.lock";
+    inherit adapter;
+    schemaPath = "delta-schema.nix";
+    regenCommand = "cd <that workspace> && gen build && git commit Go.gen.lock";
+  };
 
-  # nonEmpty :: attrs -> where -> label -> true | throw
-  #
-  # A delta with an empty package set is not a module with no packages — it
-  # is a delta that failed to describe its module. This is the specific
-  # reconstruction the old `root_package = if packageKeys == [ ] then null`
-  # branch produced, and deleting that branch is only safe because this
-  # refuses first.
-  nonEmpty = attrs: where: label:
-    if attrs != { } then true
-    else
-      refuse {
-        inherit where;
-        field = label;
-        expected = "at least one package";
-        got = "an empty set";
-        cause = ''
-          An empty package set reconstructs to a build spec with no packages
-          and a null root — which every downstream consumer accepts. There is
-          no module for which this is the right answer, so it is refused here
-          rather than propagated.'';
-        fix = "cd <that workspace> && gen build && git commit Go.gen.lock";
-      };
+  inherit (contract) refuse field closed nonEmpty;
+
 in
 {
   inherit topLevel perPackage field closed nonEmpty adapter;
