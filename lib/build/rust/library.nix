@@ -169,7 +169,21 @@ in {
     tools = devTools;
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
-    extraPackages = extraDevInputs ++ [ crate2nix ];
+    # `pkgs.crate2nix` (the CLI), NOT the `crate2nix` argument. That argument is
+    # this flake's crate2nix INPUT, declared `flake = false` in substrate's own
+    # flake.nix, so it is a bare source tree — used here only as
+    # `import "${crate2nix}/tools.nix"` above. Putting a source tree in
+    # buildInputs is not a no-op: on the non-devenv branch `mkRustDevShell`
+    # splices extraPackages straight into `pkgs.mkShell`'s buildInputs, and the
+    # devShell then fails to EVALUATE with
+    #   error: Dependency is not of a valid type: element 6 of buildInputs
+    # Measured on pleme-hotswap-derive 2026-08-17. The failure is invisible in
+    # this file: it surfaces in CI as a red `cargo fmt --check (inside .#default)`
+    # step, because that is merely the FIRST step that enters the devShell, and
+    # the fmt step's name sends the reader to reformat source that was never
+    # read. Two `cargo fmt` sweeps were spent on that misreading before the real
+    # cause was found.
+    extraPackages = extraDevInputs ++ [ pkgs.crate2nix ];
     env = allDevEnvVars;
   };
 
