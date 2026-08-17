@@ -261,6 +261,26 @@ jobs:
       && inputs.publish-from-private != 'true'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
+      # Summary through the typed action; only the one-line ::notice stays
+      # inline. step-summary-publish was a STUB when this job was written (a
+      # ::warning and exit 0, writing nothing) — implemented first, because
+      # converting to it beforehand would have deleted this notice silently.
+      #
+      # `toJSON` per value, NOT a hand-quoted JSON literal. It preserves the
+      # property the env block below exists for: `registry` is caller-supplied,
+      # and one containing a quote would break a hand-built JSON string exactly
+      # as it would break spliced shell. toJSON emits a correctly escaped JSON
+      # scalar, so the object is well-formed whatever the caller passes.
+      - uses: pleme-io/actions/step-summary-publish@main
+        with:
+          template: |
+            ### Publish withheld
+
+            Repository is private; nothing was published to `{{registry}}`.
+            Bump and tag still happened (version `{{version}}`).
+
+            If this repo is meant to publish, set `publish-from-private: true`.
+          vars: '{"registry": ${{ toJSON(inputs.registry) }}, "version": ${{ toJSON(needs.bump.outputs.new-version) }}}'
       - shell: bash
         env:
           # Passed as env rather than interpolated into the script body: the
@@ -270,11 +290,3 @@ jobs:
           VERSION: ${{ needs.bump.outputs.new-version }}
         run: |
           echo "::notice title=Publish withheld::This repository is private, so the Helm chart (version ${VERSION}) was NOT published to ${REGISTRY}. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
-          {
-            echo "### Publish withheld"
-            echo
-            echo "Repository is private; nothing was published to \`${REGISTRY}\`."
-            echo "Bump and tag still happened (version \`${VERSION}\`)."
-            echo
-            echo "If this repo is meant to publish, set \`publish-from-private: true\`."
-          } >> "$GITHUB_STEP_SUMMARY"

@@ -151,7 +151,23 @@ jobs:
       && inputs.publish-from-private != 'true'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
+      # Summary through the typed action; only the one-line ::notice stays
+      # inline, since GitHub exposes no action for annotations. Note
+      # step-summary-publish was a STUB when this job was written (a ::warning
+      # and exit 0, writing nothing) — it was implemented first, because
+      # converting to it beforehand would have deleted this notice silently.
+      - uses: pleme-io/actions/step-summary-publish@main
+        with:
+          template: |
+            ### Publish withheld
+
+            Repository is private; nothing was published to {{registry}}.
+            Bump and tag still happened.
+
+            If this repo is meant to publish, set `publish-from-private: true`.
+          vars: '{"registry":"pypi.org"}'
+      # Block scalar because the message contains ": " and a plain YAML scalar
+      # would parse as a mapping. Still one line of shell.
       - shell: bash
         run: |
           echo "::notice title=Publish withheld::This repository is private, so the Python package was NOT published to pypi.org. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
-          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to pypi.org."; echo "Bump and tag still happened."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"

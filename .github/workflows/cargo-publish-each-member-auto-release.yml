@@ -209,7 +209,24 @@ jobs:
       # note), so withholding the publish withholds all three. A notice that
       # claimed a bump had happened would be the same class of untruth this
       # whole change exists to remove, just louder.
+      # Summary through the typed action; only the one-line ::notice stays
+      # inline. step-summary-publish was a STUB when this job was written (a
+      # ::warning and exit 0, writing nothing) — implemented first, because
+      # converting to it beforehand would have deleted this notice silently.
+      - uses: pleme-io/actions/step-summary-publish@main
+        with:
+          template: |
+            ### Publish withheld
+
+            Repository is private; nothing was published to {{registry}}.
+            No member was bumped or tagged either: this workflow bumps,
+            publishes and tags inside one composite action, so withholding
+            the publish withholds all three.
+
+            If this repo is meant to publish, set `publish-from-private: true`.
+          vars: '{"registry":"crates.io"}'
+      # Block scalar: the message contains ": " and a plain YAML scalar would
+      # parse as a mapping. Still one line of shell.
       - shell: bash
         run: |
           echo "::notice title=Publish withheld::This repository is private, so no workspace member was published to crates.io. Nothing was bumped or tagged either -- this workflow bumps, publishes and tags in one action, so the three move together. Set publish-from-private: true if this repo is meant to publish public crates from private source."
-          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to crates.io."; echo "No member was bumped or tagged either: this workflow bumps, publishes and tags inside one composite action, so withholding the publish withholds all three."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"
