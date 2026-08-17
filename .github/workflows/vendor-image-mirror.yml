@@ -25,7 +25,7 @@
 # unreachable from a GitHub-hosted runner -- every job here runs on
 # Camelot's own ARC pool (camelot-builder-pleme-eks, in the camelot-ci
 # namespace, already inside Zot's authz.repositories `allowedClientNamespaces`
-# per clusters/camelot-eks/infrastructure/zot/release.yaml), never
+# per the Zot HelmRelease values in the cluster's own GitOps repo), never
 # ubuntu-latest. No private/public repo routing needed here (unlike
 # nix-image-auto-release.yml's runner-resolve split) -- reachability is
 # about the runner's network position, not the caller repo's visibility.
@@ -66,7 +66,8 @@ on:
           whenever the image's PUBLISHING gate passed because of a VEX
           statement: this faucet re-scans the pulled bytes, so without the same
           document it reaches the opposite verdict and the image can never enter
-          Zot -- and therefore can never reach 2F. Measured 2026-07-31 (run
+          Zot -- and therefore can never reach the downstream environment.
+          Measured 2026-07-31 (run
           30661312791): hardened-chproxy released green with its GO-2026-5932
           OpenVEX doc and its mirror failed "zot faucet REJECT ... severity=UNKNOWN".
           Empty = no VEX, unchanged for every existing vendor-* caller.
@@ -74,6 +75,14 @@ on:
         default: ""
       runner:
         description: "Explicit runner label override. Empty = camelot-builder-pleme-eks (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
+        type: string
+        default: ""
+      ca-cert-url:
+        description: >-
+          FALLBACK ONLY. Raw URL of the committed zot-ca.crt PEM, used with the
+          CA_CERT_TOKEN secret when the org variable CAMELOT_ZOT_CA is unset.
+          Empty by default: this workflow is public and must not carry a
+          consumer's private GitOps path as a constant.
         type: string
         default: ""
       zot-username:
@@ -108,7 +117,7 @@ on:
         description: "Password/token for source-registry (e.g. a GHCR read:packages PAT) -- only needed when the SOURCE image is private. Optional: absent keeps the public-source path unchanged."
         required: false
       CA_CERT_TOKEN:
-        description: "Read access to pleme-io/akeyless-k8s, whose committed zot-ca.crt this workflow trusts. Optional so the ~14 existing vendor-* callers keep working unchanged -- but WITHOUT it the CA fetch now fails LOUDLY rather than installing GitHub's 404 body as a certificate."
+        description: "Read access to the private GitOps repo named by the `ca-cert-url` input, whose committed zot-ca.crt this workflow trusts. Only consulted when the org variable CAMELOT_ZOT_CA is unset. Optional so the ~14 existing vendor-* callers keep working unchanged -- but WITHOUT it the CA fetch fails LOUDLY rather than installing GitHub's 404 body as a certificate."
         required: false
     outputs:
       admitted:
@@ -156,18 +165,18 @@ jobs:
       # ── `admitted` NOW MEANS WHAT ITS NAME SAYS, and it did not before ──────
       # This was `steps.pull-scan.outputs.admitted` alone -- i.e. "cleared the
       # CVE gate", computed BEFORE the push, while this workflow's own docstring
-      # promised "cleared the CVE gate AND was mirrored into Zot". The seven 2F
-      # promote jobs in hardened-images gate on exactly this value.
+      # promised "cleared the CVE gate AND was mirrored into Zot". The seven
+      # downstream promote jobs in hardened-images gate on exactly this value.
       #
       # The hole that opens: a push that returns 0 without writing is
       # indistinguishable from a real mirror. Nothing anywhere read Zot back, so
       # "the artifact is in Zot" was inferred from an exit code rather than
-      # observed. Zot is the gate the whole flow rests on -- nothing may reach 2F
-      # before it is really in Zot -- so this is the one place an unverified
-      # success is least affordable.
+      # observed. Zot is the gate the whole flow rests on -- nothing may be
+      # promoted downstream before it is really in Zot -- so this is the one
+      # place an unverified success is least affordable.
       #
       # Now it is the CONJUNCTION of the scan verdict and a readback that proves
-      # the bytes are retrievable from Zot by the tag 2F will resolve. Reading
+      # the bytes are retrievable from Zot by the tag the consumer will resolve. Reading
       # the destination is the only evidence that distinguishes "pushed" from
       # "push reported success".
       admitted: ${{ steps.pull-scan.outputs.admitted == 'true' && steps.zot-readback.outcome == 'success' }}
@@ -278,8 +287,8 @@ jobs:
           exit 1
 
       # Zot serves a self-signed cert (tls.mode: inPod, 825-day validity --
-      # see clusters/camelot-eks/infrastructure/zot/release.yaml's own
-      # comment). The committed zot-ca.crt in that same directory is meant
+      # see the Zot HelmRelease values in the cluster's own GitOps repo). The
+      # zot-ca.crt committed alongside those values is meant
       # for exactly this: pin against a SPECIFIC known cert via the
       # runner's system trust store, never `--tls-verify=false`. Once
       # trusted here, skopeo (both this step's login and oci-image-push's
@@ -287,7 +296,7 @@ jobs:
       # either.
       # ── This step installed "404: Not Found" AS A CERTIFICATE for 5 days ──
       #
-      # It fetched the CA from pleme-io/akeyless-k8s -- a PRIVATE repo -- with
+      # It fetched the CA from the cluster's GitOps repo -- a PRIVATE repo -- with
       # `curl -sL` and no token. GitHub answers an unauthenticated raw request
       # for a private path with HTTP 404 and a 14-byte body. Measured:
       #
@@ -313,9 +322,12 @@ jobs:
       #   3. an optional CA_CERT_TOKEN -- the actual auth, matching the seam
       #      pleme-io/actions/zot-push already exposes. substrate's inline
       #      curl was the only zot-CA fetch in the fleet missing BOTH.
+      #   4. the URL is an INPUT, not a constant. A reusable workflow in a
+      #      public repo must not carry a consumer's private GitOps path, and
+      #      the preferred org-variable path below needs no URL at all.
       #
       # Why it ever worked: zot-push's own comment calls this cert "public,
-      # safe to fetch" -- akeyless-k8s used to be public. The repo going
+      # safe to fetch" -- that GitOps repo used to be public. The repo going
       # private broke it silently, because nothing on this path checked.
       - name: Trust Zot's CA
         if: steps.pull-scan.outputs.admitted == 'true'
@@ -323,9 +335,10 @@ jobs:
           # PREFERRED: the CA as an org Actions variable — no network, no auth,
           # no private repo, cannot 404.
           #
-          # pleme-io/akeyless-k8s is private PERMANENTLY (operator decision,
-          # 2026-07-28), so authenticating the fetch would mean distributing a
-          # cross-repo PAT to every mirror job forever. That is the wrong shape
+          # The GitOps repo holding it is private PERMANENTLY (operator
+          # decision, 2026-07-28), so authenticating the fetch would mean
+          # distributing a cross-repo PAT to every mirror job forever. That is
+          # the wrong shape
           # for this asset: the file is a self-signed CA *public* certificate
           # (verified: 1992 bytes, one PEM CERTIFICATE block, zero PRIVATE KEY
           # blocks, CN=zot-pleme-zot.zot.svc.cluster.local, valid to 2028-10-20).
@@ -343,32 +356,33 @@ jobs:
           # FALLBACK only: a token for the private-repo fetch, for a caller
           # outside pleme-io where the org variable does not resolve.
           CA_CERT_TOKEN: ${{ secrets.CA_CERT_TOKEN }}
+          CA_CERT_URL: ${{ inputs.ca-cert-url }}
         run: |
           set -euo pipefail
-          url="https://raw.githubusercontent.com/pleme-io/akeyless-k8s/main/clusters/camelot-eks/infrastructure/zot/zot-ca.crt"
 
           if [ -n "${ZOT_CA_PEM:-}" ]; then
             printf '%s\n' "$ZOT_CA_PEM" > /tmp/zot-ca.crt
             echo "CA source: org variable CAMELOT_ZOT_CA (no network)"
-          elif [ -n "${CA_CERT_TOKEN:-}" ]; then
-            curl -fsSL -H "Authorization: Bearer $CA_CERT_TOKEN" -o /tmp/zot-ca.crt "$url"
-            echo "CA source: authenticated fetch from akeyless-k8s"
+          elif [ -n "${CA_CERT_TOKEN:-}" ] && [ -n "${CA_CERT_URL:-}" ]; then
+            curl -fsSL -H "Authorization: Bearer $CA_CERT_TOKEN" -o /tmp/zot-ca.crt "$CA_CERT_URL"
+            echo "CA source: authenticated fetch from ca-cert-url"
           else
-            echo "::error::No CA available. Set the org variable CAMELOT_ZOT_CA (preferred)"
-            echo "::error::or pass CA_CERT_TOKEN. akeyless-k8s is PRIVATE — an unauthenticated"
-            echo "::error::fetch returns a 14-byte '404: Not Found' body, which is what this"
-            echo "::error::step used to install as a certificate."
+            echo "::error::No CA available. Set the org variable CAMELOT_ZOT_CA (preferred),"
+            echo "::error::or pass BOTH the ca-cert-url input and the CA_CERT_TOKEN secret."
+            echo "::error::The source repo is PRIVATE — an unauthenticated fetch returns a"
+            echo "::error::14-byte '404: Not Found' body, which is what this step used to"
+            echo "::error::install as a certificate."
             exit 1
           fi
 
           if ! grep -q "BEGIN CERTIFICATE" /tmp/zot-ca.crt; then
             echo "::error::Fetched CA is not a PEM certificate ($(wc -c < /tmp/zot-ca.crt) bytes)."
             echo "::error::First bytes: $(head -c 120 /tmp/zot-ca.crt)"
-            echo "::error::Set the org variable CAMELOT_ZOT_CA to the PEM (preferred), or pass CA_CERT_TOKEN."
+            echo "::error::Set the org variable CAMELOT_ZOT_CA to the PEM (preferred), or pass ca-cert-url + CA_CERT_TOKEN."
             exit 1
           fi
 
-          sudo cp /tmp/zot-ca.crt /usr/local/share/ca-certificates/zot-camelot-eks.crt
+          sudo cp /tmp/zot-ca.crt /usr/local/share/ca-certificates/zot-cluster-ca.crt
           sudo update-ca-certificates
 
       # ── The Zot skopeo-login is GONE, and its replacement is not a login ────
@@ -395,7 +409,7 @@ jobs:
       #
       # oci-image-push is composite (runs natively on this runner, not a
       # Docker-mode container) -- the same fix already shipped for the
-      # akeylesslabs Harbor pipeline (pleme-io/actions@d1b51db) applies
+      # customer-facing Harbor pipeline (pleme-io/actions@d1b51db) applies
       # here identically: a local docker-archive path only resolves
       # correctly off the runner's own filesystem.
       - name: Mirror into Zot
@@ -417,12 +431,12 @@ jobs:
       # the registry serves the bytes. Those differ on a silently-rejected
       # layer, a namespace the credential cannot actually write, a proxy that
       # swallowed the PUT, or a tag that resolves to something else. Every one
-      # of those renders as a green mirror and a 2F promotion of an artifact Zot
-      # does not have.
+      # of those renders as a green mirror and a downstream promotion of an
+      # artifact Zot does not have.
       #
       # Resolving the tag to a digest THROUGH Zot, with the same CA and
       # credential a consumer would use, is the cheapest evidence that the
-      # artifact is really there and really addressable by the tag 2F resolves.
+      # artifact is really there and really addressable by the tag the consumer resolves.
       # Failing here fails the job, which is correct: a mirror that cannot be
       # read back has not mirrored, and must not be reported as admitted.
       - name: Verify the artifact is really IN Zot (readback)

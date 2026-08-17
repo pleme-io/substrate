@@ -41,20 +41,32 @@ on:
         required: true
         type: string
       promote-repo:
-        description: "Downstream repo holding the environment's promotion pointers. The promote leg writes a commit here; it never touches the environment directly."
+        description: >-
+          Downstream repo holding the environment's promotion pointers, as
+          owner/name. The promote leg writes a commit here; it never touches the
+          environment directly. NO DEFAULT: this workflow is public, so the
+          consumer's private GitOps coordinates are supplied by the caller (or
+          by the org variable HARDENED_IMAGE_PROMOTE_REPO). A promote leg with
+          nothing to promote INTO fails loudly rather than checking out this
+          repo and committing to it.
         required: false
         type: string
-        default: "akeylesslabs/akeyless-main-repo"
+        default: ""
       promote-ref:
-        description: "Branch in promote-repo that the downstream reconciler watches."
+        description: "Branch in promote-repo that the downstream reconciler watches. Falls back to the org variable HARDENED_IMAGE_PROMOTE_REF."
         required: false
         type: string
-        default: "camelot/architecture"
+        default: ""
       promote-path:
-        description: "Directory in promote-repo holding one pointer file per admitted image."
+        description: "Directory in promote-repo holding one pointer file per admitted image. Falls back to the org variable HARDENED_IMAGE_PROMOTE_PATH."
         required: false
         type: string
-        default: "camelot/hardened-images/zot-admissions"
+        default: ""
+      promote-env-label:
+        description: "Environment name used in the promotion COMMIT MESSAGE only (release-promote's target-env). Cosmetic; never resolves an address."
+        required: false
+        type: string
+        default: "downstream"
       fail-on-severity:
         description: >-
           The CVE bar, applied at BOTH the build scan and the Zot admission scan.
@@ -138,9 +150,9 @@ jobs:
     # The failure is remote from the cause and reads like infrastructure:
     # measured on hardened-images run 31604045212, the pull and the trivy scan
     # both succeeded and the job then died in "Trust Zot's CA" with "No CA
-    # available … akeyless-k8s is PRIVATE — an unauthenticated fetch returns a
-    # 14-byte '404: Not Found' body, which is what this step used to install as
-    # a certificate." Nothing in that names a missing secret.
+    # available … The source repo is PRIVATE — an unauthenticated fetch returns
+    # a 14-byte '404: Not Found' body, which is what this step used to install
+    # as a certificate." Nothing in that names a missing secret.
     #
     # The hand-written mirror jobs already carry this mapping, with a comment
     # dated 2026-07-29 saying the omission broke the mirror then too. Same
@@ -171,17 +183,45 @@ jobs:
     runs-on: ${{ fromJSON(inputs.spec).runner }}
     permissions:
       contents: read
+    env:
+      # ONE resolution point for the three downstream coordinates: the caller's
+      # input wins, otherwise the caller org's variables. `vars` in a called
+      # workflow resolves against the CALLER's org, which is the same seam
+      # vendor-image-mirror already uses for CAMELOT_ZOT_CA.
+      PROMOTE_REPO: ${{ inputs.promote-repo != '' && inputs.promote-repo || vars.HARDENED_IMAGE_PROMOTE_REPO }}
+      PROMOTE_REF: ${{ inputs.promote-ref != '' && inputs.promote-ref || vars.HARDENED_IMAGE_PROMOTE_REF }}
+      PROMOTE_PATH: ${{ inputs.promote-path != '' && inputs.promote-path || vars.HARDENED_IMAGE_PROMOTE_PATH }}
     steps:
+      # An unset coordinate must NOT degrade into "check out the calling repo
+      # and commit a promotion pointer into it" -- that is a silent write to the
+      # wrong repository, which is strictly worse than not promoting. Fail here,
+      # naming exactly what is missing.
+      - name: Refuse to promote without downstream coordinates
+        uses: pleme-io/actions/tatara-script@main
+        with:
+          script: |
+            (define repo (env-get "PROMOTE_REPO" ""))
+            (define ref (env-get "PROMOTE_REF" ""))
+            (define path (env-get "PROMOTE_PATH" ""))
+            (if (or (equal? repo "") (or (equal? ref "") (equal? path "")))
+              (begin
+                (print-line "::error::promote-repo / promote-ref / promote-path are all required.")
+                (print-line "::error::Pass them as inputs, or set the org variables")
+                (print-line "::error::HARDENED_IMAGE_PROMOTE_REPO / _REF / _PATH.")
+                (print-line (string-format "::error::got repo='{}' ref='{}' path='{}'" repo ref path))
+                (exit 1))
+              (print-line "[promote] downstream coordinates resolved"))
+
       - name: Check out the downstream promotion branch
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.promote-repo }}
-          ref: ${{ inputs.promote-ref }}
+          repository: ${{ env.PROMOTE_REPO }}
+          ref: ${{ env.PROMOTE_REF }}
           token: ${{ secrets.AKEYLESS_REPO_PAT || secrets.BOT_PAT }}
           persist-credentials: false
           fetch-depth: 0
           filter: blob:none
-          sparse-checkout: ${{ inputs.promote-path }}
+          sparse-checkout: ${{ env.PROMOTE_PATH }}
           sparse-checkout-cone-mode: true
 
       # A component promoting for the FIRST time has no pointer file, and
@@ -191,7 +231,7 @@ jobs:
       - name: Seed the pointer if this image has never been promoted
         uses: pleme-io/actions/tatara-script@main
         env:
-          POINTER: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          POINTER: ${{ env.PROMOTE_PATH }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
           ZOT_REPO: ${{ fromJSON(inputs.spec).zotRepo }}
         with:
           script: |
@@ -209,10 +249,10 @@ jobs:
         uses: pleme-io/actions/release-promote@main
         with:
           kind: helm-chart-version
-          values-file: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          values-file: ${{ env.PROMOTE_PATH }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
           yaml-path: .version
           version: ${{ fromJSON(inputs.spec).release }}
-          target-env: 2f
+          target-env: ${{ inputs.promote-env-label }}
           commit: "true"
           push: "false"
 
@@ -228,10 +268,10 @@ jobs:
         uses: pleme-io/actions/release-promote@main
         with:
           kind: helm-chart-version
-          values-file: ${{ inputs.promote-path }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
+          values-file: ${{ env.PROMOTE_PATH }}/${{ fromJSON(inputs.spec).zotRepo }}.yaml
           yaml-path: .digest
           version: ${{ needs.mirror.outputs.zot-digest }}
-          target-env: 2f
+          target-env: ${{ inputs.promote-env-label }}
           commit: "true"
           push: "false"
 
@@ -240,5 +280,5 @@ jobs:
         uses: pleme-io/actions/git-push-with-token@main
         with:
           token: ${{ secrets.AKEYLESS_REPO_PAT || secrets.BOT_PAT }}
-          branch: ${{ inputs.promote-ref }}
+          branch: ${{ env.PROMOTE_REF }}
           push-tags: "false"
