@@ -11,7 +11,7 @@
 #     inherit pkgs;
 #   }) {
 #     workspaces = ["quero-iam" "quero-state" "quero-dns" "quero-vpc" ...];
-#     awsProfile = "akeyless-development";
+#     awsProfile = "my-aws-profile";
 #   };
 #
 # Then merge: apps = pangeaOutputs.apps.${system} // amiApps // deployApps;

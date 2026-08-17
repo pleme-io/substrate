@@ -86,9 +86,16 @@
   # Path to the .rb template file relative to the workspace dir.
   template,
 
-  # AWS profile to export before any pangea/tofu invocation. Defaults to
-  # the shared pleme-io account that backs the S3 state bucket.
-  awsProfile ? "akeyless-development",
+  # AWS profile to export before any pangea/tofu invocation.
+  #
+  # NO DEFAULT ON PURPOSE. This used to carry a hardcoded account-specific
+  # profile name, which meant a workspace that simply forgot to set it still
+  # ran -- against whichever estate that name happened to resolve to. Silently
+  # targeting the wrong AWS account is the worst failure this helper can have,
+  # so when this is null the wrapper falls back to the ambient AWS_PROFILE and
+  # REFUSES to run if that is empty too (see `prologue` below). Set it here, or
+  # export AWS_PROFILE in the environment.
+  awsProfile ? null,
 
   # Extra runtime dependencies (nix packages) appended to the default
   # ruby+opentofu toolchain. Common adds: pkgs.sops (for Pangea::Secrets),
@@ -194,7 +201,17 @@ let
   # RUBYLIB, set AWS profile, nuke stale native exts, run bundle install.
   prologue = ''
     set -euo pipefail
-    export AWS_PROFILE=${lib.escapeShellArg awsProfile}
+    ${
+      if awsProfile != null
+      then ''export AWS_PROFILE=${lib.escapeShellArg awsProfile}''
+      else ''
+        if [ -z "''${AWS_PROFILE:-}" ]; then
+          echo "error: no AWS profile. Pass awsProfile to the workspace helper," >&2
+          echo "       or export AWS_PROFILE before running this app." >&2
+          exit 2
+        fi
+      ''
+    }
 
     # Add repo-root lib/ to RUBYLIB so workspace-local helpers see
     # pangea-architectures/lib/* without copying gems.

@@ -319,7 +319,7 @@ pangeaWorkspace = import "${substrate}/lib/infra/pangea-workspace.nix" {
 workspaceConfig = pangeaWorkspace {
   name = "state-backend";
   architecture = "state_backend";
-  awsProfile = "akeyless-development";
+  awsProfile = "my-aws-profile";
   namespace = "production";
   stateBackend = { type = "local"; };
   providers.aws = { region = "us-east-1"; version = "~> 5.0"; };

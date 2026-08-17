@@ -16,7 +16,7 @@
 #   in mkPangeaWorkspace {
 #     name = "state-backend";
 #     architecture = "state_backend";
-#     awsProfile = "akeyless-development";
+#     awsProfile = "my-aws-profile";
 #     stateBackend = { type = "local"; };
 #     remoteBackend = { type = "s3"; bucket = "..."; key = "..."; dynamodb_table = "..."; };
 #     config = { bucket = "..."; dynamodb_table = "..."; };
