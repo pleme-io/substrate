@@ -67,3 +67,28 @@ private-repo-human-merge	github.actor=drzzln;github.event.repository.private=tru
 # skipped when the pusher is github-actions[bot], so a bot commit (a consumer
 # that later adds a bump step) cannot loop the release on itself.
 bot-actor-self-trigger-guard	github.actor=github-actions[bot];github.event.repository.private=false		publish
+
+# ── DESTINATION VISIBILITY, MEASURED 2026-08-17 ────────────────────────────
+# The no-guard posture above rests on the destination registry being private,
+# which was previously asserted rather than checked. Measured today with an
+# anonymous GHCR token (no credentials):
+#
+#   ghcr.io/pleme-io/charts/lareira-camelot-observe   HTTP 404
+#   ghcr.io/pleme-io/charts/pleme-lib                 HTTP 403
+#   ghcr.io/pleme-io/charts/lareira-akeyless-saas     HTTP 403
+#   ghcr.io/pleme-io/helm/pleme-lareira               HTTP 403
+#   ghcr.io/pleme-io/helm/ensaio                      HTTP 403
+#
+# Not publicly readable. So a private repo publishing here discloses nothing,
+# and a privacy guard would only stop private chart repos from shipping —
+# helmworks-akeyless among them.
+#
+# THIS WORKFLOW WAS BRIEFLY GUARDED AND THE GUARD WAS REVERTED THE SAME DAY.
+# The sweep that guarded npm/python/crates counted `repository.private`
+# occurrences without distinguishing a publish gate from runner routing, and
+# swept this in with them. npm, PyPI and crates.io are public registries where
+# a publish leaks source; this is not. The revert is the correction.
+#
+# What would change the answer: a caller overriding `registry` to a public
+# host, or the namespace's per-package visibility being flipped. Neither is
+# visible to a job condition, so re-measure rather than trusting this block.
