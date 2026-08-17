@@ -149,6 +149,71 @@ with lib;
     // optionalAttrs (sysctl != {}) { boot.kernel.sysctl = sysctl; };
 
   # ─── Kubeconfig setup service ────────────────────────────────────────
+  #
+  # ★ SUPERSEDED 2026-08-17 by `seibi kubeconfig`. DO NOT WIRE THIS.
+  #
+  # Kept, not deleted (★★ MODULARIZE, DON'T DELETE): the declaration stays so
+  # the retirement is a readable decision rather than a rebuild from memory.
+  # But it must not acquire a consumer, and the reason is not style.
+  #
+  # WHO OWNS THIS CAPABILITY NOW — and the supersession is PARTIAL, which was
+  # established by reading plo rather than by inference. A first draft of this
+  # note claimed seibi already performs the 127.0.0.1 substitution in
+  # production; measured over ssh on plo 2026-08-17, that is FALSE, and the
+  # correction is the useful part:
+  #
+  #   `nix/modules/nixos/k3s-kubeconfig-export.nix` runs `seibi kubeconfig
+  #   --json` (a typed Rust tool) behind `iroha.mkServiceUnit`. The unit
+  #   `export-plo-kubeconfig.service` is active (exited), and what it produces
+  #   is TWO /etc files, fresh as of Aug 16 17:00:
+  #     /etc/k3s-admin-kubeconfig    server: https://127.0.0.1:6443
+  #     /etc/k3s-remote-kubeconfig   server: https://192.168.50.3:6443
+  #   So seibi does not rewrite 127.0.0.1 to `localhost` at all — it keeps the
+  #   loopback for the admin config and substitutes the node's REACHABLE IP for
+  #   the remote one.
+  #
+  # WHAT IS THEREFORE STILL UNOWNED: seeding a per-user ~/.kube/config, which
+  # is the half this helper did. On plo, /home/luis/.kube/config is dated
+  # 2026-03-05 and carries `server: https://localhost:6443` — a value NOTHING
+  # in the current closure produces. It is a stale artifact that no unit
+  # reconciles, the same class the nix repo records for cid's `UserShell`
+  # (green build, green activation, nothing written). Do not read the presence
+  # of a plausible-looking ~/.kube/config as evidence that something maintains
+  # it. Closing that gap belongs in seibi (a per-user export mode) or in a
+  # typed HM module — not here.
+  #
+  # CONSUMERS: zero. Measured 2026-08-17 over 49,744 .nix files in ~/code
+  # (worktrees excluded); the only file naming `mkKubeconfigService` is this
+  # one. So it is an unwired shell predecessor of a live typed capability —
+  # duplicating it would violate "solve problems once, in one place".
+  #
+  # WHY NOT SIMPLY PORT THE SHELL TO A .tlisp. Because the shell body below is
+  # not merely shell — it is a chain of side effects whose failure modes are
+  # each individually SILENT, and a faithful port would carry them across:
+  #   * the `sed -i` replacements exit 0 when the pattern does not match, so a
+  #     node ships a kubeconfig pointing at the wrong host with a GREEN
+  #     activation — the same class as the LUA_ROOT sed that never matched
+  #     because a character class held spaces where the file had a tab;
+  #   * `rm -f` exits 0 on a permission error inside the tree;
+  #   * a partly-failed `cp` leaves a stale file that the following `chmod`
+  #     reports success on;
+  #   * `if id -u <user>` skips the ENTIRE per-user block silently when the
+  #     account does not exist — the same shape as nix-darwin's uid guard
+  #     discarding every managed property with one yellow warning.
+  # seibi answers this by CONSTRUCTING the kubeconfig rather than pattern-
+  # matching a copy of it, which is why the destination is the tool and not a
+  # translation. (deshellify's ladder, rung 3: own the file, do not patch it.)
+  #
+  # TO REVIVE: don't revive the SHELL. The per-user seeding gap above is real,
+  # so the capability may genuinely be wanted again — build it as a seibi
+  # subcommand and render it through `iroha.mkServiceUnit`, matching
+  # nix/modules/nixos/k3s-kubeconfig-export.nix. A tool that CONSTRUCTS the
+  # file has somewhere to put "which server URL does this user need"; a sed
+  # over a copy does not, which is why the original could only express it as a
+  # regex that silently matches nothing when it is wrong.
+  #
+  # pending-kubeconfig-per-user: no owner for ~/.kube/config on k3s nodes
+  #
   # Returns a systemd oneshot service that waits for a kubeconfig file
   # to appear, then copies it to specified users' home directories with
   # optional sed replacements.
