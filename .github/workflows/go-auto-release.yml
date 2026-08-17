@@ -371,7 +371,29 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Summary through the typed action; only the one-line ::notice stays
+      # inline. step-summary-publish was a STUB when this job was written (a
+      # ::warning and exit 0, writing nothing) — implemented first, because
+      # converting to it beforehand would have deleted this notice silently.
+      - uses: pleme-io/actions/step-summary-publish@main
+        with:
+          template: |
+            ### Publish withheld
+
+            Repository is private; the ConfirmProxy + VerifyGate pair did not
+            run against {{registry}}.
+            Bump and tag still happened — and Go's only publish side effect is
+            that tag push, so the module IS released to anyone who can read the
+            repo.
+
+            Nothing leaked: {{registry}} has no credentials for a private
+            module and could not have fetched it either way. This guard buys
+            consistency with the rest of the release family, not containment.
+
+            If this repo is meant to publish, set `publish-from-private: true`.
+          vars: '{"registry":"proxy.golang.org"}'
+      # Block scalar: the message contains ": " and a plain YAML scalar would
+      # parse as a mapping. Still one line of shell.
       - shell: bash
         run: |
           echo "::notice title=Publish withheld::This repository is private, so the Go module was NOT confirmed or verified against proxy.golang.org. The version was bumped and tagged, and in Go's pull model that tag push IS the release. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
-          { echo "### Publish withheld"; echo; echo "Repository is private; the ConfirmProxy + VerifyGate pair did not run against proxy.golang.org."; echo "Bump and tag still happened — and Go's only publish side effect is that tag push, so the module IS released to anyone who can read the repo."; echo; echo "Nothing leaked: proxy.golang.org has no credentials for a private module and could not have fetched it either way. This guard buys consistency with the rest of the release family, not containment."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"

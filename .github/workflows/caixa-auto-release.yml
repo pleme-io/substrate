@@ -182,7 +182,23 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Summary through the typed action; only the one-line ::notice stays
+      # inline. step-summary-publish was a STUB when this job was written (a
+      # ::warning and exit 0, writing nothing) — implemented first, because
+      # converting to it beforehand would have deleted this notice silently,
+      # which is the defect this job exists to prevent.
+      - uses: pleme-io/actions/step-summary-publish@main
+        with:
+          template: |
+            ### Publish withheld
+
+            Repository is private; nothing was published to {{registry}}.
+            Bump and tag still happened.
+
+            If this repo is meant to publish, set `publish-from-private: true`.
+          vars: '{"registry":"ghcr.io/pleme-io/helm"}'
+      # Block scalar: the message contains ": " and a plain YAML scalar would
+      # parse as a mapping. Still one line of shell.
       - shell: bash
         run: |
           echo "::notice title=Publish withheld::This repository is private, so the rendered Helm chart was NOT published. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
-          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to ghcr.io/pleme-io/helm."; echo "Bump and tag still happened."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"
