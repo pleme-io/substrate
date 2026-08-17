@@ -1,5 +1,39 @@
 # Managed Flake Generator
 #
+# ★ SUPERSEDED 2026-08-17. UNWIRED — do not extend, do not wire.
+#
+# Kept, not deleted (★★ MODULARIZE, DON'T DELETE), so the retirement reads as a
+# decision. Two independent reasons it must not acquire a consumer:
+#
+# 1. NO CONSUMERS, AND THE USAGE BELOW IS ASPIRATIONAL. Measured over 49,744
+#    .nix files in ~/code (worktrees excluded): the only file naming
+#    `managed-flake` is this one. In particular blackmatter-pleme does NOT
+#    import it, despite the "Usage in a home-manager module (e.g.
+#    blackmatter-pleme)" example below — that example documents an intent that
+#    was never wired. Do not read it as a description of the fleet.
+#
+# 2. ITS `gem-bump` IS A COMPETING, WORSE IMPLEMENTATION. The fleet's one gem
+#    version writer is `forge gem bump` (pleme-io/forge, cli/src/commands/
+#    gem.rs), which substrate's own `gem:bump` app is a 4-line shim over. The
+#    app below instead seds:
+#        s/VERSION = .*/VERSION = %($new_version).freeze/
+#    which is strictly worse in two measurable ways:
+#      * it NORMALIZES the literal form — 9 of the fleet's 41 root-gemspec
+#        repos write `VERSION = "x"` or `VERSION = 'x'`, and this silently
+#        rewrites their convention to percent-freeze as a side effect of a
+#        version bump;
+#      * `VERSION = .*` does not match `VERSION= ...`, and sed exits 0 on no
+#        match, so on such a file it commits "Bump version to X" having
+#        changed nothing.
+#    `forge gem bump` handles all three forms, PRESERVES the one it finds, and
+#    splices over the matched span so a spacing variant cannot no-op
+#    (forge@e87559f, 3211 tests green).
+#
+# ALSO NOTE: this file string-concatenates Nix syntax to emit a flake, which
+# ★ NixAST forbids (a Nix-emitting renderer builds a typed NixValue and renders
+# through one pretty-printer). If a workspace flake generator is ever wanted
+# again, it is a NixAST rebuild — not a revival of this.
+#
 # Generates a flake.nix file that can be placed at a target directory
 # via home-manager activation (not symlink — real file copy).
 #
