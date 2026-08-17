@@ -1,0 +1,49 @@
+# Case table for substrate/.github/workflows/caixa-tlisp-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS WORKFLOW IS, AND WHY ITS PRIVACY ROW READS THE OTHER WAY.
+# The 2026-08-08 graphql-synthesizer silent-no-publish came from a job guarded
+# `&& !github.event.repository.private`: a private repo bumped, tagged, pushed,
+# published nothing, and reported success. This workflow carries the same
+# `github.event.repository.private` reference — but NOT as a job condition. It
+# appears only inside `runs-on`, choosing `camelot-builder-pleme-eks` over
+# `ubuntu-latest`. Nothing here is gated on visibility, and nothing should be:
+# a tlisp caixa's delivery is the TAG on the repo's own remote (the manifest's
+# :files entries carry each shipped file's :sha256/:size/:body), never a
+# crates.io publish, so a private repo releasing is a fully supported path, not
+# a leak. Rows 1 and 2 therefore pin the OPPOSITE of cargo-auto-release's row 3:
+# public and private must BOTH deliver. If a publish job is ever added behind
+# `&& !private`, row 2 turns it into a NOT-RUN/NEVER finding instead of a green
+# tick, which is the whole point of writing the posture down.
+#
+# WHAT THIS TABLE CANNOT ASSERT — read before trusting a green.
+# `release` is the workflow's ONLY job, and the bump/no-bump distinction lives
+# entirely at STEP level (`if: steps.bump.outputs.bumped == 'true'` on both the
+# commit-and-tag step and the push step). job-selection-lint evaluates job `if:`
+# only, so the no-bump path is modelled here as documentation of the scenario,
+# not as a verified claim: in row 3 the linter checks that the JOB still selects
+# (a re-run of an unchanged main is a green no-op, never version churn) and says
+# nothing at all about whether the tag steps skipped. `steps.bump.outputs.bumped`
+# and `github.event.repository.private` are declared in every row for the same
+# reason — they name the input the row varies — but neither is read by any job
+# condition today. The single path any `if:` here actually touches is
+# `github.actor`.
+
+# Public repo, something changed since the last tag: bump → commit → tag → push.
+public-bump-tags-and-pushes	github.actor=human;github.event_name=push;github.event.repository.private=false;steps.bump.outputs.bumped=true	release
+
+# THE PRIVACY ROW, and it is deliberately the inverse of cargo-auto-release's.
+# A private caixa MUST still release. Visibility routes the runner and nothing
+# else; a green run that quietly delivered nothing would be the defect.
+private-bump-still-releases	github.actor=human;github.event_name=push;github.event.repository.private=true;steps.bump.outputs.bumped=true	release
+
+# Nothing moved in source-paths. caixa-bump reports bumped=false, the job still
+# runs and exits green having tagged nothing. Job-level only — see the caveat
+# above; the step-level skip is outside this linter's scope.
+no-bump-is-a-green-no-op	github.actor=human;github.event_name=push;github.event.repository.private=false;steps.bump.outputs.bumped=false	release
+
+# The loop guard, and the only expect-skip in the table. The job pushes a
+# release commit as the bot; without `github.actor != 'github-actions[bot]'`
+# that push retriggers this workflow, which bumps again, forever.
+bot-actor-no-release-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;steps.bump.outputs.bumped=		release

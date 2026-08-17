@@ -1,0 +1,78 @@
+# Case table for substrate/.github/workflows/auto-release-verify.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS WORKFLOW IS. A PR-time verify gate. `detect` runs unconditionally and
+# emits a repo-type; exactly one per-language `verify-*` job is meant to select on
+# it and run its publish action with dry-run=true. Nothing is bumped, tagged,
+# pushed or published here.
+#
+# WHY THE TABLE EXISTS — AND HOW THIS WORKFLOW DIFFERS FROM cargo-auto-release.
+# The 2026-08-08 graphql-synthesizer silent no-publish came from
+# `&& !github.event.repository.private` on a `ship` job: a green run that shipped
+# nothing, with no row saying that was intended. This workflow has NO such guard
+# in ANY job condition — `github.event.repository.private` appears here only
+# inside `runs-on:`, where it picks the runner label (self-hosted for private
+# callers, so a reusable workflow's billing does not land on the caller). Runner
+# selection is not job selection, so the mandatory public/private publish rows of
+# the sweep have no counterpart here: there is nothing to publish and no privacy
+# branch to assert. That absence is itself the claim this header pins, so the
+# next reader does not go hunting for a row that should not exist. `runs-on` is
+# NOT asserted below — the linter models `if:` only.
+#
+# THE FAILURE SHAPE THAT *DOES* LIVE HERE is the same silent-green class wearing
+# different clothes: the dispatcher is a fixed list of six equality tests, while
+# pleme-io/actions/detect-repo-type emits ELEVEN identifiers. A repo of any of
+# the five unhandled types passes this gate having verified precisely nothing,
+# with a green tick and no warning — `verify-unsupported` cannot catch it,
+# because that job fires on the literal string 'unknown' and a recognized-type
+# repo is not unknown. Rows 7-9 pin that hole open on purpose: they assert the
+# CURRENT behaviour so that closing it (adding go / caixa / ruby-gem dispatch)
+# forces this table to change in the same PR, rather than the hole being
+# rediscovered from another shipped-nothing incident.
+#
+# The single context path any condition here touches is
+# needs.detect.outputs.repo-type, so that is the only key each case declares.
+# No case supplies always()/success()/failure()/cancelled(): no condition calls
+# one, and the linter derives needs-propagation from the selected set.
+
+# ── 1-5: the five types the dispatcher actually handles. One verify job selects,
+# ── the other four plus the unknown-diagnostic stay out. These are the rows that
+# ── turn any future typo in an equality literal into a NOT-RUN finding.
+rust-workspace	needs.detect.outputs.repo-type=rust-workspace	detect,verify-rust-workspace	verify-rust-single-crate,verify-npm,verify-python,verify-helm,verify-unsupported
+
+rust-single-crate	needs.detect.outputs.repo-type=rust-single-crate	detect,verify-rust-single-crate	verify-rust-workspace,verify-npm,verify-python,verify-helm,verify-unsupported
+
+npm	needs.detect.outputs.repo-type=npm	detect,verify-npm	verify-rust-workspace,verify-rust-single-crate,verify-python,verify-helm,verify-unsupported
+
+python	needs.detect.outputs.repo-type=python	detect,verify-python	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-helm,verify-unsupported
+
+helm	needs.detect.outputs.repo-type=helm	detect,verify-helm	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-unsupported
+
+# ── 6: no recognized manifest at root. The ONLY input for which this workflow
+# ── says anything out loud — verify-unsupported writes two ::warning:: lines.
+unknown-warns	needs.detect.outputs.repo-type=unknown	detect,verify-unsupported	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-helm
+
+# ── 7: THE SILENT-GREEN ROW, and the reason 'go' is named rather than any other
+# ── unhandled type: the workflow's own "Pending parity" comment lists
+# ── ansible-collection / ruby-gem / github-action and OMITS go, so a Go repo's
+# ── verify gate passes without verifying and without appearing on any TODO.
+go-verifies-nothing	needs.detect.outputs.repo-type=go	detect	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-helm,verify-unsupported
+
+# ── 8: the second omission from that comment. caixa repos are a first-class
+# ── pleme-io shape with their own publish workflows; here they fall straight
+# ── through.
+caixa-verifies-nothing	needs.detect.outputs.repo-type=caixa	detect	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-helm,verify-unsupported
+
+# ── 9: stands in for the three types the comment DOES acknowledge as pending
+# ── (ansible-collection, ruby-gem, github-action). Acknowledged in prose is
+# ── still a green tick over an unverified repo; asserted here so the day the
+# ── gem-publish dispatch lands, this row must be rewritten rather than quietly
+# ── keep passing.
+ruby-gem-pending-parity	needs.detect.outputs.repo-type=ruby-gem	detect	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-helm,verify-unsupported
+
+# ── 10: an EMPTY repo-type is not 'unknown'. If the detect step's output is ever
+# ── unset (an empty `${{ steps.detect.outputs.repo-type }}` interpolation), the
+# ── diagnostic job does NOT fire — the equality test is against the literal
+# ── string 'unknown'. Pinned so nobody assumes the unknown branch is a catch-all.
+empty-repo-type-is-not-unknown	needs.detect.outputs.repo-type=	detect	verify-rust-workspace,verify-rust-single-crate,verify-npm,verify-python,verify-helm,verify-unsupported

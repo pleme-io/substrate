@@ -1,0 +1,60 @@
+# Case table for substrate/.github/workflows/python-auto-release.yml
+#
+# TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
+#
+# WHAT THIS PINS
+#   Two jobs, one edge: bump -> ship. `bump` is gated only on the actor (bot
+#   loop-break); `ship` is gated only on `needs.bump.outputs.bumped == 'true'`
+#   and inherits skip-when-my-dependency-skipped (no always() anywhere here).
+#   So the whole selection surface is (actor x bumped), and every row below is
+#   one cell of it. Rows 1-4 also carry the privacy axis - see the next block
+#   for why, because that is the point of the sweep.
+#
+# THE PRIVACY AXIS IS DECLARED AND DELIBERATELY INERT - READ THIS BEFORE
+# DELETING A ROW AS A DUPLICATE.
+#   The sweep exists because cargo-auto-release's publish jobs carry
+#   `&& !github.event.repository.private`, so a private repo bumps, tags,
+#   pushes and publishes NOTHING while reporting success. THIS WORKFLOW HAS NO
+#   SUCH GUARD. `github.event.repository.private` appears twice in this file
+#   (lines 53 and 85) and BOTH are inside `runs-on:` - runner routing, not job
+#   selection. Neither `if:` mentions it, and the caller that dispatches here
+#   (auto-release.yml's `python` job, gated only on repo-type) does not gate on
+#   it either.
+#
+#   Consequence, asserted by rows public-bump and private-bump-publishes-anyway
+#   being IDENTICAL in expectation: python-auto-release publishes to pypi.org
+#   from a PRIVATE repo. That is the opposite of the cargo family's posture. It
+#   is pinned here as measured behaviour, NOT endorsed - if the fleet posture is
+#   'never publish from a private repo', the fix belongs in the workflow and
+#   private-bump-publishes-anyway then flips to expect-skip=ship in the same PR.
+#   The two rows are kept as a PAIR on purpose: one row alone cannot show that
+#   the privacy value changes nothing, and 'changes nothing' is the finding.
+#
+#   The key is declared in every case even though no condition reads it, so the
+#   day a guard is added the table already carries the axis it must be asserted
+#   on, and the rows differ by the value that will then matter.
+#
+# NO STATUS FUNCTIONS ARE SUPPLIED because no condition calls one. always() is
+# absent from this workflow, which is exactly why `ship` cannot pick a run up
+# after `bump` skips - see bot-actor-no-loop.
+
+# 1. The happy path. A public repo bumped, so it must also ship.
+public-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship	
+
+# 2. THE SWEEP ROW. Same input, private repo. `ship` STILL RUNS - unguarded.
+#    Flip this to expect-skip=ship only together with a workflow change.
+private-bump-publishes-anyway	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship	
+
+# 3. Nothing to release: bump ran and reported no version change, so ship is
+#    skipped by its own condition (not by needs-propagation).
+public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+
+# 4. The private half of row 3, proving privacy is inert in the no-bump cell
+#    too - so a future guard cannot be mistaken for this row already covering it.
+private-no-bump	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=false	bump	ship
+
+# 5. Loop-break: the bot's own push must not re-trigger a release. `bump` is
+#    skipped by actor, and `ship` is skipped by needs-propagation - the empty
+#    `bumped` value models a SKIPPED upstream, which is distinct from 'false'.
+#    Nothing runs; the run is green and empty, by design.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship

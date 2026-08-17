@@ -1,0 +1,45 @@
+# Case table for substrate/.github/workflows/npm-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. npm-auto-release has exactly two jobs, bump -> ship, and only
+# two context paths appear in any `if:` — github.actor (the bot re-trigger loop
+# guard on bump) and needs.bump.outputs.bumped (the publish gate on ship). The
+# table fixes the selected set for every combination that can actually occur.
+#
+# ROW 2 IS THE POINT OF THIS FILE, AND IT SAYS THE OPPOSITE OF ITS CARGO SIBLING.
+# The sweep exists because cargo-auto-release publishes only when
+#   needs.bump.outputs.bumped == 'true' && !github.event.repository.private
+# so a private repo bumps, tags, pushes and publishes NOTHING, on purpose and
+# silently. npm-auto-release DOES NOT CARRY THAT GUARD. Its ship condition is
+# bumped == 'true' alone; github.event.repository.private appears in this file
+# ONLY inside the two runs-on runner-routing expressions (lines 64 and 96),
+# which select a runner and never gate a job. So a private repo running this
+# workflow DOES publish to npmjs.org. Row 2 asserts that, deliberately, so the
+# divergence is written down instead of being assumed either way. If the guard
+# is ever added to ship (matching the cargo posture), row 2 goes RED and names
+# the change — which is the whole point of asserting the current behaviour
+# rather than the behaviour someone expects.
+#
+# github.event.repository.private is declared in every case even though no
+# `if:` reads it: it is the key the sweep is about, and a row that models "the
+# private repo case" while never mentioning private would be unreadable.
+# always() and github.event_name are declared for the same reason — a later
+# always() on a retry/cleanup job must not silently re-read as undeclared.
+#
+# needs-propagation is asserted by row 4: bump is skipped by the bot guard, so
+# ship is skipped too even though nothing about ship's own condition changed.
+# Its bumped value is EMPTY, not 'false', because that is what a skipped
+# upstream job yields — a distinct state the table is able to say.
+
+public-bump	github.actor=human;github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=true;always()=true	bump,ship	
+
+# THE DIVERGENCE ROW. Unlike cargo-auto-release, a PRIVATE repo publishes here.
+private-bump-publishes-anyway	github.actor=human;github.event_name=push;github.event.repository.private=true;needs.bump.outputs.bumped=true;always()=true	bump,ship	
+
+# No version change: bump runs and reports bumped=false; ship is correctly gated off.
+public-no-bump	github.actor=human;github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=false;always()=true	bump	ship
+
+# Loop guard: the push that bump itself made must not re-enter. bump skips, and
+# ship skips by needs-propagation (it declares no always()).
+bot-push-loop-guard	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=;always()=true		bump,ship

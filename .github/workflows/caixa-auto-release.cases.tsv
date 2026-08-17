@@ -1,0 +1,52 @@
+# Case table for substrate/.github/workflows/caixa-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. Two jobs, and exactly two facts decide which of them run:
+#   bump  if: github.actor != 'github-actions[bot]'      (no needs)
+#   ship  if: needs.bump.outputs.bumped == 'true'        (needs: bump)
+# So the table's job is to hold three claims still: a bump publishes, a no-bump
+# does not, and the bot's own push does not re-enter the loop.
+#
+# WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
+# cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
+# nothing — its ship job carried `&& !github.event.repository.private` and was
+# silently skipped. A deliberate no-publish and a broken no-publish were the
+# same green tick, because nobody had written down which jobs must run.
+#
+# READ ROW 2 BEFORE CHANGING ANYTHING. caixa-auto-release does NOT carry that
+# privacy guard in any `if:`, and that is deliberate, not an oversight. It reads
+# github.event.repository.private twice, but only inside `runs-on`, where it
+# picks a self-hosted label so a private consumer is not billed for metered
+# minutes — a runner selector, never a selection gate. The reason the guard is
+# absent here and present in cargo-auto-release is the DESTINATION of the
+# publish: caixa-publish pushes a rendered Helm chart to our own OCI registry,
+# where a private repo shipping a private artifact is the correct outcome;
+# cargo publish pushes to the public crates.io index, where it would leak the
+# source and where a yank cannot be undone. Same shape, opposite right answer.
+#
+# `github.event.repository.private` is therefore declared in every case even
+# though no `if:` reads it. It is the axis the sibling workflow turns on, and a
+# row that did not state it would leave the next reader unable to tell whether
+# this workflow was checked against it or merely never thought about. If a
+# `&& !github.event.repository.private` is ever added to ship, row 2 goes red
+# and the change has to be argued for rather than absorbed.
+
+# 1. The happy path on a public repo: a bump publishes.
+public-bump-publishes	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship
+
+# 2. THE ROW THAT WAS MISSING WHEN graphql-synthesizer SHIPPED NOTHING — asserted
+#    here with the OPPOSITE expectation, on purpose. A private caixa repo DOES
+#    publish, because the artifact goes to our own OCI registry and never to a
+#    public index. See the header. Do not "fix" this row to match the cargo one.
+private-bump-publishes	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship
+
+# 3. Nothing to release: bump runs and finds no change, so ship must not fire.
+#    This is the case that keeps ship's condition from being weakened to always().
+public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+
+# 4. The bot's own commit-and-push must not re-trigger the pipeline. bump is
+#    skipped by the actor guard; ship is skipped both by its own condition and by
+#    needs-propagation. The empty value models a SKIPPED upstream job, which is a
+#    distinct state from 'false' — bump never ran, so it emitted no output at all.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship

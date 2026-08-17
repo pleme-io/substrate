@@ -1,0 +1,65 @@
+# Case table for substrate/.github/workflows/cargo-publish-each-member-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS. The workflow has exactly ONE job (`release`) and exactly ONE
+# job-level condition: `github.actor != 'github-actions[bot]'`. So there is one
+# real axis of selection — bot vs human — and everything else this table
+# declares is pinned deliberately as a NEGATIVE: to record which inputs do NOT
+# move the selection, so a future edit that makes one of them matter shows up as
+# a diff here instead of as a silent behaviour change.
+#
+# WHY IT EXISTS — and the finding it records. This file is part of the sweep
+# opened by graphql-synthesizer on 2026-08-08: a release workflow reported
+# SUCCESS, bumped + tagged + pushed, published nothing, and nothing said so,
+# because its ship job carried `&& !github.event.repository.private`. Every
+# `*-auto-release*.yml` in substrate carries a `repository.private` guard, so
+# each was swept for that silent-no-publish shape.
+#
+# THIS WORKFLOW DOES NOT HAVE THAT SHAPE, AND THE INVERSE IS THE POINT.
+# Its single `github.event.repository.private` occurrence is in `runs-on`:
+#
+#   runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+#
+# which selects a RUNNER LABEL (a reusable workflow's runs-on bills the CALLER,
+# so a metered label here charges every private consumer). It is NOT a publish
+# guard, and neither the job nor the composite action it calls
+# (pleme-io/actions/cargo-publish-each-member — checked 2026-08-17, no privacy
+# guard in action.yml or run.tlisp) gates publication on repo visibility.
+# CONSEQUENCE: a PRIVATE caller of this reusable workflow DOES publish to
+# crates.io. Rows `public-human-push` and `private-human-push-STILL-PUBLISHES`
+# assert exactly that, identical selection on both, so the divergence from
+# cargo-auto-release.yml's posture is written down rather than inferred. If a
+# privacy guard is ever added to this workflow, the private row must flip to
+# expect-skip in the SAME commit — that flip is the whole review signal.
+#
+# NO no-bump ROW, deliberately. The bump/skip-when-no-source-changes decision
+# lives inside the composite action's steps, per workspace member, and is
+# invisible to job selection: no `needs.*.outputs.bumped` exists to model. A
+# fabricated no-bump row would assert nothing and read as coverage. The
+# `skip-when-no-source-changes` axis is unassertable at this layer — see the
+# workflow's own inputs.
+#
+# always() is supplied per case even though no condition reads it, so a rerun
+# posture is expressible the day a second job (needs-propagating) lands.
+
+# Baseline: a human push on a PUBLIC repo. The one job runs and publishes.
+public-human-push	github.actor=human;github.event_name=push;github.event.repository.private=false;always()=true	release	
+
+# THE ROW WORTH READING. Same selection as the public row, on purpose: private
+# repos publish through this workflow. Not a bug and not an oversight in the
+# table — it is the measured posture, asserted so a change to it cannot be
+# silent. Contrast cargo-auto-release.yml, whose ship job skips here.
+private-human-push-STILL-PUBLISHES	github.actor=human;github.event_name=push;github.event.repository.private=true;always()=true	release	
+
+# The loop guard: the action pushes per-member tags, a tag push re-triggers the
+# caller, and the bot must not publish again. This is the workflow's only real
+# selection decision.
+bot-actor-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;always()=true		release
+
+# Same guard on a private repo — the actor check is visibility-independent.
+bot-actor-private-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=true;always()=true		release
+
+# A non-push trigger (a caller wiring this to workflow_dispatch or schedule)
+# changes nothing: event_name is pinned as a negative, per the header.
+human-dispatch-still-runs	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;always()=true	release	

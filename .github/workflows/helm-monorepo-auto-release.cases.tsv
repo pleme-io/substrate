@@ -1,0 +1,69 @@
+# Case table for substrate/.github/workflows/helm-monorepo-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHY THIS TABLE EXISTS
+# On 2026-08-08 pleme-io/graphql-synthesizer ran cargo-auto-release, reported
+# SUCCESS, and published nothing: its `ship` job carried
+# `&& !github.event.repository.private`, the repo was private, the job skipped,
+# and a deliberate no-publish looked identical to a broken one. All sixteen
+# substrate *-auto-release*.yml workflows touch `repository.private`, so every
+# one of them gets a table saying which jobs must select for which input.
+#
+# WHAT THIS WORKFLOW ACTUALLY DOES WITH `repository.private` — the finding
+# THIS workflow's single occurrence of `github.event.repository.private` is in
+# `runs-on`, NOT in any `if:`. It is RUNNER ROUTING (private -> the
+# camelot-builder-pleme-eks ARC pool to avoid billed hosted minutes, public ->
+# unmetered ubuntu-24.04), not a publish gate. So the graphql-synthesizer shape
+# is structurally absent here: privacy changes WHERE the job runs, never WHETHER
+# it runs. The two mandatory public/private rows below pin exactly that, and the
+# private row is the one that would go red if somebody ever "harmonised" this
+# workflow with the cargo one by copying that guard into the `if:`.
+#
+# That divergence is correct and deliberate, not an oversight: cargo-auto-release
+# publishes to crates.io, where a private repo's code would leak publicly and a
+# yank cannot be undone. This workflow publishes Helm charts to the org's OWN
+# OCI registry (ghcr.io/pleme-io/charts), where a private chart's package stays
+# private — per-package visibility is set out-of-band (see the workflow header).
+# Refusing to publish from a private repo here would mean private chart repos
+# such as helmworks-akeyless never ship at all.
+#
+# NO BUMP CASE — deliberately absent, because the workflow has no bump job to
+# distinguish one with. A chart monorepo has no root Chart.yaml, so there is
+# nothing to auto-bump; each chart's version is hand-bumped in its own
+# Chart.yaml, and every push to main re-runs `nix run .#release` (forge helm
+# release-all), which 404-probes each (name, version) and skips whatever is
+# already on the registry. "Nothing was bumped" is therefore a RUNTIME no-op
+# inside a job that still selects — not a job-selection state, and not
+# something this linter can or should assert. If a bump job is ever added, this
+# table gains a no-bump row in the same PR.
+#
+# UNMODELLED, stated so nobody reads a green run as more than it is: the
+# `Fail the job if any upstream mirror failed` STEP is gated on
+# `steps.mirror.outcome == 'failure'`, and step-level conditions are outside
+# this linter's plane entirely (it asserts job selection). The mirror step's
+# `continue-on-error: true` is likewise unmodelled. Both are load-bearing —
+# see the workflow's own comments — and neither is covered here.
+#
+# Every context path a case's conditions touch must be declared, and an
+# undeclared path is an error rather than an empty default. Only
+# `github.actor` is actually read by the one `if:`; the
+# `github.event.repository.private` value is declared on every row anyway so
+# the public/private axis this sweep is about is visible in the table rather
+# than only in this comment.
+
+# 1. MANDATORY (public + would-publish): a human merge to main on a PUBLIC caller
+# repo. `publish` must select — this is the ship-on-merge path itself.
+public-repo-human-merge	github.actor=drzzln;github.event.repository.private=false	publish
+
+# 2. MANDATORY (private + would-publish): the graphql-synthesizer row. On a
+# PRIVATE caller repo `publish` must STILL select. Privacy routes this job to
+# the ARC pool; it does not gate it. Expecting a skip here would be importing
+# the crates.io posture into an OCI-registry workflow and would silently stop
+# every private chart repo from shipping.
+private-repo-human-merge	github.actor=drzzln;github.event.repository.private=true	publish
+
+# 3. The only real guard on this workflow: the self-trigger break. `publish` is
+# skipped when the pusher is github-actions[bot], so a bot commit (a consumer
+# that later adds a bump step) cannot loop the release on itself.
+bot-actor-self-trigger-guard	github.actor=github-actions[bot];github.event.repository.private=false		publish

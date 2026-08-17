@@ -1,0 +1,72 @@
+# job-selection-lint case table for auto-release.yml
+# Format: <case-name> \t <context k=v;k=v> \t <expect-run csv> \t <expect-skip csv>
+#
+# WHAT THIS PINS, AND WHY IT EXISTS.
+# auto-release.yml is the polymorphic DISPATCHER: `detect` classifies the repo,
+# and exactly ONE per-language arm must select for that classification. Its
+# entire selection surface is one context path — needs.detect.outputs.repo-type
+# — so every row below declares that path and nothing else is needed to decide
+# any job.
+#
+# The class of bug this table forecloses is the one this workflow has already
+# shipped twice, both recorded in the workflow's own comments:
+#   (1) before 2026-07-27 the `unsupported` catch-all gated on `== 'unknown'`
+#       rather than a NEGATION of the dispatched set, so a repo detected as
+#       ruby-gem / ansible-collection / github-action matched NO arm and no
+#       catch-all: the run completed with zero jobs and reported GREEN while
+#       publishing nothing. Rows `ruby-gem-repo`, `unknown-repo` and
+#       `detect-emitted-nothing` are the ones that would have caught it — each
+#       asserts `unsupported` RUNS, which is only true while the catch-all
+#       stays a negation.
+#   (2) an arm added to the file but left out of `unsupported`'s negation list
+#       would double-select. Every row asserts every non-matching arm SKIPS, so
+#       a new arm that forgets its negation clause turns this table red.
+# Adding a dispatch arm therefore means adding its own row here AND appearing in
+# the expect-skip column of all twelve other rows — that is deliberate friction
+# on exactly the edit that broke this workflow before.
+#
+# PRIVACY IS NOT GATED IN THIS FILE — read this before looking for it.
+# The sweep that produced this table exists because cargo-auto-release's `ship`
+# job carries `&& !github.event.repository.private`, which silently no-published
+# pleme-io/graphql-synthesizer on 2026-08-08. That guard is NOT here: this
+# dispatcher's only `github.event.repository.private` reference is in `runs-on:`
+# (runner routing), which is not a selection predicate and which this linter
+# does not evaluate. The publish/no-publish decision happens ONE LEVEL DOWN,
+# inside the reusable each arm calls, and is asserted in that workflow's own
+# cases file (cargo-auto-release.cases.tsv et al) — not here.
+# The `rust-single-crate-public` / `rust-single-crate-private` pair is kept
+# anyway, and it is not decoration: it pins that DISPATCH is privacy-INDEPENDENT
+# — the same arm is selected either way — so a future edit that tried to fix the
+# silent-no-publish by short-circuiting the arm at this level (skipping
+# rust-single-crate entirely on a private repo, which would trade a silent
+# no-publish for a silent no-bump) fails this table instead of shipping.
+# The privacy key is declared in those two rows and read by no condition; that
+# is the point of the pair.
+#
+# `detect` has no `if:` and no `needs:`, so it selects in every case. It is
+# named in every expect-run column rather than left unasserted, so a future
+# `if:` added to it cannot pass unnoticed.
+#
+# CASES 1-10 — one row per type detect-repo-type emits that HAS a dispatch arm.
+rust-workspace-repo	needs.detect.outputs.repo-type=rust-workspace	detect,rust-workspace	rust-single-crate,go,npm,python,helm,ansible-collection,github-action,caixa,unsupported
+rust-single-crate-public	needs.detect.outputs.repo-type=rust-single-crate;github.event.repository.private=false	detect,rust-single-crate	rust-workspace,go,npm,python,helm,ansible-collection,github-action,caixa,unsupported
+rust-single-crate-private	needs.detect.outputs.repo-type=rust-single-crate;github.event.repository.private=true	detect,rust-single-crate	rust-workspace,go,npm,python,helm,ansible-collection,github-action,caixa,unsupported
+go-repo	needs.detect.outputs.repo-type=go	detect,go	rust-workspace,rust-single-crate,npm,python,helm,ansible-collection,github-action,caixa,unsupported
+npm-repo	needs.detect.outputs.repo-type=npm	detect,npm	rust-workspace,rust-single-crate,go,python,helm,ansible-collection,github-action,caixa,unsupported
+python-repo	needs.detect.outputs.repo-type=python	detect,python	rust-workspace,rust-single-crate,go,npm,helm,ansible-collection,github-action,caixa,unsupported
+helm-repo	needs.detect.outputs.repo-type=helm	detect,helm	rust-workspace,rust-single-crate,go,npm,python,ansible-collection,github-action,caixa,unsupported
+ansible-collection-repo	needs.detect.outputs.repo-type=ansible-collection	detect,ansible-collection	rust-workspace,rust-single-crate,go,npm,python,helm,github-action,caixa,unsupported
+github-action-repo	needs.detect.outputs.repo-type=github-action	detect,github-action	rust-workspace,rust-single-crate,go,npm,python,helm,ansible-collection,caixa,unsupported
+caixa-repo	needs.detect.outputs.repo-type=caixa	detect,caixa	rust-workspace,rust-single-crate,go,npm,python,helm,ansible-collection,github-action,unsupported
+# CASES 11-13 — the three inputs that must reach the catch-all rather than fall
+# through to a zero-job green run.
+#   ruby-gem: emitted by detect-repo-type and DELIBERATELY armless (gem-release
+#             declares RUBYGEMS_API_KEY required:true, which would re-create the
+#             unsatisfiable secret union). It must fail loudly, not vanish.
+#   unknown:  no recognized manifest at repo root.
+#   empty:    detect ran but published no repo-type (a broken/changed
+#             detect-repo-type). Distinct from 'unknown' — the action never said
+#             so — and it must still land on the catch-all, not nowhere.
+ruby-gem-repo	needs.detect.outputs.repo-type=ruby-gem	detect,unsupported	rust-workspace,rust-single-crate,go,npm,python,helm,ansible-collection,github-action,caixa
+unknown-repo	needs.detect.outputs.repo-type=unknown	detect,unsupported	rust-workspace,rust-single-crate,go,npm,python,helm,ansible-collection,github-action,caixa
+detect-emitted-nothing	needs.detect.outputs.repo-type=	detect,unsupported	rust-workspace,rust-single-crate,go,npm,python,helm,ansible-collection,github-action,caixa

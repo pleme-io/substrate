@@ -1,0 +1,75 @@
+# Case table for substrate/.github/workflows/go-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS, AND THE ONE THING IT PINS THAT NO OTHER TABLE IN THE FAMILY
+# DOES.
+#
+# This file exists because of the 2026-08-08 graphql-synthesizer run:
+# cargo-auto-release reported SUCCESS, bumped + tagged + pushed, and published
+# nothing, because its `ship` job carries `&& !github.event.repository.private`.
+# That guard is correct — publishing from a private repo leaks code to crates.io
+# and undoes yanks — but nobody had written down which jobs must run for a given
+# input, so a deliberate no-publish and a broken no-publish were the same green
+# tick.
+#
+# THE GO WORKFLOW IS THE OPPOSITE CASE, AND THAT IS THE ASSERTION WORTH HAVING.
+# go-auto-release also carries `github.event.repository.private`, three times —
+# but every occurrence is in a `runs-on:` runner-routing expression
+# (`private && 'camelot-builder-pleme-eks' || 'ubuntu-latest'`), and NOT ONE is
+# in a job `if:`. So repo visibility changes WHERE the FSM runs and never
+# WHETHER it runs: a private repo reaches `tag` and `proxy-confirm` exactly like
+# a public one. Rows `public-bump` and `private-bump-still-proxies` are the same
+# selection on purpose, and that sameness is the claim. If someone later copies
+# cargo's `&& !private` onto `proxy-confirm`, `private-bump-still-proxies` turns
+# red — which is the whole point of writing the posture down instead of
+# inferring it from a green tick.
+#
+# The posture is deliberate and safe for Go, for a reason specific to the
+# pull model: Go's "publish" is `git push origin <tag>` and nothing else.
+# There is no upload. proxy.golang.org cannot fetch a private repo, so the
+# ConfirmProxy poll simply exhausts its budget and emits a warning
+# (ProxyTimedOut is a defined in-FSM outcome, not a failure). Nothing leaks and
+# nothing needs a privacy guard, so there is none.
+#
+# Context paths touched by the workflow's conditions, and therefore mandatory in
+# every row: github.actor, needs.tag.outputs.created, needs.tag.outputs.skip.
+# github.event.repository.private is declared too, though no `if:` reads it —
+# it names each row's visibility posture so the public/private pair is legible,
+# and it is the key a future privacy guard would land on.
+#
+# An empty value (`needs.tag.outputs.created=`) models a SKIPPED upstream `tag`
+# job, which is a distinct state from 'false'.
+#
+# None of the three conditions calls always()/success()/failure()/cancelled(),
+# so no status function is supplied. Every job here is therefore subject to
+# needs-propagation: `validate` skipping takes the whole chain down with it.
+
+# The happy path. Public repo, a human pushed, relver found changed Go source
+# and created a fresh tag — the full Drafted→Validated→Tagged→Proxied→Verified
+# FSM selects, end to end.
+public-bump	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=false	validate,tag,proxy-confirm
+
+# THE ROW THAT WOULD HAVE BEEN MISSING. Identical selection to public-bump on a
+# PRIVATE repo: the Go family has no `!private` publish guard, and must not
+# acquire one silently. See the header for why the pull model makes this safe.
+private-bump-still-proxies	github.actor=human;github.event.repository.private=true;needs.tag.outputs.created=true;needs.tag.outputs.skip=false	validate,tag,proxy-confirm
+
+# No Go source moved since the last tag: relver reports skip=true and creates
+# nothing, so the FSM stops at Tagged and the proxy/verify pair is correctly
+# not reached. This is a no-op run, not a broken one.
+no-source-changed	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=false;needs.tag.outputs.skip=true	validate,tag	proxy-confirm
+
+# Pins the SECOND conjunct of proxy-confirm's condition on its own. no-source-
+# changed already falsifies `created == 'true'`; this row falsifies only
+# `skip != 'true'`, so neither half can be deleted without a red row. Models the
+# resume shape: relver finds the tag already present, so it reports the tag as
+# created while still flagging the run as a skip.
+tag-exists-relver-skips	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=true	validate,tag	proxy-confirm
+
+# The bot's own tag push must not re-enter the FSM. `validate` guards on the
+# actor, and because nothing here calls always(), needs-propagation carries the
+# skip through `tag` and `proxy-confirm`. tag's outputs are empty (not 'false')
+# precisely because it never ran. A regression that let this loop would show up
+# as a RAN finding on all three jobs.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.tag.outputs.created=;needs.tag.outputs.skip=		validate,tag,proxy-confirm

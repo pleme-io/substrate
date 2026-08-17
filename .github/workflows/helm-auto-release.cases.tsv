@@ -1,0 +1,66 @@
+# Case table for substrate/.github/workflows/helm-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHY THIS FILE EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran
+# cargo-auto-release. The run reported SUCCESS: `bump` bumped, tagged and
+# pushed; `ship` was SKIPPED; the crate was never published; nothing said so.
+# The condition was `needs.bump.outputs.bumped == 'true' && !github.event.
+# repository.private`, which is correct and deliberate — publishing from a
+# private repo leaks code to crates.io and undoes yanks. The failure was that
+# nobody had written down which jobs must run for a given input, so a
+# deliberate no-publish and a broken no-publish were the same green tick.
+#
+# WHAT THE SWEEP FOUND HERE, and the reason to read this header before editing
+# a row. helm-auto-release does NOT share that shape. Both of its
+# `github.event.repository.private` occurrences are in `runs-on:` — runner
+# routing only (private caller -> the camelot-builder-pleme-eks ARC pool,
+# public caller -> ubuntu-latest). NEITHER is in an `if:`. So `ship` packages
+# and pushes the chart to the OCI registry from a PRIVATE caller exactly as it
+# does from a public one. Whether that is the intended posture for charts is a
+# decision this table does not make; it records the behaviour so the decision
+# is visible instead of implicit.
+#
+# Rows 1 and 2 therefore differ ONLY in a context key that no condition reads,
+# and that is deliberate — it is the tripwire. The day someone copies
+# cargo-auto-release's `&& !github.event.repository.private` onto `ship`, row 2
+# turns NOT-RUN and the change lands as a decision rather than as a silent stop
+# to every private chart's publishing.
+#
+# TABLE RULES that make these rows verbose on purpose:
+#   - every context path any condition touches must be declared in EVERY case;
+#     an undeclared path is an ERROR, not an empty default, so an incomplete
+#     case can never become a confident verdict;
+#   - an EMPTY value (needs.bump.outputs.bumped=) models a SKIPPED upstream
+#     job, which is a distinct state from 'false';
+#   - `ship` needs `bump` and does not call always(), so a skipped `bump`
+#     propagates to a skipped `ship` — rows 4 and 5 pin that.
+#
+# NOT ASSERTED, because it is outside what job selection can see: this table
+# proves `ship` is SELECTED, never that the chart became resolvable. That is
+# the job's own final step ("verify the published chart is resolvable"), which
+# runs inside `ship` and is a different layer of check.
+
+# 1. The healthy public release. Both jobs run; nothing is skipped.
+public-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship
+
+# 2. A PRIVATE caller that bumped still publishes — unlike cargo-auto-release,
+# this workflow has no privacy guard on `ship`. Asserted, not assumed.
+private-bump-still-publishes	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship
+
+# 3. Nothing under source-paths changed, so helm-bump reports bumped=false and
+# `ship` must skip. A no-op run is a legitimate green, and this row is what
+# distinguishes it from a broken one.
+public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+
+# 4. Same no-bump outcome from a private caller: the skip is driven by the bump
+# result, never by visibility. Pairs with row 2 to pin that visibility changes
+# NOTHING about which jobs select in this workflow.
+private-no-bump	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=false	bump	ship
+
+# 5. The loop guard. `bump` pushes a commit as the bot, and that push re-enters
+# this workflow; `if: github.actor != 'github-actions[bot]'` stops the second
+# pass. `bump` is skipped, so `bumped` is EMPTY (not 'false'), and `ship` is
+# skipped by needs-propagation — it never calls always(). If `ship` ever grows
+# an always(), this row goes RAN and the re-publish loop is caught here.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship

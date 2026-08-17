@@ -1,29 +1,25 @@
-# job-selection-selftest — assert which jobs substrate's reusable workflows run.
+# job-selection-selftest — assert which jobs these reusable workflows run.
 #
-# WHY THIS EXISTS. On 2026-08-08 graphql-synthesizer ran cargo-auto-release.
-# The run reported SUCCESS. `bump` bumped, tagged and pushed; `ship` was
-# SKIPPED; the crate was never published; and nothing said so. The condition —
-# `needs.bump.outputs.bumped == 'true' && !github.event.repository.private` —
-# is correct and deliberate: publishing from a private repo leaks code to
-# crates.io and undoes yanks. The failure was that nobody had written down
-# WHICH JOBS MUST RUN for a given input, so a deliberate no-publish and a
-# broken one were the same green tick.
+# WHY. On 2026-08-08 graphql-synthesizer ran cargo-auto-release. The run
+# reported SUCCESS. `bump` bumped, tagged and pushed; `ship` was SKIPPED; the
+# crate was never published; and nothing said so. The condition —
+# `needs.bump.outputs.bumped == 'true' && !github.event.repository.private` — is
+# correct and deliberate. The failure was that nobody had written down WHICH
+# JOBS MUST RUN for a given input, so a deliberate no-publish and a broken one
+# were the same green tick.
 #
-# Unit tests cannot catch that: the condition is not in any action's code.
-# actionlint cannot catch it: the expression is valid. This is the missing
-# third layer — evaluate each job's `if:` against a table of contexts and
-# compare the selected set to what the table declares.
+# Unit tests cannot see that: the condition is not in any action's code.
+# actionlint cannot see it: the expression is valid. This is the missing third
+# layer — evaluate each job's `if:` against a table of contexts and compare the
+# selected set against what the table declares.
 #
-# THE TABLES LIVE NEXT TO THE WORKFLOWS THEY DESCRIBE, as
-# `<workflow>.cases.tsv`. That co-location is the point: a workflow edit and
-# its table edit land in the same PR and this job fails in the same repo. A
-# table kept anywhere else goes stale the first time someone edits a condition
-# without knowing the table exists.
+# NO MATRIX, NO LIST. The action discovers every `<workflow>.cases.tsv` beside
+# its `<workflow>.yml`, so adding a table is the WHOLE act of adding coverage.
+# A hand-listed matrix would be a second place to remember, and the table nobody
+# remembered to add to it is indistinguishable from one that passes — which is
+# the same class of defect this check exists to catch, one level up.
 #
-# The check that matters most is `never-selects` — a job that fires in NO
-# declared case. pre-merge-gate is called by 171 repos, so a job that silently
-# stops selecting there stops gating 171 repos at once, and every one of them
-# stays green.
+# Discovery finding nothing is a failure, not a pass.
 
 name: job-selection-selftest
 
@@ -43,24 +39,15 @@ permissions:
 
 jobs:
   selection:
-    name: 'selection · ${{ matrix.workflow }}'
+    name: 'selection · every table in .github/workflows'
     runs-on: ubuntu-latest
-    strategy:
-      # fail-fast off: one workflow's drift should not hide another's.
-      fail-fast: false
-      matrix:
-        workflow:
-          - cargo-auto-release
-          - pre-merge-gate
     steps:
       - uses: actions/checkout@v4
 
-      # A table naming a job the workflow does not have is reported as STALE,
-      # and a job named in no case is reported as unasserted — so adding a job
-      # without covering it is visible here rather than discovered later by its
-      # absence.
+      # A table naming a job the workflow lacks is STALE; a job named in no case
+      # is reported unasserted. So adding a job without covering it is visible
+      # here rather than discovered later by its absence.
       - uses: pleme-io/actions/job-selection-lint@main
         with:
-          workflow: .github/workflows/${{ matrix.workflow }}.yml
-          cases: .github/workflows/${{ matrix.workflow }}.cases.tsv
+          workflow-dir: .github/workflows
           fail-on-violation: "true"

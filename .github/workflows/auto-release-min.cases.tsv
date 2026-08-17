@@ -1,0 +1,56 @@
+# Case table for substrate/.github/workflows/auto-release-min.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. auto-release-min is the bisect probe of the release
+# family: detect the repo type, hand a caixa repo to the real release workflow,
+# and fail loudly on anything else. Its whole contract is a two-arm PARTITION of
+# detect's output — exactly one of `caixa`/`unsupported` runs, always. The rows
+# below assert both arms so the partition cannot silently become "neither"
+# (flip `!=` to `==` and every non-caixa repo goes green having released
+# nothing) or "both" (an inverted arm double-dispatches).
+#
+# WHY THERE IS NO PRIVACY-SKIP ROW HERE, unlike cargo-auto-release.cases.tsv.
+# `github.event.repository.private` appears twice in this workflow and BOTH
+# occurrences are in `runs-on` — they pick a billing label, not a job. No `if:`
+# in this file reads privacy, so no job here can be privacy-skipped and there is
+# nothing honest to assert as one. Asserting a skip that the workflow cannot
+# produce would be a row that reads as coverage and is not.
+#
+# The key is still declared in every case, on purpose: it is a TRIPWIRE. The day
+# someone adds `&& !github.event.repository.private` to the `caixa` arm — the
+# exact edit that made graphql-synthesizer ship nothing while reporting success —
+# the private row below turns red with NOT-RUN, forcing the posture to be stated
+# rather than acquired. Today it costs nothing and asserts nothing; it is here so
+# that tomorrow it does.
+#
+# WHAT THIS FILE CANNOT SEE, stated so nobody reads its green as broader than it
+# is. `caixa` is a `uses:` dispatch into caixa-tlisp-auto-release.yml. This
+# linter models dispatch only — never the called workflow's own conditions. That
+# delegate has one job (`release`, gated on actor, no privacy gate), and its
+# publish is gated at STEP level (`steps.bump.outputs.bumped == 'true'`), which
+# is below this tool's resolution entirely. "caixa ran" here means "the delegate
+# was invoked", never "a release was published". The delegate needs its own
+# table; this one does not cover it.
+#
+# The two arms are total, so a caixa repo's public/private rows select
+# identically today. That is the finding, not an omission.
+
+# A caixa repo is handed to the real release workflow; the catch-all stays quiet.
+caixa-public	needs.detect.outputs.repo-type=caixa;github.event.repository.private=false	detect,caixa	unsupported
+
+# TRIPWIRE ROW. Same selection as public, because dispatch here is unconditional
+# on privacy. If this row ever disagrees with the one above, a privacy gate was
+# added to the `caixa` arm and the posture must be written down here.
+caixa-private	needs.detect.outputs.repo-type=caixa;github.event.repository.private=true	detect,caixa	unsupported
+
+# The other arm of the partition: any repo type that is not caixa reaches the
+# catch-all, which exits 1 on purpose. An unsupported repo must FAIL, never pass
+# quietly — a probe that skips both arms is the silent-green shape this family
+# exists to eliminate.
+non-caixa-rust	needs.detect.outputs.repo-type=rust;github.event.repository.private=false	detect,unsupported	caixa
+
+# detect produced no output at all (its step set nothing). The empty string is a
+# distinct state from any repo type, and it must still land in the catch-all
+# rather than falling between the arms.
+detect-yielded-nothing	needs.detect.outputs.repo-type=;github.event.repository.private=false	detect,unsupported	caixa

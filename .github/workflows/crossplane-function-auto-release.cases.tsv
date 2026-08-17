@@ -1,0 +1,71 @@
+# Case table for substrate/.github/workflows/crossplane-function-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THE WORKFLOW IS. A `workflow_call` reusable AUTO-RELEASE: on a consumer's
+# push to main it builds a Crossplane composition-Function's Nix runtime image,
+# embeds it in an xpkg, and pushes that xpkg to an OCI registry (ghcr.io by
+# default). Two jobs. `resolve` has NO `if:` and so always selects; `publish`
+# needs it and carries the file's ONLY condition.
+#
+# WHY THIS TABLE EXISTS. On 2026-08-08 graphql-synthesizer ran cargo-auto-release,
+# reported SUCCESS, bumped + tagged + pushed, and published nothing — its `ship`
+# job carries `&& !github.event.repository.private` and the repo was private.
+# The condition was correct. What was missing is that nobody had written down
+# which jobs must run for a given input, so a deliberate no-publish and a broken
+# no-publish were the same green tick. This file writes it down for this member
+# of the release family.
+#
+# THE FINDING FOR THIS WORKFLOW, AND ROW 2 IS IT. This workflow does carry
+# `github.event.repository.private` — three times — but NOT ONE of them is in an
+# `if:`. All three sit in `runs-on:` and in the runner-resolve `default:` input:
+# here the private signal ROUTES THE RUNNER (private -> camelot-builder-pleme-eks,
+# public -> ubuntu-24.04/ubuntu-latest); it does not gate publishing. That is the
+# right posture for this family — an xpkg is pushed to the consumer repo's own
+# GHCR namespace, which inherits the repo's visibility, so there is no
+# crates.io-style public-index leak to prevent, and a private Function repo is
+# expected to keep shipping. So the mandatory "private + bump -> publish skips"
+# row of the sweep INVERTS here: on a private repo `publish` MUST STILL RUN.
+# Row 2 asserts exactly that. If anyone ever copies cargo-auto-release's
+# `&& !github.event.repository.private` guard onto `publish`, row 2 turns
+# NOT-RUN and names the job instead of going quietly green.
+#
+# THE REAL GATE IS THE ACTOR, AND ROW 3 IS IT. `publish`'s whole condition is
+# `github.actor != 'github-actions[bot]'` — the anti-self-retrigger guard. A
+# bot-authored push selects `resolve` and nothing else. That is a DELIBERATE
+# no-publish, and row 3 is where it is now written down as one rather than
+# inferred from a green run.
+#
+# NO BUMP JOB, SO NO NO-BUMP CASE. Version selection is not a job here: the tag
+# is computed inside `publish`'s "Resolve tag" step (explicit `inputs.tag`, else
+# `sha-<short>` off the merge commit). There is no bumped/not-bumped fork in the
+# job graph to assert, so the sweep's third mandatory case has no subject. Row 4
+# pins the other input axis instead — the on-demand semver path via a caller's
+# workflow_dispatch selects the same two jobs as a merge push, i.e. the semver
+# release is not a separate reachability story.
+#
+# KEY SET. Every row declares the same four keys. Only `github.actor` is read by
+# a condition today; `github.event.repository.private`, `github.event_name` and
+# `inputs.tag` are declared deliberately so that a future `if:` reading any of
+# them evaluates into a NAMED assertion failure rather than an undeclared-path
+# error. This is a called reusable, so `github.event_name` is the CALLER's event
+# and `inputs.tag` is its `workflow_call` input. An empty value models "not
+# supplied", which is the documented default of `tag`. No status function
+# (always/success/failure/cancelled) appears anywhere in this workflow, so none
+# is supplied.
+
+# 1. The nominal path: a human merge to a PUBLIC consumer's main publishes.
+public-push-publishes	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.tag=	resolve,publish
+
+# 2. THE ROW THE SWEEP EXISTS FOR, INVERTED. Private repo, and publish MUST run:
+#    the privacy signal in this workflow routes the runner, it does not gate the
+#    push. A NOT-RUN here means someone added a privacy publish-guard.
+private-push-still-publishes	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.tag=	resolve,publish
+
+# 3. The one deliberate no-publish in this workflow, stated as such: the bot must
+#    not re-trigger its own pushes. `resolve` is unconditional and still selects.
+bot-push-no-self-retrigger	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;inputs.tag=	resolve	publish
+
+# 4. On-demand semver via the caller's workflow_dispatch: same selection as a
+#    merge push. Pins that the explicit-tag path is not a separate job graph.
+dispatch-explicit-semver-tag	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;inputs.tag=v0.1.0	resolve,publish

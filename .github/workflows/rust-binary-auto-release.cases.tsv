@@ -1,0 +1,52 @@
+# Case table for substrate/.github/workflows/rust-binary-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS, AND WHY IT IS THE INTERESTING ONE IN THE FAMILY.
+#
+# rust-binary-auto-release is BUMP + TAG ONLY — one job, `bump`, and no publish
+# job at all. It exists for apps (mado and friends) whose ~25 pleme-io git deps
+# make `cargo publish` impossible, so delivery is: bump the version, commit, tag
+# vX.Y.Z, and push the tag with BOT_PAT so the consumer's sibling
+# release-binaries.yml shim (on `push: tags: ['v*']`) builds the binaries.
+#
+# That means the graphql-synthesizer failure shape — a publish job silently
+# de-selected by `&& !github.event.repository.private` — CANNOT occur here,
+# because there is no privacy-gated job to de-select. `bump` carries exactly one
+# condition, `github.actor != 'github-actions[bot]'`, and nothing else.
+#
+# Rows 1 and 2 are the assertion that says so. They differ ONLY in
+# github.event.repository.private and they expect the SAME selection: a private
+# consumer still bumps and still tags, and the tag push IS the whole delivery.
+# The workflow does read that path — in `runs-on`, to route private callers to
+# the camelot-builder-pleme-eks ARC pool and public ones to ubuntu-latest — so
+# declaring it is describing the workflow, not padding the table. Runner routing
+# is not job selection: if someone ever adds `&& !github.event.repository.private`
+# to a job here, row 2 turns red and the silent-no-delivery class is caught on
+# the commit that introduces it rather than on a green run that shipped nothing.
+#
+# Rows 3 and 4 pin the loop guard across BOTH visibilities: a run whose actor is
+# github-actions[bot] must select nothing, or the bot's own release commit
+# re-triggers the workflow forever. Pinning it twice states that the guard is
+# unconditional — it does not quietly depend on repo visibility.
+#
+# NO no-bump ROW, deliberately. This workflow does not distinguish bumped from
+# not-bumped at the JOB level: `steps.bump.outputs.bumped == 'true'` gates the
+# git-commit-tag and git-push-with-token STEPS inside `bump`, and a step
+# condition is below this linter's resolution. A no-bump run therefore selects
+# `bump` exactly as a bumping run does, and a fourth row asserting that would be
+# a byte-identical duplicate of row 1 dressed up as a new claim. The real
+# assertion — "no source changed since the last tag, so nothing was tagged" —
+# belongs to cargo-bump's own unit tests, not here.
+
+public-bump-tags	github.actor=human;github.event.repository.private=false	bump
+
+# THE CONTRAST ROW. Same expectation as row 1 on purpose: unlike
+# cargo-auto-release, nothing in this workflow is privacy-gated, so a PRIVATE
+# consumer still bumps + tags + pushes and the sibling binary build still fires.
+# Privacy changes the runner, never the selection.
+private-bump-still-tags	github.actor=human;github.event.repository.private=true	bump
+
+bot-actor-no-loop-public	github.actor=github-actions[bot];github.event.repository.private=false		bump
+
+bot-actor-no-loop-private	github.actor=github-actions[bot];github.event.repository.private=true		bump

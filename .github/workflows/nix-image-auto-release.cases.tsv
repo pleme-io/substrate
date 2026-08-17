@@ -1,0 +1,56 @@
+# job-selection-lint case table for nix-image-auto-release.yml.
+# TSV: <case> \t <context k=v;k=v> \t <expect-run csv> \t <expect-skip csv>
+#
+# WHAT THIS PINS, AND WHY IT EXISTS.
+# On 2026-08-08 pleme-io/graphql-synthesizer ran a release workflow that reported
+# SUCCESS while its publish job was SKIPPED and the artifact was never shipped.
+# The guard was correct; what was missing was any statement of which jobs MUST
+# run for a given input, so a deliberate no-publish and a broken no-publish
+# produced the same green tick. These rows are that statement for this workflow.
+#
+# ── THE FINDING FOR THIS FILE: PRIVACY DOES NOT GATE THE PUSH HERE. ───────────
+# The sweep is chasing `github.event.repository.private` guards. This workflow
+# carries three of them and NOT ONE is a job `if:` — they are all `runs-on:`
+# expressions (cve-suppression-visibility:252, resolve:291) plus resolve's
+# `default:` input to runner-resolve (:299). Repo visibility therefore selects
+# WHERE the build runs (private -> camelot-builder-pleme-eks ARC pool, public ->
+# ubuntu-latest), never WHETHER the image is pushed. `publish` runs on a private
+# caller exactly as it does on a public one. That is correct for an OCI image
+# (pushed to a registry whose own ACLs govern access), and it is the opposite of
+# the crates.io case the sweep was named after — where publishing from a private
+# repo would leak source. Rows 1 and 2 are identical except for that flag, and
+# they are identical ON PURPOSE: they are the assertion that visibility is
+# runner routing and nothing more. If someone later "hardens" this by copying
+# cargo-auto-release's `&& !github.event.repository.private` onto `publish`,
+# row 2 goes red and names it, instead of every private consumer silently
+# building images that never ship.
+#
+# ── THE REAL GATE ON `publish` IS THE LOOP-BREAKER. ──────────────────────────
+# `if: github.actor != 'github-actions[bot]'` (:306). This reusable is called on
+# push-to-main, and its own push job can move main; without the guard the run
+# would retrigger itself. Rows 3 and 4 pin that the guard fires, and that when
+# it does the two upstream jobs still run — a skipped `publish` under a bot
+# actor is the DESIGNED no-op, not a failure. Rows 1 and 2 pin the other
+# direction: under any human actor the push MUST happen. A guard nobody asserts
+# in both directions is how "never publishes" hides inside "publishes normally".
+#
+# ── COVERAGE LIMIT, STATED SO IT IS NOT MISTAKEN FOR SILENCE. ────────────────
+# This linter models JOB selection. Nearly all of this workflow's conditional
+# surface is STEP-level (17 step `if:`s over scan-before-push / grype-scan /
+# vulnix-scan / the three boot-check modes / sbom-attest / cosign-sign /
+# cartorio-attest), and step conditions are outside its scope entirely. Green
+# here means the three jobs select correctly; it says NOTHING about whether a
+# CVE gate or a boot-check actually ran inside `publish`. The boot-check
+# predicate drift recorded at :559-575 — a three-way check predicate fed by a
+# two-way load predicate, five red jobs on hardened-images run 30708771205 —
+# is exactly that uncovered class and needs its own oracle.
+#
+# CONTEXT KEYS: `github.actor` is the only path any job condition reads.
+# `github.event.repository.private` is declared in every row anyway, because
+# these rows are the record that it is NOT consulted at this layer; dropping it
+# would make the public/private pair look like an accidental duplicate row and
+# it would get deleted.
+public-repo-human-push	github.actor=drzzln;github.event.repository.private=false	cve-suppression-visibility,resolve,publish
+private-repo-human-push	github.actor=drzzln;github.event.repository.private=true	cve-suppression-visibility,resolve,publish
+public-repo-bot-push-loop-breaker	github.actor=github-actions[bot];github.event.repository.private=false	cve-suppression-visibility,resolve	publish
+private-repo-bot-push-loop-breaker	github.actor=github-actions[bot];github.event.repository.private=true	cve-suppression-visibility,resolve	publish

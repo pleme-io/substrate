@@ -1,0 +1,83 @@
+# Case table for substrate/.github/workflows/release-pipeline.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS FILE PINS. release-pipeline is the mega-pipeline: one caller-side
+# file that fans a single trigger out to four reusable workflows. Its whole job
+# is SELECTION — it contains no steps of its own, so every one of its defects is
+# a selection defect, and selection is exactly what nothing was asserting when
+# graphql-synthesizer bumped, tagged, pushed and published nothing on a green
+# tick. Four jobs, and each is a different delivery path that has to fire on the
+# right event and only on the right event:
+#
+#   pre-merge  -> pre-merge-gate.yml   (PR only)
+#   security   -> security-gate.yml    (PR + schedule)
+#   release    -> auto-release.yml     (push only)     <- the delivery path
+#   container  -> container-stack.yml  (push + both container inputs)
+#
+# The three context paths every condition reads — github.event_name,
+# inputs.build-container, inputs.image — are therefore declared in EVERY row,
+# including rows where a value is irrelevant to the outcome. An undeclared path
+# is an error by design: a row that omits one is an incomplete case wearing a
+# confident verdict.
+#
+# github.event_name here is the CALLER's event, not this file's. This workflow
+# has no `on:` of its own beyond `workflow_call`, so the caller's push /
+# pull_request / schedule trigger is what every condition is really reading.
+#
+# THE PRIVACY POSTURE IS NOT ASSERTABLE HERE, and rows push-public-* /
+# push-private-* exist to say so rather than to leave it silently unexamined.
+# The `&& !github.event.repository.private` guard that made graphql-synthesizer
+# silent lives one level down, inside auto-release.yml; this workflow's own
+# conditions never read repository.private, so `release` selects identically on
+# a public and a private repo and the no-publish decision happens after the
+# selection this table can see. The two rows below declare that key purely to
+# make the pair legible — the linter does not evaluate it, because nothing in
+# this file references it. The real privacy assertion is
+# `auto-release.cases.tsv`; do not read a green run here as evidence that a
+# private repo was correctly withheld, or that a public one actually shipped.
+# Reusable-workflow `with:`/`secrets:` propagation into a called workflow's own
+# conditions is likewise not modelled, so a job selected here can still skip
+# every job inside the workflow it calls.
+
+# ── PR: the two gates run, nothing ships ───────────────────────────────────
+pr-opened	github.event_name=pull_request;inputs.build-container=false;inputs.image=	pre-merge,security	release,container
+
+# Same PR on a repo that DOES publish an image. Pins that the container inputs
+# being set is not on its own enough to put a build on a pull request — the
+# event check has to carry it, and `container` also inherits release's skip
+# through needs-propagation.
+pr-on-a-container-repo	github.event_name=pull_request;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example	pre-merge,security	release,container
+
+# ── schedule: the weekly security sweep, and ONLY that ─────────────────────
+# pre-merge must not fire (it is a PR gate with nothing to gate) and release
+# must not fire (a cron tick is not a merge, and a scheduled release would tag
+# and publish unattended).
+scheduled-security-sweep	github.event_name=schedule;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example	security	pre-merge,release,container
+
+# ── push to main: the delivery rows ────────────────────────────────────────
+# THE ROW THAT MUST STAY GREEN. A merge on a fully-configured repo runs the
+# release AND the container build. If either ever stops selecting, this repo
+# stops shipping while every run still reports success — the exact shape of the
+# defect this sweep exists to close.
+push-public-releases-and-builds-image	github.event_name=push;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=false	release,container	pre-merge,security
+
+# Same merge on a PRIVATE repo. Identical selection, deliberately: this file is
+# visibility-blind and the privacy guard is inside auto-release.yml (see the
+# header). Pinning the pair keeps a future reader from "fixing" the asymmetry
+# they expect to find here, and keeps the absence documented instead of unseen.
+push-private-selects-identically	github.event_name=push;inputs.build-container=true;inputs.image=ghcr.io/pleme-io/example;github.event.repository.private=true	release,container	pre-merge,security
+
+# The default caller: `build-container` and `image` left at their workflow_call
+# defaults. Release runs, no container is built, and that is correct — most
+# consumers of this pipeline ship a crate, not an image.
+push-default-caller-no-container	github.event_name=push;inputs.build-container=false;inputs.image=	release	pre-merge,security,container
+
+# Half-configured, both directions. Each of these is a plausible caller typo
+# that produces a green run with no image, so each gets its own row: the toggle
+# on with no image to build, and an image named with the toggle never flipped.
+# Skipping is the intended behaviour of both — the point is that it is now
+# WRITTEN DOWN, so a genuine regression in `container` cannot hide behind the
+# same silence.
+push-container-on-but-image-empty	github.event_name=push;inputs.build-container=true;inputs.image=	release	pre-merge,security,container
+push-image-set-but-container-off	github.event_name=push;inputs.build-container=false;inputs.image=ghcr.io/pleme-io/example	release	pre-merge,security,container
