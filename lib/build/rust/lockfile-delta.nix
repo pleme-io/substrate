@@ -56,13 +56,28 @@ let
   # instead — that is the difference between a real optional field and a
   # "default it and hope".
   topLevel = {
-    schema_version    = { required = false; default = 10; note = "delta format version; 10 is the shipped value"; };
+    # KNOWN-BUT-UNUSED, declared so `closed` does not reject the producer's
+    # real output for the wrong reason. Do NOT confuse it with the `version =
+    # 10` this file emits: that is the BuildSpec version, a different number.
+    #
+    # TWO versions are live in the fleet, measured 2026-08-17 over 425 deltas:
+    # v1 in 234, v2 in 191, and the split is PERFECTLY correlated with
+    # `manifest_sha256` (v2 - v1 = exactly that one key; v1 - v2 = empty). So
+    # `manifest_sha256` below is not vaguely optional -- it is required AT v2
+    # and absent AT v1, and this field is what says which.
+    schema_version    = { required = false; default = 1; note = "delta format version; 1 and 2 are both live (234 and 191 deltas)"; };
     cargo_lock_sha256 = { required = true;  note = "the D2 tie subject — without it there is no freshness check at all"; };
     per_crate         = { required = true;  note = "the payload: absent means every crate silently falls back to defaults"; };
     target_resolves   = { required = true;  note = "the resolved graph; the crate SET is derived from it, so absent means an empty build"; };
     git_nar_sha256    = { required = true;  note = "git source hashes; absent means every git dep loses its pinned NAR"; };
     flake_metadata    = { required = true;  note = "consumed verbatim by lockfile-builder"; };
-    manifest_sha256   = { required = false; default = null; note = "KNOWN-BUT-UNUSED here; present in 191/433 deltas, so genuinely optional"; };
+    # Optional because it is VERSION-CONDITIONAL, not because its absence is
+    # tolerable: absent is correct at schema_version 1 and would be a producer
+    # bug at 2. Not enforced conditionally because this reader never consumes
+    # the value, and a table that asserts more than the code consumes is the
+    # same overclaim this contract exists to stop. The knowledge lives here so
+    # whoever starts consuming it knows to gate on schema_version first.
+    manifest_sha256   = { required = false; default = null; note = "KNOWN-BUT-UNUSED here; present iff schema_version >= 2 (191 of 425)"; };
   };
 
   stripQuery = url:
