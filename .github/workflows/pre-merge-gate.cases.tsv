@@ -1,0 +1,37 @@
+# Case table for substrate/.github/workflows/pre-merge-gate.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# 171 repos call this workflow, so a job that silently stops selecting here
+# stops gating 171 repos at once and every one of them stays green. That is the
+# whole reason this table exists.
+#
+# Two properties worth asserting explicitly, because both are the kind that rot
+# without anyone noticing:
+#   - each `run-*` toggle actually gates its job (all-toggles-off proves it);
+#   - the language gates are mutually exclusive on repo-type, so a python repo
+#     never silently runs the rust gate and vice versa.
+#
+# Every context path a case's conditions touch must be declared — an undeclared
+# path is an error, not an empty default, so these rows are verbose on purpose.
+
+rust-workspace-everything-on	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=rust-workspace	detect,rust-quality,tlisp-balance,workflow-shim,publishability,publish-dry-run	npm-quality,python-quality,action-shell-ban
+
+rust-single-crate	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=rust-single-crate	detect,rust-quality	npm-quality,python-quality
+
+npm-repo	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=npm	detect,npm-quality	rust-quality,python-quality,action-shell-ban
+
+python-repo	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=python	detect,python-quality	rust-quality,npm-quality,action-shell-ban
+
+# action-shell-ban is the one job with NO toggle — it keys purely on repo-type,
+# so it cannot be turned off by a caller. That is deliberate (★★ NO-SHELL) and
+# is asserted here so a future toggle would have to change this row.
+github-action-repo	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=github-action	detect,action-shell-ban,tlisp-balance,publishability	rust-quality,npm-quality,python-quality
+
+# publish-dry-run is the only job that keys off repo-type NOT being unknown.
+unknown-repo-type-skips-publish-verify	inputs.run-rust-gate=true;inputs.run-npm-gate=true;inputs.run-python-gate=true;inputs.run-tlisp-lint=true;inputs.run-workflow-shim-lint=true;inputs.run-publishability-lint=true;inputs.run-publish-verify=true;needs.detect.outputs.repo-type=unknown	detect,tlisp-balance,workflow-shim,publishability	publish-dry-run,rust-quality,npm-quality,python-quality,action-shell-ban
+
+# Proves every toggle is load-bearing: with all of them off and no matching
+# repo-type, `detect` is the only job left. If a toggle ever stops gating, this
+# row is what notices.
+all-toggles-off	inputs.run-rust-gate=false;inputs.run-npm-gate=false;inputs.run-python-gate=false;inputs.run-tlisp-lint=false;inputs.run-workflow-shim-lint=false;inputs.run-publishability-lint=false;inputs.run-publish-verify=false;needs.detect.outputs.repo-type=unknown	detect	rust-quality,npm-quality,python-quality,tlisp-balance,action-shell-ban,workflow-shim,publishability,publish-dry-run

@@ -1,0 +1,27 @@
+# Case table for substrate/.github/workflows/cargo-auto-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# Row 3 is why this file exists. On 2026-08-17 graphql-synthesizer ran this
+# workflow, reported SUCCESS, bumped + tagged + pushed, and published nothing —
+# because it was private and BOTH publish paths carry `&& !private`. That is the
+# intended privacy posture (publishing from a private repo leaks code to
+# crates.io and undoes yanks), and it is correct. What was missing is that
+# nobody had written it down as an expectation, so a deliberate no-publish and a
+# broken no-publish were the same green tick. Now it is asserted.
+#
+# always() is supplied per case because a rerun-after-failure is a different
+# selection and the table should be able to say so.
+
+public-bump	github.actor=human;github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=true;needs.resolve-runner.result=success;always()=true	resolve-runner,precondition,bump,ship	drip
+
+public-no-bump	github.actor=human;github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=false;needs.resolve-runner.result=success;always()=true	resolve-runner,precondition,bump,drip	ship
+
+# THE ONE THAT WAS SILENT. A private repo publishes by neither path, on purpose.
+private-bump-publishes-nothing	github.actor=human;github.event_name=push;github.event.repository.private=true;needs.bump.outputs.bumped=true;needs.resolve-runner.result=success;always()=true	resolve-runner,precondition,bump	ship,drip
+
+# The bot must not re-trigger itself; bump is skipped, and drip picks the run up
+# through always() precisely because a needs-skipped job would otherwise skip it.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;needs.bump.outputs.bumped=;needs.resolve-runner.result=success;always()=true	resolve-runner,precondition,drip	bump,ship
+
+scheduled-tick	github.actor=human;github.event_name=schedule;github.event.repository.private=false;needs.bump.outputs.bumped=;needs.resolve-runner.result=success;always()=true	resolve-runner,precondition,drip	bump,ship
