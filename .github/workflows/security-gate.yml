@@ -31,6 +31,23 @@ on:
         type: string
         required: false
         default: "true"
+      # Set "false" ONLY for a repo with no dependency ecosystem at all (no
+      # Cargo.toml / package.json / go.mod / Gemfile / requirements.txt).
+      #
+      # Why an input rather than teaching the scanner to pass: security-audit
+      # types `no-manifest` as exit 3 on purpose, and exit 3 is deliberately
+      # not exit 1 — "this gate did not run" is a DIFFERENT answer from "no
+      # vulnerabilities found", and collapsing the two would make a repo with
+      # an unreadable manifest indistinguishable from a clean one. That
+      # refusal is the correct behavior and must not be weakened, so the
+      # "this layer does not apply here" decision is declared by the CALLER,
+      # where the operator knows it, instead of guessed by the scanner.
+      #
+      # Default "true" keeps every existing caller's behavior byte-identical.
+      check-dependencies:
+        type: string
+        required: false
+        default: "true"
       # Runner routing: empty default routes by CALLER repo visibility —
       # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
@@ -50,6 +67,7 @@ jobs:
   audit:
     name: 'dependency vulnerabilities'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    if: inputs.check-dependencies == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/security-audit@main
