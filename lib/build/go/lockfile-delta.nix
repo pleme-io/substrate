@@ -11,8 +11,60 @@
 # the delta. This trades a small reconstruction for an IFD-free, cache-shared,
 # slim committed artifact (mirrors the rust delta path).
 #
-# Output shape == `Go.build-spec.json` (fed where `committedSpec` is fed in
-# lockfile-builder.nix, so the whole downstream ladder is unchanged):
+# ── ★ THE OUTPUT SHAPE IS A GENERATION BEHIND THE ENCODER (2026-08-17) ──
+#
+# This header used to claim "Output shape == `Go.build-spec.json`". MEASURED:
+# it is not. This reader reconstructs the **v1 COARSE** shape below, while
+# gen-gomod's encoder emits **v2 INCREMENTAL**
+# (`gen/crates/gen-gomod/src/build_spec.rs:35`, `SCHEMA_VERSION = 2`; coarse is
+# `:48`, = 1). So the delta rung and the full-spec rung produce DIFFERENT
+# shapes, and the claim of equality is what makes that invisible.
+#
+# WHY THIS MATTERS BEFORE ANYONE "JUST WIRES THE EMITTER". gen-gomod's
+# `write_gen_delta` has zero call sites and emits no `per_package` at all, so
+# the obvious next step looks like completing the producer. That was attempted
+# and MEASURED against four real repos (akeyless-funnel, -gateway-migrator,
+# -go-test, -go): with a complete `per_package`, the reader ACCEPTS every delta
+# and the D2 tie round-trips byte-exact — and parity still FAILS, 1085 raw
+# diffs collapsing to 27 classes, all 27 on all four subjects. Only 6 are the
+# documented absent-vs-`[ ]` defaults. The rest follow from the version gap:
+#
+#   - `$.version` is 1 from the delta and 2 from the encoder — two version
+#     namespaces sharing one field name
+#   - `$.module` (whole attrset) and `$.renderer` have NO home in the closed
+#     topLevel set, yet `lockfile-builder.nix:118` reads
+#     `spec.module.has_external_deps` and THROWS without it, and
+#     `package-builder.nix:11` dispatches on `spec.renderer`
+#   - `has_external_deps` reconstructs `false` on every node where the encoder
+#     says `true`
+#   - `workspace_members` comes back as MODULE PATHS where the encoder emits
+#     NODE KEYS, asserting buildable mains that do not exist
+#
+# So the missing link is THIS READER reconstructing v2, not the producer. Doing
+# the producer first yields a delta that is accepted and still wrong.
+#
+# TWO TRAPS FOUND WHILE MEASURING, both worth knowing before touching either
+# half:
+#
+#   1. `vendor_hash` absence is OVERLOADED. perPackage documents it as "ABSENT
+#      IS MEANINGFUL: no external deps", but the real corpus has a third state:
+#      deps exist, `dep_mode = vendored`, and no hash was ever computed. An
+#      emitter that omits the hash in that case makes this reader derive
+#      `has_external_deps = false` for a module where it is true. Reproduced
+#      both directions on akeyless-funnel.
+#   2. `root_package = head packageKeys` picks the LEXICOGRAPHICALLY FIRST key,
+#      not the main module's node. Every one of the four subjects happens to
+#      have an alphabetically-minimal main module, so a corpus of those four
+#      cannot fail on root selection — a green result there carries no
+#      information.
+#
+# CEILING, so nobody plans against 90: gen's per-node encoder REFUSES packages
+# with assembly sources (`interp phase reject-asm`, deferred to M-asm). Of 90
+# fleet repos with a root `go.mod`: 41 encode, 42 reject on asm, 7 fail for
+# unrelated reasons. Anything depending on `golang.org/x/sys/unix` is in the 42.
+#
+# The v1 coarse shape this reader currently produces (fed where `committedSpec`
+# is fed in lockfile-builder.nix):
 #
 #   { version; packages = { <key> = { name; version; args = { pname; version;
 #       vendorHash?; proxyVendor?; tags; ldflags; subPackages; doCheck?; env;
