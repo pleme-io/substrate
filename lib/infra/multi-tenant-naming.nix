@@ -18,7 +18,7 @@
 #   # → "customer-a-production-us-east-2-eks"
 #
 #   name = naming.mkResourceName {
-#     tenant = "mte"; environment = "production";
+#     tenant = "default"; environment = "production";
 #     region = "us-east-2"; resource = "eks";
 #   };
 #   # → "us-east-2-production-eks"
@@ -26,7 +26,7 @@ rec {
   # ── Core: is this tenant a "default" (short-name) tenant? ──────────
   isDefaultTenant = {
     tenant,
-    defaultTenants ? [ "default" "mte" "" ],
+    defaultTenants ? [ "default" "" ],
   }: builtins.elem tenant defaultTenants;
 
   # ── Resource Name Builder ──────────────────────────────────────────
@@ -35,7 +35,7 @@ rec {
     environment,
     region ? null,
     resource ? null,
-    defaultTenants ? [ "default" "mte" "" ],
+    defaultTenants ? [ "default" "" ],
     separator ? "-",
     maxLength ? 0,
   }: let
@@ -57,7 +57,7 @@ rec {
     environment,
     region ? null,
     cloudProvider ? null,
-    defaultTenants ? [ "default" "mte" "" ],
+    defaultTenants ? [ "default" "" ],
     separator ? "-",
   }: let
     base = { inherit tenant environment region defaultTenants separator; };
@@ -81,8 +81,8 @@ rec {
   # Build ArgoCD GoTemplate tenant expressions for ApplicationSets.
 
   # Simple tenant expression with optional mappings.
-  # tenantMappings: { mte = "akeyless_global"; } →
-  #   {{ if eq .metadata.labels.tenant "mte" }}akeyless_global{{ else }}{{.metadata.labels.tenant}}{{ end }}
+  # tenantMappings: { shared = "global_path"; } →
+  #   {{ if eq .metadata.labels.tenant "shared" }}global_path{{ else }}{{.metadata.labels.tenant}}{{ end }}
   mkTenantExpr = { tenantMappings ? {} }:
     if tenantMappings == {} then "{{.metadata.labels.tenant}}"
     else let
@@ -109,7 +109,7 @@ rec {
     tenantVar ? "var.tenant",
     environmentVar ? "var.environment",
     regionVar ? "data.aws_region.current.name",
-    defaultTenants ? [ "mte" "" ],
+    defaultTenants ? [ "default" "" ],
     prefixLocal ? "resource_prefix",
     tenantEnvLocal ? "tenant_env",
   }: let

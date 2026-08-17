@@ -2011,7 +2011,7 @@ in rec {
   #
   # Example (Terraform locals):
   #   hcl = substrateLib.mkTerraformNamingLocals {
-  #     defaultTenants = [ "mte" "" ];
+  #     defaultTenants = [ "default" "" ];
   #   };
   #
   # Example (full naming scheme):

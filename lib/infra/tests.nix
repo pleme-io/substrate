@@ -27,10 +27,10 @@ in runTests [
       == "customer-a-production-us-east-2-eks")
     "named tenant should include tenant prefix")
 
-  (mkTest "naming-default-tenant-mte"
-    (naming.mkResourceName { tenant = "mte"; environment = "production"; region = "us-east-2"; resource = "eks"; }
+  (mkTest "naming-default-tenant-named"
+    (naming.mkResourceName { tenant = "default"; environment = "production"; region = "us-east-2"; resource = "eks"; }
       == "us-east-2-production-eks")
-    "mte tenant should omit tenant prefix")
+    "a default tenant should omit the tenant prefix")
 
   (mkTest "naming-default-tenant-empty"
     (naming.mkResourceName { tenant = ""; environment = "staging"; region = "eu-west-1"; resource = "rds"; }
@@ -38,18 +38,18 @@ in runTests [
     "empty tenant should omit tenant prefix")
 
   (mkTest "naming-no-region"
-    (naming.mkResourceName { tenant = "cvs"; environment = "production"; resource = "kms"; }
-      == "cvs-production-kms")
+    (naming.mkResourceName { tenant = "customer-b"; environment = "production"; resource = "kms"; }
+      == "customer-b-production-kms")
     "null region should be omitted")
 
   (mkTest "naming-no-resource"
-    (naming.mkResourceName { tenant = "cvs"; environment = "production"; region = "us-east-2"; }
-      == "cvs-production-us-east-2")
+    (naming.mkResourceName { tenant = "customer-b"; environment = "production"; region = "us-east-2"; }
+      == "customer-b-production-us-east-2")
     "null resource should be omitted")
 
   (mkTest "naming-custom-separator"
-    (naming.mkResourceName { tenant = "cvs"; environment = "prod"; region = "use2"; separator = "_"; }
-      == "cvs_prod_use2")
+    (naming.mkResourceName { tenant = "customer-b"; environment = "prod"; region = "use2"; separator = "_"; }
+      == "customer-b_prod_use2")
     "custom separator should be used")
 
   (mkTest "naming-max-length"
@@ -63,42 +63,42 @@ in runTests [
     "custom defaultTenants should be respected")
 
   # -- isDefaultTenant --
-  (mkTest "is-default-mte"
-    (naming.isDefaultTenant { tenant = "mte"; })
-    "mte should be default")
+  (mkTest "is-default-supplied-list"
+    (naming.isDefaultTenant { tenant = "primary"; defaultTenants = [ "default" "primary" "" ]; })
+    "a tenant present in the supplied defaultTenants list should be default")
 
   (mkTest "is-default-empty"
     (naming.isDefaultTenant { tenant = ""; })
     "empty should be default")
 
-  (mkTest "is-not-default-cvs"
-    (!(naming.isDefaultTenant { tenant = "cvs"; }))
-    "cvs should not be default")
+  (mkTest "is-not-default-named"
+    (!(naming.isDefaultTenant { tenant = "customer-b"; }))
+    "a named tenant should not be default")
 
   # -- mkNamingScheme --
-  (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
+  (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
   in mkTest "scheme-prefix"
-    (s.prefix == "cvs-production-us-east-2")
+    (s.prefix == "customer-b-production-us-east-2")
     "scheme prefix should match")
 
-  (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
+  (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
   in mkTest "scheme-eks"
-    (s.eksCluster == "cvs-production-us-east-2-eks")
+    (s.eksCluster == "customer-b-production-us-east-2-eks")
     "scheme eksCluster should append -eks")
 
-  (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
+  (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
   in mkTest "scheme-rds"
-    (s.rdsInstance "gateway" == "cvs-production-us-east-2-gateway-rds")
+    (s.rdsInstance "gateway" == "customer-b-production-us-east-2-gateway-rds")
     "scheme rdsInstance should append service-rds")
 
-  (let s = naming.mkNamingScheme { tenant = "mte"; environment = "production"; region = "us-east-2"; };
+  (let s = naming.mkNamingScheme { tenant = "default"; environment = "production"; region = "us-east-2"; };
   in mkTest "scheme-default-tenant"
     (s.prefix == "us-east-2-production")
     "default tenant scheme should omit tenant")
 
-  (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; };
+  (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; };
   in mkTest "scheme-labels"
-    (s.labels == { tenant = "cvs"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; })
+    (s.labels == { tenant = "customer-b"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; })
     "scheme labels should include all dimensions")
 
   # -- mkTenantExpr --
@@ -107,7 +107,7 @@ in runTests [
     "no mappings should return raw label")
 
   (mkTest "tenant-expr-single-mapping"
-    (builtins.match ".*if eq .metadata.labels.tenant \"mte\".*akeyless_global.*" (naming.mkTenantExpr { tenantMappings = { mte = "akeyless_global"; }; }) != null)
+    (builtins.match ".*if eq .metadata.labels.tenant \"shared\".*global_path.*" (naming.mkTenantExpr { tenantMappings = { shared = "global_path"; }; }) != null)
     "single mapping should produce if/else")
 
   # -- mkTenantPathExpr --
@@ -177,7 +177,7 @@ in runTests [
     "minimal selector should have one Exists expression")
 
   (mkTest "cluster-selector-exclude"
-    (let s = k8s.mkClusterSelector { requiredLabel = "svc"; excludeTenants = [ "walmart" ]; };
+    (let s = k8s.mkClusterSelector { requiredLabel = "svc"; excludeTenants = [ "excluded-tenant" ]; };
     in builtins.length s.matchExpressions == 2
       && (builtins.elemAt s.matchExpressions 1).operator == "NotIn")
     "excludeTenants should add NotIn expression")
@@ -358,7 +358,7 @@ in runTests [
   # ════════════════════════════════════════════════════════════════════
 
   (let
-    scheme = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; };
+    scheme = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; cloudProvider = "AWS"; };
     secret = es.mkExternalSecret {
       name = "${scheme.prefix}-gateway-secret";
       secretStoreName = "akeyless-store";
@@ -366,13 +366,13 @@ in runTests [
       labels = scheme.labels;
     };
   in mkTest "cross-naming-es"
-    (secret.metadata.name == "cvs-production-us-east-2-gateway-secret"
-      && secret.metadata.labels.tenant == "cvs"
-      && (builtins.head secret.spec.data).remoteRef.key == "/platform/cvs-production-us-east-2/api-key")
+    (secret.metadata.name == "customer-b-production-us-east-2-gateway-secret"
+      && secret.metadata.labels.tenant == "customer-b"
+      && (builtins.head secret.spec.data).remoteRef.key == "/platform/customer-b-production-us-east-2/api-key")
     "naming scheme should compose with ExternalSecret builder")
 
   (let
-    tenantExpr = naming.mkTenantPathExpr { tenantPathLabel = "tenant_path"; tenantMappings = { mte = "akeyless_global"; }; };
+    tenantExpr = naming.mkTenantPathExpr { tenantPathLabel = "tenant_path"; tenantMappings = { shared = "global_path"; }; };
   in mkTest "cross-naming-appset-tenant"
     (builtins.match ".*or.*tenant_path.*" tenantExpr != null)
     "tenantPathLabel should take priority over tenantMappings")
@@ -382,13 +382,13 @@ in runTests [
   # ════════════════════════════════════════════════════════════════════
 
   (mkTest "naming-all-null-optional"
-    (naming.mkResourceName { tenant = "cvs"; environment = "prod"; }
-      == "cvs-prod")
+    (naming.mkResourceName { tenant = "customer-b"; environment = "prod"; }
+      == "customer-b-prod")
     "both region and resource null should produce just tenant-environment")
 
   (mkTest "naming-empty-string-resource"
-    (naming.mkResourceName { tenant = "cvs"; environment = "prod"; region = "us1"; resource = ""; }
-      == "cvs-prod-us1")
+    (naming.mkResourceName { tenant = "customer-b"; environment = "prod"; region = "us1"; resource = ""; }
+      == "customer-b-prod-us1")
     "empty string resource should be filtered out like null")
 
   (mkTest "naming-max-length-exact"
@@ -406,32 +406,32 @@ in runTests [
     "'default' string should be treated as default tenant")
 
   (mkTest "naming-scheme-s3-bucket"
-    (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
-    in s.s3Bucket "logs" == "cvs-production-us-east-2-logs-s3")
+    (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
+    in s.s3Bucket "logs" == "customer-b-production-us-east-2-logs-s3")
     "scheme s3Bucket should append purpose-s3")
 
   (mkTest "naming-scheme-kms-key"
-    (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
-    in s.kmsKey "encryption" == "cvs-production-us-east-2-encryption-kms")
+    (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
+    in s.kmsKey "encryption" == "customer-b-production-us-east-2-encryption-kms")
     "scheme kmsKey should append purpose-kms")
 
   (mkTest "naming-scheme-namespace"
-    (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
-    in s.namespace == "cvs-production-us-east-2-ns")
+    (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
+    in s.namespace == "customer-b-production-us-east-2-ns")
     "scheme namespace should append -ns")
 
   (mkTest "naming-scheme-labels-no-cloud"
-    (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; region = "us-east-2"; };
+    (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; region = "us-east-2"; };
     in !(s.labels ? cloudProvider))
     "scheme labels without cloudProvider should omit it")
 
   (mkTest "naming-scheme-labels-no-region"
-    (let s = naming.mkNamingScheme { tenant = "cvs"; environment = "production"; };
+    (let s = naming.mkNamingScheme { tenant = "customer-b"; environment = "production"; };
     in !(s.labels ? region))
     "scheme labels without region should omit it")
 
   (mkTest "naming-tenant-expr-multiple-mappings"
-    (let expr = naming.mkTenantExpr { tenantMappings = { mte = "global"; shared = "shared_path"; }; };
+    (let expr = naming.mkTenantExpr { tenantMappings = { primary = "global"; shared = "shared_path"; }; };
     in builtins.match ".*if eq.*" expr != null
       && builtins.match ".*end.*" expr != null)
     "multiple tenantMappings should produce nested if/else GoTemplate")
@@ -689,7 +689,7 @@ in runTests [
     basePath = "/secrets";
     keys = [ "a" "b" ];
     environment = "staging";
-    tenant = "cvs";
+    tenant = "customer-b";
     service = "api";
   };
   in mkTest "secret-paths-all-resolved"
@@ -756,7 +756,7 @@ in runTests [
   # ════════════════════════════════════════════════════════════════════
 
   (let
-    scheme = naming.mkNamingScheme { tenant = "mte"; environment = "staging"; region = "eu-west-1"; };
+    scheme = naming.mkNamingScheme { tenant = "default"; environment = "staging"; region = "eu-west-1"; };
     selector = k8s.mkClusterSelector {
       requiredLabel = "api-gateway";
       excludeTenants = [ "deprecated" ];

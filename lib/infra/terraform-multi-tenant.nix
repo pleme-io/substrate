@@ -19,7 +19,7 @@
 #   # Generate a KMS key module
 #   kmsModule = tfBuilder.mkKmsKeyModule pkgs {
 #     name = "platform";
-#     defaultTenants = [ "mte" "" ];
+#     defaultTenants = [ "default" "" ];
 #   };
 #
 #   # Validate all tenant modules at once
