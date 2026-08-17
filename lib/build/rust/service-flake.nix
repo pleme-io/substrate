@@ -16,8 +16,11 @@
   substrate,
   forge,
   # Optional: only the legacy useLockfileBuilder=false path forces it. Repos on
-  # the gen/lockfile-builder standard (committed Cargo.gen.lock + Cargo.build-spec.json)
-  # drop the crate2nix flake input and omit this.
+  # the gen/lockfile-builder standard (committed Cargo.gen.lock — the delta ALONE;
+  # Cargo.build-spec.json is gitignored) drop the crate2nix flake input and omit
+  # this. This sentence is the definition other files cite, so it said "both
+  # artifacts" and propagated that error; the delta reconstructs the full
+  # BuildSpec in pure Nix (./lockfile-delta.nix).
   crate2nix ? null,
   devenv ? null,
 }:

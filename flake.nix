@@ -138,12 +138,21 @@
     # Build gen the SAME way gen's own flake builds itself
     # (`substrate.mkRustToolFlake { src = ./.; member = "gen-cli"; }`),
     # but with substrate's machinery referenced via `self` — no
-    # `inputs.gen`. gen ships a committed `Cargo.build-spec.json`, so
-    # this takes mkRustToolFlake's committed-spec fast path (crate2nix
-    # under lockfile-builder); no chicken-and-egg, gen builds WITHOUT a
-    # working gen. `gen` left unset ⇒ the inner builder auto-fetches the
-    # gen-pin rev only as an IFD build-tool, which never fires here
-    # because the committed spec is present.
+    # `inputs.gen`. gen ships a committed `Cargo.gen.lock`, so this takes
+    # lockfile-builder's DELTA path — reconstructed in pure Nix by
+    # lib/build/rust/lockfile-delta.nix — and no chicken-and-egg arises:
+    # gen builds WITHOUT a working gen. `gen` left unset ⇒ the inner
+    # builder would auto-fetch the gen-pin rev as an IFD build-tool, which
+    # never fires here because the delta short-circuits it (useDelta,
+    # lockfile-builder.nix:449) before mk-build-spec.nix is consulted.
+    #
+    # Corrected 2026-08-17: this said "gen ships a committed
+    # `Cargo.build-spec.json`, so this takes mkRustToolFlake's
+    # committed-spec fast path". That was FALSE at the pinned rev --
+    # `git ls-tree ${genPin.rev}` on pleme-io/gen lists Cargo.gen.lock and
+    # no Cargo.build-spec.json. The bootstrap property it asserts is real;
+    # the mechanism named was the retired one, so anyone protecting this
+    # property would have protected the wrong file.
     genFlake = self.mkRustToolFlake {
       inputs = {
         inherit nixpkgs crate2nix fenix;

@@ -225,9 +225,9 @@ in {
       program = toString (pkgs.writeShellScript "generate-cargo-nix" (
         if crate2nix == null then ''
           echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
-          echo "Regenerate the committed spec with:"
+          echo "Regenerate the committed delta with:"
           echo "    gen build ."
-          echo "(commits the Cargo.gen.lock delta + Cargo.build-spec.json)"
+          echo "(commit Cargo.gen.lock; Cargo.build-spec.json is gitignored)"
         '' else ''
           echo "🔨 Generating Cargo.nix for ${serviceName}..."
           ${crate2nix}/bin/crate2nix generate

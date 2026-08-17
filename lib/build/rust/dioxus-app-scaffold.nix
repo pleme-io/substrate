@@ -237,7 +237,7 @@
     files = {
       "Cargo.toml" = cargoToml;
       "flake.nix" = flakeNix;
-      ".gitignore" = "/target\n*.swp\n.DS_Store\n";
+      ".gitignore" = "/target\n*.swp\n.DS_Store\nCargo.build-spec.json\n";
       "LICENSE" = "MIT License\n\nCopyright (c) 2026 pleme-io\n";
       "src/main.rs" = mainRs;
       "src/app.rs" = appRs;

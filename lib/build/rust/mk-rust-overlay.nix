@@ -24,7 +24,9 @@
 #     crateOverrides = { rmcp = old: { CARGO_CRATE_NAME = "rmcp"; }; };
 #   };
 #
-# Prerequisites: <src>/Cargo.build-spec.json exists (run `gen build .`).
+# Prerequisites: <src>/Cargo.gen.lock exists (run `gen build .`, commit the
+# delta — NOT Cargo.build-spec.json). This file only wraps ./mk-rust-tool.nix,
+# whose own prerequisites are authoritative; see the note there.
 {
   name,
   src,

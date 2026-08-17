@@ -371,7 +371,7 @@
     files = {
       "Cargo.toml" = workspaceCargo;
       "flake.nix" = flakeNix;
-      ".gitignore" = "/target\n/dist\n*.swp\n.DS_Store\nnode_modules/\n";
+      ".gitignore" = "/target\n/dist\n*.swp\n.DS_Store\nnode_modules/\nCargo.build-spec.json\n";
       "LICENSE" = "MIT License\n\nCopyright (c) 2026 pleme-io\n";
       "Trunk.toml" = "[build]\ntarget = \"index.html\"\ndist = \"dist\"\n";
       "index.html" = ''

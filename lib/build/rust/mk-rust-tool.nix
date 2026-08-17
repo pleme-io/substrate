@@ -6,9 +6,23 @@
 # builder ceremony required.
 #
 # Prerequisites:
-#   - <src>/Cargo.toml + Cargo.lock + Cargo.build-spec.json present.
-#     Run `gen build .` to produce the spec; commit it alongside
+#   - <src>/Cargo.toml + Cargo.lock + Cargo.gen.lock present.
+#     Run `gen build .` and commit the Cargo.gen.lock DELTA alongside
 #     Cargo.lock.
+#
+#     Do NOT commit Cargo.build-spec.json. `gen build .` writes both, but
+#     only the delta is the standard: ./lockfile-delta.nix reconstructs the
+#     full BuildSpec from the delta in pure Nix, IFD-free, at ~1/3 the
+#     committed size. Measured 2026-08-17 over the local checkout: 425 repos
+#     track Cargo.gen.lock, 11 track the spec, and substrate's own release
+#     bot commits "delta-only (build-spec retired)".
+#
+#     The spec is still load-bearing for ONE case: a VARIANT build. A
+#     non-canonical spec name (Cargo.<variant>.build-spec.json) sets
+#     useDelta = false at ./lockfile-builder.nix:449 — deliberately, since
+#     one delta cannot carry a freshness tie for two specs — so a variant
+#     spec must be committed. See pangea-operator, which gitignores the
+#     canonical spec and tracks Cargo.noruby.build-spec.json.
 {
   name,
   src,

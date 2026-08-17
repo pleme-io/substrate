@@ -222,8 +222,9 @@ let
           # after (works in Nix builds)
           ${spec.name} = { git = "https://github.com/pleme-io/${spec.name}.git" }
 
-        Re-run `gen lock-build` after editing, then commit + push the
-        regenerated Cargo.build-spec.json.
+        Re-run `gen build .` after editing, then commit + push the
+        regenerated Cargo.gen.lock delta. (Not Cargo.build-spec.json — the
+        delta is the committed artifact; see ./lockfile-delta.nix.)
       ''
       else workspaceSrc;
 
@@ -562,8 +563,10 @@ let
                   auto-regen will take over, OR
               (b) pass `gen = substrate.packages.<system>.gen` to
                   lockfileBuilder.mkProject explicitly, OR
-              (c) run `gen build .` once in the workspace root to
-                  produce the committed spec.
+              (c) run `gen build .` once in the workspace root and commit
+                  the Cargo.gen.lock delta, which makes this path
+                  unreachable (see ./lockfile-delta.nix). Commit
+                  Cargo.build-spec.json ONLY for a variant spec name.
             Per the GEN TYPED-SPEC CONTRACT, (a) is the directive-
             aligned default — no per-repo regen toil.
           ''
