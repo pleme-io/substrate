@@ -101,7 +101,7 @@
 #     goToolchain = substrate.goToolchains.${system}.stable;
 #   };
 #   img = hardened.mkHardenedGoImage pkgs {
-#     name = "uam";
+#     name = "my-service";
 #     src = ./.;
 #     vendorHash = "sha256-...";
 #     version = "1.2.3";

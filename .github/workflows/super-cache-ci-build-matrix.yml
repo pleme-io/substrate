@@ -22,7 +22,7 @@
 #      (fan every cell at once; the scale-to-zero spot pool absorbs the burst).
 #
 # ── Consumer footprint (the whole thing — a 5-line shim) ────────────────────
-#   # .github/workflows/build.yml   (e.g. akeyless-nix-images — all 9 services)
+#   # .github/workflows/build.yml   (e.g. a multi-service image repo — every service)
 #   on: { push: { branches: [main] } }
 #   jobs:
 #     build-all:

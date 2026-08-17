@@ -7,7 +7,7 @@
 # This is the default way to build things in camelot: adding a new build = one
 # 5-line shim; adding a new CAPABILITY = one new verb + one catalog entry.
 #
-# akeyless-nix-images consumers reference this as external OSS with CONFIG ONLY
+# Downstream image repos reference this as external OSS with CONFIG ONLY
 # (svc/arch/…) — no pleme-io-internal code crosses; camelot/architecture branch.
 
 on:

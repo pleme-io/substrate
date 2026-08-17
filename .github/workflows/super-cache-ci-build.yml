@@ -20,7 +20,7 @@
 #   tameshi-attest    → signed BLAKE3 build receipt
 #
 # ── Consumer footprint (the whole thing — a 5-line shim) ────────────────────
-#   # .github/workflows/build.yml   (e.g. an akeyless-nix-images microservice)
+#   # .github/workflows/build.yml   (e.g. a consumer repo's microservice)
 #   on: { push: { branches: [main] } }
 #   jobs:
 #     build:

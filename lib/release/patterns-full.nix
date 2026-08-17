@@ -929,7 +929,7 @@
     "nix-image" = {
       uses = "pleme-io/actions/nix-image@main";
       backend = "tatara-lisp";
-      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and akeyless-nix-images (dockerImage:<arch>:<svc>). Fan out over runs-on:[camelot,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
+      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and a multi-service image repo (dockerImage:<arch>:<svc>). Fan out over runs-on:[camelot,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
     };
   };
   npm = {
@@ -1667,7 +1667,7 @@
     "pangea-grafana-converge" = {
       uses = "pleme-io/actions/pangea-grafana-converge@main";
       backend = "tatara-lisp";
-      role = "MODEL-2 (remote-reconcile) FedRAMP observability executor — health-probe a remote Grafana REST endpoint (inbound-only + scoped SA token) then drive the shipped pangea rio-observability workspace + deployment-agnostic pangea-grafana provider + magma runner against it, converging 2F Grafana from our side. Reports the runner''s real status; the exact flake app attr is a named LiveTODO, never faked.";
+      role = "MODEL-2 (remote-reconcile) FedRAMP observability executor — health-probe a remote Grafana REST endpoint (inbound-only + scoped SA token) then drive the shipped pangea rio-observability workspace + deployment-agnostic pangea-grafana provider + magma runner against it, converging the remote Grafana from our side. Reports the runner''s real status; the exact flake app attr is a named LiveTODO, never faked.";
     };
     "pinecone-upsert" = {
       uses = "pleme-io/actions/pinecone-upsert@main";

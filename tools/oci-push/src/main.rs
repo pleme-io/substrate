@@ -1329,14 +1329,14 @@ const PUSH_BACKOFF_BASE: std::time::Duration = std::time::Duration::from_secs(1)
 ///
 /// WHY THIS EXISTS. The skopeo invocation doca replaces carried
 /// `--retry-times 5`, and it was not decoration -- it was added against a
-/// MEASURED failure (2026-07-21, Harbor / registry.secondfront.com):
+/// MEASURED failure (2026-07-21, against a remote Harbor registry):
 /// "writing blob: ... read: connection reset by peer" partway through a ~40-blob
 /// rabbitmq image, after most blobs had already uploaded. Large multi-blob
 /// uploads over a real network hit transient resets.
 ///
 /// doca had NO retry at all. Converting the call site without this would have
 /// silently regressed resilience on precisely the path that pushes large
-/// hardened images to Harbor -- the 2F endpoint, i.e. the exact registry the
+/// hardened images to that Harbor -- i.e. the exact registry the
 /// original failure was measured against. A conversion that quietly drops a
 /// property added in response to a real incident is a regression wearing the
 /// costume of a cleanup.

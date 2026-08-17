@@ -411,7 +411,7 @@ let
         renderer = "incremental";
         inherit (g) nodes ferriteNodes root members stdTree;
         # The linked root binary + a symlinkJoin of every main (the many-mains
-        # monorepo shape: logan/gator/auth/… each a member).
+        # monorepo shape: svc-a/svc-b/svc-c/… each a member).
         rootBin = g.root.drv;
         allMains = pkgs.symlinkJoin {
           name = "go-all-mains";

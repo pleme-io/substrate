@@ -95,8 +95,8 @@ rec {
     # `nonrootGid` (both 65532, the distroless/Chainguard "nonroot"
     # convention that file explicitly models itself on) -- NOT 65534 (the
     # older "nobody" uid this default silently diverged to). No fleet
-    # consumer relies on the old default (grepped pleme-io + akeylesslabs;
-    # the one real consumer, akeyless-nix-images, already overrides this
+    # consumer relies on the old default (grepped every consuming org;
+    # the one real consumer already overrides this
     # explicitly to 10001:10001), so this is a safe convention fix, not a
     # breaking change in practice.
     user ? "${toString hardenedBase.nonrootUid}:${toString hardenedBase.nonrootGid}",

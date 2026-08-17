@@ -17,7 +17,7 @@ config knob.*
 
 Read this first. Everything below is a consequence of it.
 
-**2026-07-30.** `akeylesslabs/akeyless-main-repo`, branch `camelot/architecture`,
+**2026-07-30.** A downstream consumer's monorepo
 builds a hardened **distroless** web-ui image through substrate's
 `mkStaticSpaImage`. Its flake pins `nixpkgs = nixos-24.05` (`b134951`, May 2024).
 Trivy against the built image reported, against exactly **one** target —

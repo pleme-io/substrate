@@ -144,7 +144,7 @@ Composes Vector + NATS + KEDA for any cluster:
 
 ```ruby
 TransportBus.build(synth, {
-  cluster_name: 'akeyless-dev',
+  cluster_name: 'example-cluster',
   profile: :production,
   nats: { enabled: true, replicas: 3 },
   keda: { enabled: true },
@@ -156,7 +156,7 @@ Composes S3 + RDS + backup for any cluster:
 
 ```ruby
 StorageTier.build(synth, {
-  cluster_name: 'akeyless-dev',
+  cluster_name: 'example-cluster',
   s3: { buckets: ['state', 'etcd-backup', 'analytics'] },
   rds: { engine: 'postgresql', instance_class: 'db.t3.micro' },
   backup: { enabled: true, retention_days: 7 },
@@ -168,8 +168,8 @@ Composes IAM + Akeyless + RBAC for any cluster:
 
 ```ruby
 IdentityFabric.build(synth, {
-  cluster_name: 'akeyless-dev',
-  account_id: '376129857990',
+  cluster_name: 'example-cluster',
+  account_id: '000000000000',
   akeyless: { gateway: true, auth_methods: [:k8s, :aws_iam] },
   iam_roles: [:node, :ami_builder, :pipeline],
 })
@@ -180,9 +180,9 @@ Composes tameshi + sekiban + kensa for any cluster:
 
 ```ruby
 AttestChain.build(synth, {
-  cluster_name: 'akeyless-dev',
+  cluster_name: 'example-cluster',
   frameworks: [:nist_800_53, :cis_k8s],
-  heartbeat: { s3_uri: 's3://attestations/akeyless-dev' },
+  heartbeat: { s3_uri: 's3://attestations/example-cluster' },
   admission: { enabled: true },
 })
 ```

@@ -279,7 +279,7 @@ All data flows through the transport bus. This means:
 ```ruby
 VectorDataPlatform.build(synth, {
   profile: :production,
-  cluster_name: 'akeyless-dev',
+  cluster_name: 'example-cluster',
   ingestion: { kubernetes_logs: true, statsd: true },
   sink: { loki: true, analytics: true },
 })

@@ -551,8 +551,8 @@ jobs:
         run: nix run ".#${VULNIX_SCAN_APP}"
 
       # Correctness gate, after the CVE scan and before anything ships --
-      # matching akeylesslabs/akeyless-main-repo's own camelot-hardened-images.yml
-      # pattern exactly (that pipeline already learned this lesson: a
+      # matching the customer-facing hardened-images pipeline's own pattern
+      # exactly (that pipeline already learned this lesson: a
       # CVE-clean image that crashes at boot is worse than useless). docker
       # load, not a registry pull -- the same local tarball the scan step
       # above just cleared, never touched a registry yet.
@@ -695,7 +695,7 @@ jobs:
       # downstream cannot re-derive this closure. sign / emit-outcome-chain are
       # honest LiveTODOs (false); image-digest cross-job plumbing is a LiveTODO
       # (the exact pinned scan-image-ref is the recorded coordinate, matching
-      # akeylesslabs' own camelot-image-pipeline cartorio leg).
+      # the customer-facing image pipeline's own cartorio leg).
       - name: Build image closure info (cartorio SBOM source — local cache hit, no recompile)
         if: inputs.cartorio-attest
         env:

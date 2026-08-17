@@ -22,7 +22,7 @@
   #
   # Args:
   #   imageRef    — full image reference WITH digest preferred
-  #                 (e.g. "ghcr.io/akeylesslabs/akeyless-auth@sha256:abc")
+  #                 (e.g. "ghcr.io/myorg/my-service@sha256:abc")
   #   keyless     — use Fulcio + Rekor (default: true)
   #   identityToken — optional path to identity token file
   mkCosignSignApp = {

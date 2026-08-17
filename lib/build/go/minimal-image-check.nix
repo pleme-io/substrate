@@ -57,10 +57,10 @@
 #
 # Usage (per built image):
 #   mkMinimalImageCheck pkgs {
-#     name       = "akeyless-uam";
+#     name       = "my-service";
 #     image      = flake.packages.x86_64-linux."dockerImage:amd64";
 #     binary     = flake.packages.x86_64-linux.default;   # optional
-#     binName    = "uam";                                  # binary basename
+#     binName    = "mysvc";                                # binary basename
 #     expectStatic  = true;                                # CGO_ENABLED=0
 #     maxStorePaths = 3;                                    # binary+cacert(+1)
 #     execSmoke  = { args = [ "--version" ]; };            # optional run probe
