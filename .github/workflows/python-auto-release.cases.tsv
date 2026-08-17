@@ -3,58 +3,86 @@
 # TAB-separated: <name>	<context k=v;k=v>	<expect-run csv>	<expect-skip csv>
 #
 # WHAT THIS PINS
-#   Two jobs, one edge: bump -> ship. `bump` is gated only on the actor (bot
-#   loop-break); `ship` is gated only on `needs.bump.outputs.bumped == 'true'`
-#   and inherits skip-when-my-dependency-skipped (no always() anywhere here).
-#   So the whole selection surface is (actor x bumped), and every row below is
-#   one cell of it. Rows 1-4 also carry the privacy axis - see the next block
-#   for why, because that is the point of the sweep.
+#   Three jobs, one dependency each on `bump`: bump -> {ship, publish-withheld}.
+#   `bump` is gated only on the actor (bot loop-break). `ship` and
+#   `publish-withheld` share the SAME positive precondition
+#   (`needs.bump.outputs.bumped == 'true'`) and carry opposite privacy guards,
+#   so together they partition the bumped case: exactly one of them selects
+#   whenever a bump happened, and neither selects when it did not.
 #
-# THE PRIVACY AXIS IS DECLARED AND DELIBERATELY INERT - READ THIS BEFORE
-# DELETING A ROW AS A DUPLICATE.
-#   The sweep exists because cargo-auto-release's publish jobs carry
-#   `&& !github.event.repository.private`, so a private repo bumps, tags,
-#   pushes and publishes NOTHING while reporting success. THIS WORKFLOW HAS NO
-#   SUCH GUARD. `github.event.repository.private` appears twice in this file
-#   (lines 53 and 85) and BOTH are inside `runs-on:` - runner routing, not job
-#   selection. Neither `if:` mentions it, and the caller that dispatches here
-#   (auto-release.yml's `python` job, gated only on repo-type) does not gate on
-#   it either.
+# THE PRIVACY AXIS IS NOW LIVE — THIS FILE PREVIOUSLY RECORDED IT AS INERT.
+#   Until 2026-08-17 `github.event.repository.private` appeared in this workflow
+#   only inside `runs-on:` (runner routing, which gates nothing), so a private
+#   repo bumped, tagged, pushed AND published its source to pypi.org. The old
+#   header said so and said the fix, if it came, belonged in the workflow with
+#   private-bump-publishes-anyway flipping to expect-skip=ship in the same PR.
+#   That is this change: the row flipped, and it was renamed to
+#   private-bump-withheld because "publishes anyway" is no longer true.
 #
-#   Consequence, asserted by rows public-bump and private-bump-publishes-anyway
-#   being IDENTICAL in expectation: python-auto-release publishes to pypi.org
-#   from a PRIVATE repo. That is the opposite of the cargo family's posture. It
-#   is pinned here as measured behaviour, NOT endorsed - if the fleet posture is
-#   'never publish from a private repo', the fix belongs in the workflow and
-#   private-bump-publishes-anyway then flips to expect-skip=ship in the same PR.
-#   The two rows are kept as a PAIR on purpose: one row alone cannot show that
-#   the privacy value changes nothing, and 'changes nothing' is the finding.
+#   The risk is DISCLOSURE, not merely consistency: python-publish runs
+#   `uv build` (which emits an sdist — a source tarball) then `uv publish`, and
+#   PyPI has no unpublish. A release can be yanked, but its files stay
+#   downloadable and the (name, version) pair is burned forever.
 #
-#   The key is declared in every case even though no condition reads it, so the
-#   day a guard is added the table already carries the axis it must be asserted
-#   on, and the rows differ by the value that will then matter.
+# WHY THERE IS A publish-withheld JOB AND WHY IT IS ASSERTED HERE
+#   A bare `&& !private` would have converted every private caller to
+#   silently-not-publishing — the exact defect this linter was written for
+#   (graphql-synthesizer, 2026-08-08: green run, bumped, tagged, published
+#   nothing, nothing said so). publish-withheld runs precisely when ship is
+#   withheld, so the skip is a statement. Rows private-bump-withheld and
+#   private-bump-opt-in are kept as a PAIR: one asserts the guard fires AND
+#   announces itself, the other asserts the escape hatch actually escapes.
+#   Neither row alone shows that, and "the guard is escapable" is the finding
+#   that makes adding the guard safe.
 #
-# NO STATUS FUNCTIONS ARE SUPPLIED because no condition calls one. always() is
-# absent from this workflow, which is exactly why `ship` cannot pick a run up
-# after `bump` skips - see bot-actor-no-loop.
+# inputs.publish-from-private IS DECLARED IN EVERY ROW, including the rows where
+# it cannot matter. An undeclared context path is an ERROR in this linter by
+# design — silence about an axis is not a claim about it — and declaring it
+# everywhere means a future condition that starts reading it in another cell
+# already has the axis under assertion instead of quietly defaulting.
+#
+# always() IS DECLARED IN EVERY ROW because publish-withheld calls it. Note
+# what this table can and cannot show about it: the linter has no failure model
+# beyond the status functions a condition names, and this workflow names only
+# always(), so the run these rows CANNOT express is the one always() actually
+# exists for here — `bump` failing after setting `bumped=true` (bump step ok,
+# commit/tag/push red), where needs-propagation would otherwise suppress the
+# notice. What the rows below DO pin is the other half: that always() has not
+# turned the notice into noise on every run where nothing was bumped.
 
-# 1. The happy path. A public repo bumped, so it must also ship.
-public-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship	
+# 1. The happy path. A public repo bumped, so it ships; nothing is withheld.
+public-bump	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=true;always()=true	bump,ship	publish-withheld
 
-# 2. THE SWEEP ROW. Same input, private repo. `ship` STILL RUNS - unguarded.
-#    Flip this to expect-skip=ship only together with a workflow change.
-private-bump-publishes-anyway	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship	
+# 2. THE FLIPPED ROW. Private, no opt-in: ship is withheld AND SAYS SO.
+#    This is the row the old table predicted would flip when the guard landed.
+private-bump-withheld	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=false;needs.bump.outputs.bumped=true;always()=true	bump,publish-withheld	ship
 
-# 3. Nothing to release: bump ran and reported no version change, so ship is
-#    skipped by its own condition (not by needs-propagation).
-public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+# 3. THE ESCAPE HATCH. Private, opt-in true: ship runs, and the withheld notice
+#    stands down so a real publish is never accompanied by a claim it did not
+#    happen. Without this row the guard would be indistinguishable from an
+#    unconditional block on every private repo.
+private-bump-opt-in	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=true;needs.bump.outputs.bumped=true;always()=true	bump,ship	publish-withheld
 
-# 4. The private half of row 3, proving privacy is inert in the no-bump cell
-#    too - so a future guard cannot be mistaken for this row already covering it.
-private-no-bump	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=false	bump	ship
+# 4. Nothing to release: bump ran and reported no version change. Neither
+#    downstream job selects — publish-withheld must NOT announce a withholding
+#    when there was nothing to publish in the first place.
+public-no-bump	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=false;always()=true	bump	ship,publish-withheld
 
-# 5. Loop-break: the bot's own push must not re-trigger a release. `bump` is
-#    skipped by actor, and `ship` is skipped by needs-propagation - the empty
-#    `bumped` value models a SKIPPED upstream, which is distinct from 'false'.
-#    Nothing runs; the run is green and empty, by design.
-bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship
+# 5. The private half of row 4. Privacy must stay inert in the no-bump cell:
+#    a private repo with nothing to ship gets no notice either.
+private-no-bump	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=false;needs.bump.outputs.bumped=false;always()=true	bump	ship,publish-withheld
+
+# 6. Loop-break: the bot's own push must not re-trigger a release. `bump` is
+#    skipped by actor; the empty `bumped` value models a SKIPPED upstream, which
+#    is distinct from 'false'. `ship` skips by needs-propagation.
+#    publish-withheld does NOT get to skip that way — its always() lifts it out
+#    of needs-propagation — so it is its own `bumped == 'true'` clause that
+#    stands it down. Asserting it here is what proves always() did not turn the
+#    notice into noise on every bot push.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=;always()=true		bump,ship,publish-withheld
+
+# 7. The private bot push. Same as row 6 on the privacy axis flipped: with
+#    always() in play, private + bot is the one cell where a naive complement
+#    job WOULD fire (private is true, opt-in is false, bump is skipped), so this
+#    row pins that the shared `bumped == 'true'` precondition holds it back.
+bot-actor-private-no-loop	github.actor=github-actions[bot];github.event.repository.private=true;inputs.publish-from-private=false;needs.bump.outputs.bumped=;always()=true		bump,ship,publish-withheld

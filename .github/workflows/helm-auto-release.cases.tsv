@@ -11,56 +11,95 @@
 # nobody had written down which jobs must run for a given input, so a
 # deliberate no-publish and a broken no-publish were the same green tick.
 #
-# WHAT THE SWEEP FOUND HERE, and the reason to read this header before editing
-# a row. helm-auto-release does NOT share that shape. Both of its
-# `github.event.repository.private` occurrences are in `runs-on:` — runner
-# routing only (private caller -> the camelot-builder-pleme-eks ARC pool,
-# public caller -> ubuntu-latest). NEITHER is in an `if:`. So `ship` packages
-# and pushes the chart to the OCI registry from a PRIVATE caller exactly as it
-# does from a public one. Whether that is the intended posture for charts is a
-# decision this table does not make; it records the behaviour so the decision
-# is visible instead of implicit.
+# WHAT CHANGED HERE, 2026-08-17 — read this before trusting an older copy of
+# these rows. Until that date this workflow had NO privacy guard at all: both
+# of its `github.event.repository.private` references were in `runs-on:`
+# (runner routing, gates nothing), so `ship` pushed a PRIVATE caller's chart
+# to the OCI registry exactly as it pushed a public one. The header used to
+# record that as a deliberate tripwire — rows 1 and 2 differed only in a key
+# no condition read — and predicted that "the day someone copies
+# cargo-auto-release's guard onto `ship`, row 2 turns NOT-RUN". That day is
+# this change. Row 2 was not merely re-contexted; it was INVERTED, and the
+# tripwire fired exactly as written.
 #
-# Rows 1 and 2 therefore differ ONLY in a context key that no condition reads,
-# and that is deliberate — it is the tripwire. The day someone copies
-# cargo-auto-release's `&& !github.event.repository.private` onto `ship`, row 2
-# turns NOT-RUN and the change lands as a decision rather than as a silent stop
-# to every private chart's publishing.
+# THE RISK THIS WORKFLOW ACTUALLY CARRIES, stated so nobody rounds it either
+# way. `helm package` tars templates/, values.yaml and Chart.yaml — repo
+# source — and `ship` pushes that tarball to an OCI registry. So this is a
+# real DISCLOSURE case, not the git-tag-only shape (a Go module proxy cannot
+# fetch a private repo, so that shape leaks nothing and the guard there would
+# be consistency alone). The one over-claim to avoid: a GHCR package can be
+# deleted, unlike a crates.io release; what deletion does not recall is
+# whatever was already pulled, cached or mirrored.
+#
+# AND WHY THE GUARD DID NOT LAND ALONE. Adding `&& !private` by itself would
+# have converted every private caller to the graphql-synthesizer failure —
+# bumped, tagged, published nothing, green. `publish-withheld` runs in exactly
+# the guard's withholding case and prints the sentence a skipped job cannot.
+# Rows 2 and 3 are the pair that keeps it honest: the guard must withhold
+# WITH a notice, and the opt-in must actually publish. If either row ever
+# needs weakening, the change is wrong, not the row.
 #
 # TABLE RULES that make these rows verbose on purpose:
 #   - every context path any condition touches must be declared in EVERY case;
 #     an undeclared path is an ERROR, not an empty default, so an incomplete
-#     case can never become a confident verdict;
+#     case can never become a confident verdict. `inputs.publish-from-private`
+#     and `always()` are therefore on every row, including rows where neither
+#     changes the outcome;
 #   - an EMPTY value (needs.bump.outputs.bumped=) models a SKIPPED upstream
 #     job, which is a distinct state from 'false';
 #   - `ship` needs `bump` and does not call always(), so a skipped `bump`
-#     propagates to a skipped `ship` — rows 4 and 5 pin that.
+#     propagates to a skipped `ship` — row 6 pins that. `publish-withheld`
+#     DOES call always(), which lifts it out of that rule, so its skip in
+#     row 6 has to come from its own condition and not from needs-propagation.
 #
 # NOT ASSERTED, because it is outside what job selection can see: this table
 # proves `ship` is SELECTED, never that the chart became resolvable. That is
 # the job's own final step ("verify the published chart is resolvable"), which
-# runs inside `ship` and is a different layer of check.
+# runs inside `ship` and is a different layer of check. Likewise it proves
+# `publish-withheld` is selected, not that anyone reads the notice it prints.
 
-# 1. The healthy public release. Both jobs run; nothing is skipped.
-public-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship
+# 1. The healthy public release. Both release jobs run; the withheld notice
+# stays quiet, which is the only case where silence is the correct output.
+public-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true;inputs.publish-from-private=false;always()=true	bump,ship	publish-withheld
 
-# 2. A PRIVATE caller that bumped still publishes — unlike cargo-auto-release,
-# this workflow has no privacy guard on `ship`. Asserted, not assumed.
-private-bump-still-publishes	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship
+# 2. THE ROW THE WHOLE CHANGE IS FOR. A private caller bumped and did not opt
+# in: `ship` must stand down AND `publish-withheld` must run. Asserting only
+# the skip would have re-created the silent-skip defect and called it fixed —
+# the RAN half of this row is what makes the skip a statement.
+private-bump-withheld	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true;inputs.publish-from-private=false;always()=true	bump,publish-withheld	ship
 
-# 3. Nothing under source-paths changed, so helm-bump reports bumped=false and
+# 3. The escape hatch, asserted rather than assumed: a private source that
+# deliberately produces a public chart sets publish-from-private=true and
+# publishes, with no withheld notice contradicting it. Without this row the
+# input could be silently inert and every case above would still pass.
+private-bump-opt-in	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true;inputs.publish-from-private=true;always()=true	bump,ship	publish-withheld
+
+# 4. Nothing under source-paths changed, so helm-bump reports bumped=false and
 # `ship` must skip. A no-op run is a legitimate green, and this row is what
-# distinguishes it from a broken one.
-public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+# distinguishes it from a broken one. `publish-withheld` must ALSO stay quiet:
+# nothing was withheld, because nothing was ready to publish.
+public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false;inputs.publish-from-private=false;always()=true	bump	ship,publish-withheld
 
-# 4. Same no-bump outcome from a private caller: the skip is driven by the bump
-# result, never by visibility. Pairs with row 2 to pin that visibility changes
-# NOTHING about which jobs select in this workflow.
-private-no-bump	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=false	bump	ship
+# 5. Same no-bump outcome from a private caller. The skip is driven by the bump
+# result, not by visibility — and crucially the notice does not fire either,
+# so a private repo with nothing to release does not get told a publish was
+# withheld. A notice on every quiet run is how a notice stops being read.
+private-no-bump	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=false;inputs.publish-from-private=false;always()=true	bump	ship,publish-withheld
 
-# 5. The loop guard. `bump` pushes a commit as the bot, and that push re-enters
+# 6. The loop guard. `bump` pushes a commit as the bot, and that push re-enters
 # this workflow; `if: github.actor != 'github-actions[bot]'` stops the second
-# pass. `bump` is skipped, so `bumped` is EMPTY (not 'false'), and `ship` is
-# skipped by needs-propagation — it never calls always(). If `ship` ever grows
-# an always(), this row goes RAN and the re-publish loop is caught here.
-bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship
+# pass. `bump` is skipped, so `bumped` is EMPTY (not 'false'). `ship` is
+# skipped by needs-propagation; `publish-withheld` calls always() so
+# needs-propagation cannot skip it — its skip comes from `bumped != 'true'`
+# alone. That is the row that catches a future edit loosening its condition
+# into a notice on every bot push.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=;inputs.publish-from-private=false;always()=true		bump,ship,publish-withheld
+
+# 7. The payload-absent state: `github.event.repository.private` resolves to
+# nothing, so `!private` is TRUE and the guard falls OPEN — the chart
+# publishes and no notice fires. This row models the STATE, and deliberately
+# does not claim which events produce it; the runner-routing comment in the
+# workflow says scheduled callers "may" lack github.event.repository, and that
+# hedge is not upgraded here. Pinned because a reader of rows 2 and 3 would
+# otherwise conclude a private repo can never publish without the opt-in.
+absent-repository-payload	github.actor=human;github.event.repository.private=;needs.bump.outputs.bumped=true;inputs.publish-from-private=false;always()=true	bump,ship	publish-withheld

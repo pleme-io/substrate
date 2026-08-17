@@ -57,6 +57,15 @@ on:
         type: string
         required: false
         default: ""
+      publish-from-private:
+        description: >-
+          Publish even though the repository is private. Default false: a private
+          repo publishing to a public registry ships its source there, and a
+          registry publish cannot be withdrawn, only yanked. Set true only where
+          a private source deliberately produces a public artifact.
+        type: string
+        required: false
+        default: "false"
     secrets:
       BOT_PAT:
         required: false
@@ -101,7 +110,46 @@ jobs:
   ship:
     needs: bump
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
-    if: needs.bump.outputs.bumped == 'true'
+    # ── PRIVACY GUARD, and exactly how much risk it actually carries here ──
+    #
+    # Until 2026-08-17 this workflow had NO privacy guard: both of its
+    # `github.event.repository.private` references were in `runs-on:`, which
+    # picks a runner label and gates nothing. Six sibling release workflows
+    # (cargo, crossplane-function, helm-monorepo, nix-image, rust,
+    # rust-binary) guard; this one shipped a private caller's chart to the
+    # OCI registry exactly as it shipped a public one. That inconsistency,
+    # not a measured leak, is what this closes.
+    #
+    # THE RISK IS DISCLOSURE, and stating it precisely matters. `helm package`
+    # tars the chart directory: templates/, values.yaml, Chart.yaml, and any
+    # other file under `chart-path`. Those bytes ARE repo source, so a private
+    # caller pushing to a shared org namespace publishes source to a registry.
+    # This is not the git-tag-only shape (a Go module proxy cannot fetch a
+    # private repo at all, so that shape leaks nothing) — an artifact really
+    # does leave the repo here.
+    #
+    # But do not over-quote the crates.io wording. The input's description
+    # says "cannot be withdrawn, only yanked" because that is true of
+    # crates.io; a GHCR package CAN be deleted. The honest residual is that
+    # deletion does not recall what was already pulled, cached or mirrored,
+    # and package visibility is a registry-side setting this workflow does
+    # not control — so the push is still a one-way door in practice.
+    #
+    # `publish-from-private: true` is the escape for a private source that
+    # deliberately produces a public chart. When the guard withholds instead,
+    # `publish-withheld` below says so out loud; a silent skip is the defect
+    # this whole change exists to remove, not a side effect of it.
+    #
+    # KNOWN EDGE, inherited, not introduced: an event payload carrying no
+    # `repository` makes `!github.event.repository.private` true, so the guard
+    # falls OPEN and the chart publishes. The runner-routing comment above
+    # already names that possibility for scheduled callers; this guard reads
+    # the same field and therefore shares it. The case table pins the
+    # behaviour (`absent-repository-payload`) rather than asserting which
+    # events produce it.
+    if: >-
+      needs.bump.outputs.bumped == 'true'
+      && (!github.event.repository.private || inputs.publish-from-private == 'true')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -175,3 +223,58 @@ jobs:
             exit 1
           fi
           echo "resolvable: ${ref} --version ${version}"
+
+  # ── The guard's complement: a withheld publish STATES ITSELF ─────────────
+  #
+  # Runs in exactly the case `ship`'s privacy guard withholds — bumped, but
+  # private and not opted in — and in no other. Its whole output is the
+  # sentence a skipped job cannot say.
+  #
+  # WHY IT IS NOT OPTIONAL. On 2026-08-08 pleme-io/graphql-synthesizer ran
+  # cargo-auto-release: bump bumped, tagged and pushed; ship was SKIPPED by a
+  # correct privacy guard; the crate was never published; the run reported
+  # SUCCESS and nothing anywhere said so. Adding `&& !private` here without
+  # this job would have reproduced that defect across every private caller of
+  # this workflow — curing the disease by spreading it. A guard that fires
+  # must announce itself. cargo-auto-release's "Registry catch-up (seals the
+  # skipped-ship green)" is the same shape; this is its no-registry-claim
+  # sibling, because a private chart has no public registry state to assert.
+  #
+  # `always()` is load-bearing, not decoration: a job that needs a skipped job
+  # is itself skipped by default, which would put the notice straight back
+  # into the silence it exists to break. The rest of the condition is the
+  # exact complement of ship's guard, so the two can never both run and can
+  # never both stand down on a bumped private run.
+  #
+  # It deliberately makes no registry claim and takes no remedial action —
+  # nothing was published and nothing should be. `contents: read` because it
+  # does not even check out.
+  publish-withheld:
+    name: 'publish withheld (private repo)'
+    needs: bump
+    permissions:
+      contents: read
+    if: >-
+      always()
+      && needs.bump.outputs.bumped == 'true'
+      && github.event.repository.private
+      && inputs.publish-from-private != 'true'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - shell: bash
+        env:
+          # Passed as env rather than interpolated into the script body: the
+          # value is a caller-supplied string, and a workflow input has no
+          # business being spliced into shell source.
+          REGISTRY: ${{ inputs.registry }}
+          VERSION: ${{ needs.bump.outputs.new-version }}
+        run: |
+          echo "::notice title=Publish withheld::This repository is private, so the Helm chart (version ${VERSION}) was NOT published to ${REGISTRY}. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+          {
+            echo "### Publish withheld"
+            echo
+            echo "Repository is private; nothing was published to \`${REGISTRY}\`."
+            echo "Bump and tag still happened (version \`${VERSION}\`)."
+            echo
+            echo "If this repo is meant to publish, set \`publish-from-private: true\`."
+          } >> "$GITHUB_STEP_SUMMARY"

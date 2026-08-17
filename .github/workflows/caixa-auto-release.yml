@@ -22,6 +22,42 @@ on:
         type: string
         required: false
         default: ""
+      # THE RISK HERE IS CONSISTENCY, NOT DISCLOSURE — stated plainly so nobody
+      # re-derives a scarier reason from the shared description below.
+      #
+      # `caixa-publish` pushes a RENDERED HELM CHART (templates + values, not
+      # the repo's source tree) to `ghcr.io/pleme-io/helm`. Both clauses of the
+      # generic guard's rationale fail against that destination, measured
+      # 2026-08-17 over the org's 384 container packages:
+      #
+      #   "leaks source to a PUBLIC registry" — ghcr.io has a real private and
+      #   internal tier, unlike crates.io / npm / PyPI where anything published
+      #   is world-readable by construction. The `helm/*` namespace this
+      #   workflow targets holds exactly ONE package today,
+      #   `helm/pangea-operator`, and it is INTERNAL. Chart packages org-wide
+      #   run 186 internal / 6 private / 15 public.
+      #
+      #   "a publish cannot be withdrawn, only yanked" — a GHCR package version
+      #   can be DELETED outright and its visibility flipped to private. The
+      #   irreversibility that makes the npm/crates.io guard a containment
+      #   boundary simply is not present here.
+      #
+      # So this is not the disclosure hole npm-auto-release's guard closes. What
+      # it IS: one uniform shape across the release family, plus a cheap belt on
+      # the one real residual — nothing in this path PINS the created package's
+      # visibility, and those 15 public chart packages prove a public one is
+      # constructible in this org. A private caixa repo shipping a private chart
+      # to our own registry remains a legitimate outcome; it just has to say so
+      # with `publish-from-private: true` rather than happen by default.
+      publish-from-private:
+        description: >-
+          Publish even though the repository is private. Default false: a private
+          repo publishing to a public registry ships its source there, and a
+          registry publish cannot be withdrawn, only yanked. Set true only where
+          a private source deliberately produces a public artifact.
+        type: string
+        required: false
+        default: "false"
     secrets:
       BOT_PAT:
         required: false
@@ -83,7 +119,21 @@ jobs:
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
     runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
-    if: needs.bump.outputs.bumped == 'true'
+    # The private guard carries its own escape hatch, and its skip is ANNOUNCED
+    # by `publish-withheld` below. A bare `&& !private` here would be the exact
+    # defect this change exists to remove: on 2026-08-08 graphql-synthesizer ran
+    # cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and
+    # published nothing, because a correct guard skipped its ship job and
+    # nothing said so. A guard that fires must state that it fired.
+    #
+    # Read the `publish-from-private` input's comment before judging this one
+    # harsh: for a chart going to our own GHCR namespace the guard buys
+    # family-wide consistency, not leak containment, so the opt-in is expected
+    # to be the NORMAL setting for a private caixa repo rather than a rare
+    # exception.
+    if: >-
+      needs.bump.outputs.bumped == 'true'
+      && (!github.event.repository.private || inputs.publish-from-private == 'true')
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, ref: main }
@@ -96,3 +146,43 @@ jobs:
           rendered-dir: rendered/
         env:
           GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+
+  publish-withheld:
+    name: 'publish withheld (private repo)'
+    needs: bump
+    # `always()` lifts this job out of needs-propagation: a job that needs a
+    # SKIPPED or FAILED job is itself skipped by default, which would put the
+    # notice back into the silence this job exists to break.
+    #
+    # TIER-HONEST, measured 2026-08-17 by removing it: the case table below does
+    # NOT hold this clause — deleting always() leaves the linter green on all 5
+    # rows. That is not a redundant clause, it is an UNMODELLED one, and the two
+    # are worth telling apart:
+    #   · the bot-actor row does not need it. bump skips there, so
+    #     needs.bump.outputs.bumped is EMPTY, and `bumped == 'true'` is already
+    #     false — this job correctly stays quiet with or without always().
+    #   · the case it genuinely covers is bump FAILING after its bump step set
+    #     bumped=true (e.g. the tag push dies). Propagation would skip this job
+    #     and the run would end silent; always() makes it announce instead.
+    # job-selection-lint models which jobs SELECT, not whether they SUCCEED
+    # (its README says so), so that second case is outside the oracle and cannot
+    # be asserted as a row. Keep the clause — it is the sibling shape and it
+    # buys a real failure path — but do not read the green table as proof of it.
+    #
+    # The rest is the exact complement of ship's condition: same positive
+    # precondition (bumped == 'true'), then private AND no opt-in. ship and this
+    # job therefore partition the bumped case — never both, never neither. THAT
+    # partition is what the table holds, in rows 2 and 3.
+    if: >-
+      always()
+      && needs.bump.outputs.bumped == 'true'
+      && github.event.repository.private
+      && inputs.publish-from-private != 'true'
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - shell: bash
+        run: |
+          echo "::notice title=Publish withheld::This repository is private, so the rendered Helm chart was NOT published. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to ghcr.io/pleme-io/helm."; echo "Bump and tag still happened."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"

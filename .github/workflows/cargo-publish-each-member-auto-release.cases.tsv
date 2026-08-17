@@ -2,12 +2,16 @@
 #
 # TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
 #
-# WHAT THIS PINS. The workflow has exactly ONE job (`release`) and exactly ONE
-# job-level condition: `github.actor != 'github-actions[bot]'`. So there is one
-# real axis of selection — bot vs human — and everything else this table
-# declares is pinned deliberately as a NEGATIVE: to record which inputs do NOT
-# move the selection, so a future edit that makes one of them matter shows up as
-# a diff here instead of as a silent behaviour change.
+# WHAT THIS PINS. The workflow has TWO jobs — `release` (bump + publish + tag,
+# all three inside one composite action) and `publish-withheld` (the notice
+# that makes the privacy guard's skip audible). They partition the human-actor
+# case: exactly one of them runs, never both, never neither. Two axes move the
+# selection — actor (bot vs human) and the privacy pair
+# (github.event.repository.private × inputs.publish-from-private) — and
+# everything else this table declares is pinned deliberately as a NEGATIVE: to
+# record which inputs do NOT move the selection, so a future edit that makes one
+# of them matter shows up as a diff here instead of as a silent behaviour
+# change.
 #
 # WHY IT EXISTS — and the finding it records. This file is part of the sweep
 # opened by graphql-synthesizer on 2026-08-08: a release workflow reported
@@ -16,22 +20,36 @@
 # `*-auto-release*.yml` in substrate carries a `repository.private` guard, so
 # each was swept for that silent-no-publish shape.
 #
-# THIS WORKFLOW DOES NOT HAVE THAT SHAPE, AND THE INVERSE IS THE POINT.
-# Its single `github.event.repository.private` occurrence is in `runs-on`:
+# THE PREVIOUS VERSION OF THIS FILE RECORDED THE INVERSE, AND THE FLIP IS THE
+# WHOLE REVIEW SIGNAL. Until 2026-08-17 this workflow had NO privacy guard at
+# all: its single `github.event.repository.private` occurrence was in `runs-on`,
 #
 #   runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
 #
 # which selects a RUNNER LABEL (a reusable workflow's runs-on bills the CALLER,
-# so a metered label here charges every private consumer). It is NOT a publish
-# guard, and neither the job nor the composite action it calls
-# (pleme-io/actions/cargo-publish-each-member — checked 2026-08-17, no privacy
-# guard in action.yml or run.tlisp) gates publication on repo visibility.
-# CONSEQUENCE: a PRIVATE caller of this reusable workflow DOES publish to
-# crates.io. Rows `public-human-push` and `private-human-push-STILL-PUBLISHES`
-# assert exactly that, identical selection on both, so the divergence from
-# cargo-auto-release.yml's posture is written down rather than inferred. If a
+# so a metered label here charges every private consumer) and gates nothing. A
+# private caller therefore DID publish to crates.io, and the row asserting that
+# was named `private-human-push-STILL-PUBLISHES`. The old header said: "If a
 # privacy guard is ever added to this workflow, the private row must flip to
-# expect-skip in the SAME commit — that flip is the whole review signal.
+# expect-skip in the SAME commit — that flip is the whole review signal." That
+# is this commit; `private-human-push-WITHHELD` below is that row, flipped.
+#
+# WHAT THE GUARD COSTS HERE, stated because it is NOT the same as in the
+# sibling workflows. cargo-auto-release and npm-auto-release split bump from
+# ship, so their guard withholds only the publish and their withheld-notice
+# truthfully says "the version was bumped and tagged". This workflow does all
+# three inside ONE composite action — pleme-io/actions/cargo-publish-each-member
+# runs bump -> publish -> commit-tag, and commit-tag fires only AFTER a
+# successful publish, deliberately, so git can never tag a version absent from
+# the registry. Withholding the publish therefore withholds the bump and the tag
+# with it. The `release` row flipping to expect-skip is asserting all three
+# withheld, not just the upload, and the notice's wording says so.
+#
+# THE BOT ROWS SELECT NEITHER JOB, ON PURPOSE. `publish-withheld` carries the
+# same `github.actor != 'github-actions[bot]'` clause `release` does, so the
+# loop guard produces no notice. A loop-guard skip is not a withholding, and
+# announcing it as one would train the operator to ignore the notice — which is
+# the failure this whole layer exists to prevent, re-created one level up.
 #
 # NO no-bump ROW, deliberately. The bump/skip-when-no-source-changes decision
 # lives inside the composite action's steps, per workspace member, and is
@@ -40,26 +58,50 @@
 # `skip-when-no-source-changes` axis is unassertable at this layer — see the
 # workflow's own inputs.
 #
-# always() is supplied per case even though no condition reads it, so a rerun
-# posture is expressible the day a second job (needs-propagating) lands.
+# always() is now READ, not merely supplied: publish-withheld's condition opens
+# with it. It is not load-bearing here (that job has no `needs:` to be dragged
+# down by), and the workflow comment says so rather than overclaiming — it is
+# present so the day a `needs:` lands, the notice does not silently re-bury
+# itself.
 
-# Baseline: a human push on a PUBLIC repo. The one job runs and publishes.
-public-human-push	github.actor=human;github.event_name=push;github.event.repository.private=false;always()=true	release	
+# Baseline: a human push on a PUBLIC repo. release runs and publishes; there is
+# nothing to withhold, so the notice stands down.
+public-human-push	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.publish-from-private=false;always()=true	release	publish-withheld
 
-# THE ROW WORTH READING. Same selection as the public row, on purpose: private
-# repos publish through this workflow. Not a bug and not an oversight in the
-# table — it is the measured posture, asserted so a change to it cannot be
-# silent. Contrast cargo-auto-release.yml, whose ship job skips here.
-private-human-push-STILL-PUBLISHES	github.actor=human;github.event_name=push;github.event.repository.private=true;always()=true	release	
+# THE ROW WORTH READING, and the one that flipped. A private caller no longer
+# publishes — and the run says so out loud instead of concluding green over an
+# empty registry. Contrast the same row before 2026-08-17, which asserted
+# `release` RAN here.
+private-human-push-WITHHELD	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.publish-from-private=false;always()=true	publish-withheld	release
+
+# The escape hatch, asserted rather than documented. A private source that
+# deliberately produces public crates opts in, and gets the pre-guard behaviour
+# back exactly — release runs, no notice. Without this row the guard would be
+# indistinguishable from an unconditional private ban.
+private-human-push-opt-in	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.publish-from-private=true;always()=true	release	publish-withheld
+
+# The opt-in is INERT on a public repo: it can only ever widen the private arm,
+# never narrow the public one. Pinned as a negative so an edit that made the
+# input gate public publishing too would surface here.
+public-human-push-opt-in-is-inert	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.publish-from-private=true;always()=true	release	publish-withheld
 
 # The loop guard: the action pushes per-member tags, a tag push re-triggers the
-# caller, and the bot must not publish again. This is the workflow's only real
-# selection decision.
-bot-actor-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;always()=true		release
+# caller, and the bot must not publish again. NEITHER job selects — see the
+# header on why the notice deliberately stays quiet here.
+bot-actor-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;inputs.publish-from-private=false;always()=true		release,publish-withheld
 
-# Same guard on a private repo — the actor check is visibility-independent.
-bot-actor-private-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=true;always()=true		release
+# Same guard on a private repo — the actor check is visibility-independent, and
+# it dominates the privacy guard rather than composing with it.
+bot-actor-private-no-publish-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=true;inputs.publish-from-private=false;always()=true		release,publish-withheld
+
+# The loop guard also dominates the OPT-IN: a repo that opted into publishing
+# from private source still must not let the bot's own tag push re-publish.
+bot-actor-private-opt-in-still-no-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=true;inputs.publish-from-private=true;always()=true		release,publish-withheld
 
 # A non-push trigger (a caller wiring this to workflow_dispatch or schedule)
 # changes nothing: event_name is pinned as a negative, per the header.
-human-dispatch-still-runs	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;always()=true	release	
+human-dispatch-still-runs	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;inputs.publish-from-private=false;always()=true	release	publish-withheld
+
+# ...and the guard is trigger-independent too: a dispatch on a private repo is
+# withheld and announced exactly like a push.
+private-dispatch-withheld	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=true;inputs.publish-from-private=false;always()=true	publish-withheld	release

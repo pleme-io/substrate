@@ -41,6 +41,26 @@ on:
         type: string
         required: false
         default: ""
+      # THE RISK HERE IS DISCLOSURE, NOT MERELY CONSISTENCY. `npm publish`
+      # uploads a TARBALL OF THE PACKAGE CONTENTS to registry.npmjs.org — it is
+      # not a tag that a proxy later fetches (the Go module-proxy shape, where a
+      # private repo simply cannot be fetched and so leaks nothing). Everything
+      # the package's `files`/`.npmignore` set admits — `src` by this
+      # workflow's own default source-paths — becomes world-readable the moment
+      # it lands, and `npm unpublish` is only permitted within 72h on a package
+      # nothing depends on; after that the only remedy is `npm deprecate`, which
+      # withdraws nothing. `access: restricted` narrows INSTALL rights, not the
+      # fact that the bytes left the private boundary. So the guard below is a
+      # real containment boundary, not a tidiness rule.
+      publish-from-private:
+        description: >-
+          Publish even though the repository is private. Default false: a private
+          repo publishing to a public registry ships its source there, and a
+          registry publish cannot be withdrawn, only yanked. Set true only where
+          a private source deliberately produces a public artifact.
+        type: string
+        required: false
+        default: "false"
     secrets:
       # required:false, deliberately. GitHub validates the WHOLE reusable call
       # graph at startup, BEFORE any job `if:` is evaluated, so a
@@ -94,7 +114,15 @@ jobs:
   ship:
     needs: bump
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
-    if: needs.bump.outputs.bumped == 'true'
+    # The private guard carries its own escape hatch, and its skip is ANNOUNCED
+    # by `publish-withheld` below. A bare `&& !private` here would be the exact
+    # defect this change exists to remove: on 2026-08-08 graphql-synthesizer ran
+    # cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and
+    # published nothing, because a correct guard skipped its ship job and
+    # nothing said so. A guard that fires must state that it fired.
+    if: >-
+      needs.bump.outputs.bumped == 'true'
+      && (!github.event.repository.private || inputs.publish-from-private == 'true')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,3 +135,37 @@ jobs:
           access: ${{ inputs.access }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-withheld:
+    name: 'publish withheld (private repo)'
+    needs: bump
+    # `always()` defeats the rule that a job needing a SKIPPED-or-FAILED job is
+    # itself skipped — which is exactly how a withheld-publish notice would fall
+    # back into the silence this job exists to break.
+    #
+    # BE PRECISE ABOUT WHAT IT BUYS HERE, measured 2026-08-17 by deleting it and
+    # re-running the case table: all five rows stayed green. It is not what
+    # selects this job in any modelled case, because the `bumped == 'true'`
+    # precondition already implies bump ran to completion, so needs-propagation
+    # is satisfied anyway. What it still covers is the one shape the table does
+    # not model: bump sets the output and then FAILS a later step (the tag push),
+    # leaving bumped == 'true' with bump.result == 'failure'. Without always()
+    # that run withholds the publish and says nothing — the exact defect — so
+    # always() stays, as insurance rather than as the mechanism.
+    #
+    # The rest is the exact complement of ship's condition: same positive
+    # precondition (bumped == 'true'), then private AND no opt-in. ship and this
+    # job therefore partition the bumped case — never both, never neither.
+    if: >-
+      always()
+      && needs.bump.outputs.bumped == 'true'
+      && github.event.repository.private
+      && inputs.publish-from-private != 'true'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    permissions:
+      contents: read
+    steps:
+      - shell: bash
+        run: |
+          echo "::notice title=Publish withheld::This repository is private, so the npm package was NOT published. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to registry.npmjs.org."; echo "Bump and tag still happened."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"

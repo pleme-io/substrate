@@ -13,63 +13,99 @@
 # input, so a deliberate no-publish and a broken no-publish were the same green
 # tick.
 #
-# THE GO WORKFLOW IS THE OPPOSITE CASE, AND THAT IS THE ASSERTION WORTH HAVING.
-# go-auto-release also carries `github.event.repository.private`, three times —
-# but every occurrence is in a `runs-on:` runner-routing expression
-# (`private && 'camelot-builder-pleme-eks' || 'ubuntu-latest'`), and NOT ONE is
-# in a job `if:`. So repo visibility changes WHERE the FSM runs and never
-# WHETHER it runs: a private repo reaches `tag` and `proxy-confirm` exactly like
-# a public one. Rows `public-bump` and `private-bump-still-proxies` are the same
-# selection on purpose, and that sameness is the claim. If someone later copies
-# cargo's `&& !private` onto `proxy-confirm`, `private-bump-still-proxies` turns
-# red — which is the whole point of writing the posture down instead of
-# inferring it from a green tick.
+# ── CORRECTED 2026-08-17: THE GUARD LANDED, LOUDLY. ─────────────────────────
+# An earlier revision of this header said the Go family "has no `!private`
+# publish guard, and must not acquire one silently", and pointed at a row named
+# `private-bump-still-proxies` asserting a private repo proxies exactly like a
+# public one. Both are now obsolete, and the distinction that retired them is
+# the point: the guard was acquired LOUDLY, not silently. `proxy-confirm` gained
+# `&& (!private || inputs.publish-from-private == 'true')`, and a complement job
+# `publish-withheld` runs precisely when that guard withholds — so the skip is
+# an announced verdict, not an absence. The old row's warning was against a bare
+# `&& !private` copied over from cargo, which would have converted every private
+# Go consumer to a silent no-publish. That specific defect is what
+# `private-bump-withheld` now pins: it asserts the notice job RUNS.
 #
-# The posture is deliberate and safe for Go, for a reason specific to the
-# pull model: Go's "publish" is `git push origin <tag>` and nothing else.
-# There is no upload. proxy.golang.org cannot fetch a private repo, so the
-# ConfirmProxy poll simply exhausts its budget and emits a warning
-# (ProxyTimedOut is a defined in-FSM outcome, not a failure). Nothing leaks and
-# nothing needs a privacy guard, so there is none.
+# ── AND THE RISK CLASSIFICATION IS STILL "CONSISTENCY", NOT "DISCLOSURE". ────
+# Do not read the guard as evidence Go had a leak. It did not, and the workflow
+# comment says so at length. Go's entire publish side effect is
+# `git push origin <tag>` in the `tag` job, to the repo's OWN remote; there is
+# no upload. proxy.golang.org cannot fetch a private module — it has no
+# credentials — so the ConfirmProxy poll merely exhausts its budget and warns
+# (ProxyTimedOut is a defined in-FSM outcome, not a failure). What the
+# unguarded path discloses is METADATA: the module path and version string
+# reach a public Google service via the `go list -m` prime and the poll URL.
+# Real, small, and not the source-leak the cargo/npm guards exist for. The
+# guard therefore buys one shape across the family — the same question has the
+# same answer and the same knob everywhere — and it withholds the public-proxy
+# confirm + verify pair, NOT the release. `private-bump-withheld` selecting
+# `tag` is that fact written down: the module IS released on a private repo,
+# to everyone who can read the repo, guard or no guard.
 #
 # Context paths touched by the workflow's conditions, and therefore mandatory in
-# every row: github.actor, needs.tag.outputs.created, needs.tag.outputs.skip.
-# github.event.repository.private is declared too, though no `if:` reads it —
-# it names each row's visibility posture so the public/private pair is legible,
-# and it is the key a future privacy guard would land on.
+# every row: github.actor, needs.tag.outputs.created, needs.tag.outputs.skip,
+# github.event.repository.private, inputs.publish-from-private, and always()
+# (a status function, resolved from the case like any other key — publish-
+# withheld calls it, so every row must declare it or the linter errors rather
+# than guessing).
 #
 # An empty value (`needs.tag.outputs.created=`) models a SKIPPED upstream `tag`
 # job, which is a distinct state from 'false'.
 #
-# None of the three conditions calls always()/success()/failure()/cancelled(),
-# so no status function is supplied. Every job here is therefore subject to
-# needs-propagation: `validate` skipping takes the whole chain down with it.
+# Only publish-withheld calls always(); every other job is subject to needs-
+# propagation, so `validate` skipping takes validate→tag→proxy-confirm down with
+# it. publish-withheld is deliberately lifted out of that rule and then held off
+# the no-op runs by its own positive precondition — see the last two rows.
 
 # The happy path. Public repo, a human pushed, relver found changed Go source
 # and created a fresh tag — the full Drafted→Validated→Tagged→Proxied→Verified
-# FSM selects, end to end.
-public-bump	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=false	validate,tag,proxy-confirm
+# FSM selects, end to end. Visibility is false so the guard is inert and the
+# notice stands down.
+public-bump	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=false;always()=true	validate,tag,proxy-confirm	publish-withheld
 
-# THE ROW THAT WOULD HAVE BEEN MISSING. Identical selection to public-bump on a
-# PRIVATE repo: the Go family has no `!private` publish guard, and must not
-# acquire one silently. See the header for why the pull model makes this safe.
-private-bump-still-proxies	github.actor=human;github.event.repository.private=true;needs.tag.outputs.created=true;needs.tag.outputs.skip=false	validate,tag,proxy-confirm
+# THE GUARD, FIRING, ANNOUNCED. Private repo, no opt-in: proxy-confirm is
+# withheld and publish-withheld RUNS in its place. Asserting the notice job
+# here is the whole defence against the graphql-synthesizer defect — if a
+# future edit drops the complement job or its always(), this row goes red
+# rather than reverting to a silent green.
+#
+# Note `tag` still runs. That is not an oversight: the tag push already
+# released the module, and the table says so out loud.
+private-bump-withheld	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=false;always()=true	validate,tag,publish-withheld	proxy-confirm
+
+# THE ESCAPE HATCH. Same private repo, opt-in set: proxy-confirm runs and the
+# notice stands down. Pins that the escape clause is reachable — a guard whose
+# opt-in never selects is a guard with no escape, which is the silent-skip
+# defect wearing an input.
+private-bump-opt-in	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=true;needs.tag.outputs.created=true;needs.tag.outputs.skip=false;always()=true	validate,tag,proxy-confirm	publish-withheld
 
 # No Go source moved since the last tag: relver reports skip=true and creates
 # nothing, so the FSM stops at Tagged and the proxy/verify pair is correctly
-# not reached. This is a no-op run, not a broken one.
-no-source-changed	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=false;needs.tag.outputs.skip=true	validate,tag	proxy-confirm
+# not reached. This is a no-op run, not a broken one — and nothing was
+# withheld, so publish-withheld must stay quiet too.
+no-source-changed	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.tag.outputs.created=false;needs.tag.outputs.skip=true;always()=true	validate,tag	proxy-confirm,publish-withheld
 
 # Pins the SECOND conjunct of proxy-confirm's condition on its own. no-source-
 # changed already falsifies `created == 'true'`; this row falsifies only
 # `skip != 'true'`, so neither half can be deleted without a red row. Models the
 # resume shape: relver finds the tag already present, so it reports the tag as
-# created while still flagging the run as a skip.
-tag-exists-relver-skips	github.actor=human;github.event.repository.private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=true	validate,tag	proxy-confirm
+# created while still flagging the run as a skip. publish-withheld carries the
+# same two conjuncts, so it is pinned here twice over.
+tag-exists-relver-skips	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.tag.outputs.created=true;needs.tag.outputs.skip=true;always()=true	validate,tag	proxy-confirm,publish-withheld
 
 # The bot's own tag push must not re-enter the FSM. `validate` guards on the
-# actor, and because nothing here calls always(), needs-propagation carries the
-# skip through `tag` and `proxy-confirm`. tag's outputs are empty (not 'false')
-# precisely because it never ran. A regression that let this loop would show up
-# as a RAN finding on all three jobs.
-bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.tag.outputs.created=;needs.tag.outputs.skip=		validate,tag,proxy-confirm
+# actor, and because nothing in that chain calls always(), needs-propagation
+# carries the skip through `tag` and `proxy-confirm`. tag's outputs are empty
+# (not 'false') precisely because it never ran. A regression that let this loop
+# would show up as a RAN finding on all three jobs.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;inputs.publish-from-private=false;needs.tag.outputs.created=;needs.tag.outputs.skip=;always()=true		validate,tag,proxy-confirm,publish-withheld
+
+# THE always() TRAP, PINNED. publish-withheld is deliberately lifted out of
+# needs-propagation, so on a PRIVATE repo it is the one job that could still
+# fire on a run where nothing was ever going to publish — the bot-actor loop
+# guard, where `tag` never ran and its outputs are empty. It must not: a notice
+# on a no-op run is noise, and noise gets ignored, which reintroduces the
+# silence the notice exists to break. Only the positive precondition
+# (`created == 'true'`) holds it back, so this row is what stops someone
+# "simplifying" the condition down to `always() && private && !opt-in`.
+private-bot-actor-no-notice	github.actor=github-actions[bot];github.event.repository.private=true;inputs.publish-from-private=false;needs.tag.outputs.created=;needs.tag.outputs.skip=;always()=true		validate,tag,proxy-confirm,publish-withheld

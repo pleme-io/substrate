@@ -2,11 +2,12 @@
 #
 # TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
 #
-# WHAT THIS PINS. Two jobs, and exactly two facts decide which of them run:
-#   bump  if: github.actor != 'github-actions[bot]'      (no needs)
-#   ship  if: needs.bump.outputs.bumped == 'true'        (needs: bump)
-# So the table's job is to hold three claims still: a bump publishes, a no-bump
-# does not, and the bot's own push does not re-enter the loop.
+# WHAT THIS PINS. Three jobs: bump -> {ship | publish-withheld}. Four context
+# paths appear in an `if:` — github.actor (the bot re-trigger loop guard on
+# bump), needs.bump.outputs.bumped (the publish gate), and the pair
+# github.event.repository.private + inputs.publish-from-private (the privacy
+# guard and its opt-in escape). The table fixes the selected set for every
+# combination that can actually occur.
 #
 # WHY IT EXISTS. On 2026-08-08 pleme-io/graphql-synthesizer ran the sibling
 # cargo-auto-release, reported SUCCESS, bumped + tagged + pushed, and published
@@ -14,39 +15,78 @@
 # silently skipped. A deliberate no-publish and a broken no-publish were the
 # same green tick, because nobody had written down which jobs must run.
 #
-# READ ROW 2 BEFORE CHANGING ANYTHING. caixa-auto-release does NOT carry that
-# privacy guard in any `if:`, and that is deliberate, not an oversight. It reads
-# github.event.repository.private twice, but only inside `runs-on`, where it
-# picks a self-hosted label so a private consumer is not billed for metered
-# minutes — a runner selector, never a selection gate. The reason the guard is
-# absent here and present in cargo-auto-release is the DESTINATION of the
-# publish: caixa-publish pushes a rendered Helm chart to our own OCI registry,
-# where a private repo shipping a private artifact is the correct outcome;
-# cargo publish pushes to the public crates.io index, where it would leak the
-# source and where a yank cannot be undone. Same shape, opposite right answer.
+# ── ROW 2 REVERSED ON 2026-08-17. READ THIS BEFORE CHANGING IT BACK. ────────
 #
-# `github.event.repository.private` is therefore declared in every case even
-# though no `if:` reads it. It is the axis the sibling workflow turns on, and a
-# row that did not state it would leave the next reader unable to tell whether
-# this workflow was checked against it or merely never thought about. If a
-# `&& !github.event.repository.private` is ever added to ship, row 2 goes red
-# and the change has to be argued for rather than absorbed.
+# This header used to argue at length that the absence of a privacy guard here
+# was deliberate, and row 2 asserted that a private caixa repo PUBLISHES. The
+# argument was that caixa-publish pushes to our own OCI registry rather than a
+# public index, so a private repo shipping a private artifact is the correct
+# outcome. That reasoning is still sound about the DESTINATION and is preserved
+# below — what changed is that "correct outcome" and "silent default" are not
+# the same thing, and only the first was ever argued for.
+#
+# The measurement behind the reversal (2026-08-17, org's 384 container
+# packages): the `helm/*` namespace holds exactly one package,
+# `helm/pangea-operator`, and it is INTERNAL; chart packages org-wide run 186
+# internal / 6 private / 15 public. So the disclosure risk is genuinely low —
+# ghcr.io has a real private/internal tier and a GHCR version can be deleted
+# outright, so NEITHER clause of the generic guard's rationale ("leaks source to
+# a public registry", "cannot be withdrawn, only yanked") holds here. This guard
+# buys FAMILY-WIDE CONSISTENCY plus a cheap belt on the one real residual:
+# nothing in this path pins the created package's visibility, and those 15
+# public chart packages prove a public one is constructible in this org.
+#
+# What makes adding the guard safe rather than a re-run of the graphql-
+# synthesizer defect is that it ANNOUNCES ITSELF. publish-withheld is ship's
+# exact complement over the bumped case, so exactly one of the two selects
+# whenever a bump happened, and a withheld publish emits a ::notice + a step
+# summary instead of an absence. Rows 2 and 3 assert both halves of that
+# partition.
+#
+# CONSEQUENCE FOR CONSUMERS, stated so it is not discovered by surprise: a
+# private caixa repo that legitimately ships a private chart to our own registry
+# — which, per the measurement above, is the NORMAL case here rather than a rare
+# exception — must now set `publish-from-private: true`. That is one line in the
+# caller, and it converts an unexamined default into a stated intent.
+#
+# inputs.publish-from-private is declared in EVERY row, including the public
+# ones where no `if:` outcome turns on it: an undeclared context path is an
+# ERROR by design, because a case that models a scenario while leaving a path it
+# does not mention to default silently is how a table drifts out from under its
+# workflow. always() is declared for the same reason — publish-withheld's
+# condition reads it.
 
-# 1. The happy path on a public repo: a bump publishes.
-public-bump-publishes	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=true	bump,ship
+# 1. The happy path on a public repo: a bump publishes, and nothing is withheld.
+public-bump-publishes	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=true;always()=true	bump,ship	publish-withheld
 
-# 2. THE ROW THAT WAS MISSING WHEN graphql-synthesizer SHIPPED NOTHING — asserted
-#    here with the OPPOSITE expectation, on purpose. A private caixa repo DOES
-#    publish, because the artifact goes to our own OCI registry and never to a
-#    public index. See the header. Do not "fix" this row to match the cargo one.
-private-bump-publishes	github.actor=human;github.event.repository.private=true;needs.bump.outputs.bumped=true	bump,ship
+# 2. THE GUARD FIRING, AND SAYING SO. A private repo without the opt-in
+#    publishes nothing — and publish-withheld RUNS, so the skip is a statement
+#    rather than an absence. This row previously asserted the opposite; see the
+#    header for why it reversed and why that is not a regression to the
+#    silent-skip defect.
+private-bump-withheld	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=false;needs.bump.outputs.bumped=true;always()=true	bump,publish-withheld	ship
 
-# 3. Nothing to release: bump runs and finds no change, so ship must not fire.
-#    This is the case that keeps ship's condition from being weakened to always().
-public-no-bump	github.actor=human;github.event.repository.private=false;needs.bump.outputs.bumped=false	bump	ship
+# 3. THE ESCAPE HATCH, and for this workflow the expected setting on a private
+#    caixa repo: opting in restores publishing and stands the notice down.
+private-bump-opt-in	github.actor=human;github.event.repository.private=true;inputs.publish-from-private=true;needs.bump.outputs.bumped=true;always()=true	bump,ship	publish-withheld
 
-# 4. The bot's own commit-and-push must not re-trigger the pipeline. bump is
+# 4. Nothing to release: bump runs and finds no change, so ship must not fire.
+#    This is the case that keeps ship's condition from being weakened to
+#    always(). publish-withheld stays quiet too — nothing was withheld, there
+#    was simply nothing to publish.
+public-no-bump	github.actor=human;github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=false;always()=true	bump	ship,publish-withheld
+
+# 5. The bot's own commit-and-push must not re-trigger the pipeline. bump is
 #    skipped by the actor guard; ship is skipped both by its own condition and by
 #    needs-propagation. The empty value models a SKIPPED upstream job, which is a
 #    distinct state from 'false' — bump never ran, so it emitted no output at all.
-bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;needs.bump.outputs.bumped=		bump,ship
+#    publish-withheld skips on bumped != 'true' DESPITE its always(), which is
+#    what keeps the bot loop from emitting a spurious withheld notice.
+#
+#    NOTE, measured 2026-08-17: this row does NOT hold publish-withheld's
+#    always() clause. Removing always() keeps all 5 rows green, because bump
+#    skipping here leaves bumped EMPTY and the condition is already false. The
+#    case always() actually covers — bump FAILING after setting bumped=true — is
+#    outside this oracle, which models job SELECTION and not job SUCCESS. Stated
+#    so nobody reads the green table as evidence for that clause.
+bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.private=false;inputs.publish-from-private=false;needs.bump.outputs.bumped=;always()=true		bump,ship,publish-withheld

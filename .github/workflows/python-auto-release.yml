@@ -18,6 +18,24 @@ on:
         type: string
         required: false
         default: "pyproject.toml uv.lock"
+      # THE RISK HERE IS DISCLOSURE, NOT MERELY CONSISTENCY. `python-publish`
+      # runs `uv build` then `uv publish` to pypi.org, and `uv build` emits an
+      # SDIST — a source tarball. So a private repo reaching the ship job below
+      # uploads its own source to a public index, and PyPI has no unpublish:
+      # a release can be yanked (hidden from resolution) but its files stay
+      # downloadable, and the (name, version) pair is burned forever. That is
+      # strictly worse than the git-tag-only shape some sibling workflows have,
+      # where a private repo simply cannot be fetched by a public proxy and
+      # nothing leaks.
+      publish-from-private:
+        description: >-
+          Publish even though the repository is private. Default false: a private
+          repo publishing to a public registry ships its source there, and a
+          registry publish cannot be withdrawn, only yanked. Set true only where
+          a private source deliberately produces a public artifact.
+        type: string
+        required: false
+        default: "false"
       # Runner routing: empty default routes by CALLER repo visibility —
       # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
@@ -83,7 +101,17 @@ jobs:
   ship:
     needs: bump
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
-    if: needs.bump.outputs.bumped == 'true'
+    # The privacy guard, with its escape hatch. A bare `&& !private` would have
+    # converted 69 private callers to silently-not-publishing — the exact defect
+    # this guard family exists to remove (graphql-synthesizer, 2026-08-08:
+    # cargo-auto-release reported SUCCESS, bumped, tagged, pushed, published
+    # nothing, and no surface said so). Two things keep this honest: the opt-in
+    # below, for a private source that deliberately produces a public artifact,
+    # and the `publish-withheld` job, which turns the withheld case from an
+    # absence into a statement.
+    if: >-
+      needs.bump.outputs.bumped == 'true'
+      && (!github.event.repository.private || inputs.publish-from-private == 'true')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,3 +122,36 @@ jobs:
       - uses: pleme-io/actions/python-publish@main
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+  # The complement of `ship`'s guard, and the whole reason adding the guard is
+  # safe: it runs PRECISELY when the guard withholds, so a withheld publish is
+  # an announcement rather than a missing job nobody notices.
+  #
+  # `always()` lifts this job out of the skipped-because-my-dependency-skipped
+  # rule. Be precise about what that buys HERE, because the usual reason does
+  # not apply: the shared `bumped == 'true'` precondition already implies `bump`
+  # ran, so the skipped-upstream case is excluded by the condition itself. What
+  # always() actually covers is `bump` FAILING AFTER setting its output — the
+  # bump step succeeds, a later step (commit/tag/push) fails, `bumped` is still
+  # 'true' and `needs.bump.result` is 'failure'. Without always() the notice
+  # would vanish in exactly that run. It is kept for the same reason
+  # cargo-auto-release's drip job keeps it: a complement job that can be
+  # suppressed by its own dependency's status is back to being an absence.
+  #
+  # The positive precondition is kept byte-identical to ship's, so the two
+  # conditions partition the bumped case exactly: at most one of
+  # ship/publish-withheld selects, and when a bump happened exactly one does.
+  publish-withheld:
+    name: 'publish withheld (private repo)'
+    needs: bump
+    if: >-
+      always()
+      && needs.bump.outputs.bumped == 'true'
+      && github.event.repository.private
+      && inputs.publish-from-private != 'true'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - shell: bash
+        run: |
+          echo "::notice title=Publish withheld::This repository is private, so the Python package was NOT published to pypi.org. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+          { echo "### Publish withheld"; echo; echo "Repository is private; nothing was published to pypi.org."; echo "Bump and tag still happened."; echo; echo "If this repo is meant to publish, set \`publish-from-private: true\`."; } >> "$GITHUB_STEP_SUMMARY"
