@@ -50,6 +50,14 @@ on:
         type: string
         required: false
         default: "true"
+      run-publishability-lint:
+        description: >-
+          Report a NEW disclosure of somebody else's estate — an AWS account id,
+          a live resource id, a cloud endpoint host — in a repo that is public
+          or about to be. Reports only for now (see the job below).
+        type: string
+        required: false
+        default: "true"
       run-publish-verify:
         type: string
         required: false
@@ -166,6 +174,34 @@ jobs:
       # TIER while this reads false: only-mitigated. Not a gate yet, and it
       # should not be described as one.
       - uses: pleme-io/actions/workflow-shim-lint@main
+        with:
+          fail-on-violation: "false"
+
+  publishability:
+    name: 'universal · publishability-lint (no borrowed estate)'
+    needs: detect
+    if: inputs.run-publishability-lint == 'true'
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+      # `fail-on-violation` is FALSE for the first sweep, on purpose.
+      #
+      # Measured 2026-08-17: a sweep found customer-identifying content in 25
+      # public repos — account ids, tenant names, a partner registry, internal
+      # GitOps paths, a live incident postmortem. All of it was cleaned that
+      # day, so the expected steady state here is zero. But this gate also
+      # carries rule classes the sweep did not use, so the first fleet-wide run
+      # is a survey, and turning it red before anyone has seen its output is how
+      # a gate earns a reputation for noise and then gets switched off.
+      #
+      # Flip to "true" once a full cycle across the callers reports clean, or
+      # once the findings that do surface are baselined with a reason. Unlike
+      # the shim lint above, this one has no known backlog to work through —
+      # so the window should be short.
+      #
+      # TIER while this reads false: only-mitigated. It reports; it does not
+      # gate. Do not describe it as a gate until the flag flips.
+      - uses: pleme-io/actions/publishability-lint@main
         with:
           fail-on-violation: "false"
 
