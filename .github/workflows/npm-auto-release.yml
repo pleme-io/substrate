@@ -165,14 +165,21 @@ jobs:
     permissions:
       contents: read
     steps:
-      # The summary goes through the typed action; only the one-line ::notice
-      # annotation stays inline, since GitHub exposes no action for it and one
-      # echo is within the 3-line glue allowance.
+      # TWO SURFACES, TWO TYPED ACTIONS. step-summary-publish writes markdown to
+      # $GITHUB_STEP_SUMMARY; annotation-publish writes the workflow command that
+      # becomes a banner on the run and the PR checks tab. Both, because a reader
+      # who never opens the summary page still has to learn the publish was
+      # withheld.
       #
-      # step-summary-publish was a STUB when this job was written — a ::warning
-      # and exit 0, writing nothing at all. It was implemented first. Converting
-      # to it beforehand would have deleted this notice silently, which is the
-      # exact defect the job exists to prevent.
+      # This job used to end in a `run: echo "::notice …"`, with a comment saying
+      # the summary action could not carry it — true, and it described a MISSING
+      # PRIMITIVE rather than an exception to ★★ PIPELINING. Both actions were
+      # implemented before this job was converted (step-summary-publish was a
+      # stub emitting a ::warning and exit 0; annotation-publish did not exist),
+      # because converting first would have deleted the notice silently, which is
+      # the exact defect this job exists to prevent. The annotation is proven
+      # byte-identical to the echo it replaced by a row in
+      # annotation-publish/run.test.tlisp.
       - uses: pleme-io/actions/step-summary-publish@main
         with:
           template: |
@@ -184,9 +191,17 @@ jobs:
             If this repo is meant to publish a public artifact from private
             source, set `publish-from-private: true`.
           vars: '{"registry":"registry.npmjs.org"}'
-      # Block scalar, not a plain one: the message contains ": " and an
-      # unquoted YAML scalar starting with `echo` then parses as a mapping.
-      # Still a single line of shell.
-      - shell: bash
-        run: |
-          echo "::notice title=Publish withheld::This repository is private, so the npm package was NOT published. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+      # Folded scalar (`>-`): the message contains ": ", which a plain scalar
+      # would parse as a mapping. Folding joins the lines with single spaces, so
+      # the value the action receives is the one long sentence — do not reflow it
+      # in a way that introduces a double space or a blank line, both of which
+      # change the rendered annotation.
+      - uses: pleme-io/actions/annotation-publish@main
+        with:
+          level: notice
+          title: Publish withheld
+          message: >-
+            This repository is private, so the npm package was NOT published.
+            The version was bumped and tagged. Set publish-from-private: true
+            if this repo is meant to publish a public artifact from private
+            source.

@@ -207,16 +207,49 @@ to those files (README edit, flake.lock update) triggers a full rebuild.
 
 ### INV-4: No Import-from-Derivation
 
-**Rule:** Generated files (Cargo.nix, node-packages.nix) must be committed
-to the repo, not generated at evaluation time.
+**Rule:** Evaluation must never require a build. Committing generated files
+(Cargo.nix, node-packages.nix) instead of producing them at eval time is the
+most common case, **but it is not the whole rule** — see the correction below.
 
 | Axiom | C6 (IFD) |
 |-------|----------|
-| **nix-audit checker** | `ifd_avoidance` |
-| **flake-hygiene primitive** | (manual — detected by nix-audit) |
+| **nix-audit checker** | `ifd_avoidance` — **DOES NOT EXIST.** Do not cite it. |
+| **enforcing surface** | `checks.<sys>.rust-git-source-ifd-free`, built by `.github/workflows/nix-tests.yml` (job `rust-overrides`) **with `--option allow-import-from-derivation false`** |
+| **flake-hygiene primitive** | — |
 
 **Why:** IFD serializes evaluation (per C6) and breaks offline/sandboxed
-evaluation. Committing the generated file eliminates IFD entirely.
+evaluation.
+
+**★ CORRECTED 2026-08-18 — the rule text above used to be the whole rule, and
+it described the wrong thing.** As written ("generated files must be
+committed") it is a statement about committed artifacts, and the fleet's
+DOMINANT IFD was not that: every affected repo already had a committed
+`Cargo.gen.lock`. The real mechanism was `lib/build/rust/lockfile-builder.nix`'s
+`mkSrcOf`, which resolves a git crate source and then calls
+`builtins.pathExists` *inside* the fetched output to find the subdirectory
+holding that crate's `Cargo.toml` — and when the fetch produced a DERIVATION
+(the `fetchgit` fallback) that probe forced a build mid-evaluation. Because
+`wrapWithRuntimeGen` puts gen on every consumer's PATH, every consumer
+inherited gen's own git-dep probe: a **25.5% IFD rate over 55 conclusive fleet
+probes, 13 of 14 hits this single mechanism, 35s per IFD-taking eval against
+0s IFD-free**. An audit checking exactly what this rule used to say would have
+reported all of them clean. The rule is therefore stated as the axiom.
+
+**★ And `ifd_avoidance` never existed.** Measured 2026-08-18 at HEAD
+`dbe58e6`: `git grep allow-import-from-derivation` over this repo returned
+**zero hits** — the option was not named, let alone set, in any workflow, any
+eval suite, or any doc. INV-4 was prose for its entire life. The row above now
+names the surface that actually enforces it; the enforcement is an
+**invocation**, because a Nix expression cannot disable IFD for itself.
+
+**Known scope of that enforcement, stated so it is not read as more.** It
+covers the Rust git-source path via a committed three-file fixture
+(`lib/build/rust/tests/fixtures/git-dep-delta`). It does **not** cover
+crate2nix's `mkGitHash`, a second independent IFD mechanism on the `Cargo.nix`
+path (~137 fleet repos ship a `Cargo.nix`), and it cannot cover substrate's own
+`packages.<sys>.gen` bootstrap, which is IFD **by construction** — gen's source
+is fetched as a derivation and a flake-builder is evaluated over it. Both are
+open, and both are named here rather than left for the next reader to discover.
 
 ### INV-5: Stable Version Strings
 
@@ -297,10 +330,18 @@ Perfect (1.0): no bare `src = ./.` anywhere.
 ### M4: IFD Count
 
 ```
-M4 = flakes_using_generated_cargo_nix_without_committed_file
+M4 = evals_that_must_build_something_to_finish
 ```
 
-Perfect (0): all generated files committed.
+Perfect (0): no evaluation requires a builder.
+
+**★ CORRECTED 2026-08-18.** This used to read
+`flakes_using_generated_cargo_nix_without_committed_file`, which measures a
+PROXY, and the proxy read 0 while the real figure was 25.5% (14 of 55
+conclusive fleet probes) — every affected repo had its generated file
+committed. Measure the property, not one of its causes: the only honest probe
+is to evaluate with `--option allow-import-from-derivation false` and see
+whether it survives. See §INV-4.
 
 ### M5: Closure Size Variance
 
@@ -467,7 +508,7 @@ the existing infrastructure metrics.
 | INV-1: Single Pin | C1, C4 | nixpkgs_pin | assertStablePin | Yes |
 | INV-2: follows | C1, C5 | follows_chain | assertSingleNixpkgs | Yes |
 | INV-3: Source Filter | C7 | source_filter | enforceSourceFilter | Partial |
-| INV-4: No IFD | C6 | ifd_avoidance | — | No (manual) |
+| INV-4: No IFD | C6 | ~~ifd_avoidance~~ (never existed — see §INV-4) | — | No (manual) |
 | INV-5: Stable Versions | C1 | version_stability | — | No (manual) |
 | INV-6: Layered Docker | — | docker_layers | — | Partial |
 | INV-7: Cache Alignment | C4 | cache_alignment | — | Yes (via tend) |

@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "cargo_lock_sha256": "edc1558ffee43f258bedc48587847fc9e56536370e616b14a2f5c58d3440074a",
+  "manifest_sha256": {
+    "Cargo.toml": "bfd67455217911885db86ad0cecb9eee1ef3e174c6fc4b1ecffc84456f8e3cea"
+  },
+  "per_crate": {
+    "ifd-git-fixture-0.0.0": {
+      "edition": "2021",
+      "lib_target": {
+        "name": "ifd_git_fixture",
+        "path": "src/lib.rs"
+      }
+    },
+    "shibori-0.1.1-53e586af23b707e0c8f4da743f76f5dcbbcadbc0": {
+      "edition": "2024",
+      "lib_target": {
+        "name": "shibori",
+        "path": "src/lib.rs"
+      }
+    }
+  },
+  "target_resolves": {
+    "base": {
+      "ifd-git-fixture-0.0.0": {
+        "runtime_dependencies": [
+          {
+            "name": "shibori",
+            "package_key": "shibori-0.1.1-53e586af23b707e0c8f4da743f76f5dcbbcadbc0",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          }
+        ],
+        "build_dependencies": [],
+        "features": []
+      },
+      "shibori-0.1.1-53e586af23b707e0c8f4da743f76f5dcbbcadbc0": {
+        "runtime_dependencies": [],
+        "build_dependencies": [],
+        "features": []
+      }
+    },
+    "targets": {
+      "aarch64-apple-darwin": {
+        "overrides": {}
+      },
+      "aarch64-unknown-linux-gnu": {
+        "overrides": {}
+      },
+      "aarch64-unknown-linux-musl": {
+        "overrides": {}
+      },
+      "x86_64-apple-darwin": {
+        "overrides": {}
+      },
+      "x86_64-unknown-linux-gnu": {
+        "overrides": {}
+      },
+      "x86_64-unknown-linux-musl": {
+        "overrides": {}
+      }
+    }
+  },
+  "git_nar_sha256": {
+    "shibori-0.1.1-53e586af23b707e0c8f4da743f76f5dcbbcadbc0": "sha256-nxR7aEymaiaBl/0EiLO/16FnvSxgVwKA6KvheGPZ07g="
+  },
+  "flake_metadata": {}
+}

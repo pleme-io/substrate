@@ -151,11 +151,17 @@ jobs:
       && inputs.publish-from-private != 'true'
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
     steps:
-      # Summary through the typed action; only the one-line ::notice stays
-      # inline, since GitHub exposes no action for annotations. Note
-      # step-summary-publish was a STUB when this job was written (a ::warning
-      # and exit 0, writing nothing) — it was implemented first, because
-      # converting to it beforehand would have deleted this notice silently.
+      # TWO SURFACES, TWO TYPED ACTIONS — the summary page and the run-level
+      # annotation. Both, because a reader who never opens the summary still has
+      # to learn the publish was withheld.
+      #
+      # The annotation used to be a `run: echo "::notice …"`, kept inline because
+      # "GitHub exposes no action for annotations". That was a MISSING PRIMITIVE,
+      # not an exception to ★★ PIPELINING; annotation-publish is that primitive.
+      # Both actions were implemented before this job was converted, because
+      # converting onto a stub would have deleted the notice silently — the exact
+      # defect this job exists to prevent. Byte-identity with the replaced echo is
+      # a row in annotation-publish/run.test.tlisp.
       - uses: pleme-io/actions/step-summary-publish@main
         with:
           template: |
@@ -166,8 +172,16 @@ jobs:
 
             If this repo is meant to publish, set `publish-from-private: true`.
           vars: '{"registry":"pypi.org"}'
-      # Block scalar because the message contains ": " and a plain YAML scalar
-      # would parse as a mapping. Still one line of shell.
-      - shell: bash
-        run: |
-          echo "::notice title=Publish withheld::This repository is private, so the Python package was NOT published to pypi.org. The version was bumped and tagged. Set publish-from-private: true if this repo is meant to publish a public artifact from private source."
+      # Folded scalar (`>-`) because the message contains ": ", which a plain
+      # scalar would parse as a mapping. Folding joins the lines with single
+      # spaces; a reflow that adds a double space or a blank line changes the
+      # rendered annotation.
+      - uses: pleme-io/actions/annotation-publish@main
+        with:
+          level: notice
+          title: Publish withheld
+          message: >-
+            This repository is private, so the Python package was NOT published
+            to pypi.org. The version was bumped and tagged. Set
+            publish-from-private: true if this repo is meant to publish a public
+            artifact from private source.

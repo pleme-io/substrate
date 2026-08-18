@@ -393,6 +393,34 @@
           rust-host-tree-closure =
             (import ./lib/build/rust/tests/host-tree-closure-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── INV-4 ("No Import-from-Derivation") — the CHECKER ───────────
+          # `docs/cia/cache-theory.md` §INV-4 declared the invariant, named a
+          # checker `ifd_avoidance`, and marked it manual-fix. That checker did
+          # not exist: measured 2026-08-18 at HEAD dbe58e6, `git grep
+          # allow-import-from-derivation` over the whole repo returns ZERO
+          # hits. This is the first thing that enforces it — and it enforces
+          # the axiom (C6, eval must not build), not INV-4's narrower rule text
+          # about committed generated files, because every repo the fleet-wide
+          # IFD hit already had its generated artifact committed.
+          #
+          # ⚠ THE OPTION IS THE POINT. A Nix expression cannot disable IFD for
+          # itself, so building this check WITHOUT
+          # `--option allow-import-from-derivation false` exercises only half
+          # the gate. `.github/workflows/nix-tests.yml` passes it; keep it.
+          # The check ALSO asserts derivation-freeness structurally (via the
+          # resolved source's string context), so a step that loses the flag
+          # degrades rather than going blind — see the test file's header.
+          #
+          # NOT VACUOUS: red-run 2026-08-18 on aarch64-darwin by making
+          # `githubOwnerRepo` return null (the pre-2026-07-26 shape, where
+          # every github git dep went through `fetchgit`). With the option off
+          # the eval dies naming `…-shibori-53e586a.drv^out`; with the option
+          # on, `git-source-carries-no-derivation-dependency` fails. The
+          # fixture's git-source COUNT is asserted too, so a fixture that
+          # silently lost its git dep fails instead of passing over nothing.
+          rust-git-source-ifd-free =
+            (import ./lib/build/rust/tests/ifd-free-git-source-test.nix { inherit pkgs; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were

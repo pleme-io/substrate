@@ -1241,4 +1241,22 @@ let
   };
 in {
   inherit mkProject loadBuildSpec loadBuildSpecFrom defaultSpecFile;
+
+  # EXPORTED FOR THE INV-4 GATE, and for nothing else today.
+  #
+  # `mkSrcOf` is the whole reason INV-4 ("No Import-from-Derivation",
+  # docs/cia/cache-theory.md) was a written-down rule with no checker: its
+  # git branch fetches a source and then `builtins.pathExists` INSIDE that
+  # output to find which subdirectory holds the crate's Cargo.toml. When the
+  # fetch produces a DERIVATION (the `fetchPkgs.fetchgit` fallback) that
+  # probe forces a build mid-evaluation — a 25.5% fleet IFD rate over 55
+  # probes on 2026-08-18, 13 of 14 hits this one mechanism, 35s versus 0s
+  # per eval. See `tests/ifd-free-git-source-test.nix`, which drives THIS
+  # function (not a copy of it) under
+  # `--option allow-import-from-derivation false`.
+  #
+  # A gate that tested a reimplementation would be vacuous, so the export
+  # exists rather than the duplicate. It is not part of the consumer-facing
+  # API; `mkProject` remains the only supported entry point.
+  inherit mkSrcOf;
 }

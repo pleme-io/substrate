@@ -159,6 +159,101 @@ jobs:
       - name: darwin-test.nix (mkDarwinBuildInputs private-frameworks hook)
         run: nix-instantiate --eval --strict lib/util/darwin-test.nix
 
+      # ══ INV-4 — "No Import-from-Derivation" ═══════════════════════════
+      #
+      # docs/cia/cache-theory.md §INV-4 declared this invariant, named a
+      # checker `ifd_avoidance`, and marked it manual-fix. THAT CHECKER DID
+      # NOT EXIST — measured 2026-08-18 at HEAD dbe58e6, `git grep
+      # allow-import-from-derivation` over the whole repo returns ZERO hits:
+      # the option is never named, let alone set, in any workflow or suite.
+      # This step is the first enforcement the invariant has ever had.
+      #
+      # Note it enforces the AXIOM (C6, "evaluation must not build"), not
+      # INV-4's rule TEXT, which says only "generated files must be
+      # committed". Every repo the fleet-wide IFD hit already had a committed
+      # `Cargo.gen.lock`; an audit of exactly what INV-4 says would have
+      # reported all of them clean.
+      #
+      # ⚠ `--option allow-import-from-derivation false` IS THE GATE. A Nix
+      # expression cannot disable IFD for itself, so the enforcement has to be
+      # the INVOCATION; drop the flag and this step degrades to "does the
+      # fixture evaluate", which it does either way. Keep it, and keep it on
+      # THIS step — it is scoped to one small check on purpose, because
+      # substrate's own `packages.<sys>.gen` bootstrap is IFD BY CONSTRUCTION
+      # (gen's source is fetched as a derivation and a flake-builder evaluated
+      # over it), so a repo-wide `nix flake check` under this option would be
+      # red for a reason that is not a defect.
+      #
+      # WHAT IT WATCHES. `lib/build/rust/tests/fixtures/git-dep-delta` is a
+      # three-file committed workspace (Cargo.toml + Cargo.lock +
+      # Cargo.gen.lock — the delta reader returns null unless all three exist)
+      # whose one dependency is a GIT dep on pleme-io/shibori at a tagged rev,
+      # with its NAR pinned in the delta's `git_nar_sha256`. That is
+      # deliberately the branch that regressed: `mkSrcOf` resolves a git
+      # source and then probes INSIDE the fetched tree with
+      # `builtins.pathExists`, which forces a build mid-eval whenever the
+      # fetch produced a derivation. A registry-only fixture would sail
+      # through this step forever while never touching that branch, so the
+      # check asserts the git-source COUNT as well.
+      #
+      # This job rather than `flake-checks` because `flake-checks` is red on
+      # `checks.workflow-catalog` (2026-08-18, run 32121068202) and a new gate
+      # landing inside an already-failing job is a gate nobody can read.
+      #
+      # NOT VACUOUS — three red runs, 2026-08-18 on aarch64-darwin, each
+      # restored afterwards. (1) Reintroducing the IFD (`gh = null`, i.e. the
+      # pre-2026-07-26 shape where every github git dep went through
+      # `fetchgit`): this exact command exits 1 with `cannot build
+      # '/nix/store/…-shibori-53e586a.drv^out' during evaluation because the
+      # option 'allow-import-from-derivation' is disabled`. (2) The same break
+      # WITHOUT the option: 7/8, failing
+      # `git-source-carries-no-derivation-dependency` — the check's own
+      # structural guard, so losing the flag degrades rather than blinds.
+      # (3) Pointing it at a registry-only fixture: 4/8, failing
+      # `fixture-still-exercises-the-git-branch: expected exactly 1 git
+      # source in the fixture, found 0`.
+      - name: checks.rust-git-source-ifd-free (INV-4 — eval must not build)
+        run: |
+          nix build --no-link -L \
+            --option allow-import-from-derivation false \
+            '.#checks.x86_64-linux.rust-git-source-ifd-free'
+
+      # ══ INV-4, SECOND SUBJECT — THE PINNED GEN ════════════════════════
+      #
+      # ★ THE STEP ABOVE DOES NOT CATCH THE DEFECT THAT PROMPTED IT. Measured
+      # 2026-08-18 by an adversarial review: with BOTH gen-pin.json files
+      # reverted to the exact defective revs (rust bd36597c, go e8feaecf), the
+      # fixture check above still passed 8/8 at the IDENTICAL store path. Its
+      # subject and the fleet's IFD are DISJOINT — the fixture exercises a
+      # CONSUMER's own delta path, while the fleet's IFD lived inside GEN's
+      # evaluation, reached by every consumer because wrapWithRuntimeGen
+      # (lib/build/rust/tool-release.nix) puts gen on the built binary's PATH
+      # and so forces gen's drvPath during eval.
+      #
+      # This step watches the thing that actually regressed: the gen revision
+      # THIS REPO PINS. The rev is read from gen-pin.json rather than written
+      # here, so the gate follows the pin instead of drifting from it.
+      #
+      # Verified both directions, which is what makes it a gate and not a
+      # decoration:
+      #   c6d56f02 (current) -> "/nix/store/…-rust_gen-cli-0.1.45.drv"
+      #   bd36597c (previous) -> error: cannot build
+      #                          '/nix/store/…-shikumi-3913d35.drv^out'
+      #                          during evaluation
+      #
+      # Any future pin whose evaluation needs a build — a git dep, a
+      # fetched-then-read source, anything — fails here before it reaches a
+      # single consumer. That is the 35s-per-eval tax this exists to prevent.
+      - name: INV-4 — the pinned gen must evaluate without building
+        run: |
+          for f in lib/build/rust/gen-pin.json lib/build/go/gen-pin.json; do
+            rev=$(nix eval --impure --raw --expr "(builtins.fromJSON (builtins.readFile ./$f)).rev")
+            echo "::group::$f -> $rev"
+            nix eval --option allow-import-from-derivation false \
+              "github:pleme-io/gen/$rev#packages.x86_64-linux.host-tool.drvPath"
+            echo "::endgroup::"
+          done
+
   go-package-graph:
     name: go — gen-gomod M1 per-package interpreter eval tests
     runs-on: ubuntu-latest

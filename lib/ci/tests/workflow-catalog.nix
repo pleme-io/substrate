@@ -24,7 +24,7 @@
 #
 # Each floor is set AT the measured value for the counts that must not
 # regress, because the whole point is that today's state is the new minimum.
-# `total` is the exception: it is floored a little below 89 so that
+# `total` is the exception: it is floored a little below the live count so that
 # legitimately RETIRING a reusable is not a gate failure, while a collapse in
 # discovery still is. A floor that forbids deletion would make this file an
 # obstacle to the modularize-don't-delete flow rather than a check on it.
@@ -32,12 +32,41 @@
 let
   s = workflowCatalog.stats;
 
-  # Measured 2026-08-11 by evaluating this catalog against the tree.
+  # Measured 2026-08-11, RE-MEASURED 2026-08-18: total 91, shellFree 45,
+  # tataraScript 5, documented 91.
+  #
+  # ── WHY shellFree MOVED 44 -> 45, and why it had to move UP ──────────────
+  #
+  # Between the two dates the count went 44 -> 42: the three withheld-publish
+  # jobs (cargo-publish-each-member / npm / python auto-release) each gained a
+  # one-line `run: echo "::notice …"`, and this row was RED for a week. The
+  # regression was deliberate at the time and honestly commented — the notice is
+  # a workflow ANNOTATION, `step-summary-publish` writes only
+  # $GITHUB_STEP_SUMMARY, and converting to it would have deleted the annotation
+  # silently. That comment described a MISSING PRIMITIVE, not an exception.
+  #
+  # The primitive now exists (`pleme-io/actions/annotation-publish`, typed
+  # level/title/message + the percent-encoding GitHub's workflow-command grammar
+  # requires) and the three echoes are `uses:` calls, so the count is 45: the
+  # three recovered, on top of the +1 from `hardened-image-pipeline.yml` landing
+  # shell-free (the other arrival, `helm-unittest.yml`, carries two run steps —
+  # which is why total moved 89 -> 91 while shellFree only moved 44 -> 42). The
+  # floor is raised to 45 in the SAME change, because a floor left at 44 would
+  # let exactly this regression happen again unnoticed, which is the whole job of
+  # a ratchet. Byte-identity of the three annotations across the conversion is
+  # pinned by rows in annotation-publish/run.test.tlisp.
+  #
+  # `documented` is deliberately NOT raised to 91. Every reusable has a header
+  # (`undocumented == [ ]` below proves it, and that row is retirement-proof),
+  # whereas a floor of 91 would fail the moment a reusable is legitimately
+  # retired — the "floor that forbids deletion" defect the note above warns
+  # about. The count row is the anti-vacuity backstop; the list row is the real
+  # check.
   floors = {
-    total = 80; # 89 today; slack for deliberate retirement, not for a broken scan
-    shellFree = 44; # 44 today — the no-`run:` migration, ratcheted
-    tataraScript = 4; # 4 today — reusables INVOKING actions/tatara-script
-    documented = 89; # 89 today — crates-publish.yml, the lone gap, fixed alongside
+    total = 80; # 91 today; slack for deliberate retirement, not for a broken scan
+    shellFree = 45; # 45 today — the no-`run:` migration, ratcheted 2026-08-18
+    tataraScript = 4; # 5 today — reusables INVOKING actions/tatara-script
+    documented = 89; # 91 today — see the note above on why this stays at 89
   };
 
   undocumentedFiles = map (e: e.file) (

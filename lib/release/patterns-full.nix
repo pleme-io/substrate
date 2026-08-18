@@ -1284,6 +1284,11 @@
       backend = "tatara-lisp";
       role = "Build a Solana Anchor program.";
     };
+    "annotation-publish" = {
+      uses = "pleme-io/actions/annotation-publish@main";
+      backend = "tatara-lisp";
+      role = "Emit a GitHub workflow annotation (::notice / ::warning / ::error).";
+    };
     "anthropic-message" = {
       uses = "pleme-io/actions/anthropic-message@main";
       backend = "tatara-lisp";

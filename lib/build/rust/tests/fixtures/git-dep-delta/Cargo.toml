@@ -1,0 +1,18 @@
+# FIXTURE — the smallest workspace that makes substrate resolve a GIT crate
+# source. Read `../../ifd-free-git-source-test.nix` first; this file is not a
+# real crate and is never compiled.
+#
+# The dep is on `pleme-io/shibori` at the v0.1.1 tag's commit, chosen because
+# it is (a) pleme-io-owned rather than third-party, (b) ~10 KB, (c) tagged, so
+# the rev is a released artifact rather than a moving branch head, and (d)
+# dependency-FREE, so the reconstructed resolve graph is two nodes.
+[package]
+name = "ifd-git-fixture"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+# `tag = ` is deliberate: it makes cargo write a `?tag=v0.1.1` query string
+# into Cargo.lock's source URL, which is what exercises the builder's
+# `stripUrlQuery` on the way to the fetcher.
+shibori = { git = "https://github.com/pleme-io/shibori", tag = "v0.1.1" }

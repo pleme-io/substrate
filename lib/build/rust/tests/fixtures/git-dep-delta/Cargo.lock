@@ -1,0 +1,17 @@
+# This file is committed BY HAND, not by cargo — the fixture is never built.
+# `cargo_lock_sha256` in Cargo.gen.lock is the sha256 of these exact bytes;
+# editing this file without recomputing that hash makes the delta reader's D2
+# tie throw, which is the intended behaviour and is asserted by the test.
+version = 4
+
+[[package]]
+name = "ifd-git-fixture"
+version = "0.0.0"
+dependencies = [
+ "shibori",
+]
+
+[[package]]
+name = "shibori"
+version = "0.1.1"
+source = "git+https://github.com/pleme-io/shibori?tag=v0.1.1#53e586af23b707e0c8f4da743f76f5dcbbcadbc0"

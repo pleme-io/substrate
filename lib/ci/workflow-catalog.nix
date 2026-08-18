@@ -45,12 +45,19 @@
 #
 # ── THE RATCHET, AND WHY A FLOOR RATHER THAN A TARGET ─────────────────────
 #
-# Two migrations are in flight and both were hand-counted on 2026-08-11:
-# 44 of 89 workflows are shell-free, and 10 invoke tatara-script. Written into
-# prose, those numbers rot the moment anyone edits a workflow, and they rot
-# DOWNWARD invisibly — a count that drops reads as a modest claim, never as a
-# regression. (The org CLAUDE.md's standing rule about dated coverage claims,
-# applied to a number rather than a sentence.)
+# Two migrations are in flight, and the live figures are the FLOORS in
+# `tests/workflow-catalog.nix` — read them there, dated, rather than here.
+# Restating them in this header is what the org CLAUDE.md's dated-claim rule
+# forbids: this file's first draft said "44 of 89 shell-free, and 10 invoke
+# tatara-script" on 2026-08-11, and by 2026-08-18 the true figures were 45 of 91
+# and 5 — so the header's 10 overstated the measured 5 by five, while the FLOOR
+# two files away said 4. Three numbers for one quantity, none flagged. (Whether
+# 10 was already wrong on 2026-08-11 is not knowable from here, and claiming it
+# was would repeat the sin: state the disagreement, not a history you did not
+# measure.) A count that disagrees downward reads as modest rather than wrong.
+#
+# That asymmetry is the whole reason the counts are gated instead of narrated:
+# they rot DOWNWARD invisibly.
 #
 # `tests/workflow-catalog.nix` asserts each count against a FLOOR, so the
 # migration may progress freely and may never reverse. A floor is the right
