@@ -164,23 +164,51 @@ let
   # the v1 COARSE shape, where go.mod genuinely does give you one module and one
   # vendorHash; see ./lockfile-delta.nix's header for the full version gap.)
   #
-  # ── ★ AND THIS RUNG IS NOT WHERE GO'S IFD ACTUALLY COMES FROM ───────────
+  # ── ★ HOW FEW REPOS REACH THIS RUNG (measured, so nobody over-plans) ────
   #
-  # Measured across the fleet the same day, so nobody re-plans against a
-  # phantom: of 76 Go repos with a nix build, 58 pass an explicit or null
-  # `vendorHash` and therefore never consult this ladder at all (see
-  # ./library-check.nix — OMITTING vendorHash is what selects the
-  # spec-sourced sentinel). Of the 18 that do reach it, 15 cannot encode
-  # (13 reject-asm, 2 unrelated). The remaining 3 — manifest-renderer-go,
-  # python-synthesizer-go, todoku-go — DO take an eval-time IFD, and it is
-  # NOT this one: all three fail on `shikumi-<rev>.drv`, a GIT DEPENDENCY
-  # fetched during eval, byte-identically with and without a committed
-  # Go.build-spec.json (verified by moving the file aside and re-probing).
+  # Of 76 Go repos with a nix build, 58 pass an explicit or null `vendorHash`
+  # and therefore never consult this ladder at all — OMITTING vendorHash is
+  # what selects the spec-sourced sentinel (see ./library-check.nix). Of the
+  # 18 that do reach it, ~15 cannot encode a spec at all (13 reject-asm, 2
+  # unrelated), so committing one is not available to them. That leaves 3:
+  # manifest-renderer-go, python-synthesizer-go, todoku-go.
   #
-  # So committing a spec in those three fixes nothing. Go's real eval-time IFD
-  # is the git-dep source resolver, which is the SAME root cause measured on
-  # the Rust side (shirase, lockfile-builder.nix mkSrcOf probing inside a
-  # fetched monorepo) — a shared substrate concern, not a Go one.
+  # ── ★ RETRACTION: COMMITTING THE SPEC *DOES* FIX THOSE THREE ────────────
+  #
+  # An earlier revision of this comment claimed the opposite — that all three
+  # fail on `shikumi-<rev>.drv` "byte-identically with and without a committed
+  # Go.build-spec.json", and therefore that committing a spec fixes nothing.
+  # **That is wrong, and the experiment behind it was invalid.**
+  #
+  # The measurement generated Go.build-spec.json and probed, then moved it
+  # aside and re-probed, and got the same derivation both times — because a
+  # nix flake does NOT copy untracked files. All three of those flakes pass
+  # `src = self`, which is the git tree, so a generated-but-never-`git add`ed
+  # spec is invisible to `pathExists (src + "/Go.build-spec.json")`. The two
+  # runs compared *untracked* against *absent*: the same condition twice.
+  #
+  # Re-verified with a `path:` flake, which unlike a git flake does see
+  # untracked files: manifest-renderer-go and todoku-go both evaluate
+  # IFD-FREE. And the code says so independently — ./lockfile-builder.nix
+  # gates this whole file behind `ifdNeeded`, and Nix short-circuits at
+  # `committedSpec`, so a VISIBLE spec makes the `getFlake gen` below
+  # unreachable and `shikumi` cannot be built at all.
+  #
+  # The lesson worth keeping is the trap, not the conclusion: when a fix is
+  # "add a file", the probe must confirm the file is TRACKED, because
+  # untracked-and-invisible looks exactly like absent.
+  #
+  # ── ★ WHAT IS STILL TRUE: THERE IS A SECOND, LARGER IFD ─────────────────
+  #
+  # The git-dep resolver IFD is real and independent of this rung:
+  # ../rust/lockfile-builder.nix's `mkSrcOf` fetches a git dependency as a
+  # DERIVATION and then `builtins.pathExists` inside its output to find which
+  # subdirectory holds the crate's Cargo.toml. Measured fleet-wide: a 25.5%
+  # IFD rate over 55 conclusive probes, of which 13 of 14 hits are that one
+  # probe. It reaches Go through gen — gen builds itself via
+  # `substrate.rust.library`, so a Go repo with no committed spec runs
+  # `getFlake gen` and inherits the Rust probe. That is why a Go repo IFDs on
+  # a Rust crate, and it is a shared substrate concern rather than a Go one.
   ifdDerivationTraced = builtins.trace
     "mkBuildSpec(go)[IFD]: no committed Go.build-spec.json for ${toString src} → eval-time `gen build` (network). Run `gen build .` and commit Go.build-spec.json (NOT a Go.gen.lock delta — it cannot reconstruct a v2 spec; see the note above)."
     ifdDerivation;
