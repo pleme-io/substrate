@@ -47,6 +47,24 @@
 #     the blocker is upstream and already tracked:
 #     `pending-rust-test-check: lockfile-dev-deps`.
 #
+#   * MEASURED COST OF THAT PENDING ITEM, 2026-08-18. It is not only a missing
+#     nicety — it BLOCKS a migration that is otherwise ready.
+#     `pleme-io/pleme-hotswap-derive` is on the crate2nix path and therefore
+#     takes an eval-time IFD, and it cannot be moved to `substrate.rust.library`
+#     without a regression: its flake deliberately returns the builder's whole
+#     attrset for `checks.tests`, and it really has it — measured
+#     `checks.aarch64-darwin` = { build, tests }, against the facade's
+#     { build, gen-confirm }. For a PROC-MACRO crate (5 behavioural tests plus 2
+#     trybuild UI fixtures with committed .stderr) dropping test execution to
+#     gain IFD-freedom trades one defect for another, so it was deliberately
+#     left un-migrated when its 11 siblings moved.
+#
+#     That makes the ordering explicit: `pending-rust-test-check` is what has to
+#     land first, and the destination is a `tests` check driven by the DELTA path
+#     rather than by a crate2nix graph. Until then, a repo whose tests are only
+#     reachable through crate2nix has a real reason to stay there, and that is a
+#     narrow, nameable exception rather than a general licence.
+#
 # So `shape` does not select a builder today, and this file says so out loud
 # instead of letting the argument keep implying otherwise. What it DOES do,
 # starting now, is real and observable:
