@@ -87,8 +87,41 @@ let
   # unused for github sources — fetchTree pins by rev instead, and the
   # tarball export it produces would not match a git-checkout NAR hash
   # anyway.
+  # THREE SPELLINGS OF THE SAME HOST, added 2026-08-18. This matched
+  # `https://` only, and the note above ("scp-style URLs return null and fall
+  # through to the original `fetchgit` path unchanged") described the gap
+  # accurately without pricing it: falling through is not neutral, it is an
+  # IFD. `fetchgit` is a DERIVATION, and the `builtins.pathExists` layout probe
+  # below then forces it during evaluation, so a git dep spelled with `ssh://`
+  # made its consumer un-evaluable under
+  # `--option allow-import-from-derivation false` while the byte-identical dep
+  # spelled `https://` evaluated fine.
+  #
+  # MEASURED, on repos whose ONLY blocker this was: pleme-theme and
+  # pleme-widget-gen both depend on
+  # `ssh://git@github.com/pleme-io/pleme-widget-spec.git` and both failed with
+  #   cannot build '…-pleme-widget-spec-<rev>.drv^out' during evaluation
+  # even though the committed Cargo.gen.lock RECORDS that dep's NAR hash. The
+  # hash was never the missing piece; the URL spelling was.
+  #
+  # `ssh://git@github.com/o/r` and `git@github.com:o/r` name the same GitHub
+  # object as `https://github.com/o/r`, so `fetchTree { type = "github"; }`
+  # resolves all three identically -- this widens which URLs reach the existing
+  # eval-time path, and changes nothing about what that path does. Private
+  # repos already depended on it (that is why the https branch exists), and
+  # fetchTree authenticates via `access-tokens` regardless of spelling.
+  #
+  # A new host or spelling is ONE list entry, which is the reason for the list:
+  # the previous shape put the decision inside a regex literal, where adding
+  # the second spelling meant editing the expression rather than extending data.
   githubOwnerRepo = url:
-    let m = builtins.match "https://github\\.com/([^/]+)/([^/]+)/?" url;
+    let
+      spellings = [
+        "https://github\\.com/([^/]+)/([^/]+)/?"
+        "ssh://git@github\\.com/([^/]+)/([^/]+)/?"
+        "git@github\\.com:([^/]+)/([^/]+)"
+      ];
+      m = lib.findFirst (x: x != null) null (map (p: builtins.match p url) spellings);
     in if m == null
        then null
        else {
@@ -1259,4 +1292,17 @@ in {
   # exists rather than the duplicate. It is not part of the consumer-facing
   # API; `mkProject` remains the only supported entry point.
   inherit mkSrcOf;
+
+  # Exported for the SAME reason as mkSrcOf: the spelling table in
+  # `tests/ifd-free-git-source-test.nix` drives THIS function rather than a
+  # copy, so the gate cannot pass against a reimplementation that drifted.
+  # `mkSrcOf` alone is not enough to pin the class -- it proves the property
+  # for the ONE dep shape the fixture ships (an https, tag-pinned github dep),
+  # and the defect that motivated widening this was a shape the fixture does
+  # not contain (`ssh://`). Pinning the URL predicate directly is what makes
+  # every spelling checkable without one fixture per spelling.
+  #
+  # Not part of the consumer-facing API; `mkProject` remains the only
+  # supported entry point.
+  inherit githubOwnerRepo;
 }

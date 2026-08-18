@@ -201,6 +201,48 @@ let
       (lib.all isDerivationFree resolvedList)
       "the resolved git source depends on a DERIVATION (its string context names a .drv), so mkSrcOf's pathExists probe inside it forces a build mid-evaluation — this is INV-4, violated; see this file's header")
 
+    # ── The URL-SPELLING table ──────────────────────────────────────────
+    #
+    # Added 2026-08-18. The five assertions above prove the IFD-free property
+    # for the ONE dep the fixture ships: an `https://`, tag-pinned github dep.
+    # They are silent about which URLs actually REACH that property, and that
+    # gap shipped a live defect -- `githubOwnerRepo` matched `https://` only,
+    # so `ssh://git@github.com/o/r.git` fell through to `fetchgit` (a
+    # DERIVATION) and the layout probe forced it mid-evaluation. pleme-theme
+    # and pleme-widget-gen were both un-evaluable under
+    # `--option allow-import-from-derivation false` for exactly this reason,
+    # while their committed deltas recorded the dep's NAR hash all along.
+    #
+    # So the property is proven once, by the assertions above, and this table
+    # proves every accepted spelling reaches the branch that has it. That is
+    # cheaper and stricter than one fixture per spelling: a fixture needs a
+    # real reachable repo per URL form, and a private ssh dep cannot be a
+    # fixture in a public gate at all.
+    #
+    # Negative rows are the anti-vacuity half. Without them the table passes
+    # if `githubOwnerRepo` were widened to match EVERYTHING, which would send
+    # genuinely non-github deps down the github fetchTree path and fail at
+    # fetch time instead of falling back to fetchgit as designed.
+    (testHelpers.mkTest "github-url-spellings-all-resolve-to-owner-repo"
+      (lib.all (row: builder.githubOwnerRepo (builtins.elemAt row 0)
+                     == { owner = builtins.elemAt row 1; repo = builtins.elemAt row 2; })
+        [
+          [ "https://github.com/pleme-io/iac-forge"          "pleme-io" "iac-forge" ]
+          [ "https://github.com/pleme-io/iac-forge.git"      "pleme-io" "iac-forge" ]
+          [ "ssh://git@github.com/pleme-io/pleme-widget-spec.git" "pleme-io" "pleme-widget-spec" ]
+          [ "git@github.com:pleme-io/shibori.git"            "pleme-io" "shibori" ]
+        ])
+      "a github URL spelling did not resolve to {owner, repo} — it will fall through to fetchgit, which is a DERIVATION, and mkSrcOf's layout probe then forces it mid-evaluation (INV-4)")
+
+    (testHelpers.mkTest "non-github-urls-still-fall-through"
+      (lib.all (u: builder.githubOwnerRepo u == null)
+        [
+          "https://gitlab.com/foo/bar"
+          "ssh://git@bitbucket.org/foo/bar.git"
+          "https://git.sr.ht/~foo/bar"
+        ])
+      "a non-github URL was matched as github — it would be sent down the fetchTree path and fail at fetch time rather than falling back to fetchgit as designed")
+
     (testHelpers.mkTest "fetched-tree-is-readable-without-a-build"
       (lib.all (p: builtins.pathExists ("${storePathOf p}/Cargo.toml")) resolvedList)
       "could not read inside the resolved source without realising it — the probe mkSrcOf itself performs is the IFD mechanism INV-4 forbids")
