@@ -144,10 +144,45 @@ let
   # IFD runs `gen build .` (network, __noChroot) DURING EVAL — variable
   # latency, not shared across hosts. Falling to IFD was SILENT, so the
   # eval-time tax was invisible. Emit a loud trace naming the source so every
-  # IFD repo is visible + actionable — commit its `gen build .` output
-  # (Go.build-spec.json + Go.gen.lock) to take the deterministic no-IFD path.
+  # IFD repo is visible + actionable.
+  #
+  # ── ★ THE REMEDY IS THE BUILD-SPEC, NOT A DELTA (corrected 2026-08-17) ──
+  #
+  # This trace used to say "Commit Go.gen.lock". For the CURRENT encoder that is
+  # impossible advice, and the reason is structural rather than a missing
+  # feature: a Go.gen.lock delta cannot reconstruct a v2 spec at all.
+  #
+  # Rust's delta works because `Cargo.lock` IS the resolved package graph, so
+  # the delta only carries per-crate scalars and edges (3.4x smaller).
+  # `go.mod` carries module REQUIREMENTS, not the package import graph.
+  # Measured on akeyless-funnel: 8 require lines against 48 package nodes
+  # spanning 42 module prefixes, and each node carries `go_files` and `imports`
+  # that only `go list` can produce. `packages` + `target_resolves` are 71-76%
+  # and 23-29% of the spec — together ~99% is exactly the part no committed Go
+  # artifact holds. So for v2 there is nothing to reconstruct FROM, and
+  # Go.build-spec.json is the correct Go artifact. (The delta was designed for
+  # the v1 COARSE shape, where go.mod genuinely does give you one module and one
+  # vendorHash; see ./lockfile-delta.nix's header for the full version gap.)
+  #
+  # ── ★ AND THIS RUNG IS NOT WHERE GO'S IFD ACTUALLY COMES FROM ───────────
+  #
+  # Measured across the fleet the same day, so nobody re-plans against a
+  # phantom: of 76 Go repos with a nix build, 58 pass an explicit or null
+  # `vendorHash` and therefore never consult this ladder at all (see
+  # ./library-check.nix — OMITTING vendorHash is what selects the
+  # spec-sourced sentinel). Of the 18 that do reach it, 15 cannot encode
+  # (13 reject-asm, 2 unrelated). The remaining 3 — manifest-renderer-go,
+  # python-synthesizer-go, todoku-go — DO take an eval-time IFD, and it is
+  # NOT this one: all three fail on `shikumi-<rev>.drv`, a GIT DEPENDENCY
+  # fetched during eval, byte-identically with and without a committed
+  # Go.build-spec.json (verified by moving the file aside and re-probing).
+  #
+  # So committing a spec in those three fixes nothing. Go's real eval-time IFD
+  # is the git-dep source resolver, which is the SAME root cause measured on
+  # the Rust side (shirase, lockfile-builder.nix mkSrcOf probing inside a
+  # fetched monorepo) — a shared substrate concern, not a Go one.
   ifdDerivationTraced = builtins.trace
-    "mkBuildSpec(go)[IFD]: no committed Go.build-spec.json for ${toString src} → eval-time `gen build` (network). Commit Go.gen.lock for a deterministic no-IFD build."
+    "mkBuildSpec(go)[IFD]: no committed Go.build-spec.json for ${toString src} → eval-time `gen build` (network). Run `gen build .` and commit Go.build-spec.json (NOT a Go.gen.lock delta — it cannot reconstruct a v2 spec; see the note above)."
     ifdDerivation;
 
 in
