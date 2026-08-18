@@ -405,6 +405,44 @@ jobs:
       # trusted at install time, so it is honored regardless of trusted-user
       # status.
       #
+      # ── GH_TOKEN ADDED 2026-08-18: private Go modules in a vendor FOD ──────
+      #
+      # A buildGoModule vendor derivation for a repo that imports a PRIVATE
+      # pleme-io module cannot fetch it: proxy.golang.org 404s a private module,
+      # so `go mod download` falls through to `direct` and needs a git
+      # credential INSIDE THE BUILDER. `pleme-io/actions/git-credentials`
+      # configures git on the RUNNER, which a Nix builder does not inherit, and
+      # the nix-installer's own `github-token` only reaches NIX's fetchers
+      # (flake inputs), never a `go mod download` running inside a derivation.
+      #
+      # substrate already ships the consumer half -- lib/build/go/private-module.nix,
+      # and pitr-reclaimer's flake declares
+      # `impureEnvVars = [ "GITHUB_TOKEN" "GH_TOKEN" ]` on its goModules FOD with
+      # a GOPRIVATE + per-host `insteadOf` preBuild. Both halves were correct and
+      # never met: the ONLY impure-env channel here was named ECR_TOKEN (a
+      # SOURCE-REGISTRY concern for vendor rewraps), so the token never arrived
+      # under a name the flake looks for. Measured 2026-08-18: pitr-reclaimer's
+      # image has never been published, and a fresh dispatch failed in
+      # `pitr-reclaimer-0.1.0-go-modules.drv` for exactly this.
+      #
+      # ★ ONE `impure-env` LINE, NOT TWO. It is a single nix.conf setting whose
+      # value is a whitespace-separated list of `name=value` items -- a second
+      # line does not merge, it OVERRIDES. So both channels are composed into one
+      # line, and the feature gate now fires when EITHER secret is present.
+      #
+      # INERT FOR EXISTING CALLERS. impure-env only reaches a derivation that
+      # DECLARES the name in its own `impureEnvVars`; a build that declares
+      # neither never sees either value. And the derivations that do are
+      # FIXED-OUTPUT, so their bytes stay pinned by vendorHash -- a token
+      # influences HOW bytes are fetched, never WHICH land. Same
+      # byte-identical-for-non-adopters property the ECR_TOKEN input already has.
+      #
+      # BOT_PAT rather than GITHUB_TOKEN: GITHUB_TOKEN is scoped to the CALLING
+      # repo and structurally cannot read a sibling private repo, which is the
+      # whole failure being fixed. The name GH_TOKEN is used because the
+      # consumer's `${GITHUB_TOKEN:-${GH_TOKEN:-}}` accepts either and GH_TOKEN
+      # does not collide with the runner's own GITHUB_TOKEN semantics.
+      #
       # Both lines are gated on the secret, so a caller that passes none
       # renders two blank lines and an unchanged nix.conf -- the same shape the
       # extraSubstituters lines below already use.
@@ -422,8 +460,8 @@ jobs:
           determinate: false
           extra-conf: |
             sandbox = relaxed
-            ${{ secrets.ECR_TOKEN && 'extra-experimental-features = configurable-impure-env' || '' }}
-            ${{ secrets.ECR_TOKEN && format('impure-env = ECR_TOKEN={0}', secrets.ECR_TOKEN) || '' }}
+            ${{ (secrets.ECR_TOKEN || secrets.BOT_PAT) && 'extra-experimental-features = configurable-impure-env' || '' }}
+            ${{ (secrets.ECR_TOKEN || secrets.BOT_PAT) && format('impure-env = {0}{1}', secrets.ECR_TOKEN && format('ECR_TOKEN={0} ', secrets.ECR_TOKEN) || '', secrets.BOT_PAT && format('GH_TOKEN={0}', secrets.BOT_PAT) || '') || '' }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
