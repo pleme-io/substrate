@@ -75,6 +75,48 @@ let
 
   ldLibraryPath = lib.makeLibraryPath runtimeLibs;
 
+  # ── The RUNTIME wrap ────────────────────────────────────────────────────
+  # `mkPackage` sets `runtimeDependencies`, which is right for a package this
+  # kit BUILDS. It does nothing for a binary built elsewhere — e.g. substrate's
+  # `host-tool` variant, or any app whose flake predates this kit — and those
+  # binaries dlopen libwayland/libvulkan/libxkbcommon at startup and die if they
+  # cannot resolve them.
+  #
+  # That is not hypothetical. Measured 2026-08-18: `mado` was the ONLY GUI flake
+  # in the fleet carrying such a wrap, hand-rolled, with a hand-copied duplicate
+  # of `linuxRuntimeLibs` and a comment admitting the hazard — "keep the two in
+  # step if that grows". Every other pleme-io GUI app (escriba, tobira, shirase,
+  # tanken, shashin, hasami, kagi, fumi, hibiki, myaku, nami, namimado) had ZERO
+  # hits for wrapProgram/vulkan-loader/libxkbcommon and therefore could not run
+  # on Linux at all.
+  #
+  # So this exists to make the second copy unnecessary rather than to make it
+  # tidy: it wraps against `ldLibraryPath` above, so there is exactly ONE list.
+  # A no-op on darwin, where the libs are in the SDK and the wrap is meaningless.
+  mkLinuxGuiWrapper =
+    {
+      package,
+      name ? null,
+      mainProgram ? null,
+    }:
+    if !isLinux then
+      package
+    else
+      pkgs.symlinkJoin {
+        name = if name != null then name else "${package.pname or package.name or "gui"}-linux-gui";
+        paths = [ package ];
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        postBuild = ''
+          for f in $out/bin/*; do
+            [ -L "$f" ] || continue
+            wrapProgram "$f" --prefix LD_LIBRARY_PATH : ${ldLibraryPath}
+          done
+        '';
+        meta =
+          (package.meta or { })
+          // lib.optionalAttrs (mainProgram != null) { inherit mainProgram; };
+      };
+
   # Read a version out of a Cargo.toml, supporting both a plain package and a
   # virtual-workspace root (`[workspace.package] version = …`).
   readCargoVersion = src:
@@ -141,5 +183,6 @@ in
     ldLibraryPath
     readCargoVersion
     mkDevShell
-    mkPackage;
+    mkPackage
+    mkLinuxGuiWrapper;
 }
