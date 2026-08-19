@@ -97,20 +97,31 @@ jobs:
       # 22/22 failures across two substrate revisions, identical text each time.
       #
       # These two values are the pair nixpkgs resolves at the rev substrate,
-      # helmworks and ensaio all lock (kubernetes-helm 3.19.1,
-      # kubernetes-helmPlugins.helm-unittest 1.0.3), so CI now runs what a
-      # developer already runs. That equality is the point — it is why the
-      # "measured 0 lint failures" claims made locally were never reproducible
-      # here. DESTINATION: source both from the flake rather than downloading a
+      # helmworks and ensaio all lock — MEASURED, because the first attempt at
+      # this fix pinned 3.19.1/1.0.3 on a second-hand claim and that pair, while
+      # internally consistent, is NOT what a developer gets:
+      #
+      #   nix eval ... "helm=${p.kubernetes-helm.version} \
+      #                 unittest=${p.kubernetes-helmPlugins.helm-unittest.version}"
+      #   => helm=3.20.2 unittest=1.1.0
+      #
+      # So CI now runs what a developer already runs. That equality is the whole
+      # point — it is why "measured 0 lint failures" claims made on a laptop were
+      # never reproducible here. Note this pair is modern on BOTH sides
+      # (helm-unittest 1.1.0 emits platformHooks; helm 3.20.2 accepts it), which
+      # is also the direction that does not strand the plugin on an old line.
+      #
+      # DESTINATION: source both from the flake rather than downloading a
       # hardcoded version, so the pair cannot drift apart again by editing one
-      # line. `pending-helm-pair-from-flake`.
+      # line — and so this comment cannot go stale the next time nixpkgs moves.
+      # `pending-helm-pair-from-flake`.
       - name: Install helm
         uses: azure/setup-helm@v4
         with:
-          version: v3.19.1
+          version: v3.20.2
 
       - name: Install helm-unittest
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.0.3
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.1.0
 
       - name: Lint and test every chart
         env:
