@@ -6,8 +6,15 @@ name: auto-bump
 # to pin a substrate revision when they want stability over
 # 'always-latest @main'.
 #
-# Mirrors pleme-io/actions/.github/workflows/auto-bump.yml — same
-# pattern, different repo.
+# ── ABSORBED 2026-08-19 ──────────────────────────────────────────
+# The "mirrors pleme-io/actions/.github/workflows/auto-bump.yml —
+# same pattern, different repo" note that used to sit here was the
+# evidence: the same shape existed in three repos. It is now
+# pleme-io/actions/next-tag, and this file calls it.
+#
+# The replaced shell also had no guards. git-commit-tag refuses a
+# tag that is not above the highest released version, and refuses
+# one that already exists.
 
 on:
   push:
@@ -32,49 +39,23 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Skip when no workflow / lib changes since last tag
-        id: changes
-        shell: bash
-        run: |
-          last=$(git tag -l 'v0.*' --sort=-v:refname | head -1 || true)
-          if [ -z "$last" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "no prior tag — bump"
-            exit 0
-          fi
-          if git diff --quiet "$last" HEAD -- '.github/workflows/' 'lib/' 'docs/'; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-          echo "last=$last" >> "$GITHUB_OUTPUT"
-
-      - name: Compute next tag
-        if: steps.changes.outputs.skip == 'false'
+      - name: Compute the next tag from content changes
         id: next
-        shell: bash
-        run: |
-          last="${{ steps.changes.outputs.last }}"
-          if [ -z "$last" ]; then
-            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          bump="${{ inputs.bump-type || 'patch' }}"
-          IFS='.' read -r maj min pat <<<"${last#v}"
-          case "$bump" in
-            major) maj=$((maj+1)); min=0; pat=0 ;;
-            minor) min=$((min+1)); pat=0 ;;
-            patch|*) pat=$((pat+1)) ;;
-          esac
-          echo "tag=v${maj}.${min}.${pat}" >> "$GITHUB_OUTPUT"
+        uses: pleme-io/actions/next-tag@main
+        with:
+          bump-type: ${{ inputs.bump-type || 'patch' }}
+          source-paths: ".github/workflows lib docs"
 
-      - name: Create + push tag
-        if: steps.changes.outputs.skip == 'false'
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          tag="${{ steps.next.outputs.tag }}"
-          git tag -a "$tag" -m "release: pleme-io/substrate $tag"
-          git push origin "$tag"
-          echo "tagged + pushed $tag"
+      - name: Tag
+        if: steps.next.outputs.skip == 'false'
+        uses: pleme-io/actions/git-commit-tag@main
+        with:
+          version: ${{ steps.next.outputs.version }}
+          commit-message-template: "release: pleme-io/substrate {tag}"
+
+      - name: Push the tag
+        if: steps.next.outputs.skip == 'false'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          push-tags: "true"
