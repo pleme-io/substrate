@@ -83,13 +83,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ── THE PAIR IS A CONTRACT, NOT TWO INDEPENDENT PINS ────────────────
+      #
+      # helm-unittest >= 1.1.0 emits `platformHooks` in its plugin.yaml, and
+      # helm's plugin loader rejects unknown fields. `platformHooks` first
+      # appears in helm at v3.18.0 — measured, not assumed: `pkg/plugin/plugin.go`
+      # has 0 occurrences at v3.16.3 and v3.17.3, and 3 at v3.18.0 / v3.19.1.
+      #
+      # The previous pair (helm v3.16.3 × helm-unittest 1.1.1) straddled that
+      # boundary in the one direction that cannot work, so this workflow died at
+      # `helm plugin install` — step 3 of 5, before a single chart was read — on
+      # every run since it was authored. It was born red and shipped unexecuted:
+      # 22/22 failures across two substrate revisions, identical text each time.
+      #
+      # These two values are the pair nixpkgs resolves at the rev substrate,
+      # helmworks and ensaio all lock (kubernetes-helm 3.19.1,
+      # kubernetes-helmPlugins.helm-unittest 1.0.3), so CI now runs what a
+      # developer already runs. That equality is the point — it is why the
+      # "measured 0 lint failures" claims made locally were never reproducible
+      # here. DESTINATION: source both from the flake rather than downloading a
+      # hardcoded version, so the pair cannot drift apart again by editing one
+      # line. `pending-helm-pair-from-flake`.
       - name: Install helm
         uses: azure/setup-helm@v4
         with:
-          version: v3.16.3
+          version: v3.19.1
 
       - name: Install helm-unittest
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.1.1
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version 1.0.3
 
       - name: Lint and test every chart
         env:
