@@ -10,6 +10,16 @@ verify nothing, indistinguishable in a CI log from the 830 that work. The file's
 own header states what would make it real (derive the matrix from each crate's
 Cargo.toml/flake, or make it a per-crate `checks.<system>.*` build).
 
+> **★★ `.github/workflows/` here is the FLEET's orchestration home — 91
+> `workflow_call` reusables of 98 files, called by 758 of the 784
+> workflow-bearing pleme-io repos (2026-08-19).** Eleven are the general
+> `pleme-*` family, each a dispatcher taking one `target:`; `pleme-stack` is the
+> single-file umbrella. Before authoring a flow, check whether the shape is an
+> **input** to one that exists — and a new flow ships its `<flow>.cases.tsv` job
+> selection table or its job selection drifts unobserved. A flow holds no logic
+> of its own: every step is a `uses:` into `pleme-io/actions`. The ladder and the
+> homes: [`theory/PIPELINE-DELIVERY.md`](https://github.com/pleme-io/theory/blob/main/PIPELINE-DELIVERY.md).
+
 > **★★★ CSE / Knowable Construction.** Substrate is the *primary
 > rendering layer* of Constructive Substrate Engineering — the typed
 > primitives here (rust-tool-release-flake, module-trio, helm builders,
