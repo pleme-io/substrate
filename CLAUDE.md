@@ -10,7 +10,7 @@ verify nothing, indistinguishable in a CI log from the 830 that work. The file's
 own header states what would make it real (derive the matrix from each crate's
 Cargo.toml/flake, or make it a per-crate `checks.<system>.*` build).
 
-> **★★ `.github/workflows/` here is the FLEET's orchestration home — 91
+> **★★ `.github/workflows/` here is the FLEET's orchestration home — 90
 > `workflow_call` reusables of 98 files, called by 758 of the 784
 > workflow-bearing pleme-io repos (2026-08-19).** Eleven are the general
 > `pleme-*` family, each a dispatcher taking one `target:`; `pleme-stack` is the
