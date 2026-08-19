@@ -1,0 +1,138 @@
+name: ghcr-retention
+#
+# Prune old GHCR container versions, so a repo that publishes an image on every
+# merge stops consuming the org's storage quota forever.
+#
+# ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+#
+# Nothing in the fleet pruned image versions. Measured 2026-08-19: ensaio and
+# pangea-operator were each retaining 100+ versions, ensaio's oldest dating to
+# 2026-07-15. pleme-io is on GitHub FREE, where PACKAGES and ARTIFACTS share
+# one ~500 MB quota and private packages count against it.
+#
+# The failure that surfaced it looked like something else entirely. With the
+# quota exhausted, EVERY artifact upload fails -- including the trivy report
+# uploaded by the image-scan action -- so a job named
+# "zero-tolerance CVE scan" went red with
+#
+#   Failed to CreateArtifact: Artifact storage quota has been hit
+#
+# A security-named gate failing for a storage-billing reason is worse than a
+# plain failure: anyone glancing at it concludes the image has CVEs, and the
+# actual cause is a retention policy nobody wrote.
+#
+# ── SAFE BY DEFAULT ─────────────────────────────────────────────────────────
+#
+# `apply` defaults to FALSE. The default run REPORTS what it would delete into
+# the job summary and deletes nothing. Deleting a published image version is
+# irreversible, and a version still referenced by a running workload takes that
+# workload down on its next pull -- so the destructive half is opt-in, per
+# repo, after someone has read the list.
+on:
+  workflow_call:
+    inputs:
+      packages:
+        description: |
+          Newline-separated container package names, as GHCR knows them
+          (e.g. "ensaio", or "vector/test-runner" for a nested package).
+        type: string
+        required: true
+      min-versions-to-keep:
+        description: |
+          How many of the most recent versions survive, per package.
+
+          Deliberately generous. The cost of keeping too many is storage; the
+          cost of keeping too few is deleting an image something still pulls.
+        type: number
+        required: false
+        default: 30
+      ignore-versions:
+        description: |
+          Regex of version TAGS that are never deleted, whatever their age.
+
+          Defaults to the floating tags a deployment may resolve at pull time
+          rather than pin. A digest-pinned consumer is NOT protected by this --
+          that is what min-versions-to-keep is for.
+        type: string
+        required: false
+        default: '^(latest|amd64-latest|arm64-latest|main|stable)$'
+      apply:
+        description: >-
+          Actually delete. False (the default) reports only.
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      BOT_PAT:
+        description: >-
+          A PAT with delete:packages. GITHUB_TOKEN is INSUFFICIENT for
+          org-owned container packages -- the vector workflow this pattern was
+          lifted from records the same constraint in its own header.
+        required: false
+permissions:
+  contents: read
+jobs:
+  report:
+    # A reusable workflow's `runs-on` executes in the CALLER's billing context,
+    # so a bare metered label here charges every PRIVATE consumer. Same split
+    # every other substrate reusable uses, and the reason is on the record:
+    # a metered label in this position exhausted the org's Actions spending
+    # limit on 2026-08-08.
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    permissions:
+      packages: read
+    outputs:
+      # The matrix below is derived from THIS parse, not a second one. Two
+      # independent readings of the same newline-separated input is how a
+      # report and a delete end up disagreeing about which packages are in
+      # scope -- and only one of them is destructive.
+      packages: ${{ steps.parse.outputs.json }}
+    steps:
+      - name: Parse the package list once
+        id: parse
+        env:
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          printf 'json=%s\n' "$(echo "$PACKAGES" | grep -v '^[[:space:]]*$' | jq -Rn '[inputs]' -c)" >> "$GITHUB_OUTPUT"
+      - name: Report what retention would remove
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT || github.token }}
+          PACKAGES: ${{ inputs.packages }}
+          KEEP: ${{ inputs.min-versions-to-keep }}
+          IGNORE: ${{ inputs.ignore-versions }}
+        # One `gh api` per package with a jq projection -- composition, not a
+        # script. The counting and the protection rule are expressed in jq so
+        # this file carries no control flow of its own.
+        run: |
+          echo "$PACKAGES" | while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            gh api "/orgs/${{ github.repository_owner }}/packages/container/${pkg//\//%2F}/versions?per_page=100" \
+              --jq "[.[] | {id, created: .created_at, tags: (.metadata.container.tags // [])}]
+                    | sort_by(.created) | reverse
+                    | { package: \"$pkg\", retained: length,
+                        keeping: [.[:$KEEP][].id] | length,
+                        candidates: [ .[$KEEP:][] | select((.tags | map(test(\"$IGNORE\")) | any) | not) ]
+                      }
+                    | \"### \(.package)\n- retained: \(.retained)\n- keeping newest: \(.keeping)\n- would delete: \(.candidates | length)\n\n\(.candidates | map(\"  - \(.created)  \(.tags | join(\",\"))\") | join(\"\n\"))\n\"" \
+              >> "$GITHUB_STEP_SUMMARY" || echo "### $pkg — could not read versions" >> "$GITHUB_STEP_SUMMARY"
+          done
+  prune:
+    needs: report
+    if: inputs.apply
+    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.report.outputs.packages) }}
+    steps:
+      - name: Delete old versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: ${{ github.repository_owner }}
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: ${{ inputs.min-versions-to-keep }}
+          ignore-versions: ${{ inputs.ignore-versions }}
+          token: ${{ secrets.BOT_PAT || github.token }}
