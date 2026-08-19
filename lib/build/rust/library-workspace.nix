@@ -39,6 +39,11 @@
     inherit system;
     overlays = [ nixLib.rustOverlays.${system}.rust ];
   };
+  # Accepts either shape. A wrong shape still fails here with the arg's name
+  # rather than as a type error deep inside crate2nix.
+  checkInputs = name: v:
+    if builtins.isFunction v then true
+    else check.list name v;
 in {
   workspaceName,
   members,
@@ -55,15 +60,34 @@ in {
     (check.nonEmptyStr "workspaceName" workspaceName)
     (check.list "members" members)
     (check.nonEmptyStr "defaultMember" defaultMember)
-    (check.list "buildInputs" buildInputs)
-    (check.list "nativeBuildInputs" nativeBuildInputs)
+    (checkInputs "buildInputs" buildInputs)
+    (checkInputs "nativeBuildInputs" nativeBuildInputs)
     (check.attrs "crateOverrides" crateOverrides)
   ];
 
+  # ★ A LIST OR A FUNCTION OF pkgs, and the function form is the one that
+  # works for a native dependency.
+  #
+  # These args are supplied ONCE by the flake and reused for every system,
+  # while a derivation belongs to exactly one. So a caller who needs
+  # `pkgs.pam` had no way to say it: naming a derivation at the flake level
+  # requires a `pkgs`, and any `pkgs` they could construct there is pinned to
+  # one system and silently wrong on the other three.
+  #
+  # Measured 2026-08-19 on `mukae`, whose greeter links libpam: the build got
+  # all the way to the linker and died on `rust-lld: error: unable to find
+  # library -lpam`, with no expressible fix in the flake. Passing
+  # `buildInputs = p: [ p.pam ]` resolves against the per-system `pkgs` the
+  # helper already has in scope.
+  #
+  # A plain list keeps working unchanged — this widens the surface and moves
+  # nobody.
+  resolveInputs = v: if builtins.isFunction v then v pkgs else v;
+
   defaultBuildInputs = with pkgs; [ openssl ];
-  allBuildInputs = defaultBuildInputs ++ buildInputs;
+  allBuildInputs = defaultBuildInputs ++ (resolveInputs buildInputs);
   defaultNativeBuildInputs = with pkgs; [ pkg-config ];
-  allNativeBuildInputs = defaultNativeBuildInputs ++ nativeBuildInputs;
+  allNativeBuildInputs = defaultNativeBuildInputs ++ (resolveInputs nativeBuildInputs);
 
   crate2nixTools = import "${crate2nix}/tools.nix" { inherit pkgs; };
   generatedCargoNix =
