@@ -69,6 +69,24 @@ on:
           gate at zero.
         type: number
         default: 0
+      externalTestsDir:
+        description: >
+          OPTIONAL second suite tree, relative to the repo root, laid out as
+          <externalTestsDir>/<chartName>/*_test.yaml. Empty (the default) means
+          only in-chart `<chart>/tests` is scanned, which is what every consumer
+          got before this input existed.
+
+          Why it exists: this job globs `<chartsDir>/*/tests` and nothing else,
+          so a repo that keeps suites OUTSIDE its chart directories has them
+          silently unscanned while this job reports green. Measured in helmworks
+          2026-08-19: 176 *_test.yaml files, 1178 assertions across 43 chart
+          directories, in `tests/` — invisible here, and reachable only through
+          flake apps that no workflow invokes. `chartsWithTestsFloor` cannot
+          catch that: the floor counts charts carrying an IN-CHART tests/ dir,
+          so a repo with zero external coverage and a healthy in-chart count
+          looks identical to one with both.
+        type: string
+        default: ""
       runner:
         description: "Runner label"
         type: string
@@ -128,6 +146,7 @@ jobs:
           CHARTS_DIR: ${{ inputs.chartsDir }}
           TESTS_FLOOR: ${{ inputs.chartsWithTestsFloor }}
           LINT_CEILING: ${{ inputs.lintFailureCeiling }}
+          EXTERNAL_TESTS_DIR: ${{ inputs.externalTestsDir }}
         run: |
           set -uo pipefail
           if [ ! -d "$CHARTS_DIR" ]; then
@@ -135,7 +154,7 @@ jobs:
             exit 1
           fi
 
-          scanned=0; linted=0; lint_failed=0; tested=0; test_failed=0
+          scanned=0; linted=0; lint_failed=0; tested=0; ext_tested=0; test_failed=0
           for chart in "$CHARTS_DIR"/*/; do
             [ -f "${chart}Chart.yaml" ] || continue
             scanned=$((scanned + 1))
@@ -165,9 +184,32 @@ jobs:
                 test_failed=$((test_failed + 1))
               fi
             fi
+
+            # The OPTIONAL second suite tree. Counted separately from `tested`
+            # so the denominator stays honest: a repo can have in-chart suites,
+            # external suites, both or neither, and the summary line must be
+            # able to say which. `-f` is resolved relative to the CHART dir,
+            # hence the ../.. climb back to the repo root.
+            if [ -n "$EXTERNAL_TESTS_DIR" ] && [ -d "$EXTERNAL_TESTS_DIR/$name" ]; then
+              ext_tested=$((ext_tested + 1))
+              if ! helm unittest -f "../../$EXTERNAL_TESTS_DIR/$name/*_test.yaml" "$chart"; then
+                echo "::error title=helm unittest failed (external suite)::$name"
+                test_failed=$((test_failed + 1))
+              fi
+            fi
           done
 
-          echo "scanned=$scanned linted=$linted lint_failed=$lint_failed with-suites=$tested test_failed=$test_failed"
+          echo "scanned=$scanned linted=$linted lint_failed=$lint_failed with-suites=$tested ext-suites=$ext_tested test_failed=$test_failed"
+
+          # ANTI-VACUITY for the external tree, same discipline as the scanned=0
+          # guard below. A consumer that sets externalTestsDir has asserted the
+          # tree exists; matching ZERO chart names means the path is wrong or the
+          # layout is not <dir>/<chartName>/, and silently running nothing is the
+          # exact failure this input was added to end.
+          if [ -n "$EXTERNAL_TESTS_DIR" ] && [ "$ext_tested" -eq 0 ]; then
+            echo "::error::externalTestsDir '$EXTERNAL_TESTS_DIR' matched NO chart names under '$CHARTS_DIR' — expected <dir>/<chartName>/*_test.yaml. Nothing external was verified, so a pass here would mean nothing."
+            exit 1
+          fi
 
           # THE DENOMINATOR. Without it, a wrong chartsDir, a moved tree or
           # a glob that stops matching all yield "0 failures" — which is
