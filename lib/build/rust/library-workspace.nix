@@ -97,9 +97,27 @@ in {
   # Apply per-member crateOverrides defaults — every workspace member gets
   # the default build/native inputs; consumers can override per-crate via
   # the `crateOverrides` arg.
+  # ★ RPATH FOR EVERY buildInput, because linking is not running.
+  #
+  # A `buildInput` gives the LINKER a path; it does not put one in the
+  # produced ELF. For a library that never matters — nothing execs an rlib —
+  # so this builder shipped without it and no consumer noticed. A workspace
+  # member with a `[[bin]]` and a native dependency is a different animal, and
+  # the failure is silent in the worst way: the derivation is GREEN, the binary
+  # is in the store, and it dies on first exec.
+  #
+  # Measured 2026-08-19 on `mukae`: the greeter built, `bin/mukae` was 1.4MB,
+  # and `ldd` said `libpam.so.0 => not found`. Caught only because someone ran
+  # `ldd` instead of trusting the green build.
+  #
+  # Harmless for the library members — an rlib carries no RPATH — so this is
+  # unconditional rather than a flag someone has to know to set.
+  rpathOpts = map (l: "-C link-arg=-Wl,-rpath,${l}/lib") allBuildInputs;
+
   perMemberDefaults = pkgs.lib.genAttrs members (_member: _oldAttrs: {
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
+    extraRustcOpts = rpathOpts;
   });
 
   # FRESHNESS TIE — see ./cargo-nix-tie.nix. A committed Cargo.nix that no
