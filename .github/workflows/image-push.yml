@@ -69,6 +69,20 @@ name: image-push
 on:
   workflow_call:
     inputs:
+      allowPrivatePackage:
+        description: >-
+          A TYPED REASON to publish an image from a NON-PUBLIC repository.
+          Empty (the default) REFUSES. A package published from a private or
+          internal repo is itself private, and private packages bill the
+          ORGANISATION's one shared storage allowance (500 MB on the free
+          plan) rather than this repo's own budget -- which is why the
+          2026-08-20 exhaustion surfaced as CI failures in repos that had
+          published nothing at all. Say why this image must be a private
+          package, or make the repo public / push to the fleet's own Zot /
+          ship it as a flake output instead. Time pressure is not a reason.
+        type: string
+        default: ""
+        required: false
       imageAttr:
         description: "Flake output attribute that builds the image tarball"
         type: string
@@ -243,6 +257,33 @@ jobs:
       # env export is not sufficient on its own.
       ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
     steps:
+      # BEFORE the checkout and everything expensive after it: refuse a publish
+      # that would bill the org's ONE shared storage allowance. This file
+      # already treats repository visibility as load-bearing -- resolve-runner's
+      # `runs-on` ternary reads it to keep a private repo off metered runners.
+      # This makes it load-bearing for the PACKAGE too, which is the half that
+      # was missing when the allowance ran out.
+      - uses: pleme-io/actions/package-visibility-gate@main
+        with:
+          what: "container image"
+          allow-private: ${{ inputs.allowPrivatePackage }}
+          # SURVEY MODE, deliberately, and here is the ratchet condition.
+          # Counted 2026-08-20: 24 repos call this reusable workflow and 13 of
+          # them are PRIVATE (arc-runner, armazem, autorevivy,
+          # blackmatter-fortinet, camelot-bootstrap, ensaio, escuta, gaveta,
+          # pangea-api, saber, sarar, shinka, + ensaio's worktrees). Enforcing
+          # on day one would break every one of their image pushes at once,
+          # which is how a gate earns a reputation for friction and then gets
+          # deleted -- the same reasoning publishability-lint states for its
+          # own first sweep.
+          # FLIP TO `enforce` when those 13 have each either gone public, moved
+          # to the fleet's own Zot, or declared `allowPrivatePackage:` with a
+          # typed reason. Until then this reports every offender on every run,
+          # which is the survey that makes the flip a counted decision rather
+          # than a hopeful one.
+          # pending-package-visibility: 13 private consumers
+          mode: "warn"
+
       - uses: actions/checkout@v4
       # Derive the autobump tag when `autobumpArch` is set (see that input).
       # `%ct` is HEAD's COMMITTER date, not the author date: a rebase or
