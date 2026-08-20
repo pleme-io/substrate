@@ -162,6 +162,13 @@ let
     publishName = toolName;
     publishTag = tag;
     entrypoint = [ "${binary}/bin/${toolName}" ];
+    # Link the published package to THIS repo at GHCR. Without it the package
+    # arrives orphaned, cannot inherit the repo's visibility, defaults to
+    # private, and bills the org's one shared storage allowance -- even when
+    # the repo is public and the package should have been free. `repo` is
+    # already a required argument here (it is what `registry` is built from),
+    # so this needs no new input. See hardened-base.nix's Labels block.
+    sourceRepo = repo;
     inherit user;
     extraContents = extras;
     env = [

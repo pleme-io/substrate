@@ -576,6 +576,12 @@ let
     # consumers stayed on a direct buildLayeredImage call for exactly
     # this reason during the 2026-07-18 hardening pass.
     labels ? {},
+    # "<owner>/<name>" of the repo this image is built from, used ONLY to
+    # build the org.opencontainers.image.source label that GHCR links a
+    # package to its repository by. null keeps the previous org-root value.
+    # See the Labels block below for why this is load-bearing rather than
+    # cosmetic metadata.
+    sourceRepo ? null,
     # Extra fakeroot-stage commands, appended after the writablePaths chown.
     #
     # Exists for the same reason writablePaths does: fakeroot-assisted tar
@@ -636,7 +642,36 @@ let
       ExposedPorts = exposedPorts;
       Volumes = volumes;
       Labels = {
-        "org.opencontainers.image.source" = "https://github.com/pleme-io";
+        # ── THIS LABEL DECIDES WHETHER THE PACKAGE COSTS MONEY ──────────
+        # GHCR links a published package to a repository by reading this
+        # label and matching it against a SPECIFIC repo URL. It used to
+        # read "https://github.com/pleme-io" -- the ORG root, which matches
+        # no repository -- so every image published through this builder
+        # arrived at GHCR ORPHANED.
+        #
+        # An orphaned package cannot inherit its repo's visibility, is not
+        # reachable from the repo's package list, and DEFAULTS TO PRIVATE.
+        # Private and internal packages bill the org's one shared storage
+        # allowance (500 MB on the free plan), while public ones are free
+        # and unlimited.
+        #
+        # Measured 2026-08-20: 220 of pleme-io's 281 non-public packages had
+        # no linked repository, `sui` among them -- 218 versions at ~33 MB
+        # each, from a repo that is ITSELF PUBLIC and whose package should
+        # therefore have cost nothing. The allowance was exhausted and the
+        # visible symptom was unrelated CI jobs failing on
+        # "Artifact storage quota has been hit" in other repos entirely.
+        #
+        # `sourceRepo` is "<owner>/<name>". Left null the label keeps its
+        # previous org-root value, so this is behaviour-preserving for any
+        # caller that has not been taught its repo yet -- deliberately, since
+        # GUESSING a repo is worse than not linking: a wrong-but-existing
+        # repo would attach the package to somebody else's project, whereas
+        # a missing link is merely the status quo.
+        "org.opencontainers.image.source" =
+          if sourceRepo == null
+          then "https://github.com/pleme-io"
+          else "https://github.com/${sourceRepo}";
         "org.opencontainers.image.vendor" = "pleme-io";
         "io.pleme.rebuild.package" = package.pname or service;
         "io.pleme.rebuild.version" = package.version or "unknown";
