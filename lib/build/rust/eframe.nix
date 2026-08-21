@@ -93,6 +93,21 @@ let
   # So this exists to make the second copy unnecessary rather than to make it
   # tidy: it wraps against `ldLibraryPath` above, so there is exactly ONE list.
   # A no-op on darwin, where the libs are in the SDK and the wrap is meaningless.
+  #
+  # ★ UPDATE 2026-08-21 — the paragraph above diagnosed the problem and did not
+  # close it, which is the part worth reading. Making the second copy
+  # *unnecessary* is not the same as making it *unwritten*: for three days this
+  # helper existed, was correct, and was called by nothing, while the twelve
+  # apps it names stayed unrunnable on Linux. A fix each repo must remember to
+  # apply is a fix twelve repos did not apply.
+  #
+  # It is now called BY THE BUILDER. `tool-release.nix` derives whether a crate
+  # needs a window system from its Cargo.lock (see `gui-detect.nix`), flips its
+  # linux triples from musl to gnu — a static binary has no dynamic loader, so
+  # there is no `dlopen` for a library path to help — and applies this wrap to
+  # every linux artifact. No repo opts in and none of those twelve was edited.
+  # Keep the list here; it is still the one list, and now it is also the only
+  # call site anyone needs.
   mkLinuxGuiWrapper =
     {
       package,
