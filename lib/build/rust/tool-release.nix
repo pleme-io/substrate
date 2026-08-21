@@ -7,6 +7,15 @@
 #   - x86_64-unknown-linux-musl    (remote builder, static)
 #   - aarch64-unknown-linux-musl   (remote builder, static)
 #
+# ★ THE LINUX ABI IS DERIVED, NOT FIXED. The two musl rows above are the
+# default and NOT a law: a crate whose dependency closure opens a window or
+# talks to a GPU driver resolves `libwayland-client.so.0` / `libvulkan.so.1`
+# through `dlopen` at startup, which a static binary structurally cannot do.
+# For such a crate the linux rows become `*-unknown-linux-gnu` and every linux
+# artifact is wrapped against the window-system libraries. The decision is made
+# by `gui-detect.nix` from `Cargo.lock` — read that file for why it is derived
+# instead of declared. Override with `gui = true | false`.
+#
 # Works for both single-crate tools and workspace members:
 #   - Single crate:     omit `packageName`; uses `project.rootCrate`
 #   - Workspace member: set `packageName`; uses `project.workspaceMembers.${packageName}`
@@ -81,6 +90,30 @@
         })
       ];
     }).pkgsStatic;
+  # ── The GUI linux target: glibc, NOT pkgsStatic ────────────────────────
+  # Deliberately the same expression as `mkLinuxStaticPkgs` minus the
+  # `.pkgsStatic` projection, so the two cannot drift in the toolchain they
+  # select — the ONLY difference between a fleet linux artifact and a fleet
+  # linux GUI artifact is the C library, and that is what this line says.
+  #
+  # Why glibc rather than "musl plus a wrapper": there is nothing to wrap. A
+  # `crt-static` binary has no `ld.so`, so `LD_LIBRARY_PATH` is not consulted
+  # and `dlopen` has no implementation to call. The dynamic loader is the
+  # feature being bought here, not the library path.
+  mkLinuxGnuPkgs = targetSystem: gnuTarget:
+    if fenix == null
+    then import nixpkgs { system = targetSystem; }
+    else import nixpkgs {
+      system = targetSystem;
+      overlays = [
+        (rustOverlay.mkRustOverlay {
+          inherit fenix;
+          system = targetSystem;
+          targets = [ gnuTarget ];
+        })
+      ];
+    };
+
   # Darwin target pkgs MUST use the same fenix toolchain as hostPkgs.
   # On native darwin (target arch == host arch — the common case for
   # operator workstations), the dual-tree dispatch in lockfile-builder
@@ -100,7 +133,26 @@
       overlays = [ (rustOverlay.mkRustOverlay { inherit fenix; system = targetSystem; }) ];
     };
 
-  targets = {
+  # The target matrix, parameterised by the linux ABI the crate can actually
+  # use. `linuxAbi` is "musl" (the default: a static deploy artifact) or "gnu"
+  # (a crate that must `dlopen` at runtime). The triple KEY moves with it on
+  # purpose — an asset named `-musl` that is glibc-linked would be a lie, and
+  # these keys are what release assets are named after.
+  mkTargets = linuxAbi: let
+    linuxTriple = arch: "${arch}-unknown-linux-${linuxAbi}";
+    mkLinuxTarget = arch: nixSystem: let
+      triple = linuxTriple arch;
+    in {
+      name = triple;
+      value = {
+        pkgs =
+          if linuxAbi == "gnu"
+          then mkLinuxGnuPkgs nixSystem triple
+          else mkLinuxStaticPkgs nixSystem triple;
+        isDarwin = false;
+      };
+    };
+  in {
     "aarch64-apple-darwin" = {
       pkgs = mkDarwinPkgs "aarch64-darwin";
       isDarwin = true;
@@ -109,20 +161,24 @@
       pkgs = mkDarwinPkgs "x86_64-darwin";
       isDarwin = true;
     };
-    "x86_64-unknown-linux-musl" = {
-      pkgs = mkLinuxStaticPkgs "x86_64-linux" "x86_64-unknown-linux-musl";
-      isDarwin = false;
-    };
-    "aarch64-unknown-linux-musl" = {
-      pkgs = mkLinuxStaticPkgs "aarch64-linux" "aarch64-unknown-linux-musl";
-      isDarwin = false;
-    };
-  };
+  } // builtins.listToAttrs [
+    (mkLinuxTarget "x86_64" "x86_64-linux")
+    (mkLinuxTarget "aarch64" "aarch64-linux")
+  ];
 in {
   toolName,
   src,
   repo,
   packageName ? null,            # null = single-crate; set = workspace member
+  # Does this tool need a window system at runtime?
+  #
+  # `null` (the default) DERIVES the answer from `Cargo.lock` — see
+  # gui-detect.nix. Set it only to correct a derivation you have actually
+  # measured: `false` when a headless CLI shares a workspace lock with a GUI
+  # member and you want its static-musl artifact back, `true` when a crate
+  # dlopens a driver through a path the catalog does not name yet (and then
+  # add the crate to the catalog, because the next repo will hit it too).
+  gui ? null,
   cargoNix ? src + "/Cargo.nix",
   buildInputs ? [],
   nativeBuildInputs ? [],
@@ -183,6 +239,41 @@ let
   # Crate name for defaultCrateOverrides: workspace member when set, else toolName.
   crateKey = if packageName != null then packageName else toolName;
 
+  # ── Does this tool need a window system? ─────────────────────────
+  # Derived from Cargo.lock, IFD-free. Everything downstream — which linux
+  # triples exist at all, which C library they link, whether the artifact is
+  # wrapped — reads THIS ONE VALUE, so there is no second place for the
+  # decision to be made differently. Exposed as `packages.gui-verdict` (and
+  # readable with `nix eval .#gui-verdict`) precisely because a derived
+  # decision that nobody can inspect is worse than a declared one.
+  guiDetect = import ./gui-detect.nix { inherit (hostPkgs) lib; };
+  guiVerdict = guiDetect.resolve { inherit src packageName gui; };
+
+  # "gnu" only for a crate that must dlopen; "musl" — the static deploy
+  # artifact — for everything else.
+  linuxAbi = if guiVerdict.isGui then "gnu" else "musl";
+
+  targets = mkTargets linuxAbi;
+
+  # The window-system libraries, resolved against the TARGET's package set.
+  # Empty on darwin (eframe.nix guards on `stdenv.isLinux`) and empty for a
+  # non-GUI crate, so this composes into every build unconditionally without
+  # widening a single non-GUI closure.
+  guiLibsFor = targetPkgs:
+    if !guiVerdict.isGui then [ ]
+    else (import ./eframe.nix { pkgs = targetPkgs; }).linuxRuntimeLibs;
+
+  # The runtime wrap, applied per TARGET rather than only to the native
+  # binary: a `x86_64-unknown-linux-gnu` artifact built on darwin for rio must
+  # carry its own library path too, and wrapping only the native output would
+  # produce one artifact that runs and one that panics under the same name.
+  wrapGuiFor = targetPkgs: bin:
+    if !guiVerdict.isGui then bin
+    else (import ./eframe.nix { pkgs = targetPkgs; }).mkLinuxGuiWrapper {
+      package = bin;
+      mainProgram = toolName;
+    };
+
   # ── Build-mode resolution ────────────────────────────────────────
   # Per gen's algorithmic discipline: every consumer auto-uses the
   # lockfile-native pipeline when its Cargo.build-spec.json sidecar
@@ -231,9 +322,19 @@ let
       ${crateKey} = attrs: {
         buildInputs = (attrs.buildInputs or [])
           ++ buildInputs
-          ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs);
+          ++ (darwinHelpers.mkDarwinBuildInputs targetPkgs)
+          # The window-system stack, when this crate was detected as needing
+          # one. winit/wgpu LINK x11/wayland/fontconfig at build time and
+          # dlopen vulkan/GL at run time, so the same list serves both — see
+          # eframe.nix, which owns it.
+          ++ (guiLibsFor targetPkgs);
         nativeBuildInputs = (attrs.nativeBuildInputs or [])
-          ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs);
+          ++ (builtins.map (name: targetPkgs.${name}) nativeBuildInputs)
+          # pkg-config is what finds the x11/wayland/fontconfig `.pc` files.
+          # Added only for a GUI crate: it is cheap, but a build input that
+          # appears in every closure for the benefit of 26 repos out of 610 is
+          # not free either.
+          ++ hostPkgs.lib.optional guiVerdict.isGui targetPkgs.pkg-config;
 
         # Strip the shipped executable. Default-on: the highest posture has to be
         # what you get without asking.
@@ -288,19 +389,21 @@ let
           defaultCrateOverrides = consumerOverrides;
         };
       };
-  in
-    if packageName != null then
-      if project ? workspaceMembers && project.workspaceMembers ? "${packageName}" then
-        project.workspaceMembers.${packageName}.build
+    rawBinary =
+      if packageName != null then
+        if project ? workspaceMembers && project.workspaceMembers ? "${packageName}" then
+          project.workspaceMembers.${packageName}.build
+        else
+          builtins.throw ''
+            substrate/rust-release: packageName "${packageName}" not found.
+            ${if project ? workspaceMembers
+              then "Available members: ${builtins.concatStringsSep ", " (builtins.attrNames project.workspaceMembers)}"
+              else "Project has no workspaceMembers — is the source a workspace?"}
+          ''
       else
-        builtins.throw ''
-          substrate/rust-release: packageName "${packageName}" not found.
-          ${if project ? workspaceMembers
-            then "Available members: ${builtins.concatStringsSep ", " (builtins.attrNames project.workspaceMembers)}"
-            else "Project has no workspaceMembers — is the source a workspace?"}
-        ''
-    else
-      project.rootCrate.build;
+        project.rootCrate.build;
+  in
+    wrapGuiFor targetPkgs rawBinary;
 
   # Build all target binaries
   binaries = builtins.mapAttrs mkBinary targets;
@@ -309,8 +412,11 @@ let
   nativeTarget =
     if system == "aarch64-darwin" then "aarch64-apple-darwin"
     else if system == "x86_64-darwin" then "x86_64-apple-darwin"
-    else if system == "x86_64-linux" then "x86_64-unknown-linux-musl"
-    else if system == "aarch64-linux" then "aarch64-unknown-linux-musl"
+    # Reads `linuxAbi` rather than restating "musl": the native target and the
+    # target matrix are the same decision, and writing it twice is how the
+    # default output would end up static while the release asset was glibc.
+    else if system == "x86_64-linux" then "x86_64-unknown-linux-${linuxAbi}"
+    else if system == "aarch64-linux" then "aarch64-unknown-linux-${linuxAbi}"
     else throw "Unsupported system: ${system}";
 
   nativeBinary = binaries.${nativeTarget};
@@ -477,6 +583,26 @@ in {
     # debugging). Reaches the same store path the binary would have
     # had without the runtime-PATH wrap.
     unwrapped = nativeBinary;
+
+    # ── The derived decision, made inspectable ─────────────────────────
+    # `nix build .#gui-verdict && cat result` says WHY this repo's linux
+    # artifact is static or dynamic, including the denominator it was
+    # decided over. A derived build class that a maintainer cannot read
+    # back is worse than a declared one: when the artifact misbehaves, the
+    # first question is "what did the builder think this crate was?", and
+    # without this the only way to answer it is to read substrate.
+    gui-verdict = hostPkgs.runCommand "${toolName}-gui-verdict" { } ''
+      cat > $out <<'VERDICT'
+      ${guiDetect.explain guiVerdict}
+      isGui   : ${if guiVerdict.isGui then "true" else "false"}
+      matched : ${builtins.concatStringsSep " " guiVerdict.matched}
+      scanned : ${builtins.toString guiVerdict.scanned}
+      mode    : ${guiVerdict.mode}
+      root    : ${if guiVerdict.root == null then "(none)" else guiVerdict.root}
+      linuxAbi: ${linuxAbi}
+      targets : ${builtins.concatStringsSep " " (builtins.attrNames targets)}
+      VERDICT
+    '';
   };
 
   # Non-interactive-safe devShell. A bare `substrate.rust.<shape> { src = ./.; }`

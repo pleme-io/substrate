@@ -130,9 +130,25 @@ in runTests [
     (f.rustTarget.check "x86_64-unknown-linux-musl")
     "x86_64-unknown-linux-musl should be valid RustTarget")
 
-  (mkTest "rusttarget-invalid-gnu"
-    (!(f.rustTarget.check "x86_64-unknown-linux-gnu"))
-    "gnu target should be invalid RustTarget")
+  # ★ CHANGED 2026-08-21, and the previous row is worth naming: it asserted
+  # `x86_64-unknown-linux-gnu` was INVALID. That was true while every fleet
+  # linux artifact was static musl, and it stopped being true the moment a GUI
+  # crate got a linux target at all — a static binary has no dynamic loader,
+  # so `dlopen("libwayland-client.so.0")` cannot resolve and winit panics at
+  # startup with the library sitting in the store. gnu is now a first-class
+  # row, DERIVED per crate by build/rust/gui-detect.nix.
+  (mkTest "rusttarget-valid-linux-gnu"
+    (f.rustTarget.check "x86_64-unknown-linux-gnu"
+      && f.rustTarget.check "aarch64-unknown-linux-gnu")
+    "both gnu triples must be valid — a GUI crate's linux artifact is glibc")
+
+  # The negative row the change must NOT cost us: widening a closed set is
+  # only safe if it is still closed. A plausible-looking triple the fleet does
+  # not build for must still be refused.
+  (mkTest "rusttarget-invalid-unbuilt-triple"
+    (!(f.rustTarget.check "armv7-unknown-linux-gnueabihf")
+      && !(f.rustTarget.check "x86_64-pc-windows-msvc"))
+    "an unbuilt triple must still be rejected — the set is widened, not opened")
 
   # ── TataraDriver ──────────────────────────────────────────────────
   (mkTest "driver-valid-wasi"

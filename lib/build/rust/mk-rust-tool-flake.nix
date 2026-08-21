@@ -27,6 +27,11 @@
   buildInputs ? [],
   nativeBuildInputs ? [],
   module ? null,           # optional HM/NixOS/Darwin module trio spec
+  # Window-system override. `null` DERIVES it from Cargo.lock — see
+  # gui-detect.nix. Present here only so a measured correction has a route
+  # through this entry point too; the whole point is that no repo should need
+  # to reach for it.
+  gui ? null,
   # tool | workspace | library | service | binary.
   #
   # Until 2026-07-28 this was declared here and NEVER READ AGAIN, so all five
@@ -332,4 +337,8 @@ in toolFlake (
   }
   // (if multiMember then { packageName = pickedMember; } else {})
   // (if effectiveModule != null then { module = effectiveModule; } else {})
+  # Forwarded only when SET. Passing `gui = null` explicitly would be
+  # identical in effect, but sending nothing keeps the builder's default the
+  # single statement of "derive it" instead of two that must agree.
+  // (if gui != null then { inherit gui; } else {})
 )

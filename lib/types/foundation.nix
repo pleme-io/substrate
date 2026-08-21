@@ -26,12 +26,22 @@ in rec {
   # Container/OCI architecture identifiers.
   architecture = types.enum [ "amd64" "arm64" ];
 
-  # Rust cross-compilation targets (4-target matrix).
+  # Rust cross-compilation targets.
+  #
+  # Two darwin rows and TWO LINUX ABIs. musl is the default — a static deploy
+  # artifact — and gnu is what a crate gets when it must `dlopen` a driver at
+  # runtime (a window system, a GPU loader), which a static binary structurally
+  # cannot do. The ABI is DERIVED per crate from its dependency closure
+  # (build/rust/gui-detect.nix), so both rows are reachable without anyone
+  # declaring anything; the enum has to admit them or the derivation has
+  # nowhere to land.
   rustTarget = types.enum [
     "aarch64-apple-darwin"
     "x86_64-apple-darwin"
     "x86_64-unknown-linux-musl"
     "aarch64-unknown-linux-musl"
+    "x86_64-unknown-linux-gnu"
+    "aarch64-unknown-linux-gnu"
   ];
 
   # Zig cross-compilation targets.

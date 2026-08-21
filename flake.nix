@@ -375,6 +375,17 @@
           rust-determinism-flags =
             (import ./lib/build/rust/tests/determinism-flags-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── The linux ABI is now DERIVED, so the derivation needs a gate ──
+          # gui-detect.nix decides, per crate, whether the linux artifact is
+          # static musl or dynamic glibc. Both failure directions are silent:
+          # a missed GUI crate ships a binary that panics on `dlopen` at
+          # startup on a machine nobody is watching, and a false positive
+          # quietly takes static-musl away from a deploy tool. The suite
+          # red-runs on all three (catalog gap, closure walk collapsed to a
+          # whole-file scan, denominator faked to 0).
+          rust-gui-detect =
+            (import ./lib/build/rust/tests/gui-detect-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── The two-tree split had no gate at all ──────────────────────
           # `lockfile-builder.nix` resolves every `tree == "host"` edge and
           # every build_dependency of the TARGET tree inside the HOST tree,
