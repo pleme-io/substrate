@@ -33,6 +33,25 @@
 # **reachability** question over that graph, not a whole-file grep: a workspace
 # whose GUI member sits beside a headless CLI classifies each correctly.
 #
+# ★ **THE KNOWN LIMIT, AND IT IS NOT SMALL: `Cargo.lock` IS FEATURE-BLIND.**
+# The lock records the union of every optional dependency any feature could
+# turn on, not the set this build actually enables. A crate with a `nested`
+# or `dev-gui` feature that pulls winit therefore reads as GUI even when the
+# shipped binary is built without it.
+#
+# That is not hypothetical and it was caught by the first repo it hit. `omoya`
+# carries a winit-backed `nested` backend for developing on a machine that
+# already has a session; its SHIPPED binary links libc, libm and libgcc_s and
+# nothing else — measured on rio with `ldd`, on the artifact rather than the
+# wrapper. Wrapping it would drag five C libraries back into a closure that
+# had deliberately shed them, which is the FALSE-POSITIVE direction of this
+# detector doing real damage rather than merely being conservative.
+#
+# So a crate whose window-system dependency is feature-gated OFF in its
+# shipped build sets `gui = false` and says why. There is no lock-only fix:
+# feature resolution needs the metadata this file deliberately does not
+# resolve, and guessing from feature NAMES would be worse than asking.
+#
 # ★ THE DENOMINATOR IS INSIDE THE VERDICT (`scanned`, `mode`). A detector that
 # silently found nothing and a detector that found nothing to look at return
 # the same `isGui = false`, and the first is a defect while the second is a

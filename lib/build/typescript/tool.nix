@@ -17,7 +17,19 @@
 #     cliEntry = "cli.js";
 #     binName = "curupira-mcp";
 #   }
-{ pkgs, forgeCmd ? "forge" }:
+# nodeVersion is a PARAMETER, defaulting to the current LTS.
+#
+# It used to be `pkgs.nodejs_20` hardcoded at three call sites, while the sibling
+# library.nix already took `nodeVersion ? pkgs.nodejs_22`. When nixpkgs marked
+# nodejs-20 end-of-life and therefore insecure, every TypeScript TOOL in the
+# fleet stopped evaluating — "Refusing to evaluate package 'nodejs-20.20.2'
+# because it is marked as insecure" — while every TypeScript LIBRARY kept
+# building. Measured 2026-08-21 against pleme-io/curupira.
+#
+# The runtime node a tool is launched with is a property of that tool, so it
+# belongs in the signature rather than in three string interpolations. Consumers
+# that need to pin something else now can, instead of waiting on this file.
+{ pkgs, forgeCmd ? "forge", nodeVersion ? pkgs.nodejs_22 }:
 
 rec {
   # Build pleme-linker tool from source
@@ -113,7 +125,7 @@ rec {
           --manifest ${manifestFile} \
           --project ${src} \
           --output $out \
-          --node-bin ${pkgs.nodejs_20}/bin/node \
+          --node-bin ${nodeVersion}/bin/node \
           ${parentTsconfigArg} \
           ${workspaceDepArgs}
       '';
@@ -163,7 +175,7 @@ rec {
           --manifest ${manifestFile} \
           --project ${src} \
           --output $out \
-          --node-bin ${pkgs.nodejs_20}/bin/node \
+          --node-bin ${nodeVersion}/bin/node \
           --cli-entry ${cliEntry} \
           --bin-name ${binName} \
           ${parentTsconfigArg} \
@@ -237,7 +249,7 @@ rec {
           --manifest ${manifestFile} \
           --project ${src} \
           --output $out \
-          --node-bin ${pkgs.nodejs_20}/bin/node \
+          --node-bin ${nodeVersion}/bin/node \
           --cli-entry ${cliEntry} \
           --bin-name ${binName} \
           ${parentTsconfigArg} \
