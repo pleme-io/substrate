@@ -968,7 +968,11 @@ let
         # reproducible rlibs (SOURCE_DATE_EPOCH + --remap-path-prefix +
         # CA derivations) so a partial hit is HARMLESS rather than
         # avoided — then this prefix list retires.
-        coFreshLeafPrefixes = [ "protoc-bin-vendored" ];
+        # 2026-08-21: the wiggle/witx family (wasmtime 38) hit the IDENTICAL
+        # skew — E0460 "found possibly newer version of crate `witx` which
+        # `wiggle_generate` depends on" while building wiggle-macro. Same
+        # cause, same gating: force parent AND child co-fresh.
+        coFreshLeafPrefixes = [ "protoc-bin-vendored" "witx" "wiggle" ];
         isCoFreshLeaf = name: lib.any (p: lib.hasPrefix p name) coFreshLeafPrefixes;
       in
       lib.mapAttrs (key: crate: let
