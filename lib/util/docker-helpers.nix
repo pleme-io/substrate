@@ -54,11 +54,45 @@
   # Returns: an attrset suitable for spreading into Docker `config.Labels`.
   # The Nix evaluator's strictness rejects empty strings on these keys
   # at the provas pack site, so all values are pre-validated non-empty.
+  # ── ★ sourceRepo — the label GHCR LINKS A PACKAGE TO ITS REPO BY ──────
+  # `org.opencontainers.image.source` is not decorative metadata. GHCR reads
+  # it to associate a published package with a repository, and that
+  # association is what lets a job's own GITHUB_TOKEN push to the package at
+  # all. An unlinked package is also billed against the ORG's storage quota
+  # rather than the repo's, which surfaces as "Artifact storage quota has been
+  # hit" in repositories that published nothing.
+  #
+  # The historical default below derives the URL from the SERVICE NAME, which
+  # is right only when a repo publishes exactly one artifact named after
+  # itself. Measured 2026-08-22 over 14 real fleet package names: **6 correct,
+  # 8 pointing at repositories that do not exist** — `hardened-vector`,
+  # `hardened-clickhouse`, `sql-apply`, `charts`, `helm`, `cnpg-postgresql`,
+  # `sarar-eyes`, `escuta-mysql-tap`. The split is structural, not random: the
+  # 6 are repos publishing under their own name and the 8 are repos publishing
+  # MANY artifacts (`hardened-images` alone accounts for ~45).
+  #
+  # So neither one-line move is available: keeping the guess emits dead links,
+  # and switching to the org-root value that `oci/hardened-base.nix` defaults
+  # to would break the 6 that currently work.
+  #
+  # ★ AND IT DOES NOT NEED WORKFLOW STATE. A repository knows its own name at
+  # AUTHOR time — `hardened-images/lib/mk-hardened-image-set.nix` has always
+  # simply written its own, correctly, for all ~45 of its images. So this is a
+  # static per-repo declaration, hermetic, with no `--impure` and no
+  # `GITHUB_REPOSITORY` plumbed through the build.
+  #
+  # `sourceRepo` is "<owner>/<name>". Left null the previous behaviour is
+  # preserved byte-for-byte, so adopting this is opt-in per consumer and
+  # cannot re-digest an image that has not opted in.
   mkStandardLabels = {
     serviceName,
     tag,
     description ? null,
-    fleetSourceUrl ? "https://github.com/pleme-io/${serviceName}",
+    sourceRepo ? null,
+    fleetSourceUrl ?
+      (if sourceRepo != null
+       then "https://github.com/${sourceRepo}"
+       else "https://github.com/pleme-io/${serviceName}"),
   }: {
     "org.opencontainers.image.title" = serviceName;
     "org.opencontainers.image.description" =
