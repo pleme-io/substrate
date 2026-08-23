@@ -204,7 +204,19 @@ in {
     tools = devTools;
     buildInputs = allBuildInputs;
     nativeBuildInputs = allNativeBuildInputs;
-    extraPackages = extraDevInputs ++ [ crate2nix ];
+    # ★ `pkgs.crate2nix`, NOT the `crate2nix` INPUT. The input is declared
+    # `flake = false` (substrate/flake.nix:38-41), so it is a plain source
+    # attrset — `lastModified`/`narHash`/`outPath` and nothing else, no
+    # `packages`, no derivation. Putting it in a package list made every
+    # library-workspace devShell die with
+    #
+    #   error: Dependency is not of a valid type: element 7 of buildInputs
+    #
+    # which is what took mukae's release Test gate red (`nix develop .#default`).
+    # The source form is still needed one line down at `import
+    # "${crate2nix}/tools.nix"` — that consumer wants the RAW input, so the
+    # resolution belongs HERE, at the use site, and not in the caller.
+    extraPackages = extraDevInputs ++ [ pkgs.crate2nix ];
     env = allDevEnvVars;
   };
 
