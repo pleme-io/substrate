@@ -152,7 +152,24 @@ in {
   defaultDevEnvVars = {
     RUST_SRC_PATH = "${pkgs.fenixRustToolchain}/lib/rustlib/src/rust/library";
   };
-  allDevEnvVars = defaultDevEnvVars // devEnvVars;
+  # ★ A LIST OR A FUNCTION OF pkgs — the same widening `buildInputs` got above,
+  # for the same reason, found by the same crate.
+  #
+  # `buildInputs = p: [ p.pam ]` fixes LINKING. It does not fix LOADING: a
+  # cargo-built test binary gets `-L` flags but no RUNPATH into the nix store,
+  # so on Linux it dies at run time with
+  #
+  #   error while loading shared libraries: libpam.so.0: cannot open shared
+  #   object file: No such file or directory
+  #
+  # (measured on mukae's release Test gate, 2026-08-23 — `cargo nextest` could
+  # not even LIST the tests, exit 127). The cure is `LD_LIBRARY_PATH`, which
+  # names a store path, which needs a per-system `pkgs` — the identical bind
+  # the buildInputs comment describes, so it gets the identical escape hatch.
+  #
+  # A plain attrset keeps working unchanged: `resolveInputs` returns a
+  # non-function untouched.
+  allDevEnvVars = defaultDevEnvVars // (resolveInputs devEnvVars);
 
   # Workspace-wide check + regenerate apps (single binary script each;
   # per-member apps would multiply attribute paths without buying anything
