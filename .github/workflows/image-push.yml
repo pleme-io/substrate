@@ -608,7 +608,22 @@ jobs:
           # the base64/JWT-shaped registry tokens this is for, worth knowing.
           extra-conf: |
             sandbox = relaxed
-            access-tokens = github.com=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+            # ── ★ PER-ORG, AND DELIBERATELY NO BARE `github.com=` ─────────
+            # A bare entry attaches the credential to EVERY github.com request,
+            # and GitHub answers 401 for PUBLIC repos when the token is bad. So
+            # one dead PAT breaks the anonymous path too: measured 2026-08-22,
+            # `nix run github:pleme-io/gen` — a PUBLIC repo needing no
+            # credential at all — failed with "HTTP error 401 / Bad
+            # credentials" purely because a dead token was attached to it.
+            #
+            # Scoped per owner, an owner that is absent from the table fetches
+            # ANONYMOUSLY: right for public repos, an honest 404 for private
+            # ones. A wrong credential is worse than no credential, and this is
+            # the line that decides which of the two you get.
+            #
+            # Same shape as the fleet nix config's access-tokens, which is
+            # generated from one typed source for exactly this reason.
+            access-tokens = github.com/pleme-io=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
             netrc-file = ${{ env.NIX_GIT_NETRC_PATH }}
             ${{ secrets.ECR_TOKEN && 'extra-experimental-features = configurable-impure-env' || '' }}
             ${{ secrets.ECR_TOKEN && format('impure-env = ECR_TOKEN={0}', secrets.ECR_TOKEN) || '' }}
