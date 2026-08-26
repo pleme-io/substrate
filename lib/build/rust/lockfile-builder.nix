@@ -31,10 +31,77 @@ let
   # unchanged.
   defaultSpecFile = "Cargo.build-spec.json";
 
+  freshnessTie = import ../shared/freshness-tie.nix { };
+
+  # ── ★ THE VARIANT FRESHNESS TIE ─────────────────────────────────────────
+  #
+  # A VARIANT spec gets no `Cargo.gen.lock` delta — one delta names THE
+  # spec, and two would leave the D2 pre-commit check unable to say which
+  # one it is judging. That refusal is correct and is NOT overturned here.
+  #
+  # Its consequence was not. D2 judges `Cargo.lock` against
+  # `Cargo.gen.lock` and knows nothing about any variant, so a stale
+  # variant spec is SILENT — `regen-noruby-spec.sh`'s own header says so.
+  #
+  # MEASURED COST, 2026-08-26: pangea-operator added `gix` to Cargo.toml,
+  # `gen build` regenerated the canonical spec, D2 went GREEN, and CI failed
+  # 27m38s later with `error[E0433]: cannot find module or crate gix` —
+  # building the NORUBY variant, which is the only variant that ships. The
+  # stale spec was the one artifact nothing checked.
+  #
+  # The tie needs NOTHING NEW: every spec gen emits already carries the
+  # `cargo_lock_sha256` it was generated from — the variant included. So the
+  # check is the same comparison D2 makes, applied where D2 structurally
+  # cannot reach, and it costs one `hashFile` per variant load.
+  #
+  # Deliberately NOT done: adding a key to `Cargo.gen.lock`. Its top level
+  # is a CLOSED contract (`delta-contract.nix` throws on any undeclared
+  # key) forced to WHNF on every substrate Rust build, across 438 committed
+  # deltas in two live schema versions. A new key there is a same-day fleet
+  # outage. This changes no delta field and bumps no schema_version.
+  #
+  # TIER: eval-caught, not unrepresentable — `held` throws before the spec
+  # is used, but nothing stops someone committing a stale spec; it stops
+  # them BUILDING from one.
+  tieVariantSpec = specFile: src: spec:
+    let
+      lockPath = src + "/Cargo.lock";
+      recorded = spec.cargo_lock_sha256 or null;
+    in
+    # A spec with no recorded hash predates the field. Tying against
+    # `null` would throw for every one of them, so an absent hash is a
+    # PASS — stated rather than silent, because it is the one hole here.
+    if recorded == null || !(pathExists lockPath) then
+      spec
+    else
+      builtins.seq
+        (freshnessTie.held {
+          subject = "lockfile-builder(variant)";
+          artifact = specFile;
+          where = toString src;
+          fresh = recorded == builtins.hashFile "sha256" lockPath;
+          sides = [
+            "recorded cargo_lock_sha256  = ${recorded}"
+            ''hashFile "sha256" Cargo.lock = ${builtins.hashFile "sha256" lockPath}''
+          ];
+          cause = ''
+            Cargo.lock moved without a matching regeneration of this VARIANT
+            spec. `gen build` regenerates the canonical spec only, and the D2
+            tie judges Cargo.gen.lock — neither one covers this file, which is
+            why the drift got this far.
+          '';
+          fix = "cd <that workspace> && gen build . --no-default-features --features <list> --out ${specFile}";
+        })
+        spec;
+
   loadBuildSpecFrom = specFile: src:
     let path = src + "/${specFile}"; in
     if pathExists path
-    then fromJSON (readFile path)
+    then
+      let spec = fromJSON (readFile path); in
+      if specFile == defaultSpecFile
+      then spec                              # canonical: D2 already ties it
+      else tieVariantSpec specFile src spec
     else throw ''
       lockfile-builder: ${toString src}/${specFile} not found.
       ${if specFile == defaultSpecFile
