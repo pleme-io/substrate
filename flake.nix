@@ -854,6 +854,49 @@
         packages = eachSystem (system: {
           gen = genFor system;
 
+          # ── ★ THE FLEET RUST TOOLCHAIN, FOR THE *DEV* PLANE ──────────────
+          #
+          # `getRustToolchain` (lib/build/rust/overlay.nix:154) has existed and
+          # been re-exported (lib/default.nix:548) with ZERO consumers. It is
+          # the same fenix `stable.withComponents [rustc cargo rust-src clippy
+          # rustfmt]` that `mkRustOverlay` builds every fleet derivation with —
+          # already central, already one source. This line is the missing wire,
+          # not a new mechanism.
+          #
+          # ── THE SPLIT IT CLOSES, measured 2026-08-26 ─────────────────────
+          # Rust versions ARE centrally managed — for DERIVATION BUILD INPUTS
+          # only. The toolchain was a `let` binding consumed by buildRustCrate
+          # and never exposed, so every OPERATOR-facing plane subscribed to
+          # something else instead:
+          #
+          #   fleet builds (fenix, witnessed)  1.98.0
+          #   operator $PATH (nixpkgs cargo)   1.91.1
+          #   substrate's own devShells        1.91.1  (flake.nix:536, :574)
+          #
+          # Seven minor versions, from two sources, with nothing comparing
+          # them. Cost, measured: adding `gix` to pangea-operator pulled
+          # `kstring 2.0.4` (needs rustc 1.96). The FLEET satisfies that
+          # easily; local `cargo check` did not, so a pin the fleet never
+          # needed got committed to Cargo.lock to make a dev command resolve.
+          #
+          # Exposing it also lands two things the dev plane was missing
+          # outright: `clippy`, which is NOT installed locally today (a piped
+          # clippy run reports `no such command` and reads as a pass), and a
+          # `rustfmt` matched to the compiler rather than nixpkgs' separate
+          # one.
+          #
+          # NOT AN OVERLAY, deliberately. overlay.nix:9-12 refuses to replace
+          # global `pkgs.rustc`/`pkgs.cargo` with fenix because nixpkgs
+          # packages (mercurial, librsvg, cryptography) build rust internally.
+          # That governs build inputs; `$PATH` is a different surface, and
+          # conflating them is how you break unrelated nixpkgs builds. A
+          # consumer puts THIS package in its package list; it never overrides
+          # `pkgs.cargo`.
+          rustToolchain =
+            (import ./lib/build/rust/overlay.nix).getRustToolchain {
+              inherit fenix system;
+            };
+
           # cargo-nextest exposed as a PACKAGE, deliberately NOT added to
           # consumer devShells.
           #
