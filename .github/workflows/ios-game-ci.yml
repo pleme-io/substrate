@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action REMOVED 2026-08-14 — EOL'd upstream and broken
       # on our ARC runners (`xz: not found` unpacking its own cache blob).
       # Same drop as reusable-autoheal.yml, nix-devshell-cargo-test.yml and

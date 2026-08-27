@@ -212,7 +212,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
         if: inputs.nix
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action REMOVED 2026-08-14 — the same drop
       # nix-devshell-cargo-test.yml and pangea-operator's ci.yml already made
       # on 2026-07-25, applied to the two sites that were missed. It is EOL'd

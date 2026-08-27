@@ -130,7 +130,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action is EOL'd upstream (repo-scoped, can't carry a
       # fleet closure -- purify skill's own standing guidance) and outright
       # broken on a self-hosted ARC runner (`xz: not found` unpacking its

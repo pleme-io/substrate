@@ -127,7 +127,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: lockfile-loader-test.nix
         run: nix-instantiate --eval --strict lib/build/estante/tests/lockfile-loader-test.nix
@@ -148,7 +148,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: crate-override-compose-test.nix
         run: nix-instantiate --eval --strict lib/build/rust/crate-override-compose-test.nix
@@ -264,7 +264,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: package-graph-test.nix
         run: nix-instantiate --eval --strict lib/build/go/tests/package-graph-test.nix
@@ -289,7 +289,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: checks.mutating-verbs (lib/infra — 30 tests)
         run: nix build --no-link -L '.#checks.x86_64-linux.mutating-verbs'
@@ -380,7 +380,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # The catalog's own forcing-function: fails when a suite has been
       # added to lib/util/eval-suites.nix but given no step in this file.
@@ -414,7 +414,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: hm/tests.nix (65 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "hm/tests"; }'
@@ -438,7 +438,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: infra/tests.nix (105 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "infra/tests"; }'
@@ -474,7 +474,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: build/shared/dispatcher-coverage-test.nix (49 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/shared/dispatcher-coverage"; }'

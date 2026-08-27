@@ -284,9 +284,33 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
+        # ── WHY THE `||` FALLBACK (added 2026-08-27, after it bit sui) ──────
+        # This input becomes `access-tokens = github.com=<token>` in nix.conf,
+        # so nix attaches it to EVERY github.com fetch -- including PUBLIC
+        # repos. A dead or malformed PAT is therefore WORSE THAN NO TOKEN:
+        # GitHub answers 401 "Bad credentials" instead of serving the repo
+        # anonymously, so a public fetch that needs no auth at all fails.
+        #
+        # Measured on pleme-io/sui: the Test gate below does
+        # `builtins.getFlake "github:pleme-io/substrate"` -- substrate is
+        # PUBLIC -- and died on
+        #   api.github.com/repos/pleme-io/substrate/commits/HEAD -> HTTP 401
+        # for 16 consecutive scheduled ticks. Not a scope problem: image-push's
+        # own diagnostic states it, a valid-but-underscoped token 404s, only an
+        # invalid one 401s.
+        #
+        # The token's job HERE is rate-limit headroom on public fetches (60/hr
+        # anonymous vs 5000/hr authenticated), not authorization. GITHUB_TOKEN
+        # is always present and always valid, so falling back to it means an
+        # expired BOT_PAT degrades to "public fetches keep working" instead of
+        # "every fetch 401s". A live BOT_PAT still wins, so private inputs are
+        # unaffected.
+        #
+        # This does NOT excuse the dead credential -- rotate BOT_PAT. It stops
+        # one expired secret from taking out the public path fleet-wide.
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # Same private-git-dep credential fix as nix-devshell-cargo-test.yml:
       # nix-installer's github-token covers NIX's fetcher only, never CARGO's
