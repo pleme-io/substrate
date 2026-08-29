@@ -87,6 +87,33 @@ on:
           looks identical to one with both.
         type: string
         default: ""
+      fixtureChartsDir:
+        description: >
+          Directory of SELF-CONTAINED FIXTURE CHARTS, relative to the repo root.
+          Each immediate subdirectory is a chart run with
+          `helm unittest -f '*_test.yaml' <chart>`.
+
+          WHY THIS EXISTS, and it is not a convenience. A Helm LIBRARY chart
+          (`type: library`) renders nothing on its own, so `helm unittest` over
+          `chartsDir` can never reach it — the only way to exercise a named
+          template is a bare consumer chart that includes it. Such a chart is
+          not a member of `chartsDir` (it must never publish) and its name is
+          not a chart name, so `externalTestsDir` cannot reach it either.
+
+          Measured on helmworks 2026-08-29: a fixture chart carrying 191
+          passing tests AND one failing one had never been executed by CI, in a
+          repo whose own workflow header warns about exactly that. Empty (the
+          default) disables the pass entirely.
+        type: string
+        default: ""
+      fixtureChartsFloor:
+        description: >
+          Minimum fixture charts that must be discovered when fixtureChartsDir
+          is set. Same anti-vacuity role as chartsWithTestsFloor: a directory
+          that stops matching yields zero failures, which is indistinguishable
+          from everything passing.
+        type: number
+        default: 1
       runner:
         description: "Runner label"
         type: string
@@ -147,6 +174,8 @@ jobs:
           TESTS_FLOOR: ${{ inputs.chartsWithTestsFloor }}
           LINT_CEILING: ${{ inputs.lintFailureCeiling }}
           EXTERNAL_TESTS_DIR: ${{ inputs.externalTestsDir }}
+          FIXTURE_CHARTS_DIR: ${{ inputs.fixtureChartsDir }}
+          FIXTURE_FLOOR: ${{ inputs.fixtureChartsFloor }}
         run: |
           set -uo pipefail
           if [ ! -d "$CHARTS_DIR" ]; then
@@ -199,7 +228,41 @@ jobs:
             fi
           done
 
-          echo "scanned=$scanned linted=$linted lint_failed=$lint_failed with-suites=$tested ext-suites=$ext_tested test_failed=$test_failed"
+          # ── FIXTURE CHARTS ──────────────────────────────────────────────
+          # A library chart renders nothing, so the loop above cannot reach one.
+          # These are bare consumer charts that exist only to exercise named
+          # templates; they are counted SEPARATELY so the summary can say which
+          # kind of coverage ran, and they are never published.
+          fixtures=0
+          if [ -n "$FIXTURE_CHARTS_DIR" ]; then
+            for fx in "$FIXTURE_CHARTS_DIR"/*/; do
+              [ -f "${fx}Chart.yaml" ] || continue
+              fixtures=$((fixtures + 1))
+              fname=$(basename "$fx")
+              if grep -q '^dependencies:' "${fx}Chart.yaml"; then
+                helm dependency update "$fx" >/dev/null 2>&1 || true
+              fi
+              # -f because a fixture keeps its suites at the chart ROOT rather
+              # than in tests/ — that is the existing on-disk layout, and
+              # relocating N suites to satisfy a discovery default would be a
+              # bigger change than teaching discovery the layout.
+              if ! helm unittest -f '*_test.yaml' "$fx"; then
+                echo "::error title=helm unittest failed (fixture chart)::$fname"
+                test_failed=$((test_failed + 1))
+              fi
+            done
+          fi
+
+          echo "scanned=$scanned linted=$linted lint_failed=$lint_failed with-suites=$tested ext-suites=$ext_tested fixtures=$fixtures test_failed=$test_failed"
+
+          # ANTI-VACUITY for the fixture tree. A consumer that set the input has
+          # asserted the tree exists; finding nothing means the path is wrong or
+          # the layout is not <dir>/<chart>/Chart.yaml, and running nothing while
+          # reporting success is the exact failure this input was added to end.
+          if [ -n "$FIXTURE_CHARTS_DIR" ] && [ "$fixtures" -lt "$FIXTURE_FLOOR" ]; then
+            echo "::error::found $fixtures fixture chart(s) under '$FIXTURE_CHARTS_DIR', below the floor of $FIXTURE_FLOOR — the path is wrong, the layout is not <dir>/<chart>/Chart.yaml, or fixtures were lost"
+            exit 1
+          fi
 
           # ANTI-VACUITY for the external tree, same discipline as the scanned=0
           # guard below. A consumer that sets externalTestsDir has asserted the
