@@ -76,9 +76,9 @@ let
     };
   };
 
-  # ── FinOps tagging standard (theory/CAMELOT.md §IV.D) ─────────────
+  # ── FinOps tagging standard ──────────────────────────────────────
   #
-  # The six-key mandatory FinOps tag set every Camelot-owned AWS
+  # The six-key mandatory FinOps tag set every platform-owned AWS
   # resource carries — born from a real orphaned EC2 instance (zero
   # tags, only identifiable via a live SSM shell probe). This file
   # already hand-writes `Name` and `ManagedBy` at every `tags`/
@@ -95,7 +95,9 @@ let
     owner ? "platform",
     purpose,
     managedBy ? "pangea",
-    environment ? "camelot-dev",
+    # A neutral default: this tag names the ENVIRONMENT class, not one
+    # estate. A consumer passes its own.
+    environment ? "dev",
     ephemeral ? false,
     ttlHours ? null,
   }: {
@@ -118,7 +120,7 @@ in rec {
   #
   # Every mkBuildTemplate provisioner runs `nixos-rebuild switch` on a
   # box that may have no reachable substituter (rio's Attic cache is
-  # Tailscale MagicDNS-only — confirmed unreachable from a Camelot-VPC
+  # Tailscale MagicDNS-only — confirmed unreachable from an in-VPC
   # builder via a live SSM probe, 2026-07-16), meaning a fully-cold
   # from-source build of the whole flake closure is a real, expected
   # path, not an edge case. nix's own default (max-jobs=auto == nproc,
@@ -127,7 +129,7 @@ in rec {
   # closure with dozens of heavy Rust crates (several large AWS SDK
   # crates, async-graphql, tatara-lisp, the project's own binaries) it
   # blows past available RAM and the box disconnects mid-build (the
-  # portao-camelot-ami-build incident this table exists to prevent a
+  # portao ami-build incident this table exists to prevent a
   # repeat of: 16-way-parallel on a 32GB c7i.4xlarge, 27 minutes in,
   # SSH dropped). The fix already landed once by hand as a hardcoded
   # `--option max-jobs 1 --option cores 1` in kindling-profiles — the
@@ -383,12 +385,14 @@ in rec {
     extraVariables ? {},
     extraTags ? {},
     extraEnvironmentVars ? [],
-    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # FinOps tagging standard — see
     # mkFinopsTags above. Sensible defaults; override per call site
     # when the resource has a real owner/purpose/environment.
     owner ? "platform",
     purpose ? "NixOS base AMI build for ${amiName}",
-    environment ? "camelot-dev",
+    # A neutral default: this tag names the ENVIRONMENT class, not one
+    # estate. A consumer passes its own.
+    environment ? "dev",
     # List of profile names to apply via `kindling harden` after the
     # main provisionerScript. Accepts the same stack keys as the
     # hardening-profiles bundle: "base", "hardened", "ami-full",
@@ -590,7 +594,7 @@ in rec {
               # activation touches those units, dropping Packer's SSH
               # session mid-script — kept as defensive hardening for that
               # case. Correction (2026-07-16, same day): the original
-              # comment here cited the portao-camelot-ami-build 27-minute
+              # comment here cited the portao ami-build 27-minute
               # disconnect as "confirmed live" evidence for THIS failure
               # mode, but a direct read of that build's own log shows the
               # disconnect landed mid-way through `nixos-rebuild switch`'s
@@ -639,11 +643,13 @@ in rec {
     ] else [
       "kindling ami-test"
     ]),
-    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # FinOps tagging standard — see
     # mkFinopsTags above.
     owner ? "platform",
     purpose ? "AMI validation test instance",
-    environment ? "camelot-dev",
+    # A neutral default: this tag names the ENVIRONMENT class, not one
+    # estate. A consumer passes its own.
+    environment ? "dev",
   }: let
     template = {
       variable = {
@@ -711,11 +717,13 @@ in rec {
     extraEnvironmentVars ? [],
     extraTags ? {},
     skipCreateAmi ? false,
-    # FinOps tagging standard (theory/CAMELOT.md §IV.D) — see
+    # FinOps tagging standard — see
     # mkFinopsTags above.
     owner ? "platform",
     purpose ? "NixOS layered AMI build for ${amiName}",
-    environment ? "camelot-dev",
+    # A neutral default: this tag names the ENVIRONMENT class, not one
+    # estate. A consumer passes its own.
+    environment ? "dev",
   }: let
     template = {
       variable = {

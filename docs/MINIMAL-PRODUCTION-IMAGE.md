@@ -13,7 +13,7 @@ need. `minimal: true` is **default-on**; the image we ship is the image we
 test with.
 
 This is Pillar 8 (Nix images, no Dockerfiles) taken to its strict end, and the
-build-side half of the camelot FedRAMP-High "minimal Nix closures" RA-5/SI-2
+build-side half of the FedRAMP-High "minimal Nix closures" RA-5/SI-2
 lever: fewer package sources ⇒ a cleaner CVE verdict **by construction**.
 
 ---
@@ -114,7 +114,7 @@ CI == the minimal image starts + serves.
   admission surface key off the posture.
 - **super-cache-ci:** the build that produces these ships fewer store paths per
   image → less to hash/cache/push, with no change to the daemon path.
-- **camelot:** "minimal Nix closures" is the named FedRAMP-High CVE-remediation
+- **the consuming estate:** "minimal Nix closures" is the named FedRAMP-High CVE-remediation
   lever; this standard makes it the default, not a manual strip.
 
 ## Tier-honesty ledger

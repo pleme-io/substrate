@@ -98,7 +98,7 @@ let
       statusReason = core.mkField {
         type = "str";
         default = "";
-        description = "Free text explaining a non-live status: why, and since when (e.g. \"retired 2026-07-02 — replaced by camelot\").";
+        description = "Free text explaining a non-live status: why, and since when (e.g. \"retired 2026-07-02 — replaced by <successor>\").";
       };
       profiles = core.mkField {
         type = "listOfStr";

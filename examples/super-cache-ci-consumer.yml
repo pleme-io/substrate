@@ -1,14 +1,14 @@
 # examples/super-cache-ci-consumer.yml — the WHOLE consumer footprint for a
-# camelot build on the super-cache-ci stack. Copy this to a microservice repo's
+# build on the super-cache-ci stack. Copy this to a microservice repo's
 # .github/workflows/build.yml; every capability is a typed verb in the reusable
 # workflow (substrate/.github/workflows/super-cache-ci-build.yml), itself
 # composed purely from the pleme-io/actions super-cache-ci vocabulary.
 #
-# This is the default way to build things in camelot: adding a new build = one
+# This is the default way to build things here: adding a new build = one
 # 5-line shim; adding a new CAPABILITY = one new verb + one catalog entry.
 #
 # Downstream image repos reference this as external OSS with CONFIG ONLY
-# (svc/arch/…) — no pleme-io-internal code crosses; camelot/architecture branch.
+# (svc/arch/…) — no pleme-io-internal code crosses.
 
 on:
   push:
@@ -22,10 +22,10 @@ jobs:
       arch: amd64
     secrets: inherit
 
-  # ── Hosted-runner DRY-RUN variant (no camelot ARC runner stood up yet) ──
+  # ── Hosted-runner DRY-RUN variant (no self-hosted ARC runner yet) ──
   # Renders + threads + gates the whole pipeline on ubuntu-latest with the
   # posture assertions advisory. The live derive through a stood-up sui service
-  # on the camelot in-cluster runner is the pipeline's named LiveTODO.
+  # on the in-cluster runner is the pipeline's named LiveTODO.
   #
   # build-dryrun:
   #   uses: pleme-io/substrate/.github/workflows/super-cache-ci-build.yml@main

@@ -820,7 +820,7 @@
           # (measured, run 31002775957). Dual-arch needs a runner per arch plus
           # a manifest join, the release-vector + release-vector-arm64 +
           # join-vector shape. amd64 is also what this image is FOR: every
-          # hardened-* image in Camelot's Zot is amd64-only (verified against
+          # hardened-* image in the private Zot is amd64-only (verified against
           # the registry) and the Jobs that run sql-apply schedule on the amd64
           # pool.
           #

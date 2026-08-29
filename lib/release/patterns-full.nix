@@ -408,8 +408,8 @@
     # pattern that breaks on the third.
     #
     # The correct conversion threads a CA path, exactly as the already-working
-    # doca consumers do: camelot-hardened-images.yml passes
-    # `dest-ca-cert: /usr/local/share/ca-certificates/zot-camelot.crt`, and
+    # doca consumers do: a hardened-images workflow passes
+    # `dest-ca-cert: /usr/local/share/ca-certificates/<registry>-ca.crt`, and
     # actions/zot-pull-scan exposes src-ca-cert/dest-ca-cert for this reason.
     # pangea-architectures' flakes have no such path today; supplying one is
     # real work, not a flag rename.
@@ -929,7 +929,7 @@
     "nix-image" = {
       uses = "pleme-io/actions/nix-image@main";
       backend = "tatara-lisp";
-      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and a multi-service image repo (dockerImage:<arch>:<svc>). Fan out over runs-on:[camelot,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
+      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and a multi-service image repo (dockerImage:<arch>:<svc>). Fan out over runs-on:[the private-builder estate,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
     };
   };
   npm = {
@@ -1332,7 +1332,7 @@
     "breathe-runner" = {
       uses = "pleme-io/actions/breathe-runner@main";
       backend = "tatara-lisp";
-      role = "Preflight posture gate for camelot breathable spot runners — assert the job landed on a 100%-spot, scale-to-zero, taint-isolated in-cluster GHA runner (never rio) and arm the retirada drain->checkpoint hook. First verb of a super-cache-ci build.";
+      role = "Preflight posture gate for breathable spot runners — assert the job landed on a 100%-spot, scale-to-zero, taint-isolated in-cluster GHA runner (never rio) and arm the retirada drain->checkpoint hook. First verb of a super-cache-ci build.";
     };
     "browserstack-test" = {
       uses = "pleme-io/actions/browserstack-test@main";
@@ -1462,7 +1462,7 @@
     "ferrite-check" = {
       uses = "pleme-io/actions/ferrite-check@main";
       backend = "tatara-lisp";
-      role = "Per-package MATERIALIZABILITY gate of the camelot image pipeline: for ONE package (a flake image attr) verify it can be materialized (its attr resolves to a derivation via a cheap `nix eval`, NOT a derive) BEFORE the expensive build, content-address its SOURCE, and emit a PoMS — a Proof-of-Materialization-Spec receipt — cached by that source hash so a re-run over unchanged source is a pure cache hit (no re-eval, no derive). Single-responsibility sibling of build-matrix (the fan) + gen-build-spec (the freshness gate); it gates one fan cell's materializability. TYPED EMISSION: the PoMS JSON is composed by jq, never hand-concatenated; the receipt hash is a real BLAKE3 (the action FAILS rather than emit a receipt that lies about its algorithm). Sibling of tameshi-attest (build receipt) + cartorio-attest (delivery receipt) on ONE chain (carries chain.prev, shares the BLAKE3 core).";
+      role = "Per-package MATERIALIZABILITY gate of the image pipeline: for ONE package (a flake image attr) verify it can be materialized (its attr resolves to a derivation via a cheap `nix eval`, NOT a derive) BEFORE the expensive build, content-address its SOURCE, and emit a PoMS — a Proof-of-Materialization-Spec receipt — cached by that source hash so a re-run over unchanged source is a pure cache hit (no re-eval, no derive). Single-responsibility sibling of build-matrix (the fan) + gen-build-spec (the freshness gate); it gates one fan cell's materializability. TYPED EMISSION: the PoMS JSON is composed by jq, never hand-concatenated; the receipt hash is a real BLAKE3 (the action FAILS rather than emit a receipt that lies about its algorithm). Sibling of tameshi-attest (build receipt) + cartorio-attest (delivery receipt) on ONE chain (carries chain.prev, shares the BLAKE3 core).";
     };
     "ffmpeg-transcode" = {
       uses = "pleme-io/actions/ffmpeg-transcode@main";
@@ -1742,7 +1742,7 @@
     "runner-resolve" = {
       uses = "pleme-io/actions/runner-resolve@main";
       backend = "tatara-lisp";
-      role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> Camelot self-hosted, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or Camelot self-hosted, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
+      role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> the org's self-hosted pool, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or an org self-hosted pool, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
     };
     "banned-tool-lint" = {
       uses = "pleme-io/actions/banned-tool-lint@main";

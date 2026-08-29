@@ -79,7 +79,7 @@ let
   # The in-derivation `chmod 1777 $out/tmp` above is cosmetic only -- Nix
   # strips write bits from every store path once it's registered, so by
   # the time this reaches a base image it's back to whatever `mkdir`'s
-  # own default mode was. Confirmed live 2026-07-15 (camelot/hardened-
+  # own default mode was. Confirmed live 2026-07-15 (the hardened-
   # images mysql, nix9): mysqld's InnoDB failed with "Can't create/write
   # to file '/tmp/ibGUvuwd' (OS errno 13 - Permission denied)" -- the
   # SAME store-immutability class of bug as ibdata1's original mode
@@ -169,7 +169,7 @@ let
   # so ITS references ARE scanned correctly) — but that only works if
   # each layer of composition (base -> package image) carries its real
   # contents forward, hence this passthru chain. Confirmed live 2026-07-14
-  # against camelot/hardened-images' rabbitmq image: a naive
+  # against the hardened-images' rabbitmq image: a naive
   # `nix path-info -r` on the shipped `rabbitmq.tar.gz` returned exactly
   # ONE component (itself); this fix is what a correct SBOM needs.
 
@@ -553,7 +553,7 @@ let
     # the image layer itself. e.g. [ "/var/lib/mysql" "/var/lib/rabbitmq" ].
     #
     # Also chmods u+rwX here, not just chown -- confirmed live 2026-07-15
-    # (camelot/hardened-images mysql, 3 straight failed attempts): ANY
+    # (the hardened-images mysql, 3 straight failed attempts): ANY
     # `chmod` run *inside* a derivation that populates `extraContents`
     # (e.g. a `runCommand` pre-baking a data directory) is undone the
     # moment that derivation's output is registered in the Nix store --

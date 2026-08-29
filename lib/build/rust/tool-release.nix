@@ -344,7 +344,7 @@ let
         # Cargo profiles, so a crate can declare strip, build here, and still ship
         # a full symbol table. hanabi is the live case: its Cargo.toml sets
         # strip = true and the musl artifact still came out
-        # "static-pie linked, not stripped", which is what failed the camelot
+        # "static-pie linked, not stripped", which is what failed the
         # web-ui image's hardened conformance check once the Go shim was removed
         # and the check finally looked at the Rust binary.
         #

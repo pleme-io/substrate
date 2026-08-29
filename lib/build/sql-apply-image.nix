@@ -11,7 +11,7 @@
 #
 # Linux-only: dockerTools cannot build a Linux image on darwin. A darwin eval
 # yields a stub with the real command, matching how hardened-images and
-# camelot-bootstrap guard their own image attrs, so `nix flake check` on a Mac
+# some consumers guard their own image attrs, so `nix flake check` on a Mac
 # does not error.
 { pkgs }:
 let
