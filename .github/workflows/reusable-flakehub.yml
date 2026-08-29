@@ -28,7 +28,7 @@ on:
         type: string
         default: .
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the pleme-io-org camelot-builder-pleme-eks ARC pool
+      # private repos → the pleme-io-org self-hosted ARC pool (vars.PRIVATE_BUILDER_RUNNER)
       # (avoids billed hosted minutes), public repos → ubuntu-latest. Keyed
       # off github.event.repository.private (the caller's event payload),
       # never an org-level Actions variable — pleme-io's GitHub Free org
@@ -50,7 +50,7 @@ jobs:
     # authorized for this resource") + the `nix flake show` eval errors. Re-enable
     # by removing this `if:` line once FlakeHub auth is sorted.
     if: false
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     permissions:
       id-token: write
       contents: read

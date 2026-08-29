@@ -48,11 +48,11 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04) -- same self-routing idiom as nix-image-auto-release.yml's own resolve job. Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's runs-on."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04) -- same self-routing idiom as nix-image-auto-release.yml's own resolve job. Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's runs-on."
         type: string
         default: ""
       extraSubstituters:
-        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml/nix-image-auto-release.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: pitr-tools' function-release.yml, its sole consumer, had no cache knob at all despite self-routing onto camelot-builder-pleme-eks). Empty (default) = no extra cache, zero blast radius for existing consumers."
+        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.<build-namespace>.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml/nix-image-auto-release.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: pitr-tools' function-release.yml, its sole consumer, had no cache knob at all despite self-routing onto the private-repo builder pool). Empty (default) = no extra cache, zero blast radius for existing consumers."
         type: string
         default: ""
       extraTrustedPublicKeys:
@@ -83,13 +83,13 @@ jobs:
   # ONLY reliable signal on pleme-io's GitHub Free org plan, which does
   # NOT share org-level vars/secrets into private repos' workflow-
   # evaluation context (confirmed live: pitr-tools/function-release.yml,
-  # the sole consumer, is PRIVATE and was passing `vars.CAMELOT_IMAGE_RUNNER
+  # the sole consumer, is PRIVATE and was passing `vars.PRIVATE_BUILDER_RUNNER
   # || 'ubuntu-24.04'` -- the org var silently resolved empty, so every run
   # billed GitHub-hosted ubuntu-24.04 minutes instead of ever reaching the
-  # self-hosted camelot pool this default exists to route to).
+  # self-hosted builder pool this default exists to route to).
   resolve:
     name: Resolve runner
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
@@ -97,7 +97,7 @@ jobs:
         id: resolve
         uses: pleme-io/actions/runner-resolve@main
         with:
-          default: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
           override: ${{ inputs.runner }}
 
   publish:

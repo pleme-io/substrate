@@ -66,7 +66,7 @@
 #
 #   `github.event.repository.private` appears exactly once in this workflow and
 #   it is in `runs-on` — it selects a billing label
-#   (`camelot-builder-pleme-eks` for private callers, `ubuntu-latest` for
+#   (the self-hosted pool for private callers, `ubuntu-latest` for
 #   public), not a job. No `if:` reads it today, so rows 1 and 3 select
 #   identically. It is declared in every case ON PURPOSE: the day someone adds
 #   `&& !github.event.repository.private` to the job condition — the exact edit

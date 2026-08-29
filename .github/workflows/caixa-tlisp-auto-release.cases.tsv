@@ -7,7 +7,7 @@
 # `&& !github.event.repository.private`: a private repo bumped, tagged, pushed,
 # published nothing, and reported success. This workflow carries the same
 # `github.event.repository.private` reference — but NOT as a job condition. It
-# appears only inside `runs-on`, choosing `camelot-builder-pleme-eks` over
+# appears only inside `runs-on`, choosing the self-hosted pool over
 # `ubuntu-latest`. Nothing here is gated on visibility, and nothing should be:
 # a tlisp caixa's delivery is the TAG on the repo's own remote (the manifest's
 # :files entries carry each shipped file's :sha256/:size/:body), never a

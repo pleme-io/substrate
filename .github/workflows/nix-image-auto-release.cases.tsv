@@ -13,7 +13,7 @@
 # carries three of them and NOT ONE is a job `if:` — they are all `runs-on:`
 # expressions (cve-suppression-visibility:252, resolve:291) plus resolve's
 # `default:` input to runner-resolve (:299). Repo visibility therefore selects
-# WHERE the build runs (private -> camelot-builder-pleme-eks ARC pool, public ->
+# WHERE the build runs (private -> self-hosted ARC pool (vars.PRIVATE_BUILDER_RUNNER), public ->
 # ubuntu-latest), never WHETHER the image is pushed. `publish` runs on a private
 # caller exactly as it does on a public one. That is correct for an OCI image
 # (pushed to a registry whose own ACLs govern access), and it is the opposite of

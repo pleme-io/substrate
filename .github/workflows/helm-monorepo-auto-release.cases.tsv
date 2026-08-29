@@ -13,7 +13,7 @@
 # WHAT THIS WORKFLOW ACTUALLY DOES WITH `repository.private` — the finding
 # THIS workflow's single occurrence of `github.event.repository.private` is in
 # `runs-on`, NOT in any `if:`. It is RUNNER ROUTING (private -> the
-# camelot-builder-pleme-eks ARC pool to avoid billed hosted minutes, public ->
+# self-hosted ARC pool (vars.PRIVATE_BUILDER_RUNNER) to avoid billed hosted minutes, public ->
 # unmetered ubuntu-24.04), not a publish gate. So the graphql-synthesizer shape
 # is structurally absent here: privacy changes WHERE the job runs, never WHETHER
 # it runs. The two mandatory public/private rows below pin exactly that, and the
@@ -73,7 +73,7 @@ bot-actor-self-trigger-guard	github.actor=github-actions[bot];github.event.repos
 # which was previously asserted rather than checked. Measured today with an
 # anonymous GHCR token (no credentials):
 #
-#   ghcr.io/pleme-io/charts/lareira-camelot-observe   HTTP 404
+#   ghcr.io/pleme-io/charts/<a-private-chart>   HTTP 404
 #   ghcr.io/pleme-io/charts/pleme-lib                 HTTP 403
 #   ghcr.io/pleme-io/charts/lareira-akeyless-saas     HTTP 403
 #   ghcr.io/pleme-io/helm/pleme-lareira               HTTP 403

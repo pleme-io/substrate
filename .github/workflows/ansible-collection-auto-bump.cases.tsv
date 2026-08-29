@@ -40,7 +40,7 @@
 #
 #   Row 3 (private repo) is a TRIPWIRE, not an assertion.
 #   `github.event.repository.private` appears exactly once in this workflow and
-#   it is in `runs-on` — it picks a billing label (`camelot-builder-pleme-eks`
+#   it is in `runs-on` — it picks a billing label (the self-hosted pool
 #   for private callers, `ubuntu-latest` for public), never a job. No `if:`
 #   reads it today, so row 3 must select IDENTICALLY to row 1. It is declared
 #   anyway: the day someone appends `&& !github.event.repository.private` to

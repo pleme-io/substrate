@@ -5,7 +5,7 @@
 # Distinct from nix-image-auto-release.yml (which builds + pushes a
 # pleme-io-OWNED image, e.g. a Nix rebuild of an upstream base) and from
 # the hardened-images program generally: this workflow never rebuilds
-# anything. It exists for the class of image Camelot runs unmodified from
+# anything. It exists for the class of image a cluster runs unmodified from
 # an upstream registry (FluxCD, Istio, cloudnative-pg, external-secrets,
 # AWS EKS system images, the ARC controller, metrics-server) that has
 # never been through any pleme-io CVE gate at all, closing that visibility
@@ -23,7 +23,7 @@
 #
 # Zot is cluster-internal-only (zot-pleme-zot.zot.svc.cluster.local),
 # unreachable from a GitHub-hosted runner -- every job here runs on
-# Camelot's own ARC pool (camelot-builder-pleme-eks, in the camelot-ci
+# the org's own ARC pool (the self-hosted builder pool, in the builder-ci
 # namespace, already inside Zot's authz.repositories `allowedClientNamespaces`
 # per the Zot HelmRelease values in the cluster's own GitOps repo), never
 # ubuntu-latest. No private/public repo routing needed here (unlike
@@ -74,13 +74,13 @@ on:
         type: string
         default: ""
       runner:
-        description: "Explicit runner label override. Empty = camelot-builder-pleme-eks (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
+        description: "Explicit runner label override. Empty = the self-hosted builder pool (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
         type: string
         default: ""
       ca-cert-url:
         description: >-
           FALLBACK ONLY. Raw URL of the committed zot-ca.crt PEM, used with the
-          CA_CERT_TOKEN secret when the org variable CAMELOT_ZOT_CA is unset.
+          CA_CERT_TOKEN secret when the org variable PRIVATE_REGISTRY_CA is unset.
           Empty by default: this workflow is public and must not carry a
           consumer's private GitOps path as a constant.
         type: string
@@ -117,7 +117,7 @@ on:
         description: "Password/token for source-registry (e.g. a GHCR read:packages PAT) -- only needed when the SOURCE image is private. Optional: absent keeps the public-source path unchanged."
         required: false
       CA_CERT_TOKEN:
-        description: "Read access to the private GitOps repo named by the `ca-cert-url` input, whose committed zot-ca.crt this workflow trusts. Only consulted when the org variable CAMELOT_ZOT_CA is unset. Optional so the ~14 existing vendor-* callers keep working unchanged -- but WITHOUT it the CA fetch fails LOUDLY rather than installing GitHub's 404 body as a certificate."
+        description: "Read access to the private GitOps repo named by the `ca-cert-url` input, whose committed zot-ca.crt this workflow trusts. Only consulted when the org variable PRIVATE_REGISTRY_CA is unset. Optional so the ~14 existing vendor-* callers keep working unchanged -- but WITHOUT it the CA fetch fails LOUDLY rather than installing GitHub's 404 body as a certificate."
         required: false
     outputs:
       admitted:
@@ -160,7 +160,7 @@ permissions:
 jobs:
   mirror:
     name: pull + scan + mirror ${{ inputs.zot-repo }}:${{ inputs.zot-tag }}
-    runs-on: ${{ inputs.runner != '' && inputs.runner || 'camelot-builder-pleme-eks' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') }}
     outputs:
       # ── `admitted` NOW MEANS WHAT ITS NAME SAYS, and it did not before ──────
       # This was `steps.pull-scan.outputs.admitted` alone -- i.e. "cleared the
@@ -350,9 +350,13 @@ jobs:
           # `vars` in a called workflow resolves against the CALLER's org, and
           # every caller is pleme-io, so this needs NO per-caller wiring — it
           # works for the ~14 existing vendor-* legs and every future one.
-          # Matches the org's existing pattern (CAMELOT_IMAGE_RUNNER,
-          # CAMELOT_SUI_SUBSTITUTER).
-          ZOT_CA_PEM: ${{ vars.CAMELOT_ZOT_CA }}
+          # Matches the org's existing pattern (PRIVATE_BUILDER_RUNNER,
+          # PRIVATE_SUI_SUBSTITUTER).
+          # Grant-before-revoke: read the new org-variable name first and fall
+          # back to the old one, so this works BEFORE the rename lands in the
+          # org and continues working AFTER the old name is removed. Neither
+          # side of the rename is a flag day.
+          ZOT_CA_PEM: ${{ vars.PRIVATE_REGISTRY_CA || vars.CAMELOT_ZOT_CA }}
           # FALLBACK only: a token for the private-repo fetch, for a caller
           # outside pleme-io where the org variable does not resolve.
           CA_CERT_TOKEN: ${{ secrets.CA_CERT_TOKEN }}
@@ -362,12 +366,12 @@ jobs:
 
           if [ -n "${ZOT_CA_PEM:-}" ]; then
             printf '%s\n' "$ZOT_CA_PEM" > /tmp/zot-ca.crt
-            echo "CA source: org variable CAMELOT_ZOT_CA (no network)"
+            echo "CA source: org variable PRIVATE_REGISTRY_CA (no network)"
           elif [ -n "${CA_CERT_TOKEN:-}" ] && [ -n "${CA_CERT_URL:-}" ]; then
             curl -fsSL -H "Authorization: Bearer $CA_CERT_TOKEN" -o /tmp/zot-ca.crt "$CA_CERT_URL"
             echo "CA source: authenticated fetch from ca-cert-url"
           else
-            echo "::error::No CA available. Set the org variable CAMELOT_ZOT_CA (preferred),"
+            echo "::error::No CA available. Set the org variable PRIVATE_REGISTRY_COT_CA (preferred),"
             echo "::error::or pass BOTH the ca-cert-url input and the CA_CERT_TOKEN secret."
             echo "::error::The source repo is PRIVATE — an unauthenticated fetch returns a"
             echo "::error::14-byte '404: Not Found' body, which is what this step used to"
@@ -378,7 +382,7 @@ jobs:
           if ! grep -q "BEGIN CERTIFICATE" /tmp/zot-ca.crt; then
             echo "::error::Fetched CA is not a PEM certificate ($(wc -c < /tmp/zot-ca.crt) bytes)."
             echo "::error::First bytes: $(head -c 120 /tmp/zot-ca.crt)"
-            echo "::error::Set the org variable CAMELOT_ZOT_CA to the PEM (preferred), or pass ca-cert-url + CA_CERT_TOKEN."
+            echo "::error::Set the org variable PRIVATE_REGISTRY_CA to the PEM (preferred), or pass ca-cert-url + CA_CERT_TOKEN."
             exit 1
           fi
 

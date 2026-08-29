@@ -24,7 +24,7 @@
 # WHOLE REVIEW SIGNAL. Until 2026-08-17 this workflow had NO privacy guard at
 # all: its single `github.event.repository.private` occurrence was in `runs-on`,
 #
-#   runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+#   runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
 #
 # which selects a RUNNER LABEL (a reusable workflow's runs-on bills the CALLER,
 # so a metered label here charges every private consumer) and gates nothing. A

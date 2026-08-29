@@ -114,7 +114,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     # Two clauses, two different jobs.
     #
     # (1) Skip when the bot itself pushed (avoids tag-push -> publish ->
@@ -199,7 +199,7 @@ jobs:
     # reusable workflow's runs-on bills the CALLER — the note on release's
     # runs-on records the day that exhausted the org's spending limit). The
     # ternary keeps even this two-step reporting job off metered hosted compute.
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:

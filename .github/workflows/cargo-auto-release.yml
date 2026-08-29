@@ -69,13 +69,13 @@ on:
         default: "true"
       # Runner routing: forwarded as runner-resolve's `override` in the
       # resolve-runner job below. Empty (default) routes by CALLER repo
-      # visibility — private repos → camelot-builder-pleme-eks, public
+      # visibility — private repos → vars.PRIVATE_BUILDER_RUNNER, public
       # repos → ubuntu-latest — via runner-resolve's own
       # visibility-default tier, the canonical home for this precedence
       # (also honors an optional repo-committed .github/runner.yml, which
       # a bare ternary here never could).
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest) via runner-resolve."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-latest) via runner-resolve."
         type: string
         required: false
         default: ""
@@ -128,7 +128,7 @@ jobs:
   # (bootstrapping the resolver can't call the resolver).
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

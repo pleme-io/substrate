@@ -78,7 +78,7 @@ jobs:
     # every other substrate reusable uses, and the reason is on the record:
     # a metered label in this position exhausted the org's Actions spending
     # limit on 2026-08-08.
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     permissions:
       packages: read
     outputs:
@@ -119,7 +119,7 @@ jobs:
   prune:
     needs: report
     if: inputs.apply
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     permissions:
       packages: write
     strategy:

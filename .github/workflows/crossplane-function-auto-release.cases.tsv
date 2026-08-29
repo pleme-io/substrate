@@ -19,7 +19,7 @@
 # THE FINDING FOR THIS WORKFLOW, AND ROW 2 IS IT. This workflow does carry
 # `github.event.repository.private` — three times — but NOT ONE of them is in an
 # `if:`. All three sit in `runs-on:` and in the runner-resolve `default:` input:
-# here the private signal ROUTES THE RUNNER (private -> camelot-builder-pleme-eks,
+# here the private signal ROUTES THE RUNNER (private -> vars.PRIVATE_BUILDER_RUNNER,
 # public -> ubuntu-24.04/ubuntu-latest); it does not gate publishing. That is the
 # right posture for this family — an xpkg is pushed to the consumer repo's own
 # GHCR namespace, which inherits the repo's visibility, so there is no

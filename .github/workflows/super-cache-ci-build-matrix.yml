@@ -1,5 +1,5 @@
 # Reusable workflow: the ACROSS-IMAGES super-cache-ci build — build ALL of a
-# flake's (service × arch) image cells CONCURRENTLY on the camelot spot builder
+# flake's (service × arch) image cells CONCURRENTLY on a self-hosted spot builder
 # pool (theory/SUPER-CACHE-CI.md; the max-parallel default). This is the
 # across-images level of the two-level max-parallel contract; the per-cell verb
 # `super-cache-ci-build.yml` owns the within-derivation level (nix --max-jobs/
@@ -78,9 +78,15 @@ on:
         type: number
         default: 0
       runner:
-        description: "JSON array of runner labels for each build cell. Default = the camelot in-cluster spot builder."
+        # A JSON ARRAY of labels, because a build cell is selected by a label
+        # SET (self-hosted + pool + arch), not by one name. The default names
+        # no pool: a workflow_call default must be static, so it cannot read
+        # vars, and baking a pool name here couples every consumer to one
+        # cluster's identity. Callers pass their own set; the arch label is the
+        # only part that is a property of the work rather than of the estate.
+        description: "JSON array of runner labels for each build cell. Empty = ubuntu-latest. Pass the caller's own self-hosted label set (e.g. [\"self-hosted\",\"<pool>\",\"amd64\"])."
         type: string
-        default: '["self-hosted", "camelot", "amd64"]'
+        default: ""
       sui-mode:
         description: "connect | ephemeral — the sui-service-up backend profile per cell."
         type: string
@@ -106,7 +112,7 @@ on:
         type: boolean
         default: false
       discover-runner:
-        description: "Runner label for the lightweight `discover` job specifically (distinct from `runner`, which is the JSON array of labels for the build-matrix cells). Empty = route by CALLER repo visibility — private repos → camelot-builder-pleme-eks, public repos → ubuntu-latest — via github.event.repository.private, never an org-level Actions variable (pleme-io's GitHub Free org plan doesn't share org vars/secrets into private repos' workflow context)."
+        description: "Runner label for the lightweight `discover` job specifically (distinct from `runner`, which is the JSON array of labels for the build-matrix cells). Empty = route by CALLER repo visibility — private repos → vars.PRIVATE_BUILDER_RUNNER, public repos → ubuntu-latest — via github.event.repository.private, never an org-level Actions variable (pleme-io's GitHub Free org plan doesn't share org vars/secrets into private repos' workflow context)."
         type: string
         default: ""
     secrets:
@@ -128,7 +134,7 @@ jobs:
   #     zero-cell fan a downstream job silently skips.
   discover:
     name: discover image cells
-    runs-on: ${{ inputs.discover-runner != '' && inputs.discover-runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.discover-runner != '' && inputs.discover-runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}

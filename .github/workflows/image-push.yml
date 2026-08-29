@@ -144,7 +144,7 @@ on:
         type: string
         default: "latest"
       runner:
-        description: "Explicit runner label override. Empty (default) routes through pleme-io/actions/runner-resolve's visibility-aware default -- private-repo callers land on Camelot's self-hosted pool, public-repo callers keep free GitHub-hosted minutes. Set this only when a caller genuinely needs something else (an arm64 pool, a macOS runner -- no self-hosted macOS capacity exists fleet-wide)."
+        description: "Explicit runner label override. Empty (default) routes through pleme-io/actions/runner-resolve's visibility-aware default -- private-repo callers land on the org's self-hosted pool, public-repo callers keep free GitHub-hosted minutes. Set this only when a caller genuinely needs something else (an arm64 pool, a macOS runner -- no self-hosted macOS capacity exists fleet-wide)."
         type: string
         default: ""
       buildCores:
@@ -168,11 +168,11 @@ on:
         type: string
         default: ""
       requireSigs:
-        description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters — e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
+        description: "Set 'false' to accept UNSIGNED NARs from extraSubstituters — e.g. the in-cluster sui super-cache daemon (http://sui.<build-namespace>.svc) serves unsigned closures. Empty = nix default (signatures required; zero blast radius for existing consumers)."
         type: string
         default: ""
       superCacheSaveEndpoint:
-        description: "sui super-cache endpoint to PUSH the just-built imageAttr's store path to (e.g. http://sui.camelot-build.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above — without this, every caller that reads from sui never contributes back, so a from-source overlay pays a full cold rebuild on every single run forever, even after a successful build (mirrors nix-image-auto-release.yml's own input of the same name, added there first — pangea-operator's ci.yml/release.yml were the first callers found still missing it). Runs right after the local build and before the CVE gate, since the cache write is a pure content-addressed store-path push independent of what the scan later decides. Best-effort (never fails the job on a push error — see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
+        description: "sui super-cache endpoint to PUSH the just-built imageAttr's store path to (e.g. http://sui.<build-namespace>.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above — without this, every caller that reads from sui never contributes back, so a from-source overlay pays a full cold rebuild on every single run forever, even after a successful build (mirrors nix-image-auto-release.yml's own input of the same name, added there first — pangea-operator's ci.yml/release.yml were the first callers found still missing it). Runs right after the local build and before the CVE gate, since the cache write is a pure content-addressed store-path push independent of what the scan later decides. Best-effort (never fails the job on a push error — see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
         type: string
         default: ""
       scanBeforePush:
@@ -216,7 +216,7 @@ on:
 jobs:
   # Resolves the actual build runner via pleme-io/actions/runner-resolve
   # (★★ AUTO-RELEASE + the org's standing CI-billing invariant: a path
-  # either flows through a genuinely public repo or Camelot's self-hosted
+  # either flows through a genuinely public repo or the org's self-hosted
   # pool, never a metered GitHub-hosted runner on a private repo). A
   # separate job, not an inline step in `push`, because runs-on: cannot
   # read a same-job step output (runner-resolve's own action.yml). This
@@ -231,7 +231,7 @@ jobs:
   # not default to ubuntu-24.04 unconditionally.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
@@ -270,7 +270,7 @@ jobs:
           # SURVEY MODE, deliberately, and here is the ratchet condition.
           # Counted 2026-08-20: 24 repos call this reusable workflow and 13 of
           # them are PRIVATE (arc-runner, armazem, autorevivy,
-          # blackmatter-fortinet, camelot-bootstrap, ensaio, escuta, gaveta,
+          # blackmatter-fortinet, ensaio, escuta, gaveta,
           # pangea-api, saber, sarar, shinka, + ensaio's worktrees). Enforcing
           # on day one would break every one of their image pushes at once,
           # which is how a gate earns a reputation for friction and then gets
@@ -635,7 +635,7 @@ jobs:
             # FATAL: nix aborts the build instead of falling back to building
             # from source. MEASURED — hardened-images run 30665557380
             # (release-clickhouse-keeper) died with
-            #   error: unable to download 'http://sui.camelot-build.svc/….narinfo':
+            #   error: unable to download 'http://sui.<build-namespace>.svc/….narinfo':
             #   Timeout was reached (28)
             # A build cache is an OPTIMISATION; it must never be a liveness
             # dependency of the thing it accelerates.
@@ -689,8 +689,8 @@ jobs:
           # `gen build` shells out to the literal `cargo metadata` binary (not
           # a Nix-mediated call) to read the workspace graph. GitHub-hosted
           # runners ship a pre-installed Rust toolchain, so this was always
-          # silently relying on that; self-hosted pools (e.g. Camelot's
-          # camelot-builder-pleme-eks ARC runners) carry no such toolchain by
+          # silently relying on that; self-hosted pools (e.g. the org's
+          # self-hosted ARC runners) carry no such toolchain by
           # default, so `cargo metadata` fails with a bare "No such file or
           # directory" the moment a consumer's runner input moves off a
           # GitHub-hosted default (confirmed live: pangea-operator's release

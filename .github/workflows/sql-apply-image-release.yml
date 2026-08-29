@@ -9,9 +9,9 @@
 # whose own comments repeatedly punish exactly that. vendor-mirror.yml's
 # `vendor-*` naming is reserved for third-party mirrors. So the image is
 # published from where it is built, and hardened-images only MIRRORS it into
-# Camelot's cluster-internal Zot (as `pleme-sql-apply`, the prefix
+# the cluster-internal Zot (as `pleme-sql-apply`, the prefix
 # `pleme-concprobe` already establishes for our own tools) -- that mirror is the
-# one step which MUST run there, because Zot is only reachable from Camelot's
+# one step which MUST run there, because Zot is only reachable from the cluster's
 # own ARC pool.
 #
 # Nix dockerTools + hardened-base's distroless-static. No Dockerfile. The image

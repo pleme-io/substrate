@@ -22,7 +22,7 @@
 #
 # ── WHAT MATERIALLY CHANGES FOR CALLERS ─────────────────────────────────────
 # 1. THE RUNNER. Jobs no longer route by repo visibility. Private repos ran on
-#    camelot-builder-pleme-eks, which is stalled — measured 2026-08-06, 284 of
+#    the self-hosted builder pool, which was stalled — measured 2026-08-06, 284 of
 #    the 412 repos carrying a Cargo.gen.lock are private, so 69% of the gated
 #    fleet had no working autoheal at all. Everything now runs on ubuntu-latest
 #    unless a caller passes `runner`.
@@ -39,7 +39,7 @@
 #
 # ── PROVEN BEFORE THIS FILE WAS TOUCHED ─────────────────────────────────────
 # Piloted on amimori (private, previously two consecutive failures on the
-# camelot pool): the run went in_progress in seconds, detect passed, repair
+# self-hosted pool): the run went in_progress in seconds, detect passed, repair
 # committed, and push-back succeeded — and because that repo carried a v1
 # delta, the heal also migrated it to v2 with manifest_sha256. Full chain, on
 # the exact class of repo this migration is meant to rescue.

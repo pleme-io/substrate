@@ -64,7 +64,7 @@ on:
 
 jobs:
   pipeline:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     steps:
       - name: Checkout the consumer repo
         uses: actions/checkout@v4

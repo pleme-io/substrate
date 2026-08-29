@@ -30,14 +30,14 @@ on:
         required: false
         default: "package.json package-lock.json"
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
+      # private repos → the org-scoped self-hosted ARC pool named by vars.PRIVATE_BUILDER_RUNNER (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
       # repos → ubuntu-latest. Schedule-triggered callers may lack
       # github.event.repository and fall open to hosted (documented edge).
       # Do NOT put an expression in this default — workflow_call input
       # defaults are static; the fallback lives in each job's runs-on.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-latest)."
         type: string
         required: false
         default: ""
@@ -81,7 +81,7 @@ permissions:
 
 jobs:
   bump:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     if: github.actor != 'github-actions[bot]'
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
@@ -113,7 +113,7 @@ jobs:
 
   ship:
     needs: bump
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     # The private guard carries its own escape hatch, and its skip is ANNOUNCED
     # by `publish-withheld` below. A bare `&& !private` here would be the exact
     # defect this change exists to remove: on 2026-08-08 graphql-synthesizer ran
@@ -161,7 +161,7 @@ jobs:
       && needs.bump.outputs.bumped == 'true'
       && github.event.repository.private
       && inputs.publish-from-private != 'true'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     permissions:
       contents: read
     steps:

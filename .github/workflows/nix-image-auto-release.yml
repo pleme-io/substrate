@@ -30,7 +30,7 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's `default:` input to pleme-io/actions/runner-resolve, evaluated in its own job because runs-on: cannot read a same-job step output."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's `default:` input to pleme-io/actions/runner-resolve, evaluated in its own job because runs-on: cannot read a same-job step output."
         type: string
         default: ""
       working-directory:
@@ -80,7 +80,7 @@ on:
         type: string
         default: ""
       boot-check-cmd:
-        description: "Correctness gate, run AFTER the CVE scan and BEFORE the push (a CVE-clean image that crashes at boot is worse than useless -- theory/CAMELOT.md's own hardened-images incident, 2026-07-17: mysql+rabbitmq both passed 0-CVE scans and neither could boot). Health command exec'd inside the started container via pleme-io/actions/container-boot-check (e.g. 'mysqladmin ping --silent', 'rabbitmq-diagnostics -q ping'). Empty (default) = no boot-check -- every existing caller keeps its current behavior unchanged; opt in per consumer, same shape as scan-before-push."
+        description: "Correctness gate, run AFTER the CVE scan and BEFORE the push (a CVE-clean image that crashes at boot is worse than useless -- a hardened-images incident, 2026-07-17: mysql+rabbitmq both passed 0-CVE scans and neither could boot). Health command exec'd inside the started container via pleme-io/actions/container-boot-check (e.g. 'mysqladmin ping --silent', 'rabbitmq-diagnostics -q ping'). Empty (default) = no boot-check -- every existing caller keeps its current behavior unchanged; opt in per consumer, same shape as scan-before-push."
         type: string
         default: ""
       boot-check-image-ref:
@@ -135,7 +135,7 @@ on:
         type: boolean
         default: false
       extraSubstituters:
-        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.camelot-build.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: every hardened-images build paid full cold-compile cost despite running on the same cluster/VPC sui lives on). Empty (default) = no extra cache, zero blast radius for existing consumers."
+        description: "Extra Nix binary-cache URL(s) to pull from (space-separated) -- e.g. the in-cluster sui super-cache daemon (http://sui.<build-namespace>.svc) so heavy builds SUBSTITUTE instead of compiling. Same input shape as image-push.yml's own extraSubstituters (mirrored here -- this reusable had never carried it, confirmed live: every hardened-images build paid full cold-compile cost despite running on the same cluster/VPC sui lives on). Empty (default) = no extra cache, zero blast radius for existing consumers."
         type: string
         default: ""
       extraTrustedPublicKeys:
@@ -147,7 +147,7 @@ on:
         type: string
         default: ""
       superCacheSaveEndpoint:
-        description: "sui super-cache endpoint to PUSH the just-built image-attr's store path to (e.g. http://sui.camelot-build.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above -- without this, every consumer that reads from sui never contributes back, so a from-source overlay (e.g. hardened-images' custom erlang_26 build) recompiles from scratch on every single run forever, even after a successful build. Runs after the local build (scan-before-push's `nix build`, or a fresh build if scan-before-push is false) and before the CVE gates, since the cache write is a pure content-addressed store-path push independent of what the scans later decide -- a rebuild from the same cached bytes always re-scans identically. Best-effort (never fails the job on a push error -- see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
+        description: "sui super-cache endpoint to PUSH the just-built image-attr's store path to (e.g. http://sui.<build-namespace>.svc), via pleme-io/actions/super-cache-save. The write half of extraSubstituters above -- without this, every consumer that reads from sui never contributes back, so a from-source overlay (e.g. hardened-images' custom erlang_26 build) recompiles from scratch on every single run forever, even after a successful build. Runs after the local build (scan-before-push's `nix build`, or a fresh build if scan-before-push is false) and before the CVE gates, since the cache write is a pure content-addressed store-path push independent of what the scans later decide -- a rebuild from the same cached bytes always re-scans identically. Best-effort (never fails the job on a push error -- see super-cache-save's own README). Empty (default) = no push, zero blast radius for existing consumers."
         type: string
         default: ""
       sbom-attest:
@@ -249,7 +249,7 @@ jobs:
     # (the job STARTS, so continue-on-error correctly absorbs any step
     # failure), public -> ubuntu-latest (free hosted minutes, unchanged). Same
     # idiom, same file, same rationale as `resolve`.
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     # report-only advisory (fail-on-violation:false); the no-cve-suppression
     # tatara-script has a not-yet-root-caused runtime error, so it must never
     # false-red a consumer's release. Remove once the script bug is fixed.
@@ -269,7 +269,7 @@ jobs:
   # own and every consumer job depends on it via needs.resolve.outputs.runner.
   # pleme-io/actions/runner-resolve applies typed precedence (override >
   # repo-committed .github/runner.yml > this job's `default`). `default` here
-  # is the same private→camelot-builder-pleme-eks / public→ubuntu-24.04 split
+  # is the same private→vars.PRIVATE_BUILDER_RUNNER / public→ubuntu-24.04 split
   # as before, keyed off github.event.repository.private (the caller's event
   # payload) rather than an org-level Actions variable: pleme-io is on the
   # GitHub Free org plan, which does not share org vars/secrets into private
@@ -288,7 +288,7 @@ jobs:
     # failing before it ever reached the self-hosted pool this whole routing
     # exists to reach -- the routing job was itself the one still paying for
     # GitHub-hosted minutes.
-    runs-on: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
@@ -296,7 +296,7 @@ jobs:
         id: resolve
         uses: pleme-io/actions/runner-resolve@main
         with:
-          default: ${{ github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-24.04' }}
+          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
           override: ${{ inputs.runner }}
 
   publish:
@@ -357,7 +357,7 @@ jobs:
       #
       # WHY, measured: hardened-images run 30665557380 (release-clickhouse-keeper)
       # died with
-      #   error: unable to download 'http://sui.camelot-build.svc/....narinfo':
+      #   error: unable to download 'http://sui.<build-namespace>.svc/....narinfo':
       #          Timeout was reached (28) Connection timed out after 15001 ms
       # after ~20 retries across four store paths. The build never reached its
       # compile step, let alone its CVE gate or boot-check.

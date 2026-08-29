@@ -7,7 +7,7 @@
 # Fourteen workflows in this directory carried this same skeleton — checkout,
 # toolchain, regenerate, fail-the-PR, push-back — and each one re-decided the
 # single question that matters most: WHICH RUNNER. Eight chose
-# `camelot-builder-pleme-eks`. That pool was stalled, so on every PRIVATE repo
+# the self-hosted builder pool. That pool was stalled, so on every PRIVATE repo
 # both `gen-spec` and `auto-release` were dead: jobs queued and never started,
 # or failed with "Failed to resolve action download info: Service Unavailable".
 #
@@ -152,7 +152,7 @@ jobs:
     # on `ubuntu-latest` with 0 steps (blocked) hours after the fleet "was
     # routed". An explicit `inputs.runner` still wins, so a caller that needs
     # a specific label is unaffected.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     env:
       # ── LOAD-BEARING, AND IT WAS DROPPED ONCE ─────────────────────────────
       # cargo's bundled libgit2 IGNORES the `url.insteadOf` rewrite that the

@@ -89,7 +89,7 @@ jobs:
     # on `ubuntu-latest` with 0 steps (blocked) hours after the fleet "was
     # routed". An explicit `inputs.runner` still wins, so a caller that needs
     # a specific label is unaffected.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/tatara-script@main

@@ -47,7 +47,10 @@ on:
       runner:
         required: false
         type: string
-        default: "camelot-builder-pleme-eks"
+        # Empty = resolve from the org variable. A workflow_call input default
+        # must be STATIC, so the fallback cannot live here — it lives in the
+        # job's runs-on below.
+        default: ""
 
 permissions:
   contents: read
@@ -55,7 +58,7 @@ permissions:
 
 jobs:
   watch:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

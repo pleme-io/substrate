@@ -1,10 +1,10 @@
-# Reusable workflow: the reference CAMELOT BUILD, composed PURELY from the
+# Reusable workflow: the reference SUPER-CACHE BUILD, composed PURELY from the
 # super-cache-ci action vocabulary (theory/SUPER-CACHE-CI.md). One job whose
 # steps are the typed verbs of the default CI-authoring language for the
-# sui-service stack; a camelot build is a THREADING of these verbs, not a
+# sui-service stack; a super-cache build is a THREADING of these verbs, not a
 # monolith (★★ CLOSED-LOOP MASS-SYNTHESIS rule 2 — small verbs, no orchestrator).
 #
-#   breathe-runner   → assert breathable spot / camelot-taint posture, arm drain
+#   breathe-runner   → assert breathable spot / builder-taint posture, arm drain
 #   sui-service-up    → resolve + export the sui daemon endpoint + backend tiers
 #   gen-build-spec    → typed *.build-spec.json + GEN-TYPED-SPEC-CONTRACT stale gate
 #   super-cache-restore → warm path: probe the tiered super-cache
@@ -41,10 +41,10 @@
 #     sui-graph build CLI ships (rows 1/9) — NEVER a faked green.
 #   • never-touch-disk is a COMPUTED predicate (postgres∧redis∧tmpfs), false
 #     until M1 config selects them (row 7). Read steps.sui.outputs.never-touch-disk.
-#   • breathe-runner live CAMELOT_* signals + retirada drain = LiveTODO (rows
+#   • breathe-runner live builder-pool signals + retirada drain = LiveTODO (rows
 #     11/12); on a hosted-runner dry-run pass enforce-posture=false.
 #   • The live end-to-end (a real derive through a stood-up sui service on the
-#     camelot in-cluster ARC runner) is the pipeline's named LiveTODO — this
+#     an in-cluster ARC runner) is the pipeline's named LiveTODO — this
 #     workflow renders + threads + gates today; a stood-up sui-service is the gate.
 #
 # ── NOT build steps (named, out of this job) ────────────────────────────────
@@ -70,11 +70,14 @@ on:
         default: "amd64"
       runner:
         description: >-
-          JSON array of runner labels. Default is the camelot in-cluster spot
-          runner. For a hosted-runner dry-run pass '[\"ubuntu-latest\"]' AND
-          enforce-posture=false.
+          JSON array of runner labels — a build cell is selected by a label SET
+          (self-hosted + pool + arch), not by one name. REQUIRED when
+          enforce-posture is true: a workflow_call default must be STATIC so it
+          cannot read vars, and baking a pool name here would couple every
+          consumer to one estate's cluster identity. For a hosted-runner
+          dry-run pass '[\"ubuntu-latest\"]' AND enforce-posture=false.
         type: string
-        default: '["self-hosted", "camelot", "amd64"]'
+        default: '["ubuntu-latest"]'
       sui-mode:
         description: "connect | ephemeral — sui-service-up backend profile. connect = the never-touch-disk destination (Pg/Redis/tmpfs)."
         type: string
@@ -140,13 +143,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1 — assert the breathable spot / camelot-taint posture; arm the
+      # 1 — assert the breathable spot / isolated-pool posture; arm the
       #     retirada spot-reclaim drain->checkpoint hook (LiveTODO: rows 11/12).
       - id: breathe
         uses: pleme-io/actions/breathe-runner@main
         with:
           require-spot: true
-          require-camelot-taint: true
+          require-isolated-node-group: true
           drain-handler: true
           enforce: ${{ inputs.enforce-posture }}
 
@@ -236,7 +239,7 @@ jobs:
       # pipeline PRODUCES them. Gated on inputs.security-layers.
       #
       # TIER-HONEST: these run wherever the job runs; the live end-to-end (a
-      # real derive through a stood-up sui service on the camelot in-cluster
+      # real derive through a stood-up sui service on the in-cluster
       # ARC runner) is the pipeline's existing named LiveTODO. The steps
       # thread + execute the standard tools today; a digest-output from
       # ghcr-publish (so L-sign binds a @sha256: without a tag→digest resolve)

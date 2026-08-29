@@ -14,7 +14,7 @@
 # WHAT THE SWEEP FOUND HERE, and the reason to read this header before editing
 # a row. helm-auto-release does NOT share that shape. Both of its
 # `github.event.repository.private` occurrences are in `runs-on:` — runner
-# routing only (private caller -> the camelot-builder-pleme-eks ARC pool,
+# routing only (private caller -> the self-hosted ARC pool (vars.PRIVATE_BUILDER_RUNNER),
 # public caller -> ubuntu-latest). NEITHER is in an `if:`. So `ship` packages
 # and pushes the chart to the OCI registry from a PRIVATE caller exactly as it
 # does from a public one. Whether that is the intended posture for charts is a
@@ -70,7 +70,7 @@ bot-actor-no-loop	github.actor=github-actions[bot];github.event.repository.priva
 # which was previously asserted rather than checked. Measured today with an
 # anonymous GHCR token (no credentials):
 #
-#   ghcr.io/pleme-io/charts/lareira-camelot-observe   HTTP 404
+#   ghcr.io/pleme-io/charts/<a-private-chart>   HTTP 404
 #   ghcr.io/pleme-io/charts/pleme-lib                 HTTP 403
 #   ghcr.io/pleme-io/charts/lareira-akeyless-saas     HTTP 403
 #   ghcr.io/pleme-io/helm/pleme-lareira               HTTP 403

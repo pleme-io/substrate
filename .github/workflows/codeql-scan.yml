@@ -29,7 +29,7 @@ on:
 jobs:
   analyze:
     name: "analyze (${{ matrix.language }})"
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     permissions:
       actions: read
       contents: read

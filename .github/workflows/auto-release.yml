@@ -35,13 +35,13 @@ on:
         required: false
         default: patch
       # Runner routing: empty default routes by CALLER repo visibility —
-      # private repos → the org-scoped camelot-builder-pleme-eks ARC pool (avoids billed
+      # private repos → the org-scoped self-hosted ARC pool named by vars.PRIVATE_BUILDER_RUNNER (avoids billed
       # hosted minutes; org runner groups refuse public repos anyway), public
       # repos → ubuntu-latest. Schedule-triggered callers may lack
       # github.event.repository and fall open to hosted (documented edge).
       # Passed through verbatim to every per-language reusable below.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → camelot-builder-pleme-eks, public → ubuntu-latest)."
+        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-latest)."
         type: string
         required: false
         default: ""
@@ -137,7 +137,7 @@ concurrency:
 jobs:
   detect:
     name: Detect repo type
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     outputs:
       repo-type: ${{ steps.detect.outputs.repo-type }}
       manifest-path: ${{ steps.detect.outputs.manifest-path }}
@@ -266,7 +266,7 @@ jobs:
       needs.detect.outputs.repo-type != 'ansible-collection' &&
       needs.detect.outputs.repo-type != 'github-action' &&
       needs.detect.outputs.repo-type != 'caixa'
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && 'camelot-builder-pleme-eks' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     steps:
       - name: Fail with diagnostic
         env:

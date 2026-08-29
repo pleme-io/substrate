@@ -187,7 +187,7 @@ jobs:
       # ONE resolution point for the three downstream coordinates: the caller's
       # input wins, otherwise the caller org's variables. `vars` in a called
       # workflow resolves against the CALLER's org, which is the same seam
-      # vendor-image-mirror already uses for CAMELOT_ZOT_CA.
+      # vendor-image-mirror already uses for the private-registry CA variable.
       PROMOTE_REPO: ${{ inputs.promote-repo != '' && inputs.promote-repo || vars.HARDENED_IMAGE_PROMOTE_REPO }}
       PROMOTE_REF: ${{ inputs.promote-ref != '' && inputs.promote-ref || vars.HARDENED_IMAGE_PROMOTE_REF }}
       PROMOTE_PATH: ${{ inputs.promote-path != '' && inputs.promote-path || vars.HARDENED_IMAGE_PROMOTE_PATH }}

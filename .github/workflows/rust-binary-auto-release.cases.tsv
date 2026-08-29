@@ -19,7 +19,7 @@
 # github.event.repository.private and they expect the SAME selection: a private
 # consumer still bumps and still tags, and the tag push IS the whole delivery.
 # The workflow does read that path — in `runs-on`, to route private callers to
-# the camelot-builder-pleme-eks ARC pool and public ones to ubuntu-latest — so
+# the self-hosted ARC pool (vars.PRIVATE_BUILDER_RUNNER) and public ones to ubuntu-latest — so
 # declaring it is describing the workflow, not padding the table. Runner routing
 # is not job selection: if someone ever adds `&& !github.event.repository.private`
 # to a job here, row 2 turns red and the silent-no-delivery class is caught on
