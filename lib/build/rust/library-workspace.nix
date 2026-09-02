@@ -125,6 +125,8 @@ in {
   # from it. The tie names `cargoNix`, not `generatedCargoNix`: on the
   # fallback branch the latter is a derivation, and crate2nix just built it
   # from this tree, so there is nothing to tie.
+  crateEnvFixups = import ./crate-env-fixups.nix;
+
   cargoNixTie = import ./cargo-nix-tie.nix { };
 
   project = cargoNixTie.assertFresh {
@@ -132,7 +134,11 @@ in {
     cargoLock = src + "/Cargo.lock";
   } (import generatedCargoNix {
     inherit pkgs;
+    # crateEnvFixups first, so a consumer's `crateOverrides` can still
+    # displace one; see ./crate-env-fixups.nix for why it is shared with
+    # library.nix rather than copied into both.
     defaultCrateOverrides = pkgs.defaultCrateOverrides
+      // crateEnvFixups
       // perMemberDefaults
       // crateOverrides;
   });
