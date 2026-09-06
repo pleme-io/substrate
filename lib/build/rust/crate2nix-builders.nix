@@ -181,6 +181,11 @@ in
       # path explicitly via `useLockfileBuilder = false` when their
       # repo's build-spec is missing/stale.
       useLockfileBuilder ? true,
+      # Variant build spec for the lockfile-builder path. This is the seam
+      # `rootFeatures` cannot provide there — buildProject THROWS on
+      # rootFeatures when useLockfileBuilder is true and points here, so this
+      # argument is what makes that refusal actionable rather than a dead end.
+      specFile ? null,
     }:
     let
       projectArgs = {
@@ -201,6 +206,7 @@ in
         cargoNix
         serviceName
         projectArgs
+        specFile
         ;
     };
 
@@ -223,6 +229,10 @@ in
       # path explicitly via `useLockfileBuilder = false` when their
       # repo's build-spec is missing/stale.
       useLockfileBuilder ? true,
+      # Variant build spec for the lockfile-builder path — the seam that
+      # makes buildProject's rootFeatures refusal actionable. A tool wants a
+      # feature-gated build as much as a service does.
+      specFile ? null,
     }:
     let
       projectArgs = {
@@ -240,6 +250,7 @@ in
           src
           cargoNix
           projectArgs
+          specFile
           ;
         serviceName = toolName;
       };
