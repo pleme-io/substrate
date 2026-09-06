@@ -241,6 +241,28 @@ in {
             nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ [pkgs.protobuf];
             PROTOC = "${pkgs.protobuf}/bin/protoc";
           };
+          # magma-protocol, for the same reason as the two above but a case
+          # they do not cover: it calls `protoc_bin_vendored::protoc_bin_path()`
+          # from its OWN build script, and that function PANICS internally
+          # rather than returning `Err` when the vendored binary is not
+          # materialized in the sandbox:
+          #
+          #   thread 'main' panicked at src/lib.rs:20:5:
+          #   internal: protoc not found /build/protoc-bin-vendored-linux-x86_64-3.2.0/bin/protoc
+          #
+          # Its build.rs already guards correctly (`if std::env::var("PROTOC").is_err()`),
+          # so setting PROTOC means the panicking call is never reached. A
+          # `panic` cannot be caught by the `if let Ok(...)` the script wraps it
+          # in, which is why the guard alone is not enough.
+          #
+          # Landed here rather than per-consumer: pangea-operator carried this
+          # override THREE times (two image builders, and missing from the plain
+          # package — so its images built while `packages.default` did not, for
+          # months, with the failure only visible to whoever built the binary).
+          magma-protocol = oldAttrs: {
+            nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ [pkgs.protobuf];
+            PROTOC = "${pkgs.protobuf}/bin/protoc";
+          };
         } // crateOverrides;
       };
       };
