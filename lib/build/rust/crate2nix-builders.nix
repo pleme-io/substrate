@@ -255,10 +255,21 @@ in {
           # `panic` cannot be caught by the `if let Ok(...)` the script wraps it
           # in, which is why the guard alone is not enough.
           #
-          # Landed here rather than per-consumer: pangea-operator carried this
-          # override THREE times (two image builders, and missing from the plain
-          # package — so its images built while `packages.default` did not, for
-          # months, with the failure only visible to whoever built the binary).
+          # ── SCOPE, STATED HONESTLY ──────────────────────────────────────
+          # This file feeds the crate2nix/service-image builders. It is NOT the
+          # path `substrate.rust.{tool,workspace}` takes — that goes through
+          # lockfile-builder, whose per-crate knowledge lives in gen's typed
+          # registry (`gen/crates/gen-cargo/src/quirks.rs::REGISTRY`, where
+          # magma-protocol is now registered alongside vigy-rpc).
+          #
+          # So this entry does not fix the workspace path, and must not be
+          # cited as having done so. It is kept because it is correct for the
+          # builders that DO read this map, and because a consumer whose
+          # build-spec predates the registry entry still needs it.
+          #
+          # The pair that actually fixes the workspace path: magma's build.rs
+          # preferring a `protoc` on PATH (24d476e), plus the gen registry
+          # entry that puts one there.
           magma-protocol = oldAttrs: {
             nativeBuildInputs = (oldAttrs.nativeBuildInputs or []) ++ [pkgs.protobuf];
             PROTOC = "${pkgs.protobuf}/bin/protoc";
