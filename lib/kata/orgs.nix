@@ -170,6 +170,31 @@ let
           default = true;
           description = "Participate in tend. false makes an org searchable without being reconciled — a decision, not an omission.";
         };
+        trackRepos = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Whether tend tracks REPOSITORIES in this org. `false` keeps the
+            workspace — and therefore its `watch` config — while reporting no
+            repos for it.
+
+            ── WHY THIS IS NEITHER `sync = false` NOR `discover = false` ──
+            `sync = false` removes the workspace from tend's config outright
+            (see `synced` below), taking its `watch` block with it. For an org
+            whose file-watch feeds a live pipeline that is too blunt: it
+            forces giving up a working pipeline to silence a listing.
+
+            `discover = false` only stops the forge API call. tend still scans
+            `baseDir` and reports every undeclared directory as `unknown` —
+            correct as drift detection, wrong as an answer when the org is
+            not ours to track. Measured 2026-09-05: `akeylesslabs` holds 138
+            directories, so `discover = false` alone traded one 403 warning
+            for 138 `unknown` rows per run.
+
+            This renders to tend's `track_repos`, which skips BOTH the
+            discovery call and the on-disk scan while leaving the watch alone.
+          '';
+        };
         index = lib.mkOption {
           type = lib.types.bool;
           default = true;
@@ -249,6 +274,7 @@ in
               description = o.description or name;
               discover = o.discover or true;
               sync = o.sync or true;
+              trackRepos = o.trackRepos or true;
               index = o.index or true;
               exclude = o.exclude or [ ];
               extraRepos = o.extraRepos or [ ];
@@ -273,6 +299,10 @@ in
           base_dir = o.baseDir;
           clone_method = o.cloneMethod;
           discover = o.discover;
+          # tend's workspace-level opt-out: skips the discovery call AND the
+          # on-disk scan, while leaving `watch` running. See the option's
+          # description for why neither `sync` nor `discover` covers this.
+          track_repos = o.trackRepos;
           org = o.name;
           exclude = o.exclude;
           extra_repos = o.extraRepos;
