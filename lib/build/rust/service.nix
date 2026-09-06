@@ -19,16 +19,17 @@
 # This returns complete flake outputs: packages, devShells, apps
 {
   nixpkgs,
-  system,  # Host platform (where commands run: aarch64-darwin, x86_64-linux, etc.)
+  system, # Host platform (where commands run: aarch64-darwin, x86_64-linux, etc.)
   nixLib,
   # Optional: forced only by the legacy useLockfileBuilder=false fallback and
   # the (now-obsolete) crate2nix-generate apps. Repos on the gen/lockfile-builder
   # standard omit the crate2nix flake input; null flows through harmlessly.
   crate2nix ? null,
   forge,
-  nixHooks ? null,  # Optional: Nix hooks package for post-build-hook support
-  devenv ? null,    # Optional: devenv flake input for enhanced dev shells
-}: let
+  nixHooks ? null, # Optional: Nix hooks package for post-build-hook support
+  devenv ? null, # Optional: devenv flake input for enhanced dev shells
+}:
+let
   # ============================================================================
   # CROSS-PLATFORM BUILD ARCHITECTURE
   # ============================================================================
@@ -53,46 +54,58 @@
     inherit system;
     overlays = [ nixLib.rustOverlays.${system}.rust ];
   };
-in {
+in
+{
   serviceName,
   src,
   description ? "${serviceName} Service with crate2nix",
-  buildInputs ? [],
-  nativeBuildInputs ? [],
+  buildInputs ? [ ],
+  nativeBuildInputs ? [ ],
   enableAwsSdk ? false,
-  extraDevInputs ? [],
-  devEnvVars ? {},
-  repoRoot ? src,  # Repository root (for monorepo: pass the repo root, not the service dir)
+  extraDevInputs ? [ ],
+  devEnvVars ? { },
+  repoRoot ? src, # Repository root (for monorepo: pass the repo root, not the service dir)
   migrationsPath ? src + "/migrations",
   cargoNix ? src + "/Cargo.nix",
   # Service type: "graphql" (default) or "rest" — controls port naming and env vars in Docker image
   serviceType ? "graphql",
-  ports ? (if serviceType == "rest" then {
-    http = 8080;
-    health = 8081;
-    metrics = 9090;
-  } else {
-    graphql = 8080;
-    health = 8081;
-    metrics = 9090;
-  }),
-  productName ? null,  # Product identifier — null for standalone repos
-  registryBase ? null,  # Registry base URL — null when registry is set
-  registry ? null,  # Explicit registry override (e.g., "ghcr.io/pleme-io/shinka")
-  packageName ? (if productName != null then "${serviceName}-service" else serviceName),  # Crate name
+  ports ? (
+    if serviceType == "rest" then
+      {
+        http = 8080;
+        health = 8081;
+        metrics = 9090;
+      }
+    else
+      {
+        graphql = 8080;
+        health = 8081;
+        metrics = 9090;
+      }
+  ),
+  productName ? null, # Product identifier — null for standalone repos
+  registryBase ? null, # Registry base URL — null when registry is set
+  registry ? null, # Explicit registry override (e.g., "ghcr.io/pleme-io/shinka")
+  packageName ? (if productName != null then "${serviceName}-service" else serviceName), # Crate name
   namespace ? (if productName != null then "${productName}-staging" else "${serviceName}-system"),
   serviceDirRelative ? (if productName != null then "services/rust/${serviceName}" else "."),
-  cluster ? "staging",  # Target cluster for deployment
-  architectures ? ["amd64" "arm64"],  # Supported architectures: amd64, arm64
+  cluster ? "staging", # Target cluster for deployment
+  architectures ? [
+    "amd64"
+    "arm64"
+  ], # Supported architectures: amd64, arm64
   # Function: pkgs -> [packages] to include in Docker image at runtime.
   # Example: pkgs: with pkgs; [ opentofu git busybox ]
-  extraContents ? (_pkgs: []),
-  crateOverrides ? {},
+  extraContents ? (_pkgs: [ ]),
+  crateOverrides ? { },
   # Optional: list of Cargo features active at the root crate. Threads
   # through to crate2nix's `rootFeatures`. Use to build feature-gated
   # service variants (e.g. ["default" "embedded_ruby"]). Defaults to
   # null (preserve crate2nix's own default — `["default"]`).
   rootFeatures ? null,
+  # Variant build spec for the lockfile-builder path (the only way to change
+  # the feature set there — `rootFeatures` is refused on that path).
+  specFile ? null,
   # Optional override for the OCI image name (default
   # "${serviceName}-service") and the entrypoint binary name (default
   # serviceName). Used when building feature-gated variants that ship
@@ -102,7 +115,7 @@ in {
   # Extra image-level env vars appended to the standard set. Format:
   # ["KEY=value", ...]. Use for service-specific defaults that helm
   # values won't override.
-  extraEnv ? [],
+  extraEnv ? [ ],
   # Build-graph source. `true` (default) = the gen-cargo build-spec /
   # lockfile-builder forward path. `false` = the committed crate2nix
   # Cargo.nix (cargo-metadata feature resolution). Flip to false when a
@@ -111,10 +124,11 @@ in {
   # metadata pass resolves those correctly. Documented opt-out from
   # crate2nix-builders.nix, now reachable at the flake surface.
   useLockfileBuilder ? true,
-}: let
+}:
+let
   _ = check.all [
     (check.nonEmptyStr "serviceName" serviceName)
-    (check.enum "serviceType" ["graphql" "rest"] serviceType)
+    (check.enum "serviceType" [ "graphql" "rest" ] serviceType)
     (check.architectures "architectures" architectures)
     (check.namedPorts "ports" ports)
     (check.bool "enableAwsSdk" enableAwsSdk)
@@ -125,13 +139,26 @@ in {
   ];
   # Service lib - uses native (host) pkgs for apps, devShells, etc.
   serviceLib = import ../../default.nix {
-    inherit pkgs system crate2nix forge;
+    inherit
+      pkgs
+      system
+      crate2nix
+      forge
+      ;
   };
 
   # Build inputs (host pkgs — for devShell and host-side tools)
-  defaultBuildInputs = with pkgs; [openssl postgresql sqlite];
+  defaultBuildInputs = with pkgs; [
+    openssl
+    postgresql
+    sqlite
+  ];
   allBuildInputs = defaultBuildInputs ++ buildInputs;
-  defaultNativeBuildInputs = with pkgs; [pkg-config cmake perl];
+  defaultNativeBuildInputs = with pkgs; [
+    pkg-config
+    cmake
+    perl
+  ];
   allNativeBuildInputs = defaultNativeBuildInputs ++ nativeBuildInputs;
 
   # Helper to check if architecture is enabled
@@ -140,19 +167,54 @@ in {
   # Docker images MUST contain Linux ELF binaries, not host-platform binaries.
   # On non-Linux hosts (macOS), Nix delegates building to remote builders
   # (nix-rosetta-builder or configured Linux builders in /etc/nix/machines).
-  mkDockerImage = arch: let
-    targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
-    targetPkgs = import nixpkgs {
-      system = targetSystem;
-      overlays = [ nixLib.rustOverlays.${targetSystem}.rust ];
+  mkDockerImage =
+    arch:
+    let
+      targetSystem = if arch == "arm64" then "aarch64-linux" else "x86_64-linux";
+      targetPkgs = import nixpkgs {
+        system = targetSystem;
+        overlays = [ nixLib.rustOverlays.${targetSystem}.rust ];
+      };
+      builders = import ./crate2nix-builders.nix {
+        pkgs = targetPkgs;
+        inherit crate2nix;
+      };
+    in
+    builders.mkCrate2nixDockerImage {
+      inherit
+        serviceName
+        src
+        cargoNix
+        migrationsPath
+        ports
+        enableAwsSdk
+        packageName
+        serviceType
+        extraContents
+        crateOverrides
+        rootFeatures
+        imageName
+        binaryName
+        extraEnv
+        useLockfileBuilder
+        specFile
+        ;
+      buildInputs =
+        (with targetPkgs; [
+          openssl
+          postgresql
+          sqlite
+        ])
+        ++ buildInputs;
+      nativeBuildInputs =
+        (with targetPkgs; [
+          pkg-config
+          cmake
+          perl
+        ])
+        ++ nativeBuildInputs;
+      architecture = arch;
     };
-    builders = import ./crate2nix-builders.nix { pkgs = targetPkgs; inherit crate2nix; };
-  in builders.mkCrate2nixDockerImage {
-    inherit serviceName src cargoNix migrationsPath ports enableAwsSdk packageName serviceType extraContents crateOverrides rootFeatures imageName binaryName extraEnv useLockfileBuilder;
-    buildInputs = (with targetPkgs; [openssl postgresql sqlite]) ++ buildInputs;
-    nativeBuildInputs = (with targetPkgs; [pkg-config cmake perl]) ++ nativeBuildInputs;
-    architecture = arch;
-  };
 
   dockerImage-amd64 = if hasArch "amd64" then mkDockerImage "amd64" else null;
   dockerImage-arm64 = if hasArch "arm64" then mkDockerImage "arm64" else null;
@@ -174,20 +236,23 @@ in {
   # Use fenix toolchain (1.90+) for cargo/rustc/clippy/rustfmt to match MSRV
   # of our dependencies (async-graphql, darling, etc. require 1.88+)
   devTools = [
-    pkgs.fenixRustToolchain  # cargo, rustc, clippy, rustfmt, rust-src
+    pkgs.fenixRustToolchain # cargo, rustc, clippy, rustfmt, rust-src
     pkgs.rust-analyzer
     pkgs.cargo-watch
-    pkgs.protobuf  # Required for tonic-build/prost-build (gRPC proto compilation)
+    pkgs.protobuf # Required for tonic-build/prost-build (gRPC proto compilation)
   ];
-in {
+in
+{
   # Package outputs - Docker images
   # Only defined for requested architectures
   # Apps use `nix build --system x86_64-linux .#dockerImage-amd64` to build for target platform
   # Nix's remote builder support (configured in /etc/nix/machines) handles cross-compilation
   packages =
-    (if dockerImage-amd64 != null then { inherit dockerImage-amd64; } else {}) //
-    (if dockerImage-arm64 != null then { inherit dockerImage-arm64; } else {}) //
-    { default = if dockerImage-amd64 != null then dockerImage-amd64 else dockerImage-arm64; };
+    (if dockerImage-amd64 != null then { inherit dockerImage-amd64; } else { })
+    // (if dockerImage-arm64 != null then { inherit dockerImage-arm64; } else { })
+    // {
+      default = if dockerImage-amd64 != null then dockerImage-amd64 else dockerImage-arm64;
+    };
 
   # Development shell with all dependencies — delegates to shared factory
   devShells.default = (import ../shared/devshell.nix { inherit pkgs; }).mkRustDevShell {
@@ -203,58 +268,89 @@ in {
   # Apps for build, push, deploy, release workflows
   # Apps call `nix build --system x86_64-linux` directly (no nix→shell→nix pattern)
   # Remote builders configured in /etc/nix/machines handle cross-compilation transparently
-  apps = serviceLib.mkCrate2nixServiceApps {
-    inherit serviceName src repoRoot productName namespace cluster registryBase registry serviceDirRelative crate2nix dockerImage-amd64 dockerImage-arm64 architectures nixHooks;
-    forge = forge;
-  } // {
-    # Add rust-version app for easy version verification
-    rust-version = {
-      type = "app";
-      program = toString (pkgs.writeShellScript "rust-version" ''
-        echo "Rust version for ${serviceName} service:"
-        ${(pkgs.fenixRustc or pkgs.rustc)}/bin/rustc --version
-      '');
-    };
+  apps =
+    serviceLib.mkCrate2nixServiceApps {
+      inherit
+        serviceName
+        src
+        repoRoot
+        productName
+        namespace
+        cluster
+        registryBase
+        registry
+        serviceDirRelative
+        crate2nix
+        dockerImage-amd64
+        dockerImage-arm64
+        architectures
+        nixHooks
+        ;
+      forge = forge;
+    }
+    // {
+      # Add rust-version app for easy version verification
+      rust-version = {
+        type = "app";
+        program = toString (
+          pkgs.writeShellScript "rust-version" ''
+            echo "Rust version for ${serviceName} service:"
+            ${(pkgs.fenixRustc or pkgs.rustc)}/bin/rustc --version
+          ''
+        );
+      };
 
-    # Regenerate the build spec. On the gen/lockfile-builder standard there is
-    # no Cargo.nix — the committed artifacts are the Cargo.gen.lock delta +
-    # Cargo.build-spec.json, regenerated with `gen build .`. The legacy
-    # crate2nix-generate path remains only when a crate2nix input is supplied.
-    generateCargoNix = {
-      type = "app";
-      program = toString (pkgs.writeShellScript "generate-cargo-nix" (
-        if crate2nix == null then ''
-          echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
-          echo "Regenerate the committed delta with:"
-          echo "    gen build ."
-          echo "(commit Cargo.gen.lock; Cargo.build-spec.json is gitignored)"
-        '' else ''
-          echo "🔨 Generating Cargo.nix for ${serviceName}..."
-          ${crate2nix}/bin/crate2nix generate
-          echo "✅ Cargo.nix generated successfully!"
-          echo ""
-          echo "Don't forget to commit it:"
-          echo "  git add Cargo.nix"
-          echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
-        ''));
-    };
+      # Regenerate the build spec. On the gen/lockfile-builder standard there is
+      # no Cargo.nix — the committed artifacts are the Cargo.gen.lock delta +
+      # Cargo.build-spec.json, regenerated with `gen build .`. The legacy
+      # crate2nix-generate path remains only when a crate2nix input is supplied.
+      generateCargoNix = {
+        type = "app";
+        program = toString (
+          pkgs.writeShellScript "generate-cargo-nix" (
+            if crate2nix == null then
+              ''
+                echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
+                echo "Regenerate the committed delta with:"
+                echo "    gen build ."
+                echo "(commit Cargo.gen.lock; Cargo.build-spec.json is gitignored)"
+              ''
+            else
+              ''
+                echo "🔨 Generating Cargo.nix for ${serviceName}..."
+                ${crate2nix}/bin/crate2nix generate
+                echo "✅ Cargo.nix generated successfully!"
+                echo ""
+                echo "Don't forget to commit it:"
+                echo "  git add Cargo.nix"
+                echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
+              ''
+          )
+        );
+      };
 
-    # Alias for generateCargoNix
-    regenerate-cargo-nix = {
-      type = "app";
-      program = toString (pkgs.writeShellScript "regenerate-cargo-nix" (
-        if crate2nix == null then ''
-          echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
-          echo "Regenerate the committed spec with:  gen build ."
-        '' else ''
-          echo "🔨 Regenerating Cargo.nix for ${serviceName}..."
-          ${crate2nix}/bin/crate2nix generate
-          echo "✅ Cargo.nix regenerated successfully!"
-          echo ""
-          echo "Don't forget to commit it:"
-          echo "  git add Cargo.nix"
-          echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
-        ''));
+      # Alias for generateCargoNix
+      regenerate-cargo-nix = {
+        type = "app";
+        program = toString (
+          pkgs.writeShellScript "regenerate-cargo-nix" (
+            if crate2nix == null then
+              ''
+                echo "${serviceName} is on the gen/lockfile-builder standard — no Cargo.nix."
+                echo "Regenerate the committed spec with:  gen build ."
+              ''
+            else
+              ''
+                echo "🔨 Regenerating Cargo.nix for ${serviceName}..."
+                ${crate2nix}/bin/crate2nix generate
+                echo "✅ Cargo.nix regenerated successfully!"
+                echo ""
+                echo "Don't forget to commit it:"
+                echo "  git add Cargo.nix"
+                echo "  git commit -m 'chore: regenerate Cargo.nix for ${serviceName}'"
+              ''
+          )
+        );
+      };
     };
-  };
 }
