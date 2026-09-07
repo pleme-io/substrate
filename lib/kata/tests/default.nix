@@ -16,6 +16,7 @@ let
     ssh-aliases = ./ssh-aliases.nix;
     wireguard = ./wireguard.nix;
     kubeconfig = ./kubeconfig.nix;
+    manifest-seed = ./manifest-seed.nix;
     secret-seed = ./secret-seed.nix;
     topology = ./topology.nix;
     users = ./users.nix;

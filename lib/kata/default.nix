@@ -23,6 +23,8 @@ let
   wireguard = import ./wireguard.nix { inherit lib; };
   kubeconfig = import ./kubeconfig.nix { inherit lib; };
   secretSeed = import ./secret-seed.nix { inherit lib; };
+  manifestSeed = import ./manifest-seed.nix { inherit lib; };
+  k8sSeed = import ./k8s-seed.nix { inherit lib; };
   topology = import ./topology.nix { inherit lib; };
   users = import ./users.nix { inherit lib; };
   orgs = import ./orgs.nix { inherit lib; };
@@ -34,6 +36,8 @@ domains
 // wireguard
 // kubeconfig
 // secretSeed
+// manifestSeed
+// k8sSeed
 // topology
 // users
 // orgs

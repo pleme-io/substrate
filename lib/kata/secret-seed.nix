@@ -16,10 +16,13 @@
 # the generated, idempotent apply script (the one sanctioned bash per the
 # org NO-SHELL law — it is GENERATED from typed fields, never authored).
 #
-# Sits ABOVE the iroha alphabet: composes `iroha.mkOptionSurface` for the
-# enable-only option root and `iroha.tag` for the NixOS class tag, rather
-# than hand-typing either. kata owns the SHAPE (sops -> oneshot -> kubectl);
-# iroha owns the option/module mechanics.
+# Sits ABOVE the iroha alphabet, THROUGH `kata.k8s-seed`: this letter owns the
+# secret-specific half (the sops.secrets declarations and the generated
+# `kubectl create secret … | kubectl apply -f -` script) and delegates the unit
+# shape — option root, ordering, oneshot, and the reachable bootstrap retry
+# bound — to the shared engine. `mkManifestSeed` is its sibling over the same
+# engine. kata owns the SHAPE (sops -> oneshot -> kubectl); iroha owns the
+# option/module mechanics.
 #
 # Pure { lib } at import. pkgs binds late — it never appears here; the
 # emitted module reads `kubectl` from PATH via the consumer's `path`/wiring,
@@ -84,7 +87,7 @@
 #   - a `data` entry that is not `{ sopsPath = <str>; }`.
 { lib }:
 let
-  iroha = import ../iroha { inherit lib; };
+  k8sSeed = import ./k8s-seed.nix { inherit lib; };
 
   mkSecretSeed =
     spec:
@@ -164,13 +167,6 @@ let
         echo "kata-secret-seed: reconciled secret ${k8sNamespace}/${secretName}"
       '';
 
-      surface = iroha.mkOptionSurface {
-        inherit name namespace;
-        description = "Seed the ${secretName} Kubernetes Secret in ${k8sNamespace} from SOPS-decrypted files (bootstrap tier).";
-        optionName = name;
-        package = false;
-      };
-
       sopsSecrets = lib.listToAttrs (
         map (
           k:
@@ -182,106 +178,38 @@ let
         ) dataKeys
       );
 
-      restartTriggers = map (k: sopsFile data.${k}.sopsPath) dataKeys;
-
-      configModule =
-        { config, lib, ... }:
-        let
-          cfg = lib.attrByPath surface.optionPath { } config;
-        in
-        {
-          config = lib.mkIf cfg.enable {
-            sops.secrets = sopsSecrets;
-            systemd.services.${unitName} = {
-              inherit description after wants;
-              wantedBy = [ "multi-user.target" ];
-              restartTriggers = restartTriggers;
-              environment.KUBECONFIG = kubeconfig;
-
-              # ── ★ THE BOOTSTRAP RETRY BOUND, AS A TYPE RATHER THAN A COMMENT
-              # `Restart = on-failure` with `RestartSec = 5s` and NO start limit
-              # inherits systemd's default 5-starts-per-10s, which 5s spacing
-              # can never fill — so the limit is UNREACHABLE and a seed whose
-              # failure is PERMANENT retries forever, in `activating`, a state
-              # `systemctl --failed` does not list.
-              #
-              # THIS FACTORY'S OWN OUTPUT IS THE WORST MEASURED INSTANCE of
-              # that class in the fleet. On rio, 2026-08-01: `seed-grafana-oidc`
-              # and `seed-grafana-admin` sat at NRestarts=10854 / 10857 — ~15
-              # hours at 12 restarts/minute, each attempt spawning a
-              # tatara-script and hitting the API server. They stayed
-              # `activating`, never `failed`, so they appeared in no
-              # failed-unit list and raised nothing. And the cause was
-              # unfixable by retrying: namespace `monitoring` had been stuck
-              # `Terminating` since 2026-07-26 behind a VictoriaMetrics
-              # finalizer deadlock, and Kubernetes forbids creating content in
-              # a terminating namespace — so all 10,857 attempts were
-              # guaranteed to fail before they ran.
-              #
-              # 900s / 60 is not a fresh guess: it is the `bootstrapRetryBound`
-              # an operator had already derived BY HAND in
-              # nix/nodes/rio/configuration.nix, and it is reachable — 60
-              # attempts at 5s span 300s, comfortably inside a 900s window, so
-              # a permanent fault reaches `failed` in ~5 minutes while a
-              # bootstrap that legitimately waits for k3s and the API server to
-              # come up still gets a full hour's worth of attempts. The reason
-              # a seed needs a WIDE bound (unlike an ordinary daemon's 3/300)
-              # is exactly that: transient unavailability at boot is normal
-              # here, so the bound must separate "still coming up" from
-              # "will never work".
-              #
-              # Promoting it into the factory is the point. The hand-written
-              # version protected only the units on the node whose author knew
-              # to reference it — and the two grafana seeds that burned 15
-              # hours were generated, not hand-written.
-              #
-              # Beware the inverse footgun this replaces: `StartLimitIntervalSec
-              # = 0` DISABLES rate limiting rather than tightening it, which is
-              # how `fluxcd-bootstrap` silently opted out of the shared bound
-              # and was caught only by evaluating the result ("0s/60" against
-              # its siblings' "900s/60"), never by reading the diff.
-              #
-              # [Unit] keys, at the service level: in serviceConfig they render
-              # into [Service], where systemd logs "Unknown key name" and
-              # IGNORES them — a bound that reads as set and enforces nothing.
-              # mkDefault: a node may deliberately widen or disable this (see
-              # nix's `pleme.power.lifelineRestart`). A hard value collides.
-              startLimitIntervalSec = lib.mkDefault startLimitIntervalSec;
-              startLimitBurst = lib.mkDefault startLimitBurst;
-
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
-                Restart = "on-failure";
-                RestartSec = "5s";
-              };
-              inherit script;
-            };
-          };
+      # ── the unit shape comes from kata.k8s-seed, NOT from here ───────────
+      # This letter owns the SCRIPT and the sops declarations; the oneshot,
+      # the ordering, the option root and the reachable bootstrap retry bound
+      # are the shared engine's. Byte-parity across that move is gated by
+      # `kata-secret-seed-parity` — the 337 secret declarations on 18 nodes
+      # are why the engine had to be lifted without moving a single byte of
+      # this letter's output.
+      seed = k8sSeed.mkSeedUnit {
+        inherit
+          name
+          namespace
+          enable
+          description
+          script
+          kubeconfig
+          after
+          wants
+          startLimitIntervalSec
+          startLimitBurst
+          ;
+        optionDescription = "Seed the ${secretName} Kubernetes Secret in ${k8sNamespace} from SOPS-decrypted files (bootstrap tier).";
+        restartTriggers = map (k: sopsFile data.${k}.sopsPath) dataKeys;
+        extraConfig.sops.secrets = sopsSecrets;
+        errPrefix = "kata.secret-seed.mkSecretSeed: ";
+        meta = {
+          inherit name secretName k8sNamespace;
+          keys = dataKeys;
+          kind = "secret-seed";
         };
-
-      # The enable option defaults to `enable` (mkDefault so a node can flip
-      # it). mkOptionSurface emits mkEnableOption (default false); layer the
-      # configured default on top via the option root.
-      enableDefaultModule = {
-        config = lib.setAttrByPath (surface.optionPath ++ [ "enable" ]) (lib.mkDefault enable);
       };
 
-      module = {
-        imports = [
-          surface.module
-          configModule
-        ]
-        ++ lib.optional enable enableDefaultModule;
-      };
-
-      nixos = iroha.tag "nixos" module;
-
-      meta = {
-        inherit name secretName k8sNamespace;
-        keys = dataKeys;
-        kind = "secret-seed";
-      };
+      inherit (seed) nixos meta;
     in
     {
       inherit nixos meta;

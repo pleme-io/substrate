@@ -109,15 +109,37 @@
     exports = [ "mkKubeconfig" ];
   };
 
+  k8s-seed = {
+    file = "k8s-seed.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-09-07";
+    description = "The ONE systemd-oneshot shape every seed letter renders through: the enable-only option root, boot ordering, KUBECONFIG binding, restartTriggers, and (load-bearing) the REACHABLE bootstrap retry bound of 900s/60. Owns no apply verb — a seed kind supplies the script and any extra config. Refuses an empty script rather than emit a unit that reports success having reconciled nothing.";
+    subsumes = "The unit half of secret-seed.nix, lifted rather than copied when manifest-seed became the second consumer — so the retry bound whose absence burned 10,857 restarts over 15 hours on rio is inherited by construction, not by an author remembering to reference it.";
+    dependsOn = [ ];
+    exports = [ "mkSeedUnit" ];
+  };
+
   secret-seed = {
     file = "secret-seed.nix";
     tier = "standard";
     maturity = "Working";
     since = "2026-06-13";
-    description = "The sops-nix -> systemd-oneshot -> kubectl-apply Kubernetes Secret bootstrap pattern as one typed module factory: deterministic sops.secrets + an idempotent oneshot (create --dry-run=client -o yaml | apply -f -). Composes iroha.mkOptionSurface + core.tag.";
+    description = "The sops-nix -> systemd-oneshot -> kubectl-apply Kubernetes Secret bootstrap pattern as one typed module factory: deterministic sops.secrets + an idempotent oneshot (create --dry-run=client -o yaml | apply -f -). Owns the secret-specific half; the unit shape is kata.k8s-seed's.";
     subsumes = "The rio hand-rolled seed-grafana-admin/seed-grafana-oidc/seed-rio-cloudflare-credentials services + the copy-paste-documented pattern in nodes/rio/CLAUDE.md.";
-    dependsOn = [ ];
+    dependsOn = [ "k8s-seed" ];
     exports = [ "mkSecretSeed" ];
+  };
+
+  manifest-seed = {
+    file = "manifest-seed.nix";
+    tier = "standard";
+    maturity = "Working";
+    since = "2026-09-07";
+    description = "A declared Kubernetes manifest reconciled onto a node's own cluster from nix, making the node's gitops loop the reconciler for a cluster that has no Flux: a committed manifest edit changes its store path, which re-runs the seed on the rebuild the loop performs. Server-side apply (the seed owns spec, a controller owns status); force-conflicts by default because the object being adopted was, by construction, hand-applied first. Waits on requireCrds so a CR landing before its CRD is a wait, not a 5-minute red.";
+    subsumes = "Hand-applied manifests on a Flux-less cluster — measured 2026-09-07, the InfrastructureTemplate CR reconciling 1005 GitHub repositories existed only in an operator's shell history.";
+    dependsOn = [ "k8s-seed" ];
+    exports = [ "mkManifestSeed" ];
   };
 
   topology = {
