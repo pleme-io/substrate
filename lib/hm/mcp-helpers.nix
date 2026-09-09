@@ -366,6 +366,10 @@ in rec {
       "-disable-write" "-enabled-tools"
       "search,datasource,prometheus,loki,incident,alerting,oncall,sift,asserts,pyroscope,dashboard,annotations,navigation"
     ];
+    # The one attr the splunk kind reads from the CONSUMER's package set. Named
+    # once, here, so the kind's `packageAttr` declaration and its `package`
+    # default cannot disagree.
+    splunkPackageAttr = "holofote-mcp";
   in {
     grafana = {
       mkServer = { url }: {
@@ -404,6 +408,24 @@ in rec {
     # ./pkgs/ derivation here because the binary is ours, not vendored.
     # `package` stays overridable for a pinned or locally-built holofote.
     #
+    # That attr is DECLARED as `packageAttr`, so a consumer can read which
+    # package this kind needs without forcing it (★★ CATALOG REFLECTION —
+    # pleme-io/nix's `mcp-kind-consumer-packages-are-supplied` fleet gate
+    # reads every kind's declaration off its pinned substrate and asks its
+    # overlaid pkgs, per system, whether the attr is there). And when the
+    # attr is absent, the default THROWS BY NAME with the remedy, instead of
+    # Nix's bare `attribute 'holofote-mcp' missing` from inside the wrapper —
+    # which is what a routine input bump produced on 2026-09-09, when this
+    # kind (260e6de) was on origin/main before any consumer carried the
+    # overlay. The throw is still only a name for a wedge; the consumer-side
+    # gate is what refuses to ship it.
+    #
+    # `configFile` is holofote's `--config`: the shikumi YAML overlay for the
+    # BOUNDS (`HolofoteConfig` — max_results, default_indexes_limit, poll
+    # interval, max_search_seconds, job ttl / auto_cancel, connect + request
+    # timeouts). Nothing in it identifies a host or a credential; those are
+    # argv, per host. null → the binary's prescribed tier, no flag emitted.
+    #
     # `tls` is a typed per-host POSTURE, not a global toggle: Splunk's stock
     # management cert on :8089 is self-signed, so one tenant wants `system`,
     # a lab wants `accept-any`, a hardened tenant wants `ca:<PEM_PATH>`.
@@ -414,9 +436,11 @@ in rec {
     # binary: clap would refuse a half pair or both forms together at server
     # START, which the agent only ever sees as a dead MCP server.
     splunk = {
+      packageAttr = splunkPackageAttr;
       mkServer =
         { url, label ? url, userFile ? null, passwordFile ? null, tokenFile ? null
-        , tls ? "system", package ? pkgs.holofote-mcp }:
+        , tls ? "system", configFile ? null
+        , package ? pkgs.${splunkPackageAttr} or (throw "mcpKinds.splunk (${url}): pkgs.${splunkPackageAttr} is absent — this kind's binary is supplied by the CONSUMER's package set, never by substrate. Apply the holofote flake input's overlay fleet-wide (in pleme-io/nix: overlays/holofote.nix registered in parts/overlays.nix `baseOverlays`, the breathe/ensaio precedent) or pass `package` on the entry. The substrate bump that brought this kind and that overlay land in ONE commit, never in sequence.") }:
         assert (userFile == null) == (passwordFile == null)
           || throw "mcpKinds.splunk (${url}): --user-file and --password-file must appear together (got userFile=${toString userFile}, passwordFile=${toString passwordFile}); session-key auth needs both";
         assert (userFile != null) || tokenFile != null
@@ -429,7 +453,8 @@ in rec {
           inherit package; command = "holofote-mcp";
           args = [ "--host" url "--label" label "--tls" tls ]
             ++ optionals (userFile != null) [ "--user-file" userFile "--password-file" passwordFile ]
-            ++ optionals (tokenFile != null) [ "--token-file" tokenFile ];
+            ++ optionals (tokenFile != null) [ "--token-file" tokenFile ]
+            ++ optionals (configFile != null) [ "--config" configFile ];
           description = "Splunk (holofote, observe-only) — ${label} ${url}";
         };
       credEnvs = [ ];

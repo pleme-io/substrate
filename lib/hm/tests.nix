@@ -755,6 +755,55 @@ in runTests [
       && pinned.package == "/nix/store/pinned-holofote")
     "splunk kind must declare no credEnvs and emit no env/envFiles (secret stays a path on argv); package defaults to the consumer's pkgs.holofote-mcp and stays overridable")
 
+  # The kind DECLARES the consumer attr it defaults from, and the declaration
+  # is the same string the default reads — a consumer gate (pleme-io/nix's
+  # `mcp-kind-consumer-packages-are-supplied`) keys on it without forcing a
+  # package.
+  (let
+    splunk = (mcpHelpers.mcpKinds { }).splunk;
+  in mkTest "mcp-kind-splunk-declares-package-attr"
+    (splunk.packageAttr == "holofote-mcp"
+      && (builtins.functionArgs splunk.mkServer) ? package)
+    "splunk kind must declare packageAttr = \"holofote-mcp\" and take `package` as an overridable formal")
+
+  # RED-RUN of the consumer-package default: over a pkgs that lacks
+  # holofote-mcp, forcing the default `package` fails (a named throw — the
+  # message names the overlay and the one-commit rule; tryEval cannot read the
+  # text, only that it refused), while an explicit `package` on the same empty
+  # pkgs succeeds — proving the default is the ONLY place the kind touches the
+  # consumer's package set, so the failure can never come from anywhere else.
+  (let
+    splunk = (mcpHelpers.mcpKinds { }).splunk;
+    absent = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; tokenFile = "/t"; }).package;
+    pinned = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; tokenFile = "/t"; package = "/nix/store/pinned-holofote"; }).package;
+  in mkTest "mcp-kind-splunk-absent-consumer-package-is-refused-by-the-default-only"
+    (!absent.success && pinned.success && pinned.value == "/nix/store/pinned-holofote")
+    "splunk mkServer over a pkgs without holofote-mcp must refuse at eval when `package` is defaulted, and must not touch pkgs at all when `package` is given")
+
+  # `--config` is holofote's shikumi bounds overlay (HolofoteConfig). Emitted
+  # only when the entry names a file; the argv is otherwise byte-identical to
+  # the password-form row above.
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    with' = splunk.mkServer {
+      url = "https://splunk-a.example.com:8089"; label = "tenant-a";
+      userFile = "/run/secrets/splunk-a/user"; passwordFile = "/run/secrets/splunk-a/password";
+      configFile = "/etc/holofote/bounds.yaml";
+    };
+    without = splunk.mkServer {
+      url = "https://splunk-a.example.com:8089"; label = "tenant-a";
+      userFile = "/run/secrets/splunk-a/user"; passwordFile = "/run/secrets/splunk-a/password";
+    };
+  in mkTest "mcp-kind-splunk-config-file-flag"
+    (with'.args == [
+        "--host" "https://splunk-a.example.com:8089" "--label" "tenant-a" "--tls" "system"
+        "--user-file" "/run/secrets/splunk-a/user" "--password-file" "/run/secrets/splunk-a/password"
+        "--config" "/etc/holofote/bounds.yaml"
+      ]
+      && !(builtins.elem "--config" without.args)
+      && (builtins.functionArgs splunk.mkServer) ? configFile)
+    "splunk configFile should render `--config <PATH>` last and only when given; null emits no flag at all")
+
   (let
     splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
     r = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; });
