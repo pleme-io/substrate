@@ -355,7 +355,10 @@ in rec {
   #   mkServer returns the kind's command/args/package/env/description. The
   #   fleet wires enable/scopes/envFiles. credEnvs lists the env vars that
   #   are file-backed credentials (dummy-managed by default; a fleet entry's
-  #   `creds` overrides). Org modules extend via `(mcpKinds pkgs) // {...}`.
+  #   `creds` overrides) — EMPTY for a kind that takes its credential as a
+  #   file PATH on argv and reads it itself (splunk/holofote), so the secret
+  #   never crosses the wrapper's env. Org modules extend via
+  #   `(mcpKinds pkgs) // {...}`.
   # Generic kinds only — org-specific kinds (e.g. akeyless-jit) live in the
   # org module per the "generic in substrate, org kinds extend" decision.
   mcpKinds = pkgs: let
@@ -380,18 +383,56 @@ in rec {
       };
       credEnvs = [ "DATADOG_API_KEY" "DATADOG_APP_KEY" ];
     };
-    # The npx-based kinds below resolve their server from a mutable per-user
-    # npm cache at startup — non-hermetic, and a corrupted cache kills the
-    # server at runtime (this broke datadog-akeyless before it was pinned).
-    # All are disabled by default; before enabling one, pin it like datadog:
-    # a derivation in ./pkgs/ + `package`/`command` instead of npx.
+    # splunk — holofote-mcp, the pleme-io-native observe-only Splunk MCP
+    # (rmcp, stdio). Replaces `npx -y @splunk/mcp-server`, which was never
+    # verified and 404s on npm (measured 2026-09-09) — that kind was dead on
+    # every host that enabled it, and nix could not tell.
+    #
+    # credEnvs is deliberately EMPTY, and that is the whole point of the
+    # shape. The wrapper `cat`s every envFiles entry into an env var; holofote
+    # instead takes the credential FILES on argv (--user-file/--password-file
+    # or --token-file), reads them itself AT CALL TIME (rotation-safe) and
+    # holds the bytes only in zeroize::Zeroizing — never argv, env, logs or
+    # answers. Same precedent as KUBECONFIG above: the secret is a PATH the
+    # server opens, not a value the wrapper exports. A fleet entry therefore
+    # needs no `creds` — with credEnvs = [] mkMcpFleet emits no envFiles,
+    # no dummy homeFile and no sopsSecret for it.
+    #
+    # `pkgs.holofote-mcp` is supplied by the CONSUMER's overlay (the holofote
+    # flake input applied fleet-wide, exactly as blackmatter-akeyless's
+    # breathe/ensaio kinds take pkgs.breathe-mcp / pkgs.ensaio-mcp) — no
+    # ./pkgs/ derivation here because the binary is ours, not vendored.
+    # `package` stays overridable for a pinned or locally-built holofote.
+    #
+    # `tls` is a typed per-host POSTURE, not a global toggle: Splunk's stock
+    # management cert on :8089 is self-signed, so one tenant wants `system`,
+    # a lab wants `accept-any`, a hardened tenant wants `ca:<PEM_PATH>`.
+    # holofote names the posture in every `blind` TLS answer, so a wrong one
+    # is diagnosable from the agent side.
+    #
+    # Both credential forms are eval-rejected here rather than left to the
+    # binary: clap would refuse a half pair or both forms together at server
+    # START, which the agent only ever sees as a dead MCP server.
     splunk = {
-      # UNVERIFIED package — disabled by default at call sites.
-      mkServer = { url }: {
-        command = "npx"; args = [ "-y" "@splunk/mcp-server" ];
-        env.SPLUNK_URL = url; description = "Splunk logs — ${url}";
-      };
-      credEnvs = [ "SPLUNK_TOKEN" ];
+      mkServer =
+        { url, label ? url, userFile ? null, passwordFile ? null, tokenFile ? null
+        , tls ? "system", package ? pkgs.holofote-mcp }:
+        assert (userFile == null) == (passwordFile == null)
+          || throw "mcpKinds.splunk (${url}): --user-file and --password-file must appear together (got userFile=${toString userFile}, passwordFile=${toString passwordFile}); session-key auth needs both";
+        assert (userFile != null) || tokenFile != null
+          || throw "mcpKinds.splunk (${url}): a splunk entry needs userFile+passwordFile (session-key auth) or tokenFile (Bearer auth); holofote-mcp would start but every tool would answer `blind`";
+        assert !(userFile != null && tokenFile != null)
+          || throw "mcpKinds.splunk (${url}): userFile+passwordFile and tokenFile are exclusive — --token-file conflicts with --user-file/--password-file; pick one credential form";
+        assert tls == "system" || tls == "accept-any" || hasPrefix "ca:" tls
+          || throw "mcpKinds.splunk (${url}): tls must be one of system | accept-any | ca:<PEM_PATH>, got `${tls}`";
+        {
+          inherit package; command = "holofote-mcp";
+          args = [ "--host" url "--label" label "--tls" tls ]
+            ++ optionals (userFile != null) [ "--user-file" userFile "--password-file" passwordFile ]
+            ++ optionals (tokenFile != null) [ "--token-file" tokenFile ];
+          description = "Splunk (holofote, observe-only) — ${label} ${url}";
+        };
+      credEnvs = [ ];
     };
     kubernetes = {
       serverPrefix = "k8s";
@@ -401,6 +442,12 @@ in rec {
       };
       credEnvs = [ "KUBECONFIG" ];
     };
+    # The npx-based kinds below resolve their server from a mutable per-user
+    # npm cache at startup — non-hermetic, and a corrupted cache kills the
+    # server at runtime (this broke datadog-akeyless before it was pinned).
+    # All are disabled by default; before enabling one, either pin it like
+    # datadog (a derivation in ./pkgs/ + `package`/`command` instead of npx)
+    # or replace it with a pleme-io-native binary like splunk → holofote.
     argocd = {
       mkServer = { server }: {                       # UNVERIFIED package
         command = "npx"; args = [ "-y" "argocd-mcp" ];
@@ -452,6 +499,9 @@ in rec {
   #   entries :: [ { kind; name; args ? {}; enable ? false; scopes ? [scope];
   #                  creds ? null; } ]
   #     creds == null            → auto dummy creds from the kind's credEnvs
+  #                                (a kind with credEnvs = [] — splunk — gets
+  #                                none: no envFiles, homeFile or sopsSecret;
+  #                                its credential paths ride in `args`)
   #     creds == [ {env; strategy?; secret?; externalPath?;} ] → explicit
   #   → { servers = {...}; homeFiles = {...}; sopsSecrets = {...}; }
   #   namePrefix : optional infix to keep server names unique across fleets

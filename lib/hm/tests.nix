@@ -695,4 +695,120 @@ in runTests [
     (parsed.mcpServers ? s1 && parsed.mcpServers ? extra)
     "mkMcpJson should merge filtered servers with extraServers")
 
+  # ════════════════════════════════════════════════════════════════════
+  # mcp-helpers.nix — mcpKinds.splunk (holofote-mcp)
+  # ════════════════════════════════════════════════════════════════════
+  # mcpKinds is lazy per kind: only splunk.mkServer is forced here, so a
+  # stub pkgs carrying just holofote-mcp is enough (grafana's pkgs.mcp-grafana
+  # etc. are never touched). The flag NAMES below are the holofote-mcp CLI
+  # contract — a test failing on them means the Nix side drifted from the
+  # binary, not that the test is stale.
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    s = splunk.mkServer {
+      url = "https://splunk-a.example.com:8089"; label = "tenant-a";
+      userFile = "/run/secrets/splunk-a/user"; passwordFile = "/run/secrets/splunk-a/password";
+    };
+  in mkTest "mcp-kind-splunk-password-form-args"
+    (s.command == "holofote-mcp"
+      && s.args == [
+        "--host" "https://splunk-a.example.com:8089" "--label" "tenant-a" "--tls" "system"
+        "--user-file" "/run/secrets/splunk-a/user" "--password-file" "/run/secrets/splunk-a/password"
+      ])
+    "splunk password form should render exactly --host --label --tls --user-file --password-file, tls defaulting to system")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    s = splunk.mkServer {
+      url = "https://splunk-b.example.com:8089"; label = "tenant-b";
+      tokenFile = "/run/secrets/splunk-b/token";
+    };
+  in mkTest "mcp-kind-splunk-token-form-args"
+    (s.args == [
+        "--host" "https://splunk-b.example.com:8089" "--label" "tenant-b" "--tls" "system"
+        "--token-file" "/run/secrets/splunk-b/token"
+      ]
+      && !(builtins.elem "--user-file" s.args) && !(builtins.elem "--password-file" s.args))
+    "splunk token form should render --token-file only, never the session-key pair")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    s = splunk.mkServer {
+      url = "https://splunk-c.example.com:8089"; tokenFile = "/t";
+      tls = "ca:/etc/ssl/splunk-c-ca.pem";
+    };
+  in mkTest "mcp-kind-splunk-tls-posture-and-label-default"
+    (builtins.elem "ca:/etc/ssl/splunk-c-ca.pem" s.args
+      && lib.sublist 2 2 s.args == [ "--label" "https://splunk-c.example.com:8089" ]
+      && s.description == "Splunk (holofote, observe-only) — https://splunk-c.example.com:8089 https://splunk-c.example.com:8089")
+    "splunk tls should pass a ca:<PEM> posture through verbatim and label should default to the url")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    s = splunk.mkServer { url = "https://s:8089"; tokenFile = "/t"; };
+    pinned = splunk.mkServer { url = "https://s:8089"; tokenFile = "/t"; package = "/nix/store/pinned-holofote"; };
+  in mkTest "mcp-kind-splunk-no-env-and-consumer-package"
+    (splunk.credEnvs == [ ]
+      && !(s ? env) && !(s ? envFiles)
+      && s.package == "/nix/store/stub-holofote-mcp"
+      && pinned.package == "/nix/store/pinned-holofote")
+    "splunk kind must declare no credEnvs and emit no env/envFiles (secret stays a path on argv); package defaults to the consumer's pkgs.holofote-mcp and stays overridable")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    r = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; });
+  in mkTest "mcp-kind-splunk-rejects-no-credentials"
+    (!r.success)
+    "splunk mkServer with neither userFile+passwordFile nor tokenFile must fail at eval, not start a server that answers blind")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    userOnly = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; userFile = "/u"; });
+    passOnly = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; passwordFile = "/p"; tokenFile = "/t"; });
+  in mkTest "mcp-kind-splunk-rejects-half-pair"
+    (!userOnly.success && !passOnly.success)
+    "splunk mkServer must reject userFile without passwordFile and vice versa, even when a tokenFile is also present")
+
+  (let
+    splunk = (mcpHelpers.mcpKinds { holofote-mcp = "/nix/store/stub-holofote-mcp"; }).splunk;
+    both = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; userFile = "/u"; passwordFile = "/p"; tokenFile = "/t"; });
+    badTls = builtins.tryEval (splunk.mkServer { url = "https://s:8089"; tokenFile = "/t"; tls = "insecure"; });
+  in mkTest "mcp-kind-splunk-rejects-both-forms-and-bad-tls"
+    (!both.success && !badTls.success)
+    "splunk mkServer must reject both credential forms together (clap conflict) and a tls posture outside system|accept-any|ca:<PEM>")
+
+  (let
+    fleet = mcpHelpers.mkMcpFleet { holofote-mcp = "/nix/store/stub-holofote-mcp"; } {
+      scope = "akeyless"; homeDir = "/home/op";
+      entries = [{
+        kind = "splunk"; name = "tenant-a"; enable = true; creds = [ ];
+        args = {
+          url = "https://splunk-a.example.com:8089"; label = "tenant-a";
+          userFile = "/run/secrets/splunk-a/user"; passwordFile = "/run/secrets/splunk-a/password";
+        };
+      }];
+    };
+    srv = fleet.servers."splunk-tenant-a";
+  in mkTest "mcp-fleet-splunk-entry-no-side-effects"
+    (fleet.servers ? "splunk-tenant-a"
+      && srv.enable && srv.scopes == [ "akeyless" ]
+      && srv.envFiles == { } && fleet.homeFiles == { } && fleet.sopsSecrets == { }
+      && srv.command == "holofote-mcp" && builtins.elem "--password-file" srv.args)
+    "mkMcpFleet with one splunk entry (creds = []) should name it splunk-<name>, follow enable, and produce zero envFiles/homeFiles/sopsSecrets")
+
+  (let
+    fleet = mcpHelpers.mkMcpFleet { holofote-mcp = "/nix/store/stub-holofote-mcp"; } {
+      scope = "akeyless"; homeDir = "/home/op";
+      entries = [{
+        kind = "splunk"; name = "tenant-b";
+        args = { url = "https://splunk-b.example.com:8089"; tokenFile = "/run/secrets/splunk-b/token"; };
+      }];
+    };
+    srv = fleet.servers."splunk-tenant-b";
+  in mkTest "mcp-fleet-splunk-auto-creds-are-empty"
+    (!srv.enable
+      && srv.envFiles == { } && fleet.homeFiles == { } && fleet.sopsSecrets == { })
+    "mkMcpFleet splunk entry with creds omitted must still emit no dummy cred (credEnvs = [] → autoCreds = []) and default enable=false")
+
 ]
