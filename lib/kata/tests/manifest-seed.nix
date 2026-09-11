@@ -103,19 +103,64 @@ in
   };
 
   # ── the manifest text reaches /etc, which is what makes it gitops ──────
-  # The store path of this file is the restartTrigger; a committed manifest
-  # edit changes it, which re-runs the seed on the node's next gitops
-  # rebuild. Without the trigger the manifest sits on disk unread — the
-  # exact defect measured on plo's engenho config on 2026-09-06.
   manifest-lands-in-etc = {
     expr = tmplCfg.environment.etc."kata-manifest-seed/pleme-org-posture/10-template.yaml".text;
     expected = "apiVersion: v1\nkind: ConfigMap\n";
   };
 
-  restart-trigger-is-the-manifest-path = {
-    expr = tmplUnit.restartTriggers;
-    expected = [ "/etc/kata-manifest-seed/pleme-org-posture/10-template.yaml" ];
-  };
+  # ── ★★ THE PROPERTY THAT MAKES THIS A LOOP, RED-RUN AGAINST ITSELF ─────
+  #
+  # A committed manifest edit must change the restartTrigger, or systemd does
+  # not restart the unit and the new manifest sits in /etc unread while the
+  # cluster keeps the old object. That is the whole contract.
+  #
+  # ★ A test named `restart-trigger-is-the-manifest-path` used to sit here and
+  # assert `expected = [ "/etc/kata-manifest-seed/…/10-template.yaml" ]` — i.e.
+  # it PINNED the defect in place, green, while the comment above it described
+  # the opposite intent. The path is byte-identical across every possible
+  # content change, so the trigger never moved.
+  #
+  # Measured on plo before the fix: `pleme-io-github-repos-seed` last ran
+  # 2026-09-10 08:12:07 while the generation that rewrote its manifest landed
+  # 2026-09-11 16:58:03. `spec.suspend` read `true` on disk and `false` on the
+  # live object for 32 hours, with the seed owning `f:suspend` and reporting
+  # `serverside-applied`, exit 0.
+  #
+  # This case is written as a DIFFERENTIAL rather than an equality against a
+  # literal hash, because an equality would pin whatever the implementation
+  # happens to emit — which is precisely how the old case survived.
+  restart-trigger-moves-with-the-content =
+    let
+      mk =
+        text:
+        (evalSeed (kata.mkManifestSeed {
+          name = "trig";
+          manifests."10-x" = text;
+        })).systemd.services."trig-seed".restartTriggers;
+      a = mk "kind: A\n";
+      b = mk "kind: B\n";
+    in
+    {
+      # same name, same key, same path — ONLY the content differs.
+      expr = a != b && builtins.length a == 1;
+      expected = true;
+    };
+
+  # And the negative half: identical content must NOT churn the unit, or every
+  # rebuild restarts every seed and wakes the reconcile loop for nothing.
+  restart-trigger-is-stable-when-content-is =
+    let
+      mk =
+        _:
+        (evalSeed (kata.mkManifestSeed {
+          name = "trig";
+          manifests."10-x" = "kind: A\n";
+        })).systemd.services."trig-seed".restartTriggers;
+    in
+    {
+      expr = mk 1 == mk 2;
+      expected = true;
+    };
 
   # ── server-side apply, and force-conflicts as the default ─────────────
   # Adopting an object something else applied first IS the transition; without

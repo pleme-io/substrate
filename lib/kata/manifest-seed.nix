@@ -181,12 +181,41 @@ let
         startLimitIntervalSec = spec.startLimitIntervalSec or 900;
         startLimitBurst = spec.startLimitBurst or 60;
 
-        # The store path of every manifest. This is what makes the loop
-        # gitops: a committed manifest edit changes its store path, which
-        # re-runs the unit on the rebuild the node's gitops loop performs.
-        # Without it a manifest change would sit on disk unread — the exact
-        # defect measured on this node's engenho config on 2026-09-06.
-        restartTriggers = map (k: manifestPath k) keys;
+        # ── ★★ THE TRIGGER IS THE CONTENT, NOT THE PATH ─────────────────────
+        #
+        # This is what makes the loop gitops: a committed manifest edit changes
+        # the trigger, which re-runs the unit on the rebuild the node's gitops
+        # loop performs. Without it a manifest change sits on disk unread.
+        #
+        # ★ CORRECTED 2026-09-11, and the bug was this exact line. It read
+        # `map (k: manifestPath k) keys` while the comment above it said "the
+        # store path of every manifest" — but `manifestPath` returns
+        # `/etc/kata-manifest-seed/<name>/<key>.yaml`, a STABLE string that is
+        # byte-identical across every possible content change. So
+        # `X-Restart-Triggers` never moved, systemd never restarted the unit,
+        # and the manifest updated in /etc while the cluster kept the old
+        # object — forever. The guard was decorative, and it failed in exactly
+        # the way its own comment predicted it would if absent.
+        #
+        # MEASURED on plo: `pleme-io-github-repos-seed` last ran
+        # 2026-09-10 08:12:07 while generation 1366 landed 2026-09-11 16:58:03
+        # and rewrote the manifest correctly. `spec.suspend` read `false` on the
+        # live object and `true` on disk, with the seed owning `f:suspend` in
+        # managedFields and reporting `serverside-applied`, exit 0. Every
+        # surface said success; nothing had been delivered for 32 hours.
+        #
+        # This is almost certainly why the roteador CRs drifted to names the
+        # chart stopped producing: deliveries silently stop happening, and a
+        # write-once mechanism is indistinguishable from a converging one until
+        # you compare timestamps.
+        #
+        # ★ Why a hash and not the text: `pkgs` is deliberately out of scope in
+        # this file (see the header), so `writeText` is unavailable, and putting
+        # the text itself in restartTriggers writes every manifest verbatim into
+        # the X-Restart-Triggers store entry — ~27 KB per router CR here. The
+        # hash is a pure function of the content, changes iff the content
+        # changes, and stays one line long.
+        restartTriggers = map (k: builtins.hashString "sha256" manifests.${k}) keys;
 
         extraConfig.environment.etc = lib.listToAttrs (
           map (
