@@ -199,6 +199,41 @@ let
           startLimitBurst
           ;
         optionDescription = "Seed the ${secretName} Kubernetes Secret in ${k8sNamespace} from SOPS-decrypted files (bootstrap tier).";
+        # ── ★★ KNOWN DEFECT, NOT YET FIXED: `pending-secret-seed-rotation-trigger`
+        #
+        # `sopsFile` is `sopsPath: "/run/secrets/${sopsPath}"` (:141) — a STABLE
+        # runtime path, byte-identical across every rotation of the secret it
+        # names. So `X-Restart-Triggers` never moves, systemd never restarts the
+        # unit, and **a rotated secret never reaches the cluster**: sops-nix
+        # rewrites /run/secrets/<path> at activation while the Kubernetes Secret
+        # keeps the old value, silently and indefinitely.
+        #
+        # This is the SAME defect measured and fixed in the sibling letter on
+        # 2026-09-11 (`kata/manifest-seed.nix`, where the trigger was likewise a
+        # stable /etc path and a seed had not delivered for 32 hours while
+        # reporting `serverside-applied`, exit 0). It is left unfixed here only
+        # because the session that found it was ending and secret seeding is not
+        # a thing to change without time to verify — NOT because it is benign.
+        #
+        # ★ Why the manifest fix does not transplant: there, the manifest TEXT is
+        # in nix, so the trigger became `builtins.hashString "sha256"` of the
+        # content. Here the value is ENCRYPTED and is not available at eval time,
+        # so there is nothing to hash. The fix is to trigger on the sops SOURCE
+        # file's store path instead — coarse (any edit to secrets.yaml re-runs
+        # every seed reading it) but correct, and coarse-and-correct beats
+        # precise-and-never.
+        #
+        # ★ THREE LIVE CONSUMERS, so this is not hypothetical:
+        #   nix/nodes/plo/github-org-posture-secret.nix   ← the GitHub App key
+        #   nix/nodes/rio/akeyless-dev-operator-secret.nix
+        #   nix/nodes/rio/discord-bot-secret.nix
+        # The first one carries the credential that `pangea-operator`'s GitHub
+        # provider authenticates with. Rotating that key today would leave the
+        # cluster on the old one with every surface reporting success.
+        #
+        # Detection recipe, until it is fixed: compare the unit's
+        # `InactiveExitTimestamp` against the activation time of the generation
+        # that changed the secret. If the unit is older, nothing was delivered.
         restartTriggers = map (k: sopsFile data.${k}.sopsPath) dataKeys;
         extraConfig.sops.secrets = sopsSecrets;
         errPrefix = "kata.secret-seed.mkSecretSeed: ";
