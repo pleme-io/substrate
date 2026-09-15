@@ -55,17 +55,13 @@
 }:
 
 let
-  tataraScript = tataraLisp.packages.${system}.tatara-script;
-  envExports = pkgs.lib.concatStringsSep "\n"
-    (pkgs.lib.mapAttrsToList (k: v: "export ${k}=${pkgs.lib.escapeShellArg v}") env);
-  pathPrefix = pkgs.lib.makeBinPath (extraPath ++ [ tataraScript ]);
-  wrapper = pkgs.writeShellApplication {
-    name = name;
-    text = ''
-      export PATH=${pathPrefix}:$PATH
-      ${envExports}
-      exec ${tataraScript}/bin/tatara-script ${src}/${path} "$@"
-    '';
+  # The runner is built by the package builder, so `nix run .#<name>` and an
+  # installed `bin/<name>` made from the same arguments are the SAME
+  # derivation. Refactor constraint: this must stay byte-identical to the
+  # wrapper previously inlined here — every existing app's store path is
+  # pinned by that, and a moved hash would silently rebuild the fleet's apps.
+  wrapper = import ./tatara-script-package.nix { inherit pkgs tataraLisp system; } {
+    inherit name src path extraPath env;
   };
 in {
   type = "app";
