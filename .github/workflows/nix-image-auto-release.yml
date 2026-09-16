@@ -758,3 +758,21 @@ jobs:
             cartorio-sbom.cdx.json
             cartorio-slsa.json
           if-no-files-found: warn
+
+# 2026-09-16: no-op touch to move this file's blob, deliberately.
+#
+# akeylesslabs/pitr-tools' image-release lane has returned startup_failure on
+# every run since 2026-08-25 while calling THIS path. A four-probe bisection
+# ruled out the content (a byte-identical LOCAL copy starts), the inputs (it
+# fails with none declared), secrets: inherit, and cross-org resolution (a
+# sibling reusable in this same repo resolves from the same caller on the same
+# branch). What remained was the resolution of this one path for that one
+# caller — the shape of a cached bad state on GitHub's side rather than
+# anything in these bytes.
+#
+# A startup failure exposes no message through the API (runs/<id>/jobs returns
+# zero jobs; the commit check-runs carry no output), so the cheapest remaining
+# probe was to change the blob this @main reference resolves to. If the caller
+# starts after this commit, the cache hypothesis is confirmed and this comment
+# is the record of why. If it does not, the hypothesis is refuted and the next
+# step is reading the annotation in the Actions UI.
