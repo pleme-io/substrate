@@ -761,7 +761,7 @@ jobs:
 
 # 2026-09-16: no-op touch to move this file's blob, deliberately.
 #
-# akeylesslabs/pitr-tools' image-release lane has returned startup_failure on
+# akeylesslabs/drill-tools' image-release lane (named pitr-tools at the time) has returned startup_failure on
 # every run since 2026-08-25 while calling THIS path. A four-probe bisection
 # ruled out the content (a byte-identical LOCAL copy starts), the inputs (it
 # fails with none declared), secrets: inherit, and cross-org resolution (a
