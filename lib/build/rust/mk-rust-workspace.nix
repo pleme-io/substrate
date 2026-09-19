@@ -43,6 +43,9 @@ let
   } // lib.optionalAttrs (specFile != null) { inherit specFile; });
 in {
   inherit (project) rootCrate workspaceMembers allWorkspaceMembers crates;
+  # `cargo test` over the workspace as a derivation — lockfile-builder's
+  # opt-in runner (./workspace-tests.nix). `runTests { } { }` for defaults.
+  inherit (project) runTests;
   /* Convenience: pull a specific member derivation by name. */
   binaryOf = memberName:
     (project.workspaceMembers.${memberName} or

@@ -300,6 +300,21 @@ jobs:
       - name: checks.rust-test-check (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-test-check'
 
+      # The lockfile path's opt-in `cargo test` runner (workspace-tests.nix).
+      # The e2e and negative-control steps BUILD a tiny fixture workspace
+      # (two members, one registry crate) with cargo in the sandbox — seconds,
+      # not minutes. The negative control is expected to FAIL inside and pass
+      # outside: it asserts cargo's exit 101 reached the builder and that the
+      # log names every property's test as run.
+      - name: checks.rust-workspace-tests (lib/build/rust — runner surface + opt-in pin)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-workspace-tests'
+
+      - name: checks.rust-workspace-tests-e2e (lib/build/rust — fixture tests run green)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-workspace-tests-e2e'
+
+      - name: checks.rust-workspace-tests-negative-control (lib/build/rust — the runner can fail)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-workspace-tests-negative-control'
+
       - name: checks.flake-checks-gate (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.flake-checks-gate'
 

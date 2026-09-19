@@ -213,8 +213,11 @@ in {
   # Typed test-gate declaration — see ./test-check.nix. Default ON;
   # `{ enable = false; reason = "…"; }` is the only way to turn it off and
   # a bare boolean is refused. NOTE the availability caveat below: on the
-  # DEFAULT `lockfile` build path substrate cannot run tests at all yet, so
-  # this declaration only bites for `buildMode = "cargo-nix"` consumers.
+  # DEFAULT `lockfile` build path buildRustCrate cannot compile a test
+  # target, so without more this declaration only bites for
+  # `buildMode = "cargo-nix"` consumers. `tests.cargo = { … }` OPTS IN to
+  # the cargo-vendored runner (./workspace-tests.nix), which emits
+  # `checks.tests` on the lockfile path too.
   tests ? {},
   testCrateFlags ? [],
   testInputs ? [],
@@ -565,6 +568,41 @@ let
   # `nix run .#<toolName>-<target>` works too.
   withMainProgram = drv:
     drv // { meta = (drv.meta or {}) // { mainProgram = toolName; }; };
+
+  # ── checks.tests via the cargo-vendored runner (opt-in) ──────────────
+  # (consumed by `checks` below)
+  #
+  # `tests.cargo = { … }` selects ./workspace-tests.nix on EITHER build
+  # path: `cargo test --frozen` over the Cargo.lock-vendored workspace, on
+  # the NATIVE system (hostPkgs), so the tests run where `nix flake check`
+  # runs. On the lockfile path it goes through lockfile-builder's
+  # `runTests`, which adds the native tools gen's quirks name; on
+  # cargo-nix there is no gen project, so the spec-free `mkWorkspaceTests`.
+  # Either way it also carries this consumer's `nativeBuildInputs` (names)
+  # and the darwin inputs the build itself links against.
+  #
+  # Not the default, deliberately: it compiles the whole graph a second
+  # time, uncached per crate, and ~280 consumers must not start paying for
+  # that without asking. And not a substitute for the buildRustCrate-native
+  # test leg: it proves the tests pass under cargo, never that the shipped
+  # artifact behaves (see workspace-tests.nix, "WHAT IT DOES NOT PROVE").
+  nativeLockfileBuilder = import ./lockfile-builder.nix { pkgs = hostPkgs; };
+  cargoTestInputs = {
+    extraNativeBuildInputs = builtins.map (name: hostPkgs.${name}) nativeBuildInputs;
+    extraBuildInputs = darwinHelpers.mkDarwinBuildInputs hostPkgs;
+  };
+  mkCargoTests = cargoDecl:
+    if effectiveMode == "lockfile"
+    then (nativeLockfileBuilder.mkProject {
+      inherit src gen;
+      name = toolName;
+      hostPkgs = hostPkgs;
+    }).runTests cargoDecl cargoTestInputs
+    else nativeLockfileBuilder.mkWorkspaceTests ({
+      inherit src;
+      name = toolName;
+      config = cargoDecl;
+    } // cargoTestInputs);
 in {
   packages = builtins.listToAttrs (
     builtins.map (targetName: {
@@ -716,12 +754,15 @@ in {
   #     `checks.tests` that ran nothing would be strictly worse than
   #     emitting none — a guard over an empty subject set reports the
   #     tier it does not have (UNREPRESENTABILITY §II.3, tier ⊥).
-  #     The load-bearing fix is UPSTREAM in gen-cargo (emit
-  #     `dev_dependencies` edges into the spec, per the ★★ GEN TYPED-SPEC
-  #     CONTRACT) plus a substrate-side test-runner derivation; a Nix-side
-  #     re-derivation of cargo's dev-dep feature resolution would be a
-  #     second, untested copy of the resolver.
+  #     The load-bearing fix for a buildRustCrate-native test leg is
+  #     UPSTREAM in gen-cargo (emit `dev_dependencies` edges into the spec,
+  #     per the ★★ GEN TYPED-SPEC CONTRACT); a Nix-side re-derivation of
+  #     cargo's dev-dep feature resolution would be a second, untested copy
+  #     of the resolver.
   #     Tracked: `pending-rust-test-check: lockfile-dev-deps`.
+  #     The substrate-side test-runner derivation that note always named
+  #     now exists and runs cargo itself — opt-in, see `mkCargoTests` in
+  #     the let block above.
   #     On `buildMode = "cargo-nix"` the generated Cargo.nix DOES carry
   #     devDependencies + crate2nix's `crateWithTest`, so `checks.tests`
   #     is emitted there and genuinely runs the crate's tests.
@@ -741,6 +782,7 @@ in {
       runTests = true;
       inherit testCrateFlags testInputs;
     };
+    inherit mkCargoTests;
     extra =
       if gen == null then {}
       else {

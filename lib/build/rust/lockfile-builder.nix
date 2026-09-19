@@ -342,6 +342,10 @@ let
   overrideCompose = import ./crate-override-compose.nix { inherit lib; };
   # I2 corollary — the host tree's resolve section (see `hostBuildSection`).
   hostTreeClosure = import ./host-tree-closure.nix { inherit lib; };
+  # The test RUNNER for this path — `cargo test --frozen` over the
+  # Cargo.lock-vendored workspace. See that file for why it runs cargo
+  # rather than a buildRustCrate test tree, and for what it does NOT prove.
+  workspaceTests = import ./workspace-tests.nix { inherit lib; };
   mkProject = {
     src,
     # Optional human-readable workspace identifier used in error
@@ -1334,7 +1338,26 @@ let
       name = c.name;
       value = { packageId = c.name; build = built.${key}; debug = built.${key}; };
     };
+
+    # Native build TOOLS gen's typed quirks name for this graph (protoc,
+    # cmake, …), folded through the SAME dispatcher the build uses — see
+    # `quirkToolNames` in ./workspace-tests.nix for why only those carry over.
+    # Resolved against `hostPkgs`: tools run on the build machine.
+    quirkNativeToolNames = workspaceTests.quirkToolNames quirkApply.applyQuirks spec.crates;
+
+    # `cargo test` over this workspace, as a derivation (./workspace-tests.nix).
+    # A FUNCTION, so it costs nothing until a consumer calls it — no existing
+    # consumer's evaluation changes. `cfg` is the `tests.cargo` declaration;
+    # `extra*` lets a builder add the consumer's own inputs.
+    runTests = cfg: { extraNativeBuildInputs ? [ ], extraBuildInputs ? [ ] }:
+      workspaceTests.mkWorkspaceTests hostPkgs {
+        inherit src name extraBuildInputs;
+        config = cfg;
+        extraNativeBuildInputs =
+          map (n: hostPkgs.${n}) quirkNativeToolNames ++ extraNativeBuildInputs;
+      };
   in {
+    inherit runTests;
     rootCrate = { packageId = spec.crates.${spec.root_crate}.name; build = built.${spec.root_crate}; debug = built.${spec.root_crate}; };
     workspaceMembers = builtins.listToAttrs (map memberRecord spec.workspace_members);
     crates = spec.crates;
@@ -1345,6 +1368,11 @@ let
   };
 in {
   inherit mkProject loadBuildSpec loadBuildSpecFrom defaultSpecFile;
+
+  # The spec-free form of `mkProject`'s `runTests`: the same runner, for a
+  # caller that has a workspace and a Cargo.lock but no gen project (or does
+  # not want the spec's quirk-derived tools). Bound to this file's `pkgs`.
+  mkWorkspaceTests = workspaceTests.mkWorkspaceTests pkgs;
 
   # EXPORTED FOR THE INV-4 GATE, and for nothing else today.
   #

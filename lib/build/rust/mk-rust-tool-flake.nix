@@ -42,6 +42,21 @@
   # counts that make routing on it a 132-repo IFD regression rather than a
   # one-line fix.
   shape ? "tool",
+  # The typed test-gate declaration (./test-check.nix), forwarded to the
+  # builder. `null` forwards NOTHING, so the builder's own default stays the
+  # single statement of what an undeclaring consumer gets. The opt-in that
+  # makes `checks.tests` exist on this (lockfile) path is
+  # `tests.cargo = { … }` — the cargo-vendored runner, ./workspace-tests.nix:
+  #
+  #   substrate.rust.workspace {
+  #     src = ./.;
+  #     member = "engenho";
+  #     tests.cargo.runs = [
+  #       { args = [ "--workspace" "--all-features" "--all-targets" ]; }
+  #       { args = [ "--workspace" "--all-features" "--doc" ]; }
+  #     ];
+  #   }
+  tests ? null,
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
@@ -341,4 +356,5 @@ in toolFlake (
   # identical in effect, but sending nothing keeps the builder's default the
   # single statement of "derive it" instead of two that must agree.
   // (if gui != null then { inherit gui; } else {})
+  // (if tests != null then { inherit tests; } else {})
 )

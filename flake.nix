@@ -206,6 +206,9 @@
         # Aggregate-before-assert eval-test derivations for the vocabulary.
         checks = eachSystem (system: let
           pkgs = import nixpkgs { inherit system; };
+          # Imported once: three checks below read three faces of one suite.
+          rustWorkspaceTests =
+            import ./lib/build/rust/tests/workspace-tests-test.nix { inherit pkgs; };
         in {
           iroha =
             (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck pkgs;
@@ -321,6 +324,43 @@
           # bare `enable = false` fails the two reason-required negatives.
           rust-test-check =
             (import ./lib/build/rust/tests/test-check-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
+          # ── The lockfile path's test RUNNER (opt-in `tests.cargo`) ─────
+          # `substrate.rust.<shape>` on the default lockfile path emitted
+          # `checks.build` and never `checks.tests`: buildRustCrate cannot
+          # compile a test target without gen's (absent) dev-dependency
+          # graph. workspace-tests.nix runs `cargo test --frozen` over the
+          # Cargo.lock-vendored workspace instead; lockfile-builder exposes it
+          # as `runTests`, and `tests.cargo = { … }` wires it to checks.tests.
+          #
+          #   rust-workspace-tests          surface + the regression pin that
+          #                                 an opted-in consumer gets
+          #                                 checks.tests and an undeclaring
+          #                                 one is unchanged (pure eval)
+          #   rust-workspace-tests-e2e      the fixture's tests RUN green:
+          #                                 dev-deps (path + registry), the
+          #                                 workspace [profile], a doctest
+          #   rust-workspace-tests-negative-control
+          #                                 the same fixture with its lever set
+          #                                 FAILS with cargo's exit status 101,
+          #                                 and its log names every property's
+          #                                 test as run — the anti-vacuity
+          #                                 evidence the green run cannot carry
+          #
+          # NOT VACUOUS: red-run 2026-09-19 on aarch64-darwin by restoring the
+          # pre-runner surface (test-check.nix `runner = mode;` — the runner
+          # chosen by build path alone, so a lockfile consumer's `tests.cargo`
+          # yields no checks.tests). rust-workspace-tests went 19/21, failing
+          # `opted-in-consumer-gets-checks-tests` and
+          # `opted-in-tests-come-from-lockfile-builder-runTests`;
+          # rust-test-check went 29/32, failing `lockfile-opt-in-emits-tests`,
+          # `cargo-opt-in-wins-on-cargo-nix-too` and
+          # `opt-in-without-runner-throws`. Restored byte-for-byte (cmp), green.
+          # The negative control is itself a standing red run: it fails the
+          # build unless cargo's exit 101 reaches the builder.
+          rust-workspace-tests = rustWorkspaceTests.asCheck pkgs;
+          rust-workspace-tests-e2e = rustWorkspaceTests.e2e;
+          rust-workspace-tests-negative-control = rustWorkspaceTests.negativeControl;
 
           # ── The "did the gate have anything to build?" gate ────────────
           # Policy consumed by `.github/workflows/cargo-ci.yml` via

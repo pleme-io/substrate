@@ -84,13 +84,18 @@
 # ── THE ROUTING DESTINATION, NAMED (Operating Principle #0) ─────────────
 #
 # The destination is that `shape` selects a verification surface per shape,
-# with `library` running the crate's tests. It is blocked behind exactly one
-# upstream item, not behind this file: gen-cargo emitting `dev_dependencies`
-# edges into `Cargo.build-spec.json` (★★ GEN TYPED-SPEC CONTRACT). Once the
-# lockfile path can compile a test target, `checks.tests` becomes available
-# on the path all 280 consumers already use, and `shape` can select surface
-# WITHOUT anybody moving to crate2nix. Fixing it by routing today would be
-# the path-of-least-resistance answer to the wrong question.
+# with `library` running the crate's tests. For a buildRustCrate-native test
+# leg it is blocked behind exactly one upstream item, not behind this file:
+# gen-cargo emitting `dev_dependencies` edges into `Cargo.build-spec.json`
+# (★★ GEN TYPED-SPEC CONTRACT). Fixing it by routing today would be the
+# path-of-least-resistance answer to the wrong question.
+#
+# UPDATE: `checks.tests` IS now reachable on the lockfile path without
+# crate2nix, by opt-in — `tests.cargo = { … }` selects the cargo-vendored
+# runner (./workspace-tests.nix: `cargo test --frozen` over the
+# Cargo.lock-vendored workspace). It is opt-in, not shape-selected, because
+# it compiles the graph a second time; making it a shape default is a
+# separate, priced decision.
 #
 # ── TIER, AND THE SUBJECT SET, MEASURED (do not round this up) ──────────
 #
@@ -179,8 +184,11 @@ rec {
       + "builder — see lib/build/rust/shape.nix) on the ${mode} build path; "
       + (if mode == "cargo-nix"
          then "`checks.tests` emitted."
-         else "`checks.tests` absent — the lockfile path carries no "
-              + "dev-dependency graph (pending-rust-test-check: "
-              + "lockfile-dev-deps). The real test leg for this consumer is "
-              + "the `cargo-test` job in substrate's cargo-ci.yml.");
+         else "`checks.tests` absent unless opted in — the lockfile path "
+              + "carries no dev-dependency graph for buildRustCrate "
+              + "(pending-rust-test-check: lockfile-dev-deps); "
+              + "`tests.cargo = { }` emits it via the cargo-vendored runner "
+              + "(lib/build/rust/workspace-tests.nix). Without the opt-in, "
+              + "the real test leg for this consumer is the `cargo-test` job "
+              + "in substrate's cargo-ci.yml.");
 }

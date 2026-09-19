@@ -1,0 +1,20 @@
+# Fixture for lib/build/rust/workspace-tests.nix — the lockfile path's
+# `cargo test` runner. Every piece of this workspace exists to make ONE
+# property observable; each is something the buildRustCrate path cannot do:
+#
+#   wt-devonly   a member reachable ONLY as a dev-dependency of wt-core. gen's
+#                spec has no dev edges, so the lockfile path never sees it.
+#   cfg-if       a REGISTRY dev-dependency — exercises the vendored-crate path
+#                (fetch by Cargo.lock checksum, source replacement, --frozen).
+#   [profile]    debug-assertions off in dev (so in test, which inherits it).
+#                `profile_is_honoured` fails unless cargo read THIS file.
+#   doctest      `answer`'s doc example; only rustdoc-via-cargo runs it.
+#
+# The negative control (the check can go red) is the same fixture with
+# WT_FIXTURE_MUST_FAIL set — see tests/workspace-tests-test.nix.
+[workspace]
+resolver = "2"
+members = ["wt-core", "wt-devonly"]
+
+[profile.dev]
+debug-assertions = false

@@ -255,6 +255,20 @@ Until it lands, the real-test leg for those consumers is the `cargo-test`
 job in `cargo-ci.yml` (`cargo test` inside the flake's devShell on the CI
 runner), which retires into `checks.tests` when the pending item closes.
 
+**Opt-in runner, available now (2026-09-19): `tests.cargo = { … }`.**
+`lib/build/rust/workspace-tests.nix` runs `cargo test --frozen` over a vendor
+dir built from the workspace's own `Cargo.lock` — cargo, the real resolver,
+so dev-deps, test-profile features, integration tests, doctests and the
+workspace `[profile.*]` behave as on a laptop. lockfile-builder exposes it as
+`mkProject { … }.runTests` (plus the spec-free `mkWorkspaceTests`), and any
+`substrate.rust.<shape>` emits it as `checks.tests` when the consumer writes
+`tests.cargo.runs = [ { args = [ "--workspace" … ]; } … ];`. **Opt-in only**:
+it compiles the whole graph again, uncached per crate, and a consumer that
+does not ask gets a byte-identical check set (pinned by
+`checks.rust-workspace-tests`). **Tier-honest:** it proves the tests pass under
+cargo; it proves nothing about the buildRustCrate artifact, so it narrows
+`pending-rust-test-check` rather than closing it.
+
 **That leg carries three repos — `engenho`, `forge`, `iac-forge` — against
 the 270 `flake.nix` files naming a `substrate.rust.*` builder** (290 counting
 direct `mkRustToolFlake`). `nix-devshell-cargo-test.yml`, which

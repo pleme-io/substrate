@@ -49,10 +49,21 @@
 #   but never runs them and still has no dev-dep externs to compile
 #   against). 12 of 13 surveyed consumers declare `[dev-dependencies]`, so
 #   "compile the test target with no dev-deps on the extern path" fails for
-#   essentially all of them. UNAVAILABLE — and the fix belongs UPSTREAM in
-#   gen-cargo (emit `dev_dependencies` edges into the spec, per the
-#   ★★ GEN TYPED-SPEC CONTRACT), not in a Nix-side re-derivation of cargo's
-#   resolver. Tracked as `pending-rust-test-check: lockfile-dev-deps`.
+#   essentially all of them. UNAVAILABLE through buildRustCrate — and that
+#   leg's fix belongs UPSTREAM in gen-cargo (emit `dev_dependencies` edges
+#   into the spec, per the ★★ GEN TYPED-SPEC CONTRACT), not in a Nix-side
+#   re-derivation of cargo's resolver. Tracked as
+#   `pending-rust-test-check: lockfile-dev-deps`.
+#
+# `cargo-vendored` runner (OPT-IN, any build path — `tests.cargo = { … }`):
+#   ./workspace-tests.nix runs CARGO itself, `--frozen`, over a vendor dir
+#   built from the workspace's Cargo.lock. It needs no dev-dependency graph
+#   from gen because it does not re-derive one: cargo resolves dev-deps,
+#   test-profile features, integration tests and doctests exactly as it does
+#   on a laptop, and reads the workspace's `[profile.*]`. AVAILABLE — but
+#   only on request, because it compiles the whole graph once more,
+#   uncached per crate. It proves the TESTS pass under cargo; it proves
+#   nothing about the buildRustCrate artifact (see that file's header).
 #
 # ── OPT-OUT IS TYPED, NEVER A BARE BOOLEAN ─────────────────────────────
 #
@@ -62,13 +73,17 @@
 { lib }:
 
 let
-  knownFields = [ "enable" "reason" ];
+  # `cargo` — `null` (the default: no runner requested) or the
+  # `tests.cargo` declaration workspace-tests.nix validates. Presence is the
+  # opt-in; its contents are that file's business, not this one's.
+  knownFields = [ "enable" "reason" "cargo" ];
 in
 rec {
   # The default: tests are ON wherever substrate can run them.
   defaultDecl = {
     enable = true;
     reason = null;
+    cargo = null;
   };
 
   # Validate + fill a consumer's `tests = { … }` declaration.
@@ -90,6 +105,12 @@ rec {
         ${builtins.typeOf merged.enable}. A stringly-typed flag is how a
         gate silently stops gating.
       ''
+      else if !(merged.cargo == null || builtins.isAttrs merged.cargo)
+      then throw ''
+        substrate/rust: ${who} — `tests.cargo` must be an attrset (the
+        cargo-vendored runner's declaration, `{ }` for its defaults) or
+        absent, got ${builtins.typeOf merged.cargo}.
+      ''
       else if !merged.enable && (merged.reason == null || merged.reason == "")
       then throw ''
         substrate/rust: ${who} — `tests.enable = false` requires a typed
@@ -108,11 +129,15 @@ rec {
   # Can substrate genuinely RUN this crate's tests on the given build path?
   # Returns a typed record; never a bare bool, so the reason travels with
   # the verdict to whatever surfaces it.
+  #
+  # Modes: "cargo-nix" and "lockfile" are BUILD paths; "cargo-vendored" is
+  # the opt-in runner (./workspace-tests.nix), which `runnerMode` selects
+  # whenever a declaration carries `cargo`, whatever the build path.
   availability = mode:
-    if mode == "cargo-nix"
+    if mode == "cargo-nix" || mode == "cargo-vendored"
     then {
       ok = true;
-      mode = "cargo-nix";
+      inherit mode;
       reason = null;
     }
     else {
@@ -122,10 +147,15 @@ rec {
         "the gen lockfile build path carries no dev-dependency graph "
         + "(Cargo.build-spec.json has runtime_dependencies + "
         + "build_dependencies only, and spec-invariants.nix rejects a "
-        + "dev-dep appearing in either), so a test target cannot be "
-        + "compiled; the fix is gen-cargo emitting dev_dependencies edges "
-        + "— pending-rust-test-check: lockfile-dev-deps";
+        + "dev-dep appearing in either), so buildRustCrate cannot compile "
+        + "a test target; the fix for that leg is gen-cargo emitting "
+        + "dev_dependencies edges — pending-rust-test-check: "
+        + "lockfile-dev-deps. To run the tests today, opt in to the "
+        + "cargo-vendored runner: `tests.cargo = { };`";
     };
+
+  # Which runner a (normalized) declaration selects on a given build path.
+  runnerMode = d: mode: if d.cargo != null then "cargo-vendored" else mode;
 
   # Assemble the `checks` attrset a builder returns.
   #
@@ -137,6 +167,11 @@ rec {
   #                forced ONLY when it will actually be emitted, so the
   #                unavailable path never evaluates a `.override` that
   #                would throw.
+  #   mkCargoTests — `cargoDecl -> derivation` for the cargo-vendored
+  #                runner, forced ONLY when the declaration carries
+  #                `cargo`. `null` means the builder does not offer the
+  #                runner, and a declaration asking for it THROWS rather
+  #                than silently falling back to no tests.
   #   extra      — builder-specific checks merged in (e.g. gen-confirm)
   surface = {
     who,
@@ -144,14 +179,26 @@ rec {
     mode,
     buildDrv,
     mkTests,
+    mkCargoTests ? null,
     extra ? { },
   }:
     let
       d = normalize who decl;
-      avail = availability mode;
+      runner = runnerMode d mode;
+      avail = availability runner;
+      testsDrv =
+        if runner != "cargo-vendored" then mkTests { }
+        else if mkCargoTests == null
+        then throw ''
+          substrate/rust: ${who} — `tests.cargo` asks for the cargo-vendored
+          runner, but this builder does not offer it. Refusing rather than
+          emitting no `checks.tests`: an opt-in that silently does nothing is
+          the green-over-nothing this surface exists to prevent.
+        ''
+        else mkCargoTests d.cargo;
     in
       { build = buildDrv; }
-      // (if d.enable && avail.ok then { tests = mkTests { }; } else { })
+      // (if d.enable && avail.ok then { tests = testsDrv; } else { })
       // extra;
 
   # Human-readable statement of what a given (decl, mode) pair yields.
@@ -161,11 +208,13 @@ rec {
   explain = { who, decl ? { }, mode }:
     let
       d = normalize who decl;
-      avail = availability mode;
+      avail = availability (runnerMode d mode);
     in
       if !d.enable
       then "${who}: no `tests` check — opted out: ${d.reason}"
       else if !avail.ok
       then "${who}: no `tests` check — unavailable on the ${avail.mode} build path: ${avail.reason}"
+      else if avail.mode == "cargo-vendored"
+      then "${who}: `tests` check emitted (cargo-vendored runner: `cargo test --frozen` over the Cargo.lock-vendored workspace)"
       else "${who}: `tests` check emitted (${avail.mode} build path)";
 }
