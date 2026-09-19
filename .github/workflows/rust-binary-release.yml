@@ -106,6 +106,16 @@ on:
         type: string
         required: true
         description: "Name of the Cargo binary (used for `target/<triple>/release/<binary-name>`)"
+      package:
+        type: string
+        default: ""
+        description: >-
+          Cargo package that owns the binary, passed to rust-cross-build as `-p`.
+          Empty (the default) builds with `--bin` alone, as before. Set it in a
+          workspace: `--bin` limits which binaries are built, but cargo still
+          unifies features across every member, so a dependency only one member
+          enables (openssl-sys via native-tls, in engenho) reaches every leg.
+          `-p` resolves features for that package alone.
       features:
         type: string
         default: ""
@@ -336,6 +346,7 @@ jobs:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         with:
           binary-name:         ${{ inputs.binary-name }}
+          package:             ${{ inputs.package }}
           target:              ${{ matrix.target }}
           suffix:              ${{ matrix.suffix }}
           # ── PER-LEG override, falling back to the workflow-level input ──
