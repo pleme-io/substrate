@@ -197,14 +197,23 @@ jobs:
     # duration. git-push-with-token rebases onto such a push and re-points the
     # tag, so the tag can then cover a commit this run did not test. That
     # window existed before; it is longer now.
-    needs: test
+    # `waiver` is in `needs` so that its FAILURE blocks the tag. It runs on
+    # every invocation and errors only for `require-tests: false` with an empty
+    # `require-tests-waiver`. Before this, `bump` depended on `test` alone, so
+    # that error was a red job beside a tag that had already been pushed — the
+    # typed-reason rule was advisory in exactly the case it exists for.
+    needs: [test, waiver]
     if: >-
       !cancelled()
       && github.actor != 'github-actions[bot]'
       && github.event_name != 'schedule'
       && (
         needs.test.result == 'success'
-        || (inputs.require-tests == false && needs.test.result == 'skipped')
+        || (
+          inputs.require-tests == false
+          && needs.test.result == 'skipped'
+          && needs.waiver.result == 'success'
+        )
       )
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
