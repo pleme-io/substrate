@@ -360,9 +360,22 @@ jobs:
         #
         # This does NOT excuse the dead credential -- rotate BOT_PAT. It stops
         # one expired secret from taking out the public path fleet-wide.
-        uses: DeterminateSystems/nix-installer-action@main
+        #
+        # One step now, not two: nix-setup installs Nix AND realises
+        # substrate's pinned cargo-nextest, so this workflow stops carrying a
+        # second copy of the install-then-fetch shape. It passes the token the
+        # same way, for the reason above.
+        #
+        # pending-expired-token-fallback: `||` is FALSY-only, so it covers an
+        # ABSENT BOT_PAT and not an expired-but-present one — the exact shape
+        # that bit sui. nix-setup's own `inputs.github-token || github.token`
+        # has the same gap. Closing it needs a liveness probe on the token
+        # before it reaches nix.conf, in nix-setup, not here.
+        uses: pleme-io/actions/nix-setup@main
+        id: nix
         with:
           github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          nextest: "true"
 
       # Same private-git-dep credential fix as nix-devshell-cargo-test.yml:
       # nix-installer's github-token covers NIX's fetcher only, never CARGO's
@@ -408,16 +421,12 @@ jobs:
              devShells = (builtins.getFlake (toString ./.)).devShells or {};
            }' >> "$GITHUB_OUTPUT"
 
-      # nextest comes from substrate's pin as an absolute store path, NOT
-      # from the consumer's devShell — 20 of 52 consumers pin substrate at
-      # 2026-06-07, so anything added to their shell reaches them only after
-      # they re-lock, and a consumer can replace `extraPackages` outright.
-      - name: Fetch the anti-vacuity runner
-        id: nextest
-        run: |
-          out=$(nix build --no-link --print-out-paths github:pleme-io/substrate#cargo-nextest)
-          echo "bin=$out/bin/cargo-nextest" >> "$GITHUB_OUTPUT"
-
+      # nextest is nix-setup's `nextest-bin`: substrate's pin, as an ABSOLUTE
+      # store path, never the consumer's devShell. 20 of 52 consumers pin
+      # substrate at 2026-06-07, so anything added to their shell reaches them
+      # only after they re-lock, and a consumer can replace `extraPackages`
+      # outright. Invoking by absolute path is what makes that unshadowable.
+      #
       # `--no-tests=fail` IS the anti-vacuity assertion, and it is a flag on
       # an existing tool rather than a gate of our own. `cargo test` exits 0
       # when it runs zero tests — measured on three shapes (no tests at all,
@@ -431,7 +440,7 @@ jobs:
         run: |
           echo "::notice::test gate tier=${{ steps.env.outputs.tier }} shell=${{ steps.env.outputs.installable }} granularity=${{ inputs.test-granularity }}"
           nix develop "${{ steps.env.outputs.installable }}" -c \
-            "${{ steps.nextest.outputs.bin }}" nextest run --no-tests=fail ${{ inputs.test-args }}
+            "${{ steps.nix.outputs.nextest-bin }}" nextest run --no-tests=fail ${{ inputs.test-args }}
 
   ship:
     name: Ship workspace to registry
