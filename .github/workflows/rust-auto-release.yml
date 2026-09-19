@@ -184,17 +184,8 @@ jobs:
     #
     # `!cancelled()` is load-bearing on its own: an operator cancel that lands
     # after `test` passed but before this job starts must not tag. `always()`
-    # would tag in that window, which is why this is not `always()` alone.
+    # would tag in that window, which is why this is not `always()`.
     #
-    # `always() && !cancelled()` evaluates exactly as `!cancelled()` does —
-    # both are status functions, `always()` is constant true — so the leading
-    # `always()` changes nothing GitHub computes. It is there for
-    # pleme-io/actions/job-selection-lint, which lifts needs-propagation only
-    # for a condition containing `always()` (GitHub lifts it for ANY status
-    # function). Without it the linter models this job as skipped whenever
-    # `test` is, and the waived row of rust-auto-release.cases.tsv could not
-    # be asserted at all.
-    # pending-job-selection-lint: lift needs-propagation for every status function, then drop the leading always()
     #
     # The two guards that were here before are unchanged: skip when the bot
     # itself pushed (avoids tag-push → bump → tag-push loops) and on the
@@ -208,8 +199,7 @@ jobs:
     # window existed before; it is longer now.
     needs: test
     if: >-
-      always()
-      && !cancelled()
+      !cancelled()
       && github.actor != 'github-actions[bot]'
       && github.event_name != 'schedule'
       && (
