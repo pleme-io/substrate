@@ -738,3 +738,45 @@
   :outputs   ()
   :secrets   ()
   :consumers 0)
+
+; ── Added 2026-09-19: four reusables that shipped without a row ─────────────
+; `catalog/check.tlisp` had been red on main naming all four. :consumers is a
+; MEASURED count over locally-cloned repos on that date, per the file header —
+; a zero means "no local caller found", never proof of death.
+
+(defworkflow ghcr-retention
+  :file      "ghcr-retention.yml"
+  :pattern   other
+  :inputs    (packages min-versions-to-keep ignore-versions apply)
+  :outputs   ()
+  :secrets   (BOT_PAT)
+  :consumers 1)
+
+(defworkflow helm-unittest
+  :file      "helm-unittest.yml"
+  :pattern   helm-chart
+  :inputs    (chartsDir chartsWithTestsFloor lintFailureCeiling externalTestsDir fixtureChartsDir fixtureChartsFloor runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 5)
+
+(defworkflow hardened-image-pipeline
+  :file      "hardened-image-pipeline.yml"
+  :pattern   container-image
+  :inputs    (spec promote-repo promote-ref promote-path promote-env-label fail-on-severity)
+  :outputs   ()
+  :secrets   ()
+  :consumers 1)
+
+; An EXPERIMENT, not a sibling to reach for: same inputs as
+; nix-image-auto-release, but it declares NO secrets, so a caller that relies on
+; BOT_PAT / GHCR_TOKEN / ECR_TOKEN being declared gets a different contract
+; rather than a faster one. It also shipped carrying its sibling's `name:`,
+; corrected in this commit.
+(defworkflow nix-image-auto-release-slim
+  :file      "nix-image-auto-release-slim.yml"
+  :pattern   nix
+  :inputs    (release-app registry-host runner working-directory scan-before-push image-attr scan-image-ref scan-fail-on-severity scan-ignore-unfixed scan-ignore-file scan-vex-file boot-check-cmd boot-check-image-ref boot-check-env boot-check-still-running boot-check-expect-log vulnix-scan vulnix-scan-app vulnix-scan-advisory-only grype-scan grype-scan-app grype-scan-advisory-only extraSubstituters extraTrustedPublicKeys requireSigs superCacheSaveEndpoint sbom-attest sbom-attest-app cosign-sign cosign-sign-app cartorio-attest cartorio-subject cartorio-closure-info-attr)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)

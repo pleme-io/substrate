@@ -1,5 +1,21 @@
-
-name: nix-image-auto-release
+name: nix-image-auto-release-slim
+#
+# An EXPERIMENT: nix-image-auto-release with the heavy legs removed, to measure
+# what the scan / attest / sign steps actually cost a caller in wall-clock.
+#
+# ── STATUS: no consumer, and NOT a drop-in replacement ──────────────────────
+#
+# Measured 2026-09-19: 0 callers across the locally-cloned fleet, against 40
+# for nix-image-auto-release. It takes the same inputs as its sibling but
+# declares NO `secrets:` block, so a caller relying on BOT_PAT / GHCR_TOKEN /
+# ECR_TOKEN being declared gets a different contract, not a faster one.
+#
+# ── WHY IT IS NAMED SEPARATELY ──────────────────────────────────────────────
+#
+# It shipped carrying `name: nix-image-auto-release` — its sibling's name. Two
+# reusable workflows under one name are indistinguishable in the Actions UI and
+# in any log that prints the workflow name, which is how an experiment gets
+# mistaken for the thing it is an experiment about.
 
 on:
   workflow_call:
