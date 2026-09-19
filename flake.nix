@@ -957,6 +957,17 @@
           # FLAG ON AN EXISTING TOOL, not a gate of our own invention.
           # Already in substrate's nixpkgs pin (0.9.136) — no new flake input.
           cargo-nextest = (import nixpkgs { inherit system; }).cargo-nextest;
+
+          # cargo-mutants, exposed for the same reason and from the SAME pin.
+          #
+          # A mutation gate that takes its runner from one pin and its mutator
+          # from another is measuring two toolchains. engenho's gate had
+          # exactly that: nextest resolved through substrate (the line above)
+          # while cargo-mutants came from the consumer's own nixpkgs via
+          # `--inputs-from .`. Naming both here makes the pair move together,
+          # and a consumer points at `github:pleme-io/substrate#cargo-mutants`
+          # instead of carrying a second resolution path.
+          cargo-mutants = (import nixpkgs { inherit system; }).cargo-mutants;
           # oci-push (→ doca): typed OCI manager. `nix run …#oci-push -- push …`
           # replaces inline skopeo bash in the image-push pipeline.
           # fenix threaded through 2026-07-22 -- see lib/build/oci-push.nix's
