@@ -33,8 +33,25 @@
 # matches the target — an off-target build mislabels the arch and `exec format
 # error`s at runtime. Use `additionalTags: <arch>-latest` ONLY as a human-facing
 # moving pointer; the DEPLOY target is always the exact `r<n>` tag, which a
-# cluster's committed `# {"$imagepolicy"}` marker pins. The `tag` default below
-# is `latest` for back-compat only — autobump-native repos MUST override it.
+# cluster's committed `# {"$imagepolicy"}` marker pins.
+#
+# ── `tag` IS REQUIRED (2026-09-19) ──────────────────────────────────────────
+# It used to default to `latest` "for back-compat only — autobump-native repos
+# MUST override it", which is a rule written in a comment: a caller that forgot
+# the input published a moving `:latest` and nothing said so, against ★ AUTOBUMP
+# (":latest is never a deploy source"). It is now `required: true`, so omitting
+# it is refused when the workflow is called rather than silently producing the
+# one tag the fleet must not deploy from.
+#
+# Census before the change, over locally-cloned repos: 41 call sites in 25
+# files, and ALL 41 already pass `tag`. The default was load-bearing for
+# nobody — it was only waiting to catch someone.
+#
+# `additionalTags` still defaults to `latest`, and that is NOT an oversight
+# here: 12 of the 41 call sites (actions 6, escuta 2, flows, saber, sarar,
+# substrate) omit it and would stop publishing a `:latest` pointer the day the
+# default changed. Removing a tag other repositories may pull is a separate,
+# caller-visible decision.
 #
 # ── scanBeforePush: the CVE gate belongs BEFORE the push, not after ───────
 # Found live 2026-07-19 (pangea-operator, tag embedded-amd64-r174): this
@@ -88,9 +105,9 @@ on:
         type: string
         default: "dockerImage"
       tag:
-        description: "Image tag to push"
+        description: "Image tag to push. REQUIRED — there is deliberately no default."
         type: string
-        default: "latest"
+        required: true
       autobumpArch:
         description: >
           When set (e.g. "embedded-amd64"), DERIVE the autobump tag instead of
