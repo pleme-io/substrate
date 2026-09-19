@@ -1,0 +1,61 @@
+name: tlisp-tests
+
+# Run every *.test.tlisp in this repository.
+#
+# ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+#
+# substrate had `.test.tlisp` files and no job that ran them. Measured
+# 2026-09-19: one file, lib/measure/aferir.test.tlisp, 11 assertions, green —
+# and green only because someone ran it by hand. A suite nothing executes is
+# indistinguishable from a suite that passes, and it reads as coverage in
+# exactly the places a reviewer looks for coverage.
+#
+# pleme-io/actions learned this the expensive way and wrote it down: its own
+# tlisp-tests job carried `continue-on-error: true` with nothing `needs:`-ing
+# it, so a failing test failed nothing. When it was armed, THREE files were red
+# and had been for some time — two of them at 0/N, meaning "nothing ran" and
+# "everything failed" produced the same green.
+#
+# ── THE FLOOR, AND WHY IT IS NOT DECORATION ─────────────────────────────────
+#
+# `min-files` fails the job when discovery finds fewer files than stated.
+# Without it, a glob that matches nothing logs "all 0 file(s) passed" and exits
+# 0 — the zero-denominator green this repo's own cargo-profiles and no-c-tls
+# checks are careful about elsewhere.
+#
+# It is 1 because there is 1 (2026-09-19). There is no slack to give at this
+# size: one file with a floor of one means deleting the only suite is red,
+# which is the property wanted.
+#
+# ★ RE-MEASURE THE FLOOR WHENEVER A SUITE LANDS. In pleme-io/actions the same
+# floor drifted below reality three times — 30 vs 44, 42 vs 58, 56 vs 62 — each
+# time leaving room for a large collapse in discovery to pass the check that
+# exists to catch exactly that. The lesson is the drift, not the number.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.tlisp"
+      - ".github/workflows/tlisp-tests.yml"
+  pull_request:
+    paths:
+      - "**/*.tlisp"
+      - ".github/workflows/tlisp-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  tlisp-tests:
+    name: every *.test.tlisp runs, and there is at least one
+    # Same caller-visibility runner routing as catalog-check.yml: a bare
+    # metered label charges every private consumer, which is what exhausted
+    # the org's Actions spending limit on 2026-08-08.
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      # Discovers each <base>.test.tlisp, runs its (deftest …) forms against
+      # the real <base>.tlisp with TLISP_TEST=1 (so the unit defines its
+      # functions and skips its main), and fails on any failing assertion.
+      - uses: pleme-io/actions/tlisp-test@main
+        with:
+          min-files: "1"
