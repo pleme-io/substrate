@@ -161,9 +161,61 @@ jobs:
   bump:
     name: Bump workspace + tag
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
-    # Skip when the bot itself pushed (avoids tag-push → bump → tag-push loops)
-    # and on the scheduled drip tick (a capacity-ride must never bump/tag).
-    if: github.actor != 'github-actions[bot]' && github.event_name != 'schedule'
+    # ── The TAG waits for the test gate ───────────────────────────────────
+    # The tag this job pushes is itself a release: tag-triggered workflows
+    # (binary builds, GitHub Releases marked Latest) fire on it, and a private
+    # repo ships nothing else, because `ship` and `drip` both skip on
+    # `github.event.repository.private`. Until 2026-09-19 this job had no
+    # `needs:` and ran in PARALLEL with `test`, so only the crates.io publish
+    # waited for the gate. Receipt, engenho auto-release run 35396380114
+    # (2026-09-18 UTC): its bump tagged v0.53.117 at 21:27:13 and had pushed
+    # it by 21:27:21, when the tag-triggered `release` run started; its own
+    # Test gate went red at 21:33:33; the tag's GitHub Release was published
+    # at 21:33:49 regardless.
+    #
+    # The condition is written out because a plain `needs: test` is WRONG
+    # here: under GitHub's implicit `success()` a SKIPPED dependency skips the
+    # dependent, and `test` skips whenever a repo waives tests
+    # (`require-tests: false`). That would stop every waiving repo from ever
+    # tagging again. Naming a status function removes the implicit
+    # `success()`, and the explicit clause then admits exactly two states:
+    # the gate passed, or it was waived and therefore skipped. A failed or
+    # cancelled gate matches neither.
+    #
+    # `!cancelled()` is load-bearing on its own: an operator cancel that lands
+    # after `test` passed but before this job starts must not tag. `always()`
+    # would tag in that window, which is why this is not `always()` alone.
+    #
+    # `always() && !cancelled()` evaluates exactly as `!cancelled()` does —
+    # both are status functions, `always()` is constant true — so the leading
+    # `always()` changes nothing GitHub computes. It is there for
+    # pleme-io/actions/job-selection-lint, which lifts needs-propagation only
+    # for a condition containing `always()` (GitHub lifts it for ANY status
+    # function). Without it the linter models this job as skipped whenever
+    # `test` is, and the waived row of rust-auto-release.cases.tsv could not
+    # be asserted at all.
+    # pending-job-selection-lint: lift needs-propagation for every status function, then drop the leading always()
+    #
+    # The two guards that were here before are unchanged: skip when the bot
+    # itself pushed (avoids tag-push → bump → tag-push loops) and on the
+    # scheduled drip tick (a capacity-ride must never bump/tag).
+    #
+    # Cost, stated rather than hidden: the release now takes test + bump
+    # wall-clock instead of max(test, bump), and the window in which a human
+    # push can land on main before this job's push widens by the test's
+    # duration. git-push-with-token rebases onto such a push and re-points the
+    # tag, so the tag can then cover a commit this run did not test. That
+    # window existed before; it is longer now.
+    needs: test
+    if: >-
+      always()
+      && !cancelled()
+      && github.actor != 'github-actions[bot]'
+      && github.event_name != 'schedule'
+      && (
+        needs.test.result == 'success'
+        || (inputs.require-tests == false && needs.test.result == 'skipped')
+      )
     outputs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
@@ -263,7 +315,8 @@ jobs:
     # is itself skipped, so `needs: bump` here would skip the gate on every
     # schedule tick — and `drip`'s scheduled arm would then be blocked by a
     # SKIP, regressing the exact never-published hole drip exists to close.
-    # Running in parallel with bump also halves wall-clock.
+    # The dependency runs the other way instead: `bump` needs THIS job, so no
+    # tag is cut until the gate has passed (or was waived). See bump's header.
     #
     # Consequence to state rather than hide: this verifies the PRE-bump tree,
     # while `ship` re-checkouts main and publishes the POST-bump tree. Only

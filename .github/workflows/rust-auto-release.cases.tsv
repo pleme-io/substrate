@@ -17,56 +17,66 @@
 # EVERY context path any condition touches is declared in EVERY row, by design:
 # an undeclared path is an ERROR in this linter rather than an empty default,
 # because a silently-defaulted path turns an incomplete case into a confident
-# verdict. The eight paths this workflow reads are github.actor,
+# verdict. The nine paths this workflow reads are github.actor,
 # github.event_name, github.event.repository.private, inputs.require-tests,
-# needs.bump.outputs.bumped, needs.bump.result, needs.test.result, and always().
+# needs.bump.outputs.bumped, needs.bump.result, needs.test.result, always(),
+# and cancelled() (read by bump since it began waiting for test, 2026-09-19).
 #
 # An EMPTY value (`needs.bump.outputs.bumped=`) models a SKIPPED upstream job,
 # which is a distinct state from 'false' — rows 4 and 5 depend on that
 # distinction, since a skipped bump publishes nothing by either path.
 #
+# The needs.bump.* values in a row are the ones the job graph can actually
+# produce for that row: this linter reads them from the context rather than
+# deriving them from its own selection, so a row that skips bump while
+# declaring `needs.bump.result=success` would be describing a run that cannot
+# happen.
+#
 # `waiver` HAS NO JOB-LEVEL `if:` — it selects unconditionally, deliberately, so
 # that `require-tests: false` costs a visible job rather than passing silently.
 # Its gate is a STEP-level `if:`, which this linter does not model. So `waiver`
 # in expect-run asserts only that the job is reached; it does NOT assert that
-# the typed-reason check inside it fires. Do not read row 7 as coverage of that.
+# the typed-reason check inside it fires. Do not read the two gate-off rows
+# (gate-off-ship-waiver-arm-is-unreachable, private-gate-waived-still-tags) as
+# coverage of that.
 
 # ── The two happy paths: exactly one publisher fires, never both, never neither.
-public-bump-ships	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=success;always()=true	bump,waiver,test,ship	drip
+public-bump-ships	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=success;always()=true;cancelled()=false	bump,waiver,test,ship	drip
 
 # No source change since the last tag ⇒ no bump ⇒ ship is skipped and NOTHING
 # would assert anything about the registry. drip is the complement that closes
 # that green-by-omission hole (workflow comment, 2026-07-30).
-public-no-bump-drips	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=false;needs.bump.result=success;needs.test.result=success;always()=true	bump,waiver,test,drip	ship
+public-no-bump-drips	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=false;needs.bump.result=success;needs.test.result=success;always()=true;cancelled()=false	bump,waiver,test,drip	ship
 
 # ── THE ONE THAT WAS SILENT. A private repo publishes by NEITHER path, on
 # purpose. bump+tag still run: private repos get versioned, just not published.
-private-bump-publishes-nothing	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=true;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=success;always()=true	bump,waiver,test	ship,drip
+private-bump-publishes-nothing	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=true;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=success;always()=true;cancelled()=false	bump,waiver,test	ship,drip
 
 # The bot must not re-trigger itself, so bump is skipped. Unlike the cargo
 # sibling, drip does NOT pick this run up: its third arm requires
 # needs.bump.result == 'success', and a skipped bump is not a success. A
 # bot-actor push therefore publishes nothing here — asserted, not assumed.
-bot-actor-no-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=success;always()=true	waiver,test	bump,ship,drip
+bot-actor-no-loop	github.actor=github-actions[bot];github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=success;always()=true;cancelled()=false	waiver,test	bump,ship,drip
 
 # The drip's own trigger. bump is skipped on schedule by its own `if:` (a
 # capacity-ride must never bump/tag); always() is what keeps drip alive past
 # that skipped dependency, and `test` carries no `needs: bump` precisely so the
 # gate still runs here rather than being satisfied by a skip.
-scheduled-tick	github.actor=human;github.event_name=schedule;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=success;always()=true	waiver,test,drip	bump,ship
+scheduled-tick	github.actor=human;github.event_name=schedule;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=success;always()=true;cancelled()=false	waiver,test,drip	bump,ship
 
 # Operator-forced catch-up with nothing new to bump: the resume hand-off for a
 # backlog a cancelled or deferred ship stranded, with no fake source change.
-dispatch-no-bump-drips	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=false;needs.bump.result=success;needs.test.result=success;always()=true	bump,waiver,test,drip	ship
+dispatch-no-bump-drips	github.actor=human;github.event_name=workflow_dispatch;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=false;needs.bump.result=success;needs.test.result=success;always()=true;cancelled()=false	bump,waiver,test,drip	ship
 
 # ── The publish gate, both directions.
 #
-# Gate ON, tests RED: neither publisher may fire. `test` is still SELECTED here
-# — this linter models which jobs are reached, not their outcome — so ship's
-# `needs:` are met and the block comes from ship's own explicit
-# `needs.test.result == 'success'` clause, which is exactly why that clause is
-# written out rather than left to `needs:`.
-test-fails-blocks-both-publishers	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=failure;always()=true	bump,waiver,test	ship,drip
+# Gate ON, tests RED: neither publisher may fire, and since 2026-09-19 no TAG
+# either — bump waits for test and admits only a passed or waived gate. The
+# context says so: bump skipped, so bumped is empty and its result `skipped`.
+# ship's own explicit `needs.test.result == 'success'` clause used to be the
+# only thing blocking it here; it is now backed by bump's skip as well, and
+# kept because a publish should never rest on a single clause.
+test-fails-blocks-both-publishers	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=failure;always()=true;cancelled()=false	waiver,test	bump,ship,drip
 
 # Gate OFF (require-tests: false). This row RECORDS THE MODEL for the
 # `pending-release-path: waiver-arm reachability` note in the workflow: ship
@@ -77,4 +87,35 @@ test-fails-blocks-both-publishers	github.actor=human;github.event_name=push;gith
 # a live experiment — 0 of the 52 consumers set require-tests, so nothing has
 # exercised it either way. If a throwaway-repo experiment ever contradicts this
 # row, the workflow is what changed meaning, and this row is where you find out.
-gate-off-ship-waiver-arm-is-unreachable	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=false;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=skipped;always()=true	bump,waiver	test,ship,drip
+#
+# bump is the contrast: it DOES name status functions, so its waived arm is
+# reachable and it still runs here. That is the whole reason its condition is
+# written out rather than left to a plain `needs: test`.
+gate-off-ship-waiver-arm-is-unreachable	github.actor=human;github.event_name=push;github.event.repository.private=false;inputs.require-tests=false;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=skipped;always()=true;cancelled()=false	bump,waiver	test,ship,drip
+
+# ── The TAG waits for the gate (2026-09-19).
+#
+# Until then bump had no `needs:` and ran in parallel with test, so the tag —
+# and every tag-triggered release built from it — landed before the gate
+# answered. engenho v0.53.117 was tagged at 21:27:13 UTC on 2026-09-18, its
+# Test gate went red at 21:33:33, and its GitHub Release published at 21:33:49.
+#
+# These four rows are PRIVATE on purpose. A private repo publishes by neither
+# ship nor drip, so its tag is its entire release and bump is the only job the
+# gate can hold back. Each row names the one arm of bump's condition it pins.
+#
+# Gate GREEN, nothing new to bump: bump still RUNS (it is what decides there is
+# nothing to tag). Pins the `needs.test.result == 'success'` arm.
+private-gate-green-bump-runs	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=true;needs.bump.outputs.bumped=false;needs.bump.result=success;needs.test.result=success;always()=true;cancelled()=false	bump,waiver,test	ship,drip
+
+# Gate RED: no tag. Against the pre-2026-09-19 graph this row reports bump RAN.
+private-gate-red-no-tag	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=failure;always()=true;cancelled()=false	waiver,test	bump,ship,drip
+
+# Gate WAIVED, so test SKIPPED: bump must still run. This is the row a plain
+# `needs: test` fails — it would skip bump for every repo that waives tests.
+private-gate-waived-still-tags	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=false;needs.bump.outputs.bumped=true;needs.bump.result=success;needs.test.result=skipped;always()=true;cancelled()=false	bump,waiver	test,ship,drip
+
+# Run CANCELLED after the gate went green but before bump started: no tag. This
+# is the row `always()` without `!cancelled()` fails, because the test result
+# alone still reads `success` here.
+private-cancel-after-green-no-tag	github.actor=human;github.event_name=push;github.event.repository.private=true;inputs.require-tests=true;needs.bump.outputs.bumped=;needs.bump.result=skipped;needs.test.result=success;always()=true;cancelled()=true	waiver,test	bump,ship,drip
