@@ -644,7 +644,7 @@ absent, so build/lint still runs as a smoke test before secrets land.
 | `helm-publish.yml` | ghcr.io/charts (OCI) | helm lint + package + push (GHCR_TOKEN); forge preferred |
 | `helm-chart-release.yml` | ghcr.io/charts (OCI) | tag-aware thin wrapper around `helm-publish.yml` |
 | `image-push.yml` | ghcr.io (Docker / OCI) | nix build .#dockerImage → forge / skopeo push (GHCR_TOKEN) |
-| `rust-binary-release.yml` | GH Release | cross-arch cargo build → binaries + sha256 to Release |
+| `rust-binary-release.yml` | GH Release | cross-arch cargo build → binaries + sha256 to Release; `artifact-only: true` publishes nothing and hands one merged artifact (`artifact-name` output) to the caller |
 | `rust-release.yml` | crates.io + GH Release | combined Rust workspace release |
 | `terraform-provider-publish.yml` | Terraform Registry | goreleaser build + GPG sign + upload (TF_REGISTRY_GPG_*); Registry auto-detects |
 | `pulumi-provider-publish.yml` | Pulumi Cloud + npm + PyPI | provider plugin + SDKs (per-language token gating) |

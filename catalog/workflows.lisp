@@ -187,9 +187,12 @@
 (defworkflow rust-binary-release
   :file      "rust-binary-release.yml"
   :pattern   rust
-  :inputs    (binary-name features no-default-features system-deps app-bundle app-name bundle-id icon-svg desktop-categories min-system-version)
-  :outputs   ()
-  :secrets   ()
+  ; matrix-include, linux-libc and BOT_PAT were already in the workflow and
+  ; missing here; added with artifact-only (2026-09-19). artifact-name is set
+  ; only in artifact-only mode and is empty otherwise.
+  :inputs    (binary-name features no-default-features matrix-include system-deps app-bundle app-name bundle-id icon-svg desktop-categories min-system-version linux-libc artifact-only)
+  :outputs   (artifact-name)
+  :secrets   (BOT_PAT)
   :consumers 7)
 
 (defworkflow cargo-release

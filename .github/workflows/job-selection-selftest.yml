@@ -28,10 +28,12 @@ on:
     paths:
       - '.github/workflows/*.yml'
       - '.github/workflows/*.cases.tsv'
+      - 'tools/artifact-only-guard.tlisp'
   pull_request:
     paths:
       - '.github/workflows/*.yml'
       - '.github/workflows/*.cases.tsv'
+      - 'tools/artifact-only-guard.tlisp'
   workflow_dispatch:
 
 permissions:
@@ -51,3 +53,18 @@ jobs:
         with:
           workflow-dir: .github/workflows
           fail-on-violation: "true"
+
+  # The step-level half, which job-selection-lint cannot see: a workflow that
+  # declares an `artifact-only` input must not reach any GitHub-Release step
+  # when it is true. The script finds those workflows itself and runs a
+  # self-check on its own predicate first. See the header of
+  # tools/artifact-only-guard.tlisp.
+  artifact-only-guard:
+    name: 'artifact-only · no release step is reachable'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pleme-io/actions/tatara-script@main
+        with:
+          script-file: tools/artifact-only-guard.tlisp

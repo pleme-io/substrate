@@ -1,0 +1,229 @@
+;; tools/artifact-only-guard.tlisp — artifact-only mode must publish nothing.
+;;
+;; A reusable workflow that declares a boolean `artifact-only` input promises
+;; that, with it set, no GitHub Release is created, edited or marked Latest.
+;; This check holds every such workflow to that promise:
+;;
+;;   every step that WRITES a GitHub Release must carry `!inputs.artifact-only`
+;;   as a top-level conjunct of its `if:`.
+;;
+;; WHY A SEPARATE CHECK. job-selection-lint (the *.cases.tsv tables) decides
+;; which JOBS run. Whether a release is written is decided by STEP conditions
+;; inside a job, which that linter does not read. rust-binary-release.cases.tsv
+;; pins the job half; this file pins the step half. Both run in
+;; job-selection-selftest.yml.
+;;
+;; DISCOVERY, NOT A LIST. Every `.github/workflows/*.yml` whose
+;; `on.workflow_call.inputs` has an `artifact-only` key is checked, so adopting
+;; the input in another workflow is the whole act of getting covered. Finding
+;; none is a failure: a guard that checks nothing must not pass.
+;;
+;; THE RULE IS CONSERVATIVE. "Guarded" means: after dropping a `${{ }}`
+;; wrapper, the condition contains no `||`, and one of its `&&`-separated parts
+;; is exactly `!inputs.artifact-only`. Anything else fails, including correct
+;; conditions written some other way (`inputs.artifact-only == false`, the guard
+;; inside parentheses). Rewrite those into the canonical shape; the rule stays
+;; simple enough that a pass is a proof. With no `||`, `&&` is the only
+;; operator joining the parts, so a false guard makes the whole condition false.
+;;
+;; WHAT COUNTS AS A RELEASE WRITER. A step whose `uses:` starts with one of
+;; release-writer-actions below, or whose `run:` calls `gh release` with
+;; create, upload, edit or delete. A job-level `uses:` that calls another
+;; reusable workflow is NOT inspected: what that workflow publishes is not in
+;; this file. Say so rather than pass it silently: such jobs are logged.
+;;
+;; SELF-CHECK. Before reading any workflow the predicate is run against fixed
+;; conditions with known verdicts, positive and negative. A regression in
+;; `guarded?` fails the run on its own, before it can pass a real workflow.
+;;
+;; TIER: CI-caught, not unrepresentable. YAML has no type system, so this has
+;; to run to notice. It is the honest floor, stated as such.
+
+(define workflows-dir ".github/workflows")
+
+(define guard-conjunct "!inputs.artifact-only")
+
+(define release-writer-actions
+  (list
+    "softprops/action-gh-release"
+    "pleme-io/actions/gh-release-create"
+    "ncipollo/release-action"))
+
+(define release-writer-commands
+  (list "gh release create" "gh release upload" "gh release edit" "gh release delete"))
+
+;; ── reading YAML ───────────────────────────────────────────────────────────
+;; `yaml-read` yields association lists — (key value) pairs — not maps.
+
+(define (aget al key dflt)
+  (cond
+    ((not (list? al)) dflt)
+    ((null? al) dflt)
+    ((not (list? (car al))) dflt)
+    ((equal? (car (car al)) key) (nth 1 (car al)))
+    (else (aget (cdr al) key dflt))))
+
+(define (as-string v) (cond ((string? v) v) (else "")))
+
+;; ── the predicate ──────────────────────────────────────────────────────────
+
+(define (unwrap expr)
+  (let ((t (string-trim expr)))
+    (cond
+      ((and (string-starts-with? t "${{") (string-ends-with? t "}}"))
+        (string-trim (string-replace (string-replace t "${{" "") "}}" "")))
+      (else t))))
+
+(define (guarded? cond-str)
+  (let ((e (unwrap cond-str)))
+    (and
+      (not (string-contains? e "||"))
+      (member? guard-conjunct (map string-trim (string-split e "&&"))))))
+
+(define (starts-with-any? s prefixes)
+  (any? (lambda (p) (string-starts-with? s p)) prefixes))
+
+(define (contains-any? s needles)
+  (any? (lambda (n) (string-contains? s n)) needles))
+
+(define (release-writer? step)
+  (or
+    (starts-with-any? (as-string (aget step "uses" "")) release-writer-actions)
+    (contains-any? (as-string (aget step "run" "")) release-writer-commands)))
+
+;; ── self-check: the predicate must still tell the two apart ────────────────
+
+(define self-check-cases
+  (list
+    (list "startsWith(github.ref, 'refs/tags/v') && !inputs.artifact-only" #t)
+    (list "!inputs.artifact-only && startsWith(github.ref, 'refs/tags/v')" #t)
+    (list "${{ inputs.app-bundle && !inputs.artifact-only }}" #t)
+    (list "startsWith(github.ref, 'refs/tags/v')" #f)
+    (list "" #f)
+    (list "!inputs.artifact-only || startsWith(github.ref, 'refs/tags/v')" #f)
+    ;; The guard IS an `&&` part here, and it still does not hold: `&&` binds
+    ;; tighter, so this is `(!ao && tag) || force`, true with ao set. This is
+    ;; the only case that fails if the `||` refusal is dropped (measured).
+    (list "!inputs.artifact-only && startsWith(github.ref, 'refs/tags/v') || inputs.force" #f)
+    (list "inputs.artifact-only && startsWith(github.ref, 'refs/tags/v')" #f)
+    (list "(a && !inputs.artifact-only) || b" #f)
+    (list "!inputs.artifact-only-override && x" #f)))
+
+(define (self-check-failures)
+  (filter
+    (lambda (c) (not (equal? (guarded? (nth 0 c)) (nth 1 c))))
+    self-check-cases))
+
+;; ── one workflow ───────────────────────────────────────────────────────────
+
+(define (declares-artifact-only? doc)
+  (let ((inputs (aget (aget (aget doc "on" (list)) "workflow_call" (list)) "inputs" (list))))
+    (and (list? inputs) (any? (lambda (pair) (equal? (car pair) "artifact-only")) inputs))))
+
+(define (step-label job-id step)
+  (string-append job-id " / " (as-string (aget step "name" (as-string (aget step "uses" "(unnamed step)"))))))
+
+;; -> list of (label if-string) for every release-writing step
+(define (release-steps doc)
+  (let ((jobs (aget doc "jobs" (list))))
+    (concat-all
+      (map
+        (lambda (pair)
+          (let ((steps (aget (nth 1 pair) "steps" (list))))
+            (map
+              (lambda (s) (list (step-label (car pair) s) (as-string (aget s "if" ""))))
+              (filter release-writer? (cond ((list? steps) steps) (else (list)))))))
+        jobs))))
+
+(define (concat-all xss)
+  (cond ((null? xss) (list)) (else (concat (car xss) (concat-all (cdr xss))))))
+
+(define (called-workflow-jobs doc)
+  (map car
+    (filter
+      (lambda (pair) (not (equal? (as-string (aget (nth 1 pair) "uses" "")) "")))
+      (aget doc "jobs" (list)))))
+
+;; Returns the number of violations in one workflow and logs each one.
+(define (check-workflow path)
+  (let*
+    ((doc (yaml-read path))
+      (name (path-basename path))
+      (writers (release-steps doc))
+      (unguarded (filter (lambda (w) (not (guarded? (nth 1 w)))) writers))
+      (callers (called-workflow-jobs doc)))
+    (for-each
+      (lambda (j)
+        (log-warn (string-append name ": job '" j "' calls another workflow; what it publishes is not checked here")))
+      callers)
+    (for-each
+      (lambda (w)
+        (log-error
+          (string-append
+            name ": '" (nth 0 w) "' writes a GitHub Release but its if: is not guarded by `"
+            guard-conjunct "` as a top-level conjunct (and no `||`). Got: "
+            (cond ((equal? (nth 1 w) "") "(no if:)") (else (nth 1 w))))))
+      unguarded)
+    (cond
+      ((null? writers)
+        (log-error
+          (string-append
+            name ": declares artifact-only but has no step that writes a GitHub Release. "
+            "The input gates nothing; remove it or say what it guards."))
+        1)
+      (else
+        (log-info
+          (string-append
+            name ": " (string-format "{}" (length writers)) " release-writing step(s), "
+            (string-format "{}" (length unguarded)) " unguarded"))
+        (length unguarded)))))
+
+(define (sum xs) (cond ((null? xs) 0) (else (+ (car xs) (sum (cdr xs))))))
+
+;; ── main ───────────────────────────────────────────────────────────────────
+
+(define (main)
+  (let ((bad (self-check-failures)))
+    (cond
+      ((not (null? bad))
+        (for-each
+          (lambda (c)
+            (log-error
+              (string-append
+                "self-check: guarded? misjudged `" (nth 0 c) "` (expected "
+                (cond ((nth 1 c) "guarded") (else "unguarded")) ")")))
+          bad)
+        (log-error "artifact-only-guard: the predicate is broken; refusing to judge any workflow with it")
+        (exit 2))
+      (else
+        (log-info
+          (string-append
+            "self-check: " (string-format "{}" (length self-check-cases))
+            " fixed conditions judged correctly")))))
+  (let*
+    ((targets (filter (lambda (p) (declares-artifact-only? (yaml-read p)))
+                (glob (string-append workflows-dir "/*.yml")))))
+    (cond
+      ((null? targets)
+        (log-error
+          (string-append
+            "artifact-only-guard: no workflow in " workflows-dir
+            " declares an artifact-only input. A guard that checks nothing does not pass."))
+        (exit 2))
+      (else #f))
+    (let ((total (sum (map check-workflow targets))))
+      (cond
+        ((= total 0)
+          (log-info
+            (string-append
+              "artifact-only-guard: clean — " (string-format "{}" (length targets))
+              " workflow(s) publish nothing in artifact-only mode"))
+          (exit 0))
+        (else
+          (log-error (string-append "artifact-only-guard: " (string-format "{}" total) " violation(s)"))
+          (exit 1))))))
+
+(cond
+  ((equal? (env-get "TLISP_TEST" "") "1")
+    (log-info "TLISP_TEST=1 — artifact-only-guard helpers loaded; main skipped"))
+  (else (main)))

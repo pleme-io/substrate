@@ -634,7 +634,7 @@ the build half still runs as a smoke test.
 | `helm-publish.yml` | ghcr.io/charts (OCI) | helm lint + package + push, forge preferred (GHCR_TOKEN) |
 | `helm-chart-release.yml` | ghcr.io/charts (OCI) | tag-aware thin wrapper around `helm-publish.yml`: parses chart version from `v*` tag, delegates publish |
 | `image-push.yml` | ghcr.io (Docker / OCI) | nix build .#dockerImage → forge push / skopeo copy (GHCR_TOKEN) |
-| `rust-binary-release.yml` | GH Release | cross-arch (linux/macOS × x86_64/aarch64) feature-aware cargo build → attach binaries + .sha256 to Release |
+| `rust-binary-release.yml` | GH Release | cross-arch (linux/macOS × x86_64/aarch64) feature-aware cargo build → attach binaries + .sha256 to Release. `artifact-only: true` (default false) writes no Release and marks nothing Latest: each leg uploads a workflow artifact, and `artifact-set` merges them once every leg and the linux baseline pass (`artifact-name` output). Pinned by `rust-binary-release.cases.tsv` (jobs) and `tools/artifact-only-guard.tlisp` (release steps) |
 | `rust-release.yml` | crates.io + GH Release | combined Rust workspace release primitive |
 | `terraform-provider-publish.yml` | Terraform Registry | goreleaser builds + GPG-signs the provider, uploads to GH Release; Registry auto-detects via webhook (TF_REGISTRY_GPG_PRIVATE_KEY + TF_REGISTRY_GPG_PASSPHRASE). First-time providers require manual registration at registry.terraform.io |
 | `pulumi-provider-publish.yml` | Pulumi Cloud + npm + PyPI | builds Go provider binary + Python SDK + Node.js SDK; per-language publish gated by PYPI_TOKEN / NPM_TOKEN / PULUMI_ACCESS_TOKEN. Plugin tarballs always land on GH Release |

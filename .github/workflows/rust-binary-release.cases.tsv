@@ -1,0 +1,37 @@
+# Case table for substrate/.github/workflows/rust-binary-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# WHAT THIS PINS
+#
+# rust-binary-release has two modes, chosen by the boolean input artifact-only
+# (default false).
+#
+#   default        every leg attaches its own files to the tag's GitHub
+#                  Release as soon as it finishes. That behaviour belongs to
+#                  7+ callers (mado, tatara-lisp, gen, ...) and must not move.
+#   artifact-only  every leg uploads a workflow artifact and publishes nothing.
+#                  `artifact-set` merges them once every leg and the linux
+#                  baseline are green, and its name is the workflow's
+#                  `artifact-name` output. The caller publishes from that.
+#
+# Row 1 is the default: build and linux-baseline run, artifact-set does not.
+# If artifact-set lost its `if:`, every existing caller would grow a job and a
+# merged artifact it never asked for, and this row would report RAN.
+#
+# Row 2 is artifact-only: all three jobs run. It also pins that the mode still
+# BUILDS and still runs the baseline gate. Putting `!inputs.artifact-only` on
+# linux-baseline would make it NOT-RUN here, and would also take artifact-set
+# down with it, since artifact-set needs linux-baseline.
+#
+# WHAT THIS CANNOT PIN. Whether a GitHub Release is written is decided by STEP
+# conditions inside `build`, and step conditions are below this linter's
+# resolution. tools/artifact-only-guard.tlisp pins that half: every step that
+# writes a GitHub Release must carry `!inputs.artifact-only` as a top-level
+# conjunct. It runs next to this table in job-selection-selftest.yml.
+#
+# No row models a failed build leg. The linter treats a needed job as "ran"
+# once it is selected, so failure is outside what it can express; the skip on
+# failure comes from GitHub's implicit success() on `needs:`.
+default-tag-push	inputs.artifact-only=false	build,linux-baseline	artifact-set
+artifact-only	inputs.artifact-only=true	build,linux-baseline,artifact-set

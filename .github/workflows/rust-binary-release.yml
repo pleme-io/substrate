@@ -49,6 +49,53 @@
 # runners, unlike the Nix sandbox) instead of resvg + png2icns. The
 # Nix-module path (channel 2) and this CI path (channel 1) therefore
 # produce equivalent `.app` bundles from one icon source of truth.
+#
+# ── ARTIFACT-ONLY MODE (opt-in, `artifact-only: true`) ─────────────────────
+# Builds exactly what the default mode builds and publishes NOTHING. No leg
+# creates, edits or uploads to a GitHub Release, so no release appears and
+# none is marked Latest. Each leg uploads its files as a workflow artifact
+# instead. Once every leg AND the linux baseline gate are green, the
+# `artifact-set` job merges them into ONE artifact, named by the
+# `artifact-name` output. The caller's own job downloads it and decides
+# whether and when to publish, after whatever gates it has (tests, image
+# pushes, a promote step):
+#
+#   jobs:
+#     binaries:
+#       uses: pleme-io/substrate/.github/workflows/rust-binary-release.yml@main
+#       with:
+#         binary-name: my-tool
+#         artifact-only: true
+#     publish:
+#       needs: [binaries, test]
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/download-artifact@v4
+#           with:
+#             name: ${{ needs.binaries.outputs.artifact-name }}
+#         # every leg's <bin>-<suffix> + .sha256 (+ app packages) is here, flat
+#
+# Why it exists. In the default mode each leg publishes on its own. The first
+# leg to finish creates the tag's GitHub Release, and softprops leaves
+# `make_latest` to the API default, so that release becomes Latest. Nothing
+# checks "every leg and every gate is green" before the release is public.
+# Receipt: engenho run 35396851404 (tag v0.53.117, 2026-09-18). The
+# engenho-mcp linux-x86_64 leg uploaded its binary at 21:33:48 UTC and the
+# release was published at 21:33:49. It ended with 12 of 16 binaries: both
+# linux-aarch64 legs failed, and so did all four ghcr image pushes and the
+# chart push in the same run. Artifact-only mode gives the caller a point
+# where it can check all of that before anything is public, and it lets a
+# repo release binaries without any registry.
+#
+# The default (false) leaves every existing caller's behaviour unchanged.
+# Two things pin it:
+#   rust-binary-release.cases.tsv  -> which JOBS run in each mode
+#                                     (job-selection-lint)
+#   tools/artifact-only-guard.tlisp -> every GitHub-Release step is
+#                                      unreachable when artifact-only is true
+#                                      (step conditions are below the
+#                                      job-selection linter's resolution)
+# Both run in job-selection-selftest.yml.
 
 name: Rust binary release
 
@@ -127,6 +174,29 @@ on:
           CLI that has to run on arbitrary runners and images; stay on gnu for
           GUI/GPU apps, which dynamically load wayland/X/GL at runtime and do
           not work statically linked.
+      artifact-only:
+        type: boolean
+        default: false
+        description: >-
+          When true, build every leg and publish NOTHING. No GitHub Release is
+          created, edited or marked Latest, even on a `v*` tag. Each leg
+          uploads its binary, its .sha256 and any app packages as a workflow
+          artifact. The `artifact-set` job merges them into one artifact once
+          every leg and the linux baseline gate are green, and the
+          `artifact-name` output names it. Publishing is left to the caller.
+          Default false: every existing caller behaves exactly as before. The
+          workflow still declares `contents: write` because the default mode
+          needs it, so the caller must still grant it.
+
+    outputs:
+      artifact-name:
+        description: >-
+          Name of the merged artifact holding every leg's files, flat:
+          <binary-name>-<suffix>, its .sha256, and the app packages when
+          app-bundle is true. Set only in artifact-only mode, and only when
+          every leg and the linux baseline passed. Empty otherwise, so a
+          caller cannot read it as a success when nothing was produced.
+        value: ${{ jobs.artifact-set.outputs.name }}
 
     secrets:
       # ── PRIVATE GIT DEPENDENCIES ─────────────────────────────────────────
@@ -439,16 +509,60 @@ jobs:
       # Handed to the linux-baseline job below, which re-checks the artifact on
       # a pinned old runner. Uploading is what makes that check independent of
       # wherever this leg happened to build.
+      #
+      # Not in artifact-only mode: that mode's per-leg upload below already
+      # carries this file, and linux-baseline downloads it from there.
       - name: Upload linux x86_64 artifact for the baseline check
-        if: matrix.suffix == 'linux-x86_64'
+        if: matrix.suffix == 'linux-x86_64' && !inputs.artifact-only
         uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64-binary
           path: dist/${{ inputs.binary-name }}-linux-x86_64
           retention-days: 1
 
+      # ── artifact-only mode: hand the leg's files over, publish nothing ──
+      # Two uploads rather than one, so every file lands at the root of the
+      # merged artifact. upload-artifact roots an artifact at the common
+      # ancestor of its paths, and the app packages are built in the workspace
+      # root while the binaries sit in dist/. One upload would put the binaries
+      # under dist/ on app legs and at the root on the others.
+      #
+      # The names start with binary-name because one caller run can build
+      # several binaries (engenho calls this workflow twice), and the merge in
+      # `artifact-set` collects this binary's legs by that prefix. Retention is
+      # one day because these are intermediates: the merge deletes them.
+      - name: Upload this leg's binary + checksum (artifact-only)
+        if: inputs.artifact-only
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-release-${{ matrix.suffix }}
+          path: |
+            dist/${{ inputs.binary-name }}-${{ matrix.suffix }}
+            dist/${{ inputs.binary-name }}-${{ matrix.suffix }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+      # Only one of the two assemble steps ran on this leg, so one pair of
+      # these paths is empty; upload-artifact skips empty path lines.
+      - name: Upload this leg's app packages (artifact-only)
+        if: inputs.artifact-only && inputs.app-bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-release-${{ matrix.suffix }}-app
+          path: |
+            ${{ steps.macapp.outputs.dmg }}
+            ${{ steps.macapp.outputs.zip }}
+            ${{ steps.linapp.outputs.tar }}
+          if-no-files-found: error
+          retention-days: 1
+
+      # ── GitHub Release steps. Each carries `&& !inputs.artifact-only` as a
+      # top-level conjunct, and the condition has no `||`. That is the exact
+      # shape tools/artifact-only-guard.tlisp requires of every step that
+      # writes a GitHub Release, so a new release step without the guard fails
+      # CI instead of publishing from artifact-only mode.
       - name: Attach binaries to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && !inputs.artifact-only
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -456,7 +570,7 @@ jobs:
             dist/${{ inputs.binary-name }}-${{ matrix.suffix }}.sha256
 
       - name: Attach macOS app packages to GitHub Release
-        if: inputs.app-bundle && runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        if: inputs.app-bundle && runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v') && !inputs.artifact-only
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -464,7 +578,7 @@ jobs:
             ${{ steps.macapp.outputs.zip }}
 
       - name: Attach linux app package to GitHub Release
-        if: inputs.app-bundle && runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v')
+        if: inputs.app-bundle && runner.os == 'Linux' && startsWith(github.ref, 'refs/tags/v') && !inputs.artifact-only
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -492,10 +606,15 @@ jobs:
     # than "billing blocked". Public callers keep the exact label they had.
     runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-22.04' }}
     steps:
+      # Artifact-only mode skips the dedicated baseline upload and reads the
+      # same file from the leg's own upload. Both artifacts extract the binary
+      # to `<binary-name>-linux-x86_64` at the root, so the steps below do not
+      # care which one it came from. With artifact-only false this expression
+      # is the literal the step always had.
       - name: Download the linux x86_64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: linux-x86_64-binary
+          name: ${{ inputs.artifact-only && format('{0}-release-linux-x86_64', inputs.binary-name) || 'linux-x86_64-binary' }}
 
       - name: Report what the binary requires
         run: |
@@ -552,3 +671,34 @@ jobs:
           fi
           echo "OK: no PT_INTERP, no versioned glibc symbols — no libc floor"
           echo "     file(1) says: $(file -b "$bin")"
+
+  # ── artifact-only mode: the one artifact a caller publishes from ──────────
+  # Runs only after EVERY build leg and the linux baseline gate have
+  # succeeded. `needs:` skips it when any leg fails, and fail-fast is off, so a
+  # half-built release never gets a name. Without this job a caller would have
+  # to gather each leg's artifact by pattern itself, and nothing would check
+  # the set as a whole before the caller published.
+  #
+  # The merge deletes the per-leg artifacts it consumed, so the run keeps one
+  # copy of each file.
+  artifact-set:
+    name: artifact set (artifact-only mode)
+    needs: [build, linux-baseline]
+    if: inputs.artifact-only
+    # Same billing rule as linux-baseline: a reusable workflow's `runs-on`
+    # executes in the CALLER's context, so private callers route to their
+    # own pool.
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    outputs:
+      # Tied to the merge's own result rather than written as a literal. Job
+      # outputs are evaluated even when a step fails, and a literal name would
+      # then point at an artifact that does not exist.
+      name: ${{ steps.merge.outputs.artifact-id != '' && format('{0}-release', inputs.binary-name) || '' }}
+    steps:
+      - name: Merge every leg into one artifact
+        id: merge
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: ${{ inputs.binary-name }}-release
+          pattern: ${{ inputs.binary-name }}-release-*
+          delete-merged: true
