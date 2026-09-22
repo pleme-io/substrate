@@ -56,14 +56,45 @@ with lib;
       settings,
       runAfter ? [ "writeBoundary" ],
     }:
-    optionalAttrs (settings != { }) {
-      home.activation.${name} =
-        let
-          plist = "${homeDirectory}/Library/Preferences/${domain}.plist";
-          json = builtins.toJSON settings;
-        in
-        # Inlined `lib.hm.dag.entryAfter runAfter data` rather than calling it:
-        # that function only exists on home-manager's lib-extended `lib`
+    let
+      plist = "${homeDirectory}/Library/Preferences/${domain}.plist";
+      json = builtins.toJSON settings;
+    in
+    {
+      # ★ mkIf on the LEAF VALUE, never on the OUTER SHAPE (was
+      # `optionalAttrs (settings != {}) { home.activation.${name} = {...}; }`
+      # until 2026-09-22). That made the whole RETURNED ATTRSET's shape --
+      # whether the `home` key exists at all -- conditional on `settings`.
+      #
+      # Every consumer of this file passes `settings = cfg.<something>`, an
+      # option from the SAME module this return value becomes `config` for
+      # (see this file's own usage doc above). The module system's
+      # `pushDownProperties` (lib/modules.nix) has to inspect the SHAPE of a
+      # module's `config` value to distribute it across option leaves, and
+      # doing that for a shape-conditional value forces `settings != {}` --
+      # i.e. forces `cfg.preferences`'s OWN merged value -- from INSIDE the
+      # very merge pass that is computing it. Nix's blackhole detector
+      # catches the self-reference: "infinite recursion encountered".
+      #
+      # Measured 2026-09-22, blackmatter-gemini's home.nix, exactly the
+      # documented usage pattern: `nix eval` on a real fleet config throws
+      # infinite recursion the instant `settings = cfg.preferences` is used
+      # in `config = mkIf cfg.enable (mkUserDefaultsActivation {...})`.
+      # `domain` (referenced identically) never triggered it -- it sits
+      # inside the `then`-branch string that Nix's laziness never touched
+      # once `settings != {}` short-circuited to false, so nothing about
+      # this file's own PURE tests (which call the function directly, never
+      # through `lib.evalModules`) could have caught it.
+      #
+      # The fix keeps the SAME "empty settings -> no activation entry"
+      # guarantee (`mkIf false` contributes zero definitions to the option,
+      # so an all-mkIf-false leaf is indistinguishable from never having
+      # been set) while making the outer shape -- `home.activation.${name}`
+      # existing as a key -- unconditional, so pushDownProperties never
+      # needs `settings`'s value just to see that shape.
+      home.activation.${name} = mkIf (settings != { }) (
+        # Inlined `lib.hm.dag.entryAfter runAfter data` rather than calling
+        # it: that function only exists on home-manager's lib-extended `lib`
         # (`modules/lib/stdlib-extended.nix`), not plain `nixpkgs.lib` — and
         # this file is deliberately pure-testable with plain `nixpkgs.lib`
         # (see hm/tests.nix). Home-manager's activation DAG resolver accepts
@@ -83,6 +114,7 @@ with lib;
             rm -f "$managedJson" "$managedPlist"
             /usr/bin/killall cfprefsd >/dev/null 2>&1 || true
           '';
-        };
+        }
+      );
     };
 }

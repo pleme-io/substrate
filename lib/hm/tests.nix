@@ -863,24 +863,62 @@ in runTests [
 
   # ════════════════════════════════════════════════════════════════════
   # user-defaults-helpers.nix — mkUserDefaultsActivation
+  #
+  # All four tests below resolve through a REAL `lib.evalModules`, not a
+  # bare call to the function. Until 2026-09-22 these tests called
+  # `mkUserDefaultsActivation` directly and all passed while the function
+  # carried a real infinite-recursion bug (fixed same day) that only bites
+  # inside an actual module merge — see the fix's own comment in
+  # user-defaults-helpers.nix and the regression test at the end of this
+  # block. A pure function-call test cannot catch a module-system-shaped
+  # bug; resolving through evalModules is what makes these load-bearing.
   # ════════════════════════════════════════════════════════════════════
 
-  (mkTest "user-defaults-empty-settings-is-no-activation"
-    (userDefaultsHelpers.mkUserDefaultsActivation {
-      name = "gemini-desktop"; domain = "com.google.GeminiMacOS";
-      homeDirectory = "/Users/op"; settings = { };
-    } == { })
-    "empty settings must produce {} — no activation entry for a component with nothing to write")
+  (let
+    evaled = lib.evalModules {
+      modules = [
+        {
+          options.home.homeDirectory = lib.mkOption { type = lib.types.str; };
+          options.home.activation = lib.mkOption {
+            type = lib.types.attrsOf lib.types.attrs;
+            default = { };
+          };
+          config.home.homeDirectory = "/Users/op";
+          config.home.activation = (userDefaultsHelpers.mkUserDefaultsActivation {
+            name = "gemini-desktop";
+            domain = "com.google.GeminiMacOS";
+            homeDirectory = "/Users/op";
+            settings = { };
+          }).home.activation or { };
+        }
+      ];
+    };
+  in mkTest "user-defaults-empty-settings-is-no-activation"
+    (evaled.config.home.activation == { })
+    "empty settings must produce no activation entry for a component with nothing to write — resolved through evalModules, not a bare function-return check (an mkIf-false leaf and a bare {} are different shapes that must both resolve the same way)")
 
   (let
-    out = userDefaultsHelpers.mkUserDefaultsActivation {
-      name = "gemini-desktop"; domain = "com.google.GeminiMacOS";
-      homeDirectory = "/Users/op"; settings = { AutoUpdateEnabled = false; };
+    evaled = lib.evalModules {
+      modules = [
+        {
+          options.home.homeDirectory = lib.mkOption { type = lib.types.str; };
+          options.home.activation = lib.mkOption {
+            type = lib.types.attrsOf lib.types.attrs;
+            default = { };
+          };
+          config.home.homeDirectory = "/Users/op";
+          config.home.activation = (userDefaultsHelpers.mkUserDefaultsActivation {
+            name = "gemini-desktop";
+            domain = "com.google.GeminiMacOS";
+            homeDirectory = "/Users/op";
+            settings = { AutoUpdateEnabled = false; };
+          }).home.activation or { };
+        }
+      ];
     };
-    script = out.home.activation.gemini-desktop.data or out.home.activation.gemini-desktop;
-    text = builtins.toString script;
+    text = builtins.toString evaled.config.home.activation.gemini-desktop.data;
   in mkTest "user-defaults-targets-the-right-plist-and-merges-not-imports"
-    (out ? home.activation.gemini-desktop
+    (evaled.config.home.activation ? gemini-desktop
       && lib.hasInfix "/Users/op/Library/Preferences/com.google.GeminiMacOS.plist" text
       && lib.hasInfix "PlistBuddy" text
       && lib.hasInfix "Merge" text
@@ -888,13 +926,78 @@ in runTests [
     "non-empty settings must activate against the domain's real plist path via PlistBuddy Merge, never a destructive `defaults import`")
 
   (let
-    out = userDefaultsHelpers.mkUserDefaultsActivation {
-      name = "x"; domain = "com.example.App"; homeDirectory = "/Users/op";
-      settings = { ContainsQuote = "it's fine"; };
+    evaled = lib.evalModules {
+      modules = [
+        {
+          options.home.homeDirectory = lib.mkOption { type = lib.types.str; };
+          options.home.activation = lib.mkOption {
+            type = lib.types.attrsOf lib.types.attrs;
+            default = { };
+          };
+          config.home.homeDirectory = "/Users/op";
+          config.home.activation = (userDefaultsHelpers.mkUserDefaultsActivation {
+            name = "x";
+            domain = "com.example.App";
+            homeDirectory = "/Users/op";
+            settings = { ContainsQuote = "it's fine"; };
+          }).home.activation or { };
+        }
+      ];
     };
-    text = builtins.toString (out.home.activation.x.data or out.home.activation.x);
+    text = builtins.toString evaled.config.home.activation.x.data;
   in mkTest "user-defaults-shell-escapes-embedded-quotes"
     (lib.hasInfix "it'\\''s fine" text)
     "a settings value containing a literal single-quote must be shell-escaped (escapeShellArg), not interpolated raw into a single-quoted printf")
+
+  # ── ★ REGRESSION: settings sourced from the SAME module's own option ──
+  # This is the documented usage shape (this file's own header comment) and
+  # blackmatter-gemini's real home.nix: `settings = cfg.preferences`, where
+  # `cfg.preferences` is an option DECLARED BY THE SAME MODULE that this
+  # function's return value becomes `config` for. Before the 2026-09-22 fix,
+  # this threw "infinite recursion encountered" — `optionalAttrs (settings
+  # != {}) {...}` made the OUTER SHAPE of the returned attrset conditional
+  # on `settings`, and determining that shape during module merge
+  # (pushDownProperties) forced `cfg.preferences`'s own merged value from
+  # inside the very pass computing it. The three tests above call the
+  # function with a LITERAL settings value and could never have caught
+  # this; only a self-referencing option does.
+  (let
+    evaled = lib.evalModules {
+      modules = [
+        (
+          { lib, config, ... }:
+          let
+            cfg = config.blackmatter.components.example.desktop;
+          in
+          {
+            options.blackmatter.components.example.desktop = {
+              enable = lib.mkEnableOption "example";
+              domain = lib.mkOption { type = lib.types.str; default = "com.example.App"; };
+              preferences = lib.mkOption { type = lib.types.attrs; default = { }; };
+            };
+            options.home.homeDirectory = lib.mkOption { type = lib.types.str; };
+            options.home.activation = lib.mkOption {
+              type = lib.types.attrsOf lib.types.attrs;
+              default = { };
+            };
+            config = lib.mkIf cfg.enable (
+              userDefaultsHelpers.mkUserDefaultsActivation {
+                name = "example-desktop";
+                inherit (cfg) domain;
+                homeDirectory = config.home.homeDirectory;
+                settings = cfg.preferences;
+              }
+            );
+          }
+        )
+        {
+          config.home.homeDirectory = "/Users/op";
+          config.blackmatter.components.example.desktop.enable = true;
+        }
+      ];
+    };
+  in mkTest "user-defaults-self-referencing-settings-does-not-recurse"
+    (evaled.config.home.activation == { })
+    "settings sourced from the declaring module's own option (the documented usage) must resolve through evalModules without infinite recursion, and empty preferences must still produce no activation entry")
 
 ]
