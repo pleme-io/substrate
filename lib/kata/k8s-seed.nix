@@ -334,7 +334,33 @@ let
     in
     {
       nixos = iroha.tag "nixos" module;
-      homeManager = iroha.tag "homeManager" homeManagerModule;
+      # ★ DELIBERATELY UNTAGGED — measured 2026-09-22 wiring ryn's real
+      # consumer. `iroha.classes.homeManager` ("homeManager") exists and two
+      # OTHER letters already produce it (package-module.nix, gitops.nix),
+      # but neither has ever been imported into a real
+      # `home-manager.users.<name>.imports` on a nix-darwin host — this was
+      # the first, and it threw:
+      #
+      #   The module `<iroha:tag:homeManager>` (class: "homeManager") cannot
+      #   be imported into a module evaluation that expects class "darwin".
+      #
+      # This flake's pinned home-manager does not give
+      # `home-manager.users.<name>`'s module list its own classed
+      # `evalModules` call — it flattens into the SAME class="darwin"
+      # evaluation the whole nix-darwin system tree runs under. A module
+      # whose `_class` is anything other than `null` or `"darwin"` is
+      # therefore rejected the instant it lands in that list, regardless of
+      # which string iroha's registry uses. Per lib/modules.nix's own check
+      # (`m._class == null || m._class == class`), a module with NO `_class`
+      # passes under ANY expected class — so returning the bare module here,
+      # not `iroha.tag "homeManager" ...`, is what actually works in a real
+      # nix-darwin + home-manager tree.
+      #
+      # `pending-iroha: classes.homeManager is asserted but its check does
+      # not hold against this fleet's real home-manager integration — the
+      # two existing producers (package-module.nix, gitops.nix) are untested
+      # against a live consumer and should be re-verified the same way.`
+      homeManager = homeManagerModule;
       inherit meta unitName;
       optionPath = surface.optionPath;
     };

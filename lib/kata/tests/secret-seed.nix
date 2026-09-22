@@ -309,9 +309,14 @@ moduleEvalCases
   # `nixos`) is the first homeManager consumer.
   # ══════════════════════════════════════════════════════════════════════
 
-  hm-is-class-tagged = {
-    expr = grafana.homeManager._class;
-    expected = "homeManager";
+  # DELIBERATELY untagged — see k8s-seed.nix's homeManager comment: a real
+  # nix-darwin + home-manager tree flattens `home-manager.users.<name>`'s
+  # modules into the outer class="darwin" evaluation, so a `_class` other
+  # than null/"darwin" is rejected the instant it lands there. Asserting
+  # its ABSENCE is the regression guard for that fix.
+  hm-is-deliberately-untagged = {
+    expr = grafana.homeManager ? _class;
+    expected = false;
   };
 
   hm-sops-secrets-unchanged-shape = {
