@@ -591,6 +591,35 @@ let
     extraNativeBuildInputs = builtins.map (name: hostPkgs.${name}) nativeBuildInputs;
     extraBuildInputs = darwinHelpers.mkDarwinBuildInputs hostPkgs;
   };
+
+  # ── The dev shell carries what the TESTS declared ─────────────────────
+  # `checks.tests` gets `tests.cargo.{nativeBuildInputs,buildInputs}` (the
+  # names, resolved above) and the dev shell used to get neither, although CI
+  # runs those same tests INSIDE the shell: rust-auto-release.yml's Test gate is
+  # `nix develop <installable> -c nextest run`. So the shell is a superset of
+  # the runner's system libraries BY CONSTRUCTION, and the two lists are one
+  # fact — restating it in `devShellPackages` would just be the same names
+  # declared twice, drifting apart on the next `-sys` crate.
+  #
+  # Measured 2026-09-22 on pleme-io/engenho: `tests.cargo` named pkg-config and
+  # openssl (sui-store asks reqwest for `default-tls`, so openssl-sys compiles
+  # on Linux). The shell had neither, openssl-sys found ubuntu's partial
+  # /usr/include/openssl and died on a missing opensslconf.h, and the release
+  # gate was red for 100 consecutive runs — while `checks.tests`, which does get
+  # the names, stayed green. A declaration that reaches one of two consumers is
+  # the shape this closes.
+  #
+  # The build's own `nativeBuildInputs` (names) come along for the same reason:
+  # what the derivation needs to compile the crate, a shell compiling that crate
+  # needs too. `buildInputs` are already derivations, and are passed as-is.
+  cargoTestDecl = let decl = tests.cargo or { }; in
+    if builtins.isAttrs decl then decl else { };
+  devShellSystemInputs = {
+    nativeBuildInputs = builtins.map (name: hostPkgs.${name})
+      (hostPkgs.lib.unique ((cargoTestDecl.nativeBuildInputs or [ ]) ++ nativeBuildInputs));
+    buildInputs = buildInputs
+      ++ builtins.map (name: hostPkgs.${name}) (cargoTestDecl.buildInputs or [ ]);
+  };
   mkCargoTests = cargoDecl:
     if effectiveMode == "lockfile"
     then (nativeLockfileBuilder.mkProject {
@@ -665,7 +694,8 @@ in {
     # Consumer-declared dev-shell tooling, resolved by name against the host
     # package set the shell is actually built from. See `devShellPackages`.
     extraPackages = builtins.map (name: hostPkgs.${name}) devShellPackages;
-    inherit buildInputs;
+    # Both lists include what `tests.cargo` declared — see devShellSystemInputs.
+    inherit (devShellSystemInputs) buildInputs nativeBuildInputs;
   };
 
   apps = {

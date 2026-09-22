@@ -114,14 +114,25 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     crate2nix = null;
   };
-  consumer = extra: (toolRelease ({
+  outputsFor = extra: toolRelease ({
     toolName = "wt-fixture";
     src = fixture;
     repo = "pleme-io/substrate";
     shape = "workspace";
-  } // extra)).checks;
+  } // extra);
+  consumer = extra: (outputsFor extra).checks;
   undeclared = consumer { };
   optedIn = consumer { tests.cargo.runs = ciRuns; };
+
+  # Every package name the dev shell puts in front of a developer — and in
+  # front of CI, which runs the tests INSIDE it (`nix develop … -c nextest`).
+  shellNames = extra: let shell = (outputsFor extra).devShells.default; in
+    map (d: d.name or "?") ((shell.buildInputs or [ ]) ++ (shell.nativeBuildInputs or [ ]));
+  declaringSystemLibs = {
+    runs = ciRuns;
+    nativeBuildInputs = [ "pkg-config" ];
+    buildInputs = [ "openssl" ];
+  };
 
   tests = [
     # ── Config: defaults and the exact argv ────────────────────────────
@@ -195,6 +206,25 @@ let
     (testHelpers.mkTest "undeclared-consumer-is-unchanged"
       (builtins.attrNames undeclared == [ "build" ])
       "a consumer that did not opt in must get exactly the pre-runner check set")
+
+    # ── THE SECOND CONSUMER OF THE SAME DECLARATION: the dev shell ─────
+    # `tests.cargo.{nativeBuildInputs,buildInputs}` reached checks.tests and
+    # stopped there, while CI runs those tests inside `nix develop` — so a
+    # declared system library was present exactly where it was not needed.
+    # Measured 2026-09-22 on pleme-io/engenho: pkg-config + openssl declared,
+    # neither in the shell, openssl-sys fell through to ubuntu's /usr/include,
+    # and auto-release was red for 100 consecutive runs with checks.tests green.
+    (testHelpers.mkTest "declared-test-system-libs-reach-the-dev-shell"
+      (let names = shellNames { tests.cargo = declaringSystemLibs; }; in
+        lib.any (lib.hasPrefix "pkg-config") names
+        && lib.any (lib.hasPrefix "openssl") names)
+      "a system library `tests.cargo` declares must be in the dev shell too — CI compiles those tests there")
+
+    (testHelpers.mkTest "an-undeclaring-consumer-gets-no-system-libs"
+      (let names = shellNames { }; in
+        !(lib.any (lib.hasPrefix "openssl") names)
+        && !(lib.any (lib.hasPrefix "pkg-config") names))
+      "the negative control: the shell carries what was declared, so the test above cannot pass on a library that was there anyway")
 
     # ── Loud over silent ───────────────────────────────────────────────
     (testHelpers.mkTest "rejects-no-run"
