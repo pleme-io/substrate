@@ -78,6 +78,12 @@
 #               };
 #     meta :: { name, secretName, k8sNamespace, keys = [<dataKeys sorted>],
 #               kind = "secret-seed" };
+#     homeManager :: class-tagged ("homeManager") module — the SAME shape as
+#               `nixos` above, rendered as a `launchd.agents.<name>-seed` per
+#               kata.k8s-seed's homeManager output (a per-user launchd agent,
+#               not a root daemon — see that letter's header). `sops.secrets`
+#               is unchanged: sops-nix ships a home-manager module exposing
+#               the identical option.
 #   }
 #
 # Throws (every message prefixed "kata.secret-seed.mkSecretSeed: "):
@@ -244,10 +250,10 @@ let
         };
       };
 
-      inherit (seed) nixos meta;
+      inherit (seed) nixos homeManager meta;
     in
     {
-      inherit nixos meta;
+      inherit nixos homeManager meta;
     };
 in
 {

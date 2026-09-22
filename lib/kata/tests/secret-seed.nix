@@ -24,6 +24,12 @@ let
           type = lib.types.attrsOf lib.types.anything;
           default = { };
         };
+        # For the homeManager output below — a suite that never declares
+        # this is blind to it the same way a code path with no test is.
+        launchd.agents = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
       };
     };
 
@@ -36,6 +42,17 @@ let
         universe
         { _module.args.pkgs = stubPkgs; }
         seed.nixos
+      ]
+      ++ extraModules;
+    }).config;
+
+  evalSeedHomeManager =
+    seed: extraModules:
+    (lib.evalModules {
+      modules = [
+        universe
+        { _module.args.pkgs = stubPkgs; }
+        seed.homeManager
       ]
       ++ extraModules;
     }).config;
@@ -282,6 +299,49 @@ moduleEvalCases
   };
   missing-name-throws = {
     expr = (builtins.tryEval (kata.mkSecretSeed { k8sNamespace = "ns"; data.k.sopsPath = "a/b"; }).meta.name).success;
+    expected = false;
+  };
+
+  # ══════════════════════════════════════════════════════════════════════
+  # kata.k8s-seed's homeManager output, threaded through mkSecretSeed. The
+  # ryn github-org-posture-secret mirror (the GitHub App key this letter's
+  # own header already names as the load-bearing production consumer of
+  # `nixos`) is the first homeManager consumer.
+  # ══════════════════════════════════════════════════════════════════════
+
+  hm-is-class-tagged = {
+    expr = grafana.homeManager._class;
+    expected = "homeManager";
+  };
+
+  hm-sops-secrets-unchanged-shape = {
+    # Same assertion as sops-entry-shape above, off the homeManager eval —
+    # sops-nix's home-manager module exposes an identical sops.secrets shape.
+    expr = (evalSeedHomeManager grafana [ ]).sops.secrets."monitoring/grafana-admin-user";
+    expected = {
+      owner = "root";
+      mode = "0400";
+      path = "/run/secrets/monitoring/grafana-admin-user";
+    };
+  };
+
+  hm-agent-carries-the-same-apply-script = {
+    # The secret-seed LOGIC (namespace, secretName, each --from-file, the
+    # idempotent create|apply pipe) is identical on both platforms; only
+    # the supervisor differs, so the same substring checks as
+    # script-contains-every-data-key / script-is-idempotent-apply apply.
+    expr =
+      let
+        script = lib.concatStringsSep " " (evalSeedHomeManager grafana [ ]).launchd.agents."grafana-admin-seed".config.ProgramArguments;
+      in
+      lib.hasInfix "secret generic grafana-admin" script
+      && lib.hasInfix "--from-file=admin-user=/run/secrets/monitoring/grafana-admin-user" script
+      && lib.hasInfix "--dry-run=client" script;
+    expected = true;
+  };
+
+  hm-disabled-no-agent = {
+    expr = (evalSeedHomeManager disabled [ ]).launchd.agents ? off-seed;
     expected = false;
   };
 }
