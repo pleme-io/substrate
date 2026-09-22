@@ -46,20 +46,42 @@ let
 
   dummyPkg = pkgs.runCommand "testd" { } "mkdir -p $out/bin; touch $out/bin/testd; chmod +x $out/bin/testd";
 
-  # Evaluate a system module against a stub universe. `environment.etc` and
-  # `systemd.services` are declared locally so we never import nixpkgs' whole
-  # NixOS module set — that keeps this eval in milliseconds and IFD-free.
+  anyAttrs = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
+  anyList = lib.mkOption { type = lib.types.listOf lib.types.anything; default = []; };
+
+  # The system universe, stubbed: `environment.etc` and `systemd.services`
+  # are declared locally so we never import nixpkgs' whole NixOS module set —
+  # that keeps this eval in milliseconds and IFD-free.
+  systemStubs = {
+    options = {
+      environment.etc = anyAttrs;
+      environment.systemPackages = anyList;
+      systemd.services = anyAttrs;
+      launchd.daemons = anyAttrs;
+    };
+  };
+
+  # The home-manager universe, stubbed the same way.
+  hmStubs = {
+    options = {
+      home.homeDirectory = lib.mkOption { type = lib.types.str; default = "/home/test"; };
+      home.packages = anyList;
+      home.file = anyAttrs;
+      home.activation = anyAttrs;
+      launchd.agents = anyAttrs;
+      systemd.user.services = anyAttrs;
+      blackmatter.components.anvil.mcp.servers = anyAttrs;
+    };
+  };
+
+  # The HM daemon arm branches on `pkgs.stdenv.isDarwin`; both branches are
+  # exercised from whichever host runs the check.
+  pkgsOn = isDarwin: pkgs // { stdenv = pkgs.stdenv // { inherit isDarwin; }; };
+
   evalSystem = module: settings: lib.evalModules {
     modules = [
       module
-      {
-        options = {
-          environment.etc = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-          environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.anything; default = []; };
-          systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-          launchd.daemons = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-        };
-      }
+      systemStubs
       ({ ... }: {
         services.testd = {
           enable = true;
@@ -78,6 +100,42 @@ let
 
   etcOf = e: e.config.environment.etc;
   unitOf = e: e.config.systemd.services."testd-daemon" or null;
+
+  # ── Restart policy fixtures ────────────────────────────────────────
+  # A tool that names its policy once, in its spec; every arm inherits it.
+  policyTrio = trioLib.mkModuleTrio {
+    name = "policyd";
+    description = "policy daemon";
+    withSystemDaemon = true;
+    withUserDaemon = true;
+    daemonRestartPolicy = "on-failure";
+  };
+
+  evalPolicySystem = module: daemon: lib.evalModules {
+    modules = [
+      module
+      systemStubs
+      { services.policyd = { enable = true; package = dummyPkg; daemon = { enable = true; } // daemon; }; }
+    ];
+    specialArgs = { inherit pkgs; };
+  };
+
+  evalPolicyHome = isDarwin: daemon: lib.evalModules {
+    modules = [
+      policyTrio.homeManagerModule
+      hmStubs
+      { programs.policyd = { enable = true; package = dummyPkg; daemon = { enable = true; } // daemon; }; }
+    ];
+    specialArgs = { pkgs = pkgsOn isDarwin; };
+  };
+
+  nixosRestartOf = e: e.config.systemd.services."policyd-daemon".serviceConfig.Restart;
+  launchdKeepAliveOf = e: e.config.launchd.daemons."policyd-daemon".serviceConfig.KeepAlive;
+  agentKeepAliveOf = e: e.config.launchd.agents."policyd-daemon".config.KeepAlive;
+  userUnitRestartOf = e: e.config.systemd.user.services."policyd-daemon".Service.Restart;
+
+  onFailureKeepAlive = { SuccessfulExit = false; Crashed = true; };
+  restartPolicy = import ../hm/restart-policy.nix { inherit lib; };
 
   # The env the daemon unit was given, wherever mkNixOSService put it.
   daemonEnvOf = e:
@@ -112,12 +170,7 @@ let
         let e = lib.evalModules {
           modules = [
             plainTrio.nixosModule
-            { options = {
-                environment.etc = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-                environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.anything; default = []; };
-                systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-              };
-            }
+            systemStubs
             { services.plaind = { enable = true; package = dummyPkg; }; }
           ];
           specialArgs = { inherit pkgs; };
@@ -149,12 +202,7 @@ let
         let e = lib.evalModules {
           modules = [
             trio.nixosModule
-            { options = {
-                environment.etc = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-                environment.systemPackages = lib.mkOption { type = lib.types.listOf lib.types.anything; default = []; };
-                systemd.services = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = {}; };
-              };
-            }
+            systemStubs
             { services.testd = {
                 enable = true; package = dummyPkg;
                 settings = { metrics.port = 9201; };
@@ -176,6 +224,67 @@ let
         let cmd = (unitOf withSettings).serviceConfig.ExecStart or "";
         in lib.hasInfix "  " (toString cmd) || lib.hasSuffix " " (toString cmd);
       expected = false;
+    };
+
+    # ── Restart policy ─────────────────────────────────────────────────
+    # A spec that names no policy renders exactly what it rendered before
+    # the option existed: each service manager keeps its own default.
+    testNoPolicyKeepsNixosRestartAlways = {
+      expr = (unitOf withSettings).serviceConfig.Restart;
+      expected = "always";
+    };
+    testNoPolicyKeepsLaunchdKeepAliveTrue = {
+      expr = (evalSystem trio.darwinModule null).config.launchd.daemons."testd-daemon".serviceConfig.KeepAlive;
+      expected = true;
+    };
+
+    # The spec's policy reaches all four renderings.
+    testSpecPolicyReachesNixos = {
+      expr = nixosRestartOf (evalPolicySystem policyTrio.nixosModule {});
+      expected = "on-failure";
+    };
+    testSpecPolicyReachesLaunchdDaemon = {
+      expr = launchdKeepAliveOf (evalPolicySystem policyTrio.darwinModule {});
+      expected = onFailureKeepAlive;
+    };
+    testSpecPolicyReachesLaunchdAgent = {
+      expr = agentKeepAliveOf (evalPolicyHome true {});
+      expected = onFailureKeepAlive;
+    };
+    testSpecPolicyReachesUserUnit = {
+      expr = userUnitRestartOf (evalPolicyHome false {});
+      expected = "on-failure";
+    };
+
+    # The host overrides the tool's default, in both directions.
+    testOperatorPolicyWinsOnNixos = {
+      expr = nixosRestartOf (evalPolicySystem policyTrio.nixosModule { restartPolicy = "always"; });
+      expected = "always";
+    };
+    testOperatorPolicyWinsOnAgent = {
+      expr = agentKeepAliveOf (evalPolicyHome true { restartPolicy = "always"; });
+      expected = true;
+    };
+    testOperatorNullRestoresServiceManagerDefault = {
+      expr = nixosRestartOf (evalPolicySystem policyTrio.nixosModule { restartPolicy = null; });
+      expected = "always";
+    };
+
+    # A policy outside the closed set is an eval error, not a unit with a
+    # value systemd ignores.
+    testUnknownPolicyIsRejected = {
+      expr = (builtins.tryEval (nixosRestartOf
+        (evalPolicySystem policyTrio.nixosModule { restartPolicy = "sometimes"; }))).success;
+      expected = false;
+    };
+
+    # Every policy has a spelling on every service manager.
+    testProjectionsAreTotal = {
+      expr = builtins.all
+        (p: (builtins.tryEval (builtins.deepSeq
+          [ (restartPolicy.launchdKeepAlive p) (restartPolicy.systemdRestart p) ] true)).success)
+        restartPolicy.policies;
+      expected = true;
     };
   };
 in

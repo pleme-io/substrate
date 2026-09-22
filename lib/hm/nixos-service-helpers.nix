@@ -13,6 +13,9 @@
 #   let inherit (nixosHelpers) mkNixOSService mkFirewallConfig mkKernelConfig ...; in { ... }
 { lib }:
 with lib;
+let
+  policies = import ./restart-policy.nix { inherit lib; };
+in
 {
   # ─── Systemd service ──────────────────────────────────────────────────
   # Returns a config block: { systemd.services.<name> = { ... }; }
@@ -48,6 +51,9 @@ with lib;
     execStartPre ? null,
     execStartPost ? null,
     restart ? "always",
+    # "always" | "on-failure" | null (./restart-policy.nix); when set it
+    # decides Restart=, and null leaves `restart` in charge.
+    restartPolicy ? null,
     restartSec ? 5,
     startLimitIntervalSec ? 300,
     startLimitBurst ? 3,
@@ -91,7 +97,7 @@ with lib;
       serviceConfig = {
         Type = type;
         ExecStart = concatStringsSep " " ([command] ++ args);
-        Restart = restart;
+        Restart = policies.restartOr restart restartPolicy;
         RestartSec = restartSec;
         KillMode = killMode;
       }

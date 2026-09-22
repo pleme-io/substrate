@@ -81,6 +81,16 @@
 #                     need root (k3s, networkd, etc.). For per-user
 #                     daemons, prefer withUserDaemon.
 #   daemonSubcommand  subcommand string (default: "daemon").
+#   daemonRestartPolicy
+#                     "always" | "on-failure" | null (default: null) — the
+#                     default of services.<name>.daemon.restartPolicy. The
+#                     closed set and its launchd/systemd spellings live in
+#                     ./hm/restart-policy.nix. `on-failure` is for a daemon
+#                     that can end on purpose: exit 0 stays down, anything
+#                     else is relaunched. null keeps each service manager's
+#                     historic default (NixOS Restart=always, launchd
+#                     KeepAlive=true, systemd user units Restart=on-failure),
+#                     so a spec that never names a policy renders unchanged.
 #
 #   withUserDaemon    bool — add programs.<name>.daemon (HM only). Spawns a
 #                     user-level launchd agent (Darwin) or systemd user unit
@@ -93,6 +103,9 @@
 #                     list of additional CLI args appended after the
 #                     subcommand (default: []).
 #   userDaemonEnv     attrset of env vars (default: {}).
+#   userDaemonRestartPolicy
+#                     as daemonRestartPolicy, for programs.<name>.daemon
+#                     (default: daemonRestartPolicy).
 #
 #   withShikumiConfig bool — add services.<name>.settings and deploy a YAML
 #                     config. Used by shikumi-style apps that read a YAML file
@@ -220,6 +233,7 @@ let
   hmHelpers     = import ./hm/service-helpers.nix         { inherit lib; };
   nixosHelpers  = import ./hm/nixos-service-helpers.nix   { inherit lib; };
   darwinHelpers = import ./hm/darwin-service-helpers.nix  { inherit lib; };
+  restartPolicy = import ./hm/restart-policy.nix          { inherit lib; };
   irohaCore     = import ./iroha/core.nix                 { inherit lib; };
 
   inherit (lib) mkOption mkEnableOption mkIf mkMerge optionalAttrs types literalExpression;
@@ -263,12 +277,26 @@ in
       # literal empty argv element clap rejects as an unexpected argument. The
       # filter makes both platforms emit a clean argv. (extraArgs still append.)
       systemDaemonBaseArgs = if daemonSubcommand == "" then [] else [ daemonSubcommand ];
+      daemonRestartPolicy  = spec.daemonRestartPolicy or null;
 
       withUserDaemon       = spec.withUserDaemon       or false;
       userDaemonSubcommand = spec.userDaemonSubcommand or daemonSubcommand;
       userDaemonBaseArgs   = if userDaemonSubcommand == "" then [] else [ userDaemonSubcommand ];
       userDaemonExtraArgs  = spec.userDaemonExtraArgs  or [];
       userDaemonEnv        = spec.userDaemonEnv        or {};
+      userDaemonRestartPolicy = spec.userDaemonRestartPolicy or daemonRestartPolicy;
+
+      # One option for both daemon arms. Its default is the spec's, so the
+      # tool states its own policy once and every host inherits it.
+      restartPolicyOption = default: mkOption {
+        type = types.nullOr restartPolicy.type;
+        inherit default;
+        description = ''
+          When the service manager starts the daemon again: "always", or
+          "on-failure" (exit 0 stays down, anything else is relaunched).
+          null keeps the service manager's own default.
+        '';
+      };
 
       withShikumiConfig = spec.withShikumiConfig or false;
       shikumiDefaults   = spec.shikumiDefaults   or {};
@@ -466,6 +494,7 @@ in
             default = userDaemonEnv;
             description = "Environment variables for the user daemon.";
           };
+          restartPolicy = restartPolicyOption userDaemonRestartPolicy;
         };
       } // extraHmOptions;
 
@@ -612,6 +641,7 @@ in
             default = {};
             description = "Environment variables for the daemon.";
           };
+          restartPolicy = restartPolicyOption daemonRestartPolicy;
         };
       } // extraSystemOptions;
 
@@ -763,6 +793,7 @@ in
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
                   logDir = "${homeDir}/Library/Logs";
+                  restartPolicy = cfg.daemon.restartPolicy;
                 }))
               (mkIf (withUserDaemon && (cfg.daemon.enable or false) && !pkgs.stdenv.isDarwin)
                 (hmHelpers.mkSystemdService {
@@ -771,6 +802,7 @@ in
                   command = "${cfg.package}/bin/${binaryName}";
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment;
+                  restartPolicy = cfg.daemon.restartPolicy;
                 }))
 
               (extraHmConfig cfg)
@@ -889,6 +921,7 @@ in
               # path rendered by sops) must not be silently overridden by the
               # module's own render.
               environment = sys.env // cfg.daemon.environment;
+              restartPolicy = cfg.daemon.restartPolicy;
             }))
 
             (extraNixosConfig cfg)
@@ -922,6 +955,7 @@ in
               command = "${cfg.package}/bin/${binaryName}";
               args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
               env = sys.env // cfg.daemon.environment;
+              restartPolicy = cfg.daemon.restartPolicy;
             }))
 
             (extraDarwinConfig cfg)

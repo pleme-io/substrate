@@ -19,6 +19,9 @@
 #   let inherit (darwinHelpers) mkLaunchdDaemon mkLaunchdPeriodicDaemon ...; in { ... }
 { lib }:
 with lib;
+let
+  policies = import ./restart-policy.nix { inherit lib; };
+in
 {
   # ─── System-level launchd daemon (persistent, runs as root) ──────────
   # Returns: { launchd.daemons.<name> = { serviceConfig = { ... }; }; }
@@ -45,6 +48,9 @@ with lib;
     env ? {},
     logDir ? "/var/log",
     keepAlive ? true,
+    # "always" | "on-failure" | null (./restart-policy.nix); when set it
+    # decides KeepAlive, and null leaves `keepAlive` in charge.
+    restartPolicy ? null,
     runAtLoad ? true,
     processType ? "Adaptive",
     userName ? "root",
@@ -58,7 +64,7 @@ with lib;
         Label = label;
         ProgramArguments = [ command ] ++ args;
         RunAtLoad = runAtLoad;
-        KeepAlive = keepAlive;
+        KeepAlive = policies.keepAliveOr keepAlive restartPolicy;
         ProcessType = processType;
         StandardOutPath = "${logDir}/${name}.log";
         StandardErrorPath = "${logDir}/${name}.err";

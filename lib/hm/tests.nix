@@ -152,6 +152,15 @@ in runTests [
       && svc.systemd.user.services.zoekt-webserver.Install.WantedBy == ["default.target"])
     "systemd service should have description, type, restart policy, and wantedBy")
 
+  # A named restart policy reaches Service.Restart (module-trio passes a
+  # daemon's `restartPolicy` straight through).
+  (let svc = serviceHelpers.mkSystemdService {
+    name = "always"; description = "d"; command = "/bin/t"; restartPolicy = "always";
+  };
+  in mkTest "systemd-restart-policy"
+    (svc.systemd.user.services.always.Service.Restart == "always")
+    "restartPolicy must reach Service.Restart")
+
   # ── ★ THE START LIMIT MUST BE REACHABLE — regression, rio 2026-08-05 ─────
   # systemd's default limit is 5 starts / 10s. With RestartSec=5 only ~2 starts
   # land in a 10s window, so the default is UNREACHABLE and a permanently

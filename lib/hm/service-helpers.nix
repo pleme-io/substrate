@@ -13,6 +13,9 @@
 #   let inherit (hmHelpers) mkMcpOptions mkMcpServerEntry mkLaunchdService ...; in { ... }
 { lib }:
 with lib;
+let
+  policies = import ./restart-policy.nix { inherit lib; };
+in
 {
   # ─── MCP server entry options ─────────────────────────────────────────
   # Standard option set for services.<name>.mcp: { enable, package, serverEntry }
@@ -142,6 +145,9 @@ with lib;
     env ? {},
     logDir,
     keepAlive ? true,
+    # "always" | "on-failure" | null (./restart-policy.nix); when set it
+    # decides KeepAlive, and null leaves `keepAlive` in charge.
+    restartPolicy ? null,
     runAtLoad ? true,
     processType ? "Adaptive",
     nice ? null,
@@ -154,7 +160,7 @@ with lib;
         Label = label;
         ProgramArguments = [command] ++ args;
         RunAtLoad = runAtLoad;
-        KeepAlive = keepAlive;
+        KeepAlive = policies.keepAliveOr keepAlive restartPolicy;
         ProcessType = processType;
         StandardOutPath = "${logDir}/${name}.log";
         StandardErrorPath = "${logDir}/${name}.err";
@@ -210,6 +216,9 @@ with lib;
     after ? ["default.target"],
     wantedBy ? ["default.target"],
     preStart ? null,
+    # "always" | "on-failure" | null (./restart-policy.nix); null keeps
+    # Restart=on-failure.
+    restartPolicy ? null,
     restartSec ? 5,
     # ── ★ A START LIMIT THAT CAN ACTUALLY BE REACHED ────────────────────
     # systemd's start limit is `StartLimitBurst` starts within
@@ -256,7 +265,7 @@ with lib;
       Service = {
         Type = "simple";
         ExecStart = concatStringsSep " " ([command] ++ args);
-        Restart = "on-failure";
+        Restart = policies.restartOr "on-failure" restartPolicy;
         RestartSec = restartSec;
       } // optionalAttrs (env != {}) {
         Environment = mapAttrsToList (k: v: "${k}=${v}") env;
