@@ -167,6 +167,17 @@ rec {
       else let runs = lib.imap0 (normalizeRun who) merged.runs;
            in builtins.deepSeq runs (merged // { inherit runs; });
 
+  # Resolve one nixpkgs attribute NAME from a `tests.cargo` declaration,
+  # naming the declaration when the attribute does not exist.
+  #
+  # Exported because the names have two readers: the runner below, and the DEV
+  # SHELL (tool-release.nix), which carries them for the same reason — CI
+  # compiles these tests inside `nix develop`. One typo should read the same
+  # from either side rather than surfacing as nixpkgs' bare
+  # "attribute 'opensl' missing" in one of them.
+  byNameIn = pkgs: who: n:
+    pkgs.${n} or (throw "substrate/rust: ${who} — `tests.cargo` names nixpkgs attribute `${n}`, which does not exist.");
+
   # The exact argv of one run, after `cargo`. Pure, so the shape of every
   # invocation is assertable without building anything.
   argvFor = run:
@@ -218,7 +229,7 @@ rec {
   }:
     let
       cfg = normalize name config;
-      byName = n: pkgs.${n} or (throw "substrate/rust: ${name} — `tests.cargo` names nixpkgs attribute `${n}`, which does not exist.");
+      byName = byNameIn pkgs name;
       receipt = builtins.toJSON (receiptFor { inherit name cfg; });
     in
       if !(builtins.pathExists lockFile)

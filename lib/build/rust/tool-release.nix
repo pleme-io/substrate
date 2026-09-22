@@ -614,11 +614,16 @@ let
   # needs too. `buildInputs` are already derivations, and are passed as-is.
   cargoTestDecl = let decl = tests.cargo or { }; in
     if builtins.isAttrs decl then decl else { };
+  # The same resolver the runner uses, so one typo reads the same from either
+  # side (./workspace-tests.nix, `byNameIn`).
+  byTestName =
+    (import ./workspace-tests.nix { lib = hostPkgs.lib; }).byNameIn hostPkgs resolvedShape.who;
   devShellSystemInputs = {
-    nativeBuildInputs = builtins.map (name: hostPkgs.${name})
-      (hostPkgs.lib.unique ((cargoTestDecl.nativeBuildInputs or [ ]) ++ nativeBuildInputs));
+    nativeBuildInputs = builtins.map byTestName
+      (hostPkgs.lib.unique (cargoTestDecl.nativeBuildInputs or [ ]))
+      ++ builtins.map (name: hostPkgs.${name}) nativeBuildInputs;
     buildInputs = buildInputs
-      ++ builtins.map (name: hostPkgs.${name}) (cargoTestDecl.buildInputs or [ ]);
+      ++ builtins.map byTestName (cargoTestDecl.buildInputs or [ ]);
   };
   mkCargoTests = cargoDecl:
     if effectiveMode == "lockfile"
