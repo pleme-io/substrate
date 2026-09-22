@@ -220,6 +220,11 @@ let
         && lib.any (lib.hasPrefix "openssl") names)
       "a system library `tests.cargo` declares must be in the dev shell too — CI compiles those tests there")
 
+    (testHelpers.mkTest "declared-test-system-libs-are-loadable-at-run-time"
+      (let shell = (outputsFor { tests.cargo = declaringSystemLibs; }).devShells.default; in
+        lib.hasInfix "openssl" (shell.LD_LIBRARY_PATH or ""))
+      "linking is not loading: the test binary cargo builds in the shell must be able to open the library, which in `nix develop` needs the path (engenho: `libssl.so.3: cannot open shared object file`)")
+
     (testHelpers.mkTest "an-undeclaring-consumer-gets-no-system-libs"
       (let names = shellNames { }; in
         !(lib.any (lib.hasPrefix "openssl") names)

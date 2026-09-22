@@ -173,5 +173,26 @@ in rec {
       pkgs.mkShell ({
         buildInputs = tools ++ buildInputs ++ extraPackages ++ darwinInputs;
         inherit nativeBuildInputs;
-      } // env);
+      }
+      # ── The C libs must be findable at RUN time, not only at link time ──
+      # `buildInputs` lets a `-sys` crate COMPILE in the shell; the test binary
+      # cargo then produces still has to load the library. In a derivation the
+      # ld wrapper's rpath covers that; in `nix develop` it does not, and the
+      # binary looks for a bare soname the dynamic linker cannot resolve.
+      #
+      # Measured 2026-09-22 on pleme-io/engenho: with openssl in `buildInputs`
+      # the compile succeeded and nextest then died listing tests —
+      # `engenho_apiserver-…: error while loading shared libraries:
+      # libssl.so.3: cannot open shared object file`. Linking and loading are
+      # two facts, and a shell that serves only the first turns a build failure
+      # into a later, stranger one.
+      #
+      # Only the declared C libs go on the path — not the toolchain, not the
+      # dev tools — so nothing shadows the loader's view of ordinary binaries.
+      # Ignored on darwin (which reads DYLD_*), where these crates link
+      # frameworks from the SDK instead.
+      // lib.optionalAttrs (buildInputs != [ ]) {
+        LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+      }
+      // env);
 }
