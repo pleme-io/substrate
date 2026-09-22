@@ -349,4 +349,39 @@ moduleEvalCases
     expr = (evalSeedHomeManager disabled [ ]).launchd.agents ? off-seed;
     expected = false;
   };
+
+  hm-with-homeDirectory-uses-per-user-path-not-run-secrets = {
+    # The regression this exists to catch: /run/secrets/* is sops-nix's
+    # NixOS path; a caller that passes homeDirectory must get a script
+    # reading the home-manager sops module's actual per-user location, and
+    # the corresponding sops.secrets declaration must land under it too.
+    expr =
+      let
+        withHome = kata.mkSecretSeed {
+          name = "grafana-admin";
+          namespace = "monitoring";
+          k8sNamespace = "monitoring";
+          homeDirectory = "/Users/op";
+          data.admin-user.sopsPath = "monitoring/grafana-admin-user";
+        };
+        out = evalSeedHomeManager withHome [ ];
+        script = lib.concatStringsSep " " out.launchd.agents."grafana-admin-seed".config.ProgramArguments;
+      in
+      {
+        # The functional line: the actual --from-file argument the apply
+        # reads from. This is the property that matters — a file that does
+        # not exist at the path named here is a Secret with no data.
+        fromFileUsesHomePath = lib.hasInfix "--from-file=admin-user=/Users/op/.local/state/kata-secret-seed/monitoring/grafana-admin-user" script;
+        sopsPath = out.sops.secrets."monitoring/grafana-admin-user".path;
+        # NOT asserted: total absence of "/run/secrets" from the script.
+        # restartTriggers is shared across both outputs (pending-secret-
+        # seed-rotation-trigger, unrelated to this fix) and still folds the
+        # nixos path in as an inert `: # seed-trigger=...` comment line —
+        # correct to leave alone here, out of scope for this letter.
+      };
+    expected = {
+      fromFileUsesHomePath = true;
+      sopsPath = "/Users/op/.local/state/kata-secret-seed/monitoring/grafana-admin-user";
+    };
+  };
 }

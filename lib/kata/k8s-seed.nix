@@ -94,8 +94,30 @@
 #                     outputs (secret-seed's `sops.secrets` and
 #                     manifest-seed's `environment.etc` each have a
 #                     home-manager implementation too);
-#     logDir      ? "/var/log" — homeManager only: stdout/stderr go to
-#                     `<logDir>/<name>-seed.{log,err}`;
+#     homeDirectory ? null — REQUIRED to get anything meaningful out of
+#                     `.homeManager` whenever a caller's script/extraConfig
+#                     touch a filesystem path: NixOS's `/etc` and sops-nix's
+#                     `/run/secrets/*` have NO home-manager equivalent (they
+#                     are root/system paths; home-manager materializes
+#                     everything under $HOME), so a caller whose script
+#                     embeds one of those must pass a HOME-RELATIVE
+#                     replacement via `homeManagerScript`/
+#                     `homeManagerExtraConfig` below, and needs
+#                     `homeDirectory` to compute it. Also becomes the default
+#                     `logDir` (`<homeDirectory>/Library/Logs`) — `/var/log`
+#                     is root-owned and a per-user launchd agent cannot
+#                     write there;
+#     homeManagerScript ? script — the script text for the `.homeManager`
+#                     output specifically, when it must differ from `script`
+#                     (a different file path baked into the command). Falls
+#                     back to `script` unchanged, which is correct whenever
+#                     the caller's script has nothing platform-specific in it;
+#     homeManagerExtraConfig ? extraConfig — same idea, for the config
+#                     merged alongside the launchd agent (e.g. `home.file`
+#                     instead of `environment.etc`);
+#     logDir      ? "/var/log", or "<homeDirectory>/Library/Logs" when
+#                     `homeDirectory` is set — homeManager only:
+#                     stdout/stderr go to `<logDir>/<name>-seed.{log,err}`;
 #     startLimitIntervalSec ? 900 / startLimitBurst ? 60 — see the note at the
 #                     unit; the default is rio's hand-derived, REACHABLE bound;
 #     meta        ? { } — passed through to the result verbatim;
@@ -143,8 +165,23 @@ let
       extraConfig = spec.extraConfig or { };
       startLimitIntervalSec = spec.startLimitIntervalSec or 900;
       startLimitBurst = spec.startLimitBurst or 60;
-      logDir = spec.logDir or "/var/log";
+      homeDirectory = spec.homeDirectory or null;
+      logDir = spec.logDir or (if homeDirectory != null then "${homeDirectory}/Library/Logs" else "/var/log");
       meta = spec.meta or { };
+
+      # Fall back to the shared values unchanged — correct whenever a
+      # caller's script/extraConfig has nothing platform-specific baked in
+      # (e.g. secret-seed's grafana-admin test fixtures, which touch no
+      # `/etc` path at all).
+      hmScriptOverride =
+        let raw = spec.homeManagerScript or script; in
+        if !(builtins.isString raw) then
+          throw "${errPrefix}`homeManagerScript` must be a string — got ${builtins.typeOf raw} for seed '${name}'."
+        else if lib.trim raw == "" then
+          throw "${errPrefix}`homeManagerScript` must be non-empty (seed '${name}')."
+        else
+          raw;
+      homeManagerExtraConfig = spec.homeManagerExtraConfig or extraConfig;
 
       unitName = "${name}-seed";
 
@@ -256,7 +293,7 @@ let
         while [ "$_attempt" -lt ${toString startLimitBurst} ]; do
           _attempt=$(( _attempt + 1 ))
           if (
-            ${script}
+            ${hmScriptOverride}
           ); then
             exit 0
           fi
@@ -299,8 +336,13 @@ let
           #
           # `launchd.agents.<name>.config`, NOT `.daemon` — see the header
           # note on why this is an HM agent rather than a darwinModule daemon.
+          #
+          # `homeManagerExtraConfig`, NOT `extraConfig` — `environment.etc`
+          # and `sops.secrets` paths like `/run/secrets/*` are NixOS/system
+          # concepts with no home-manager equivalent; a caller whose script
+          # touches either must supply the home-relative replacement here.
           config = lib.mkIf cfg.enable (
-            lib.recursiveUpdate extraConfig {
+            lib.recursiveUpdate homeManagerExtraConfig {
               launchd.agents.${unitName} = {
                 enable = true;
                 config = rendered.serviceConfig;

@@ -34,6 +34,13 @@ let
           type = lib.types.attrsOf lib.types.anything;
           default = { };
         };
+        # For the homeDirectory-aware homeManager path: home.file is
+        # home-manager's actual file-materialization primitive, unlike
+        # environment.etc which does not exist there at all.
+        home.file = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+        };
       };
     };
 
@@ -381,6 +388,33 @@ in
       && lib.hasInfix "--force-conflicts" script
       && lib.hasInfix "wait --for=condition=established" script;
     expected = true;
+  };
+
+  hm-with-homeDirectory-uses-home-file-not-etc = {
+    # The regression this exists to catch: environment.etc and
+    # /run/secrets/* have no home-manager equivalent at all, so a caller
+    # that passes homeDirectory must get a script referencing a path
+    # actually materialized by `home.file`, not the nixos `/etc` one.
+    expr =
+      let
+        withHome = kata.mkManifestSeed {
+          name = "pleme-org-posture";
+          manifests."10-template" = "apiVersion: v1\nkind: ConfigMap\n";
+          homeDirectory = "/Users/op";
+        };
+        out = evalSeedHomeManager withHome;
+        script = lib.concatStringsSep " " out.launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
+      in
+      {
+        scriptUsesHomePath = lib.hasInfix "/Users/op/.local/state/kata-manifest-seed/pleme-org-posture/10-template.yaml" script;
+        scriptAvoidsEtc = !(lib.hasInfix "/etc/kata-manifest-seed" script);
+        fileLandsUnderHomeFile = out.home.file.".local/state/kata-manifest-seed/pleme-org-posture/10-template.yaml".text;
+      };
+    expected = {
+      scriptUsesHomePath = true;
+      scriptAvoidsEtc = true;
+      fileLandsUnderHomeFile = "apiVersion: v1\nkind: ConfigMap\n";
+    };
   };
 
   hm-restart-trigger-moves-with-the-content = {

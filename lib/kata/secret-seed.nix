@@ -146,6 +146,16 @@ let
       # restartTrigger fires on rotation.
       sopsFile = sopsPath: "/run/secrets/${sopsPath}";
 
+      # ── ★ THE HOME-MANAGER EQUIVALENT OF `/run/secrets` ──────────────────
+      # `/run/secrets/*` is sops-nix's NixOS-module path — a root-owned
+      # tmpfs. sops-nix's home-manager module decrypts to a PER-USER
+      # location instead, so a script hardcoding `/run/secrets/...` reads a
+      # file that was never written on the homeManager side. Only computed
+      # when a caller supplies `homeDirectory` (same contract as
+      # kata.manifest-seed's equivalent fix).
+      homeDirectory = spec.homeDirectory or null;
+      hmSopsFile = sopsPath: "${homeDirectory}/.local/state/kata-secret-seed/${sopsPath}";
+
       # ── the one sanctioned bash: GENERATED + idempotent ────────────────
       # Per the kata/iroha law, the only bash a letter may emit is generated
       # from typed data. This is `kubectl create … --dry-run=client -o yaml |
@@ -154,7 +164,11 @@ let
         k: "--from-file=${k}=${sopsFile data.${k}.sopsPath}"
       ) dataKeys;
 
-      script = ''
+      hmFromFileArgs = lib.concatMapStringsSep " " (
+        k: "--from-file=${k}=${hmSopsFile data.${k}.sopsPath}"
+      ) dataKeys;
+
+      mkScript = fromFileArgsText: ''
         set -euo pipefail
 
         # Ensure the target namespace exists (idempotent — the consuming
@@ -167,11 +181,14 @@ let
         ${kubectl} create secret generic ${secretName} \
           --namespace ${k8sNamespace} \
           --type ${secretType} \
-          ${fromFileArgs} \
+          ${fromFileArgsText} \
           --dry-run=client -o yaml | ${kubectl} apply -f -
 
         echo "kata-secret-seed: reconciled secret ${k8sNamespace}/${secretName}"
       '';
+
+      script = mkScript fromFileArgs;
+      hmScript = mkScript hmFromFileArgs;
 
       sopsSecrets = lib.listToAttrs (
         map (
@@ -184,6 +201,18 @@ let
         ) dataKeys
       );
 
+      # No `owner` on the home-manager side — there is no root/user split to
+      # express, the file is already the invoking user's by construction.
+      hmSopsSecrets = lib.listToAttrs (
+        map (
+          k:
+          lib.nameValuePair data.${k}.sopsPath {
+            mode = "0400";
+            path = hmSopsFile data.${k}.sopsPath;
+          }
+        ) dataKeys
+      );
+
       # ── the unit shape comes from kata.k8s-seed, NOT from here ───────────
       # This letter owns the SCRIPT and the sops declarations; the oneshot,
       # the ordering, the option root and the reachable bootstrap retry bound
@@ -191,7 +220,12 @@ let
       # `kata-secret-seed-parity` — the 337 secret declarations on 18 nodes
       # are why the engine had to be lifted without moving a single byte of
       # this letter's output.
-      seed = k8sSeed.mkSeedUnit {
+      #
+      # ★ PARENTHESIZED — see manifest-seed.nix's identical note: `f { A } //
+      # { B }` is `(f { A }) // { B }`, not `f ({ A } // { B })`. Without the
+      # parens homeManagerScript/homeManagerExtraConfig land as stray keys on
+      # the RESULT and never reach mkSeedUnit's argument.
+      seed = k8sSeed.mkSeedUnit ({
         inherit
           name
           namespace
@@ -242,13 +276,20 @@ let
         # that changed the secret. If the unit is older, nothing was delivered.
         restartTriggers = map (k: sopsFile data.${k}.sopsPath) dataKeys;
         extraConfig.sops.secrets = sopsSecrets;
+        inherit homeDirectory;
+      }
+      // lib.optionalAttrs (homeDirectory != null) {
+        homeManagerScript = hmScript;
+        homeManagerExtraConfig.sops.secrets = hmSopsSecrets;
+      }
+      // {
         errPrefix = "kata.secret-seed.mkSecretSeed: ";
         meta = {
           inherit name secretName k8sNamespace;
           keys = dataKeys;
           kind = "secret-seed";
         };
-      };
+      });
 
       inherit (seed) nixos homeManager meta;
     in

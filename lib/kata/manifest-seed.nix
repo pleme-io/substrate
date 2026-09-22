@@ -133,6 +133,18 @@ let
       etcDir = "kata-manifest-seed/${name}";
       manifestPath = k: "/etc/${etcDir}/${k}.yaml";
 
+      # ── ★ THE HOME-MANAGER EQUIVALENT OF `/etc` ───────────────────────────
+      # `environment.etc` is a NixOS/nix-darwin SYSTEM option with no
+      # home-manager equivalent at all — home-manager materializes files
+      # under `home.file`, relative to $HOME. So the homeManager rendering
+      # needs its own path scheme and its own script, not just its own
+      # supervisor. Only computed when a caller supplies `homeDirectory`
+      # (required to know where $HOME actually is); a caller that never
+      # touches `.homeManager` pays nothing for this.
+      homeDirectory = spec.homeDirectory or null;
+      hmStateDir = ".local/state/${etcDir}";
+      hmManifestPath = k: "${homeDirectory}/${hmStateDir}/${k}.yaml";
+
       applyFlags = lib.concatStringsSep " " (
         lib.optional serverSide "--server-side"
         ++ lib.optional serverSide "--field-manager=${fieldManager}"
@@ -155,7 +167,11 @@ let
         ${kubectl} apply ${applyFlags} -f ${manifestPath k}
       '') keys;
 
-      script = ''
+      hmApplies = lib.concatMapStringsSep "\n" (k: ''
+        ${kubectl} apply ${applyFlags} -f ${hmManifestPath k}
+      '') keys;
+
+      mkScript = applyLines: ''
         set -euo pipefail
 
         ${lib.optionalString (requireCrds != [ ]) ''
@@ -165,12 +181,23 @@ let
           ${crdWaits}
         ''}
         ${lib.optionalString (namespaces != [ ]) nsEnsures}
-        ${applies}
+        ${applyLines}
 
         echo "kata-manifest-seed: reconciled ${toString (builtins.length keys)} manifest(s) for ${name}"
       '';
 
-      seed = k8sSeed.mkSeedUnit {
+      script = mkScript applies;
+      hmScript = mkScript hmApplies;
+
+      # ★ PARENTHESIZED: `f { A } // { B }` parses as `(f { A }) // { B }` —
+      # function application binds tighter than `//` — so the merge must
+      # close BEFORE mkSeedUnit is applied, or homeManagerScript /
+      # homeManagerExtraConfig land as stray keys on the RESULT instead of
+      # reaching mkSeedUnit's argument at all. Caught by
+      # hm-with-homeDirectory-uses-home-file-not-etc failing outright rather
+      # than silently: the fallback-to-nixos-shape defaults masked it as a
+      # passing case until that test asserted the actual path.
+      seed = k8sSeed.mkSeedUnit ({
         inherit name description script;
         namespace = spec.namespace or "services";
         enable = spec.enable or true;
@@ -227,6 +254,26 @@ let
           ) keys
         );
 
+        # ── the homeManager equivalents ──────────────────────────────────
+        # Only meaningful when the caller passed `homeDirectory`; otherwise
+        # these fall back to k8sSeed.mkSeedUnit's own defaults (identical to
+        # `script`/`extraConfig`), which is dead code for a caller that never
+        # imports `.homeManager` — no cost, no behavior change for the many
+        # nixos-only consumers (rio, camelot, …).
+        inherit homeDirectory;
+      }
+      // lib.optionalAttrs (homeDirectory != null) {
+        homeManagerScript = hmScript;
+        homeManagerExtraConfig.home.file = lib.listToAttrs (
+          map (
+            k:
+            lib.nameValuePair "${hmStateDir}/${k}.yaml" {
+              text = manifests.${k};
+            }
+          ) keys
+        );
+      }
+      // {
         inherit errPrefix;
         meta = {
           inherit
@@ -237,7 +284,7 @@ let
             ;
           kind = "manifest-seed";
         };
-      };
+      });
     in
     seed;
 in
