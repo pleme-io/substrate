@@ -17,6 +17,7 @@ let
   fragmentHelpers = import ./flake-fragment-helpers.nix { inherit lib; };
   nixosHelpers = import ./nixos-service-helpers.nix { inherit lib; };
   mcpHelpers = import ./mcp-helpers.nix { inherit lib; };
+  userDefaultsHelpers = import ./user-defaults-helpers.nix { inherit lib; };
 
   inherit (testHelpers) mkTest runTests;
 in runTests [
@@ -859,5 +860,41 @@ in runTests [
     (!srv.enable
       && srv.envFiles == { } && fleet.homeFiles == { } && fleet.sopsSecrets == { })
     "mkMcpFleet splunk entry with creds omitted must still emit no dummy cred (credEnvs = [] → autoCreds = []) and default enable=false")
+
+  # ════════════════════════════════════════════════════════════════════
+  # user-defaults-helpers.nix — mkUserDefaultsActivation
+  # ════════════════════════════════════════════════════════════════════
+
+  (mkTest "user-defaults-empty-settings-is-no-activation"
+    (userDefaultsHelpers.mkUserDefaultsActivation {
+      name = "gemini-desktop"; domain = "com.google.GeminiMacOS";
+      homeDirectory = "/Users/op"; settings = { };
+    } == { })
+    "empty settings must produce {} — no activation entry for a component with nothing to write")
+
+  (let
+    out = userDefaultsHelpers.mkUserDefaultsActivation {
+      name = "gemini-desktop"; domain = "com.google.GeminiMacOS";
+      homeDirectory = "/Users/op"; settings = { AutoUpdateEnabled = false; };
+    };
+    script = out.home.activation.gemini-desktop.data or out.home.activation.gemini-desktop;
+    text = builtins.toString script;
+  in mkTest "user-defaults-targets-the-right-plist-and-merges-not-imports"
+    (out ? home.activation.gemini-desktop
+      && lib.hasInfix "/Users/op/Library/Preferences/com.google.GeminiMacOS.plist" text
+      && lib.hasInfix "PlistBuddy" text
+      && lib.hasInfix "Merge" text
+      && !(lib.hasInfix "defaults import" text))
+    "non-empty settings must activate against the domain's real plist path via PlistBuddy Merge, never a destructive `defaults import`")
+
+  (let
+    out = userDefaultsHelpers.mkUserDefaultsActivation {
+      name = "x"; domain = "com.example.App"; homeDirectory = "/Users/op";
+      settings = { ContainsQuote = "it's fine"; };
+    };
+    text = builtins.toString (out.home.activation.x.data or out.home.activation.x);
+  in mkTest "user-defaults-shell-escapes-embedded-quotes"
+    (lib.hasInfix "it'\\''s fine" text)
+    "a settings value containing a literal single-quote must be shell-escaped (escapeShellArg), not interpolated raw into a single-quoted printf")
 
 ]
