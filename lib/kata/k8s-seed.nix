@@ -28,6 +28,39 @@
 # Pure { lib } at import. No package is resolved here — `kubectl` arrives as a
 # string the caller's script interpolates.
 #
+# ── ★ THE DARWIN OUTPUT — one script, two supervisors ─────────────────────
+# Added when ryn took over org-wide GitOps reconciliation from plo: the same
+# seed shape (a bounded-retry reconcile that gives up rather than loops
+# forever) is needed on a Darwin engenho node, and systemd does not exist
+# there. `nixos` above stays byte-for-byte unchanged; `darwin` is additive.
+#
+# launchd has no unit-dependency ordering (`after`/`wants` are accepted for
+# interface parity and otherwise UNUSED on this side — a dependency that
+# isn't up yet just fails an attempt, which the retry loop already tolerates)
+# and no native "N starts within T seconds, then stay failed" circuit
+# breaker the way `StartLimitIntervalSec`/`StartLimitBurst` give systemd. So
+# the retry bound moves INTO the generated script as a bounded attempt loop
+# — up to `startLimitBurst` tries, `5s` apart (matching the hardcoded
+# `RestartSec` above), bailing early if `startLimitIntervalSec` wall-clock
+# elapses first. This is the same reduction the systemd bound's own comment
+# already makes by hand ("60 attempts at 5s span 300s, comfortably inside a
+# 900s window") — not a new algorithm, the existing mental model made literal
+# for a platform with no supervisor-level equivalent. One launchd
+# `RunAtLoad`-triggered invocation IS one bounded campaign; there is no
+# `KeepAlive` respawn to layer a second retry mechanism on top of.
+#
+# `restartTriggers` has no systemd unit to bump — nix-darwin's own launchd
+# activation diffs each job's rendered plist and reloads only the ones that
+# changed, so folding each trigger value into the script text (as an inert
+# `: # seed-trigger=<value>` line) is sufficient: the derivation content
+# moves, the plist moves, nix-darwin reloads it on the next `rebuild`. No
+# bespoke trigger plumbing needed on this side, unlike systemd's explicit
+# `X-Restart-Triggers`.
+#
+# Runs as a `launchd.daemons` entry (nix-darwin, system-level, root) — the
+# darwin peer of `systemd.services` above, not a home-manager `launchd.agents`
+# entry, matching this letter's existing system-level placement.
+#
 # Exports:
 #
 #   mkSeedUnit :: {
@@ -38,19 +71,29 @@
 #     optionDescription :: str (required) — the enable option's description;
 #     script      :: str (required, non-empty) — the generated unit body;
 #     kubeconfig  ? "/etc/rancher/k3s/k3s.yaml" — KUBECONFIG for the unit;
-#     after       ? [ "k3s.service" ];
-#     wants       ? [ "k3s.service" ];
-#     restartTriggers ? [ ] — paths whose change re-runs the seed;
-#     extraConfig ? { } — merged into the emitted module's `config`;
+#     after       ? [ "k3s.service" ] — nixos only, informational on darwin;
+#     wants       ? [ "k3s.service" ] — nixos only, informational on darwin;
+#     restartTriggers ? [ ] — values whose change re-runs the seed (a path on
+#                     nixos; ANY string on darwin — see the note above);
+#     extraConfig ? { } — merged into the emitted NIXOS module's `config`
+#                     only (darwin has no `sops.secrets`/`environment.etc`
+#                     analog here — a darwin-specific extra hook can be added
+#                     the day a second consumer needs one);
+#     logDir      ? "/var/log" — darwin only: stdout/stderr go to
+#                     `<logDir>/<name>-seed.{log,err}`;
 #     startLimitIntervalSec ? 900 / startLimitBurst ? 60 — see the note at the
 #                     unit; the default is rio's hand-derived, REACHABLE bound;
 #     meta        ? { } — passed through to the result verbatim;
 #     errPrefix   ? "kata.k8s-seed.mkSeedUnit: " — prefix for this letter's
 #                     throws, so a caller's errors name the CALLER's letter;
-#   } -> { nixos :: class-tagged module; meta; unitName; optionPath; }
+#   } -> {
+#     nixos :: class-tagged module; darwin :: class-tagged module;
+#     meta; unitName; optionPath;
+#   }
 { lib }:
 let
   iroha = import ../iroha { inherit lib; };
+  launchdUnit = import ../iroha/launchd-unit.nix { inherit lib; };
 
   mkSeedUnit =
     spec:
@@ -85,6 +128,7 @@ let
       extraConfig = spec.extraConfig or { };
       startLimitIntervalSec = spec.startLimitIntervalSec or 900;
       startLimitBurst = spec.startLimitBurst or 60;
+      logDir = spec.logDir or "/var/log";
       meta = spec.meta or { };
 
       unitName = "${name}-seed";
@@ -175,6 +219,72 @@ let
           );
         };
 
+      # ── The darwin script: the retry bound made literal ───────────────────
+      # One `RunAtLoad` invocation = one bounded campaign of up to
+      # `startLimitBurst` attempts, `5s` apart (matching `RestartSec` above),
+      # bailing early on the `startLimitIntervalSec` wall-clock — see the
+      # header note for why this reduction is faithful to the systemd bound
+      # rather than a new algorithm. `restartTriggers` fold in as inert
+      # comment lines purely so the script TEXT (and therefore the rendered
+      # plist) changes when they do; nix-darwin's own activation reloads a
+      # job whose plist changed, which is what stands in for systemd's
+      # `X-Restart-Triggers` here.
+      darwinTriggerLines = lib.concatMapStringsSep "\n" (t: ": # seed-trigger=${t}") restartTriggers;
+
+      darwinScript = ''
+        set -uo pipefail
+        ${darwinTriggerLines}
+        export KUBECONFIG=${lib.escapeShellArg kubeconfig}
+
+        _attempt=0
+        _deadline=$(( $(date +%s) + ${toString startLimitIntervalSec} ))
+        while [ "$_attempt" -lt ${toString startLimitBurst} ]; do
+          _attempt=$(( _attempt + 1 ))
+          if (
+            ${script}
+          ); then
+            exit 0
+          fi
+          if [ "$(date +%s)" -ge "$_deadline" ]; then
+            break
+          fi
+          sleep 5
+        done
+        echo "${unitName}: giving up after $_attempt attempt(s) — bootstrap retry bound (${toString startLimitBurst}/${toString startLimitIntervalSec}s) exceeded" >&2
+        exit 1
+      '';
+
+      darwinConfigModule =
+        { config, lib, ... }:
+        let
+          cfg = lib.attrByPath surface.optionPath { } config;
+          rendered = launchdUnit.mkLaunchdUnit {
+            label = "io.pleme.${unitName}";
+            programArguments = [
+              "/bin/bash"
+              "-c"
+              darwinScript
+            ];
+            runAtLoad = true;
+            keepAlive = false;
+            standardOutPath = "${logDir}/${unitName}.log";
+            standardErrorPath = "${logDir}/${unitName}.err";
+          };
+        in
+        {
+          # `extraConfig` merges here too, NOT just on the nixos side —
+          # manifest-seed's `environment.etc.*` (where the manifest YAML
+          # actually lands for `kubectl apply -f` to read) is a nix-darwin
+          # option as well, and secret-seed's `sops.secrets` likewise has a
+          # darwin implementation via sops-nix's darwinModule. A caller whose
+          # `extraConfig` genuinely names a nixos-only option gets a clear
+          # eval error naming it when `.darwin` is imported — an honest
+          # failure, not a silent gap, and no reason to special-case away.
+          config = lib.mkIf cfg.enable (
+            lib.recursiveUpdate extraConfig { launchd.daemons.${unitName} = rendered.daemon; }
+          );
+        };
+
       # The enable option defaults to `enable` (mkDefault so a node can flip
       # it). mkOptionSurface emits mkEnableOption (default false); layer the
       # configured default on top via the option root.
@@ -189,9 +299,18 @@ let
         ]
         ++ lib.optional enable enableDefaultModule;
       };
+
+      darwinModule = {
+        imports = [
+          surface.module
+          darwinConfigModule
+        ]
+        ++ lib.optional enable enableDefaultModule;
+      };
     in
     {
       nixos = iroha.tag "nixos" module;
+      darwin = iroha.tag "darwin" darwinModule;
       inherit meta unitName;
       optionPath = surface.optionPath;
     };
