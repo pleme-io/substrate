@@ -318,8 +318,14 @@ in
   # kata.k8s-seed's HOME-MANAGER (darwin) output, asserted through this
   # letter — same contract as the nixos suite above, ryn (Darwin engenho,
   # per-user) is the first real consumer (org-wide GitHub-repo
-  # reconciliation, moved off plo). It is a launchd AGENT (`.config`), not
-  # a darwinModule daemon — see the letter's header for why.
+  # reconciliation, moved off plo). It is `launchd.agents.<name>.
+  # serviceConfig` — nix-darwin's own shape, which is what this fleet's
+  # actual home-manager-in-nix-darwin wiring resolves to even when the
+  # option is set from inside `home-manager.users.<name>` (measured
+  # 2026-09-22 — see the letter's header for the full story and why this
+  # differs from home-manager's own documented `{enable;config;}` shape).
+  # No `enable` sub-field exists here; the outer `lib.mkIf cfg.enable`
+  # omits the whole entry instead.
   # ══════════════════════════════════════════════════════════════════════
 
   hm-manifest-still-lands-in-etc = {
@@ -332,13 +338,21 @@ in
   };
 
   hm-agent-uses-a-pleme-reverse-dns-label = {
-    expr = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.Label;
+    expr = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".serviceConfig.Label;
     expected = "io.pleme.pleme-org-posture-seed";
   };
 
-  hm-agent-is-enabled = {
-    expr = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".enable;
-    expected = true;
+  hm-disabled-no-agent = {
+    # The darwin peer of the manifest-seed suite having no equivalent
+    # disabled-seed case: the whole launchd.agents.<name> entry is absent
+    # when the seed is disabled, not present-with-enable-false.
+    expr =
+      (evalSeedHomeManager (kata.mkManifestSeed {
+        name = "off";
+        manifests.a = "kind: A\n";
+        enable = false;
+      })).launchd.agents ? off-seed;
+    expected = false;
   };
 
   hm-runs-once-and-does-not-respawn = {
@@ -348,7 +362,7 @@ in
     # disagreeing about when to give up.
     expr =
       let
-        cfg = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config;
+        cfg = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".serviceConfig;
       in
       {
         runAtLoad = cfg.RunAtLoad;
@@ -368,7 +382,7 @@ in
     # that SOME loop exists.
     expr =
       let
-        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
+        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".serviceConfig.ProgramArguments;
       in
       lib.hasInfix "-lt 60" script && lib.hasInfix "+ 900" script;
     expected = true;
@@ -382,7 +396,7 @@ in
     # differs.
     expr =
       let
-        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
+        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".serviceConfig.ProgramArguments;
       in
       lib.hasInfix "--server-side" script
       && lib.hasInfix "--force-conflicts" script
@@ -403,7 +417,7 @@ in
           homeDirectory = "/Users/op";
         };
         out = evalSeedHomeManager withHome;
-        script = lib.concatStringsSep " " out.launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
+        script = lib.concatStringsSep " " out.launchd.agents."pleme-org-posture-seed".serviceConfig.ProgramArguments;
       in
       {
         scriptUsesHomePath = lib.hasInfix "/Users/op/.local/state/kata-manifest-seed/pleme-org-posture/10-template.yaml" script;
@@ -427,7 +441,7 @@ in
         render = text: lib.concatStringsSep " " (evalSeedHomeManager (kata.mkManifestSeed {
           name = "trig";
           manifests."10-x" = text;
-        })).launchd.agents."trig-seed".config.ProgramArguments;
+        })).launchd.agents."trig-seed".serviceConfig.ProgramArguments;
       in
       render "kind: A\n" != render "kind: B\n";
     expected = true;

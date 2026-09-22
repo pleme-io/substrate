@@ -48,10 +48,17 @@
 # output is root/system because plo's engenho genuinely IS a NixOS system
 # service; ryn's engenho genuinely is a per-user one — the two platforms
 # differ in KIND here, not just in which supervisor renders the unit.
-# `iroha.launchd-unit.mkLaunchdUnit`'s own header already anticipated this
-# split: its `serviceConfig` return (the bare plist, no daemon wrapper) is
-# "what a home-manager `launchd.agents.<name>.config` expects" — that field,
-# not `.daemon`, is what this output uses.
+# `iroha.launchd-unit.mkLaunchdUnit`'s `serviceConfig` return (the bare
+# plist, no daemon wrapper) is the field this output uses — assigned to
+# `launchd.agents.<name>.serviceConfig`, NOT `.daemon`. That header's own
+# claim that this is "what a home-manager `launchd.agents.<name>.config`
+# expects" describes home-manager's OWN upstream module faithfully (real,
+# confirmed by reading it) but is not what this fleet's actual
+# nix-darwin + home-manager wiring resolves `launchd.agents` set from
+# inside a `home-manager.users.<name>` value to — measured 2026-09-22, it
+# lands on nix-darwin's own `launchd.agents` option (`serviceConfig`, no
+# `enable`/`config` fields). Trusted here over the upstream doc because it
+# is what a real evaluation on this fleet actually accepted.
 #
 # launchd has no unit-dependency ordering (`after`/`wants` are accepted for
 # interface parity and otherwise UNUSED on this side — a dependency that
@@ -334,8 +341,21 @@ let
           # imported — an honest failure, not a silent gap, and no reason to
           # special-case away.
           #
-          # `launchd.agents.<name>.config`, NOT `.daemon` — see the header
-          # note on why this is an HM agent rather than a darwinModule daemon.
+          # ★ `{ serviceConfig = ...; }`, NOT home-manager's OWN documented
+          # `{ enable; config; }` shape — measured 2026-09-22 against a real
+          # `home-manager.users."luis.d"` evaluation on this fleet's actual
+          # nix-darwin + home-manager wiring: setting `launchd.agents.<name>`
+          # from inside a home-manager user's config resolves against
+          # NIX-DARWIN's OWN `launchd.agents` option (`serviceConfig`, a
+          # `submodule launchdConfig`, no `enable`/`config` fields at all —
+          # `modules/launchd/default.nix` in nix-darwin proper, the same
+          # shape `nodes/*/modules/pleme/darwin/{input,nix-caching}.nix`
+          # already use successfully), not home-manager's own same-named
+          # option (which genuinely does exist upstream with `{enable;
+          # config;}` — confirmed by reading home-manager's
+          # `modules/launchd/default.nix` — it is simply not the one this
+          # particular integration resolves to). Trust the measurement over
+          # the upstream doc when they disagree on a live tree.
           #
           # `homeManagerExtraConfig`, NOT `extraConfig` — `environment.etc`
           # and `sops.secrets` paths like `/run/secrets/*` are NixOS/system
@@ -343,10 +363,7 @@ let
           # touches either must supply the home-relative replacement here.
           config = lib.mkIf cfg.enable (
             lib.recursiveUpdate homeManagerExtraConfig {
-              launchd.agents.${unitName} = {
-                enable = true;
-                config = rendered.serviceConfig;
-              };
+              launchd.agents.${unitName}.serviceConfig = rendered.serviceConfig;
             }
           );
         };

@@ -337,7 +337,7 @@ moduleEvalCases
     # script-contains-every-data-key / script-is-idempotent-apply apply.
     expr =
       let
-        script = lib.concatStringsSep " " (evalSeedHomeManager grafana [ ]).launchd.agents."grafana-admin-seed".config.ProgramArguments;
+        script = lib.concatStringsSep " " (evalSeedHomeManager grafana [ ]).launchd.agents."grafana-admin-seed".serviceConfig.ProgramArguments;
       in
       lib.hasInfix "secret generic grafana-admin" script
       && lib.hasInfix "--from-file=admin-user=/run/secrets/monitoring/grafana-admin-user" script
@@ -365,7 +365,7 @@ moduleEvalCases
           data.admin-user.sopsPath = "monitoring/grafana-admin-user";
         };
         out = evalSeedHomeManager withHome [ ];
-        script = lib.concatStringsSep " " out.launchd.agents."grafana-admin-seed".config.ProgramArguments;
+        script = lib.concatStringsSep " " out.launchd.agents."grafana-admin-seed".serviceConfig.ProgramArguments;
       in
       {
         # The functional line: the actual --from-file argument the apply
