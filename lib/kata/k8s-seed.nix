@@ -28,11 +28,30 @@
 # Pure { lib } at import. No package is resolved here — `kubectl` arrives as a
 # string the caller's script interpolates.
 #
-# ── ★ THE DARWIN OUTPUT — one script, two supervisors ─────────────────────
+# ── ★ THE HOME-MANAGER (darwin) OUTPUT — one script, two supervisors ──────
 # Added when ryn took over org-wide GitOps reconciliation from plo: the same
 # seed shape (a bounded-retry reconcile that gives up rather than loops
-# forever) is needed on a Darwin engenho node, and systemd does not exist
-# there. `nixos` above stays byte-for-byte unchanged; `darwin` is additive.
+# forever) is needed on ryn's Darwin engenho, and systemd does not exist
+# there. `nixos` above stays byte-for-byte unchanged; `homeManager` is
+# additive.
+#
+# ★ IT IS A HOME-MANAGER AGENT (`launchd.agents`), NOT A DARWINMODULE DAEMON
+# (`launchd.daemons`) — and that is not a naming detail, it is a placement
+# fact about the actual node. Checked against ryn's live config before
+# writing this: `pleme.engenho.pangeaStack` (the operator + postgres this
+# seed's CR depends on) is a home-manager module under
+# `home-manager.users."luis.d"`, engenho's own kubeconfig lives at
+# `~/.kube/configs/engenho` (a HOME path), and engenho itself runs as the
+# LOGGED-IN USER's launchd agent, not a root daemon. A system-level
+# `launchd.daemons` entry would run as root, which cannot read any of that
+# without a second, unnecessary credential-copying step. plo's `.nixos`
+# output is root/system because plo's engenho genuinely IS a NixOS system
+# service; ryn's engenho genuinely is a per-user one — the two platforms
+# differ in KIND here, not just in which supervisor renders the unit.
+# `iroha.launchd-unit.mkLaunchdUnit`'s own header already anticipated this
+# split: its `serviceConfig` return (the bare plist, no daemon wrapper) is
+# "what a home-manager `launchd.agents.<name>.config` expects" — that field,
+# not `.daemon`, is what this output uses.
 #
 # launchd has no unit-dependency ordering (`after`/`wants` are accepted for
 # interface parity and otherwise UNUSED on this side — a dependency that
@@ -49,17 +68,13 @@
 # `RunAtLoad`-triggered invocation IS one bounded campaign; there is no
 # `KeepAlive` respawn to layer a second retry mechanism on top of.
 #
-# `restartTriggers` has no systemd unit to bump — nix-darwin's own launchd
-# activation diffs each job's rendered plist and reloads only the ones that
-# changed, so folding each trigger value into the script text (as an inert
-# `: # seed-trigger=<value>` line) is sufficient: the derivation content
-# moves, the plist moves, nix-darwin reloads it on the next `rebuild`. No
-# bespoke trigger plumbing needed on this side, unlike systemd's explicit
-# `X-Restart-Triggers`.
-#
-# Runs as a `launchd.daemons` entry (nix-darwin, system-level, root) — the
-# darwin peer of `systemd.services` above, not a home-manager `launchd.agents`
-# entry, matching this letter's existing system-level placement.
+# `restartTriggers` has no systemd unit to bump — home-manager's launchd
+# activation diffs each agent's rendered plist and reloads only the ones
+# that changed, so folding each trigger value into the script text (as an
+# inert `: # seed-trigger=<value>` line) is sufficient: the derivation
+# content moves, the plist moves, home-manager reloads it on the next
+# `switch`/`rebuild`. No bespoke trigger plumbing needed on this side,
+# unlike systemd's explicit `X-Restart-Triggers`.
 #
 # Exports:
 #
@@ -74,12 +89,12 @@
 #     after       ? [ "k3s.service" ] — nixos only, informational on darwin;
 #     wants       ? [ "k3s.service" ] — nixos only, informational on darwin;
 #     restartTriggers ? [ ] — values whose change re-runs the seed (a path on
-#                     nixos; ANY string on darwin — see the note above);
-#     extraConfig ? { } — merged into the emitted NIXOS module's `config`
-#                     only (darwin has no `sops.secrets`/`environment.etc`
-#                     analog here — a darwin-specific extra hook can be added
-#                     the day a second consumer needs one);
-#     logDir      ? "/var/log" — darwin only: stdout/stderr go to
+#                     nixos; ANY string on the homeManager side — see above);
+#     extraConfig ? { } — merged into the emitted module's `config` on BOTH
+#                     outputs (secret-seed's `sops.secrets` and
+#                     manifest-seed's `environment.etc` each have a
+#                     home-manager implementation too);
+#     logDir      ? "/var/log" — homeManager only: stdout/stderr go to
 #                     `<logDir>/<name>-seed.{log,err}`;
 #     startLimitIntervalSec ? 900 / startLimitBurst ? 60 — see the note at the
 #                     unit; the default is rio's hand-derived, REACHABLE bound;
@@ -87,7 +102,7 @@
 #     errPrefix   ? "kata.k8s-seed.mkSeedUnit: " — prefix for this letter's
 #                     throws, so a caller's errors name the CALLER's letter;
 #   } -> {
-#     nixos :: class-tagged module; darwin :: class-tagged module;
+#     nixos :: class-tagged module; homeManager :: class-tagged module;
 #     meta; unitName; optionPath;
 #   }
 { lib }:
@@ -229,11 +244,11 @@ let
       # plist) changes when they do; nix-darwin's own activation reloads a
       # job whose plist changed, which is what stands in for systemd's
       # `X-Restart-Triggers` here.
-      darwinTriggerLines = lib.concatMapStringsSep "\n" (t: ": # seed-trigger=${t}") restartTriggers;
+      hmTriggerLines = lib.concatMapStringsSep "\n" (t: ": # seed-trigger=${t}") restartTriggers;
 
-      darwinScript = ''
+      hmScript = ''
         set -uo pipefail
-        ${darwinTriggerLines}
+        ${hmTriggerLines}
         export KUBECONFIG=${lib.escapeShellArg kubeconfig}
 
         _attempt=0
@@ -254,7 +269,7 @@ let
         exit 1
       '';
 
-      darwinConfigModule =
+      hmConfigModule =
         { config, lib, ... }:
         let
           cfg = lib.attrByPath surface.optionPath { } config;
@@ -263,7 +278,7 @@ let
             programArguments = [
               "/bin/bash"
               "-c"
-              darwinScript
+              hmScript
             ];
             runAtLoad = true;
             keepAlive = false;
@@ -274,14 +289,23 @@ let
         {
           # `extraConfig` merges here too, NOT just on the nixos side —
           # manifest-seed's `environment.etc.*` (where the manifest YAML
-          # actually lands for `kubectl apply -f` to read) is a nix-darwin
+          # actually lands for `kubectl apply -f` to read) is a home-manager
           # option as well, and secret-seed's `sops.secrets` likewise has a
-          # darwin implementation via sops-nix's darwinModule. A caller whose
-          # `extraConfig` genuinely names a nixos-only option gets a clear
-          # eval error naming it when `.darwin` is imported — an honest
-          # failure, not a silent gap, and no reason to special-case away.
+          # home-manager implementation (sops-nix's homeManagerModule). A
+          # caller whose `extraConfig` genuinely names a nixos-only option
+          # gets a clear eval error naming it when `.homeManager` is
+          # imported — an honest failure, not a silent gap, and no reason to
+          # special-case away.
+          #
+          # `launchd.agents.<name>.config`, NOT `.daemon` — see the header
+          # note on why this is an HM agent rather than a darwinModule daemon.
           config = lib.mkIf cfg.enable (
-            lib.recursiveUpdate extraConfig { launchd.daemons.${unitName} = rendered.daemon; }
+            lib.recursiveUpdate extraConfig {
+              launchd.agents.${unitName} = {
+                enable = true;
+                config = rendered.serviceConfig;
+              };
+            }
           );
         };
 
@@ -300,17 +324,17 @@ let
         ++ lib.optional enable enableDefaultModule;
       };
 
-      darwinModule = {
+      homeManagerModule = {
         imports = [
           surface.module
-          darwinConfigModule
+          hmConfigModule
         ]
         ++ lib.optional enable enableDefaultModule;
       };
     in
     {
       nixos = iroha.tag "nixos" module;
-      darwin = iroha.tag "darwin" darwinModule;
+      homeManager = iroha.tag "homeManager" homeManagerModule;
       inherit meta unitName;
       optionPath = surface.optionPath;
     };

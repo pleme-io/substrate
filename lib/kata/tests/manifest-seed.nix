@@ -28,9 +28,9 @@ let
           default = { };
         };
         # Declared for the SAME reason as the two above (see the header
-        # comment): the darwin output writes launchd.daemons, so a suite that
-        # evaluates only .nixos is blind to it by construction.
-        launchd.daemons = lib.mkOption {
+        # comment): the homeManager output writes launchd.agents, so a
+        # suite that evaluates only .nixos is blind to it by construction.
+        launchd.agents = lib.mkOption {
           type = lib.types.attrsOf lib.types.anything;
           default = { };
         };
@@ -47,16 +47,17 @@ let
       ];
     }).config;
 
-  # The darwin peer of evalSeed — same stub universe, imports `.darwin`
-  # instead of `.nixos`. `environment.etc` is shared unchanged (nix-darwin
-  # implements it too), which is exactly the property under test below.
-  evalSeedDarwin =
+  # The home-manager peer of evalSeed — same stub universe, imports
+  # `.homeManager` instead of `.nixos`. `environment.etc` is shared
+  # unchanged (home-manager implements it too), which is exactly the
+  # property under test below.
+  evalSeedHomeManager =
     seed:
     (lib.evalModules {
       modules = [
         universe
         { _module.args.pkgs = { }; }
-        seed.darwin
+        seed.homeManager
       ];
     }).config;
 
@@ -307,33 +308,40 @@ in
   };
 
   # ══════════════════════════════════════════════════════════════════════
-  # kata.k8s-seed's DARWIN output, asserted through this letter — same
-  # contract as the nixos suite above, ryn (Darwin engenho) is the first
-  # real consumer (org-wide GitHub-repo reconciliation, moved off plo).
+  # kata.k8s-seed's HOME-MANAGER (darwin) output, asserted through this
+  # letter — same contract as the nixos suite above, ryn (Darwin engenho,
+  # per-user) is the first real consumer (org-wide GitHub-repo
+  # reconciliation, moved off plo). It is a launchd AGENT (`.config`), not
+  # a darwinModule daemon — see the letter's header for why.
   # ══════════════════════════════════════════════════════════════════════
 
-  darwin-manifest-still-lands-in-etc = {
+  hm-manifest-still-lands-in-etc = {
     # Proves extraConfig (environment.etc, where the manifest YAML the
-    # script `kubectl apply -f`s actually lives) merges on the darwin side
-    # too, not just nixos — the exact thing that would silently break the
-    # apply if extraConfig were dropped for darwin.
-    expr = (evalSeedDarwin tmpl).environment.etc."kata-manifest-seed/pleme-org-posture/10-template.yaml".text;
+    # script `kubectl apply -f`s actually lives) merges on the
+    # home-manager side too, not just nixos — the exact thing that would
+    # silently break the apply if extraConfig were dropped there.
+    expr = (evalSeedHomeManager tmpl).environment.etc."kata-manifest-seed/pleme-org-posture/10-template.yaml".text;
     expected = "apiVersion: v1\nkind: ConfigMap\n";
   };
 
-  darwin-daemon-uses-a-pleme-reverse-dns-label = {
-    expr = (evalSeedDarwin tmpl).launchd.daemons."pleme-org-posture-seed".serviceConfig.Label;
+  hm-agent-uses-a-pleme-reverse-dns-label = {
+    expr = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.Label;
     expected = "io.pleme.pleme-org-posture-seed";
   };
 
-  darwin-runs-once-and-does-not-respawn = {
+  hm-agent-is-enabled = {
+    expr = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".enable;
+    expected = true;
+  };
+
+  hm-runs-once-and-does-not-respawn = {
     # KeepAlive stays false: the retry bound lives INSIDE the script as a
     # bounded campaign (see the header note), so nothing above it should
     # ALSO be respawning the job — that would be two retry mechanisms
     # disagreeing about when to give up.
     expr =
       let
-        cfg = (evalSeedDarwin tmpl).launchd.daemons."pleme-org-posture-seed".serviceConfig;
+        cfg = (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config;
       in
       {
         runAtLoad = cfg.RunAtLoad;
@@ -345,27 +353,29 @@ in
     };
   };
 
-  darwin-script-carries-the-reachable-retry-bound = {
+  hm-script-carries-the-reachable-retry-bound = {
     # The same 900s/60 numbers the nixos unit gets from systemd options are,
-    # on darwin, literal numbers baked into the generated script — this is
-    # the "made literal" the header note describes, so assert the actual
-    # figures survive the translation rather than just that SOME loop exists.
+    # on the home-manager side, literal numbers baked into the generated
+    # script — this is the "made literal" the header note describes, so
+    # assert the actual figures survive the translation rather than just
+    # that SOME loop exists.
     expr =
       let
-        script = lib.concatStringsSep " " (evalSeedDarwin tmpl).launchd.daemons."pleme-org-posture-seed".serviceConfig.ProgramArguments;
+        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
       in
       lib.hasInfix "-lt 60" script && lib.hasInfix "+ 900" script;
     expected = true;
   };
 
-  darwin-apply-is-server-side-with-force = {
+  hm-apply-is-server-side-with-force = {
     # Same property as apply-is-server-side-with-force above, read off the
-    # darwin-wrapped script instead of the systemd one — the manifest-seed
-    # logic itself (kubectl flags, CRD wait, namespace ensure) is IDENTICAL
-    # on both platforms; only the supervisor wrapper differs.
+    # home-manager-wrapped script instead of the systemd one — the
+    # manifest-seed logic itself (kubectl flags, CRD wait, namespace
+    # ensure) is IDENTICAL on both platforms; only the supervisor wrapper
+    # differs.
     expr =
       let
-        script = lib.concatStringsSep " " (evalSeedDarwin tmpl).launchd.daemons."pleme-org-posture-seed".serviceConfig.ProgramArguments;
+        script = lib.concatStringsSep " " (evalSeedHomeManager tmpl).launchd.agents."pleme-org-posture-seed".config.ProgramArguments;
       in
       lib.hasInfix "--server-side" script
       && lib.hasInfix "--force-conflicts" script
@@ -373,17 +383,17 @@ in
     expected = true;
   };
 
-  darwin-restart-trigger-moves-with-the-content = {
-    # The darwin peer of restart-trigger-moves-with-the-content: no systemd
-    # restartTriggers field exists, so the property under test is that the
-    # rendered PROGRAM (and therefore the plist nix-darwin diffs on
-    # activation) changes when the manifest content changes.
+  hm-restart-trigger-moves-with-the-content = {
+    # The home-manager peer of restart-trigger-moves-with-the-content: no
+    # systemd restartTriggers field exists, so the property under test is
+    # that the rendered PROGRAM (and therefore the plist home-manager
+    # diffs on activation) changes when the manifest content changes.
     expr =
       let
-        render = text: lib.concatStringsSep " " (evalSeedDarwin (kata.mkManifestSeed {
+        render = text: lib.concatStringsSep " " (evalSeedHomeManager (kata.mkManifestSeed {
           name = "trig";
           manifests."10-x" = text;
-        })).launchd.daemons."trig-seed".serviceConfig.ProgramArguments;
+        })).launchd.agents."trig-seed".config.ProgramArguments;
       in
       render "kind: A\n" != render "kind: B\n";
     expected = true;
