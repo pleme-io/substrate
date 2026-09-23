@@ -376,6 +376,26 @@
           flake-checks-gate =
             (import ./lib/util/tests/flake-checks-gate-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── lib/duckdb.nix: tuned duckdb, settings carried by -init ────
+          # Refusals at eval (unknown setting, '%' memory, unknown profile)
+          # and the rendered profiles; `duckdb-wrapper` proves the wrapper
+          # really loads them in `-c` mode, which ~/.duckdbrc does not.
+          duckdb = (import ./lib/tests/duckdb-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          duckdb-wrapper =
+            let
+              d = import ./lib/duckdb.nix { inherit (nixpkgs) lib; };
+              wrapped = d.wrap {
+                inherit pkgs;
+                settings = d.settingsFor { profile = "build"; hardware = { memoryGiB = 16; performanceCores = 4; maxJobs = 4; }; };
+              };
+            in
+            pkgs.runCommand "duckdb-wrapper-test" { } ''
+              NIX_BUILD_CORES=3 ${wrapped}/bin/duckdb -csv -noheader -c "select current_setting('threads') || ' ' || current_setting('memory_limit') || ' ' || current_setting('temp_directory')" > got
+              echo "3 2.3 GiB $TMPDIR/duckdb" > want
+              if ! cmp -s got want; then echo "wrapper did not load its settings:"; cat got want; exit 1; fi
+              cp got $out
+            '';
+
           # ── The "can the cargo-test job ENTER the devShell?" gate ──────
           # Policy INTENDED for `.github/workflows/nix-devshell-cargo-test.yml`,
           # exposed as `devshellPreflightPath` below.

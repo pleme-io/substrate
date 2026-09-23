@@ -1198,6 +1198,7 @@ Key differences from `rust-tool-release`:
 | `mkVersionedOverlay` | `util/versioned-overlay.nix` | N-track overlay gen |
 | `repoFlakeBuilder` | `util/repo-flake.nix` | Universal flake builder |
 | `monorepoPartsModule` | `util/monorepo-parts.nix` | flake-parts module |
+| `duckdb.nix` (standalone, `{ lib }`) | `duckdb.nix` | DuckDB tuned per profile (`interactive`/`build`) from declared hardware; `wrap` bakes the settings in with `-init`, because `~/.duckdbrc` is read only by an interactive terminal. `checks.duckdb` + `checks.duckdb-wrapper` |
 
 ### Type System
 
