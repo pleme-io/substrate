@@ -64,9 +64,9 @@ let
       (has "SET memory_limit = '2106MiB';" (duckdb.render build))
       "60% of 48 GiB over 14 jobs = 2106 MiB, so 14 concurrent builds cannot overcommit")
 
-    (testHelpers.mkTest "new-files-use-the-current-format"
-      (has "SET storage_compatibility_version = 'latest';" (duckdb.render shell))
-      "the default writes v0.10.2-format files")
+    (testHelpers.mkTest "storage-format-left-at-default"
+      (!(has "storage_compatibility_version" (duckdb.render shell)) && !(has "storage_compatibility_version" (duckdb.render build)))
+      "'latest' measured 7% LARGER than the default on 1.4.3 — not rendered without a receipt")
 
     (testHelpers.mkTest "overrides-win"
       (has "SET threads = 3;" (duckdb.render (duckdb.settingsFor { profile = "interactive"; hardware = workstation; overrides = { threads = 3; }; })))

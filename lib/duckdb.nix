@@ -27,12 +27,11 @@
 #   threads                  default = every core. In a build, nix already
 #                            allots cores (NIX_BUILD_CORES); DuckDB defers to
 #                            it instead of each build claiming all 14.
-#   storage_compatibility_version
-#                            default v0.10.2 — new databases are written in a
-#                            two-year-old format, forgoing newer compression.
-#                            Rendered: 'latest', safe because the same pinned
-#                            duckdb reads what it writes (the consumer's job:
-#                            ship ONE duckdb to both the builds and the shell).
+#
+# Deliberately NOT rendered: storage_compatibility_version. Its default
+# (v0.10.2) looks stale, but 'latest' wrote a 7% LARGER file (20M TPC-H
+# lineitem rows on 1.4.3: 613 MB vs 571 MB) and makes files unreadable by an
+# older duckdb. It stays in `known` for a consumer with its own receipt.
 #
 # Values that must be read at run time ($TMPDIR, NIX_BUILD_CORES) are rendered
 # as DuckDB expressions over getenv(), which `SET` evaluates when the file is
@@ -124,7 +123,6 @@ let
       memory_limit = gib (h.memoryGiB * 0.5);
       max_temp_directory_size = gib h.scratchGiB;
       temp_directory = scratchDir;
-      storage_compatibility_version = "latest";
     };
 
     # One nix derivation among up to maxJobs at once: nix's own core allotment,
@@ -134,7 +132,6 @@ let
       memory_limit = gib (lib.max 1 (h.memoryGiB * 0.6 / h.maxJobs));
       max_temp_directory_size = gib h.scratchGiB;
       temp_directory = scratchDir;
-      storage_compatibility_version = "latest";
     };
   };
 in
