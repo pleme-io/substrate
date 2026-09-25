@@ -97,6 +97,28 @@
   # export AWS_PROFILE in the environment.
   awsProfile ? null,
 
+  # Does this workspace need AWS at all?
+  #
+  # Defaults TRUE, which preserves the refusal above for every existing
+  # consumer: most workspaces keep tofu state in an S3 bucket, so no AWS
+  # credential means no state, and running would be worse than refusing.
+  #
+  # Set FALSE for a workspace that touches no AWS resource AND keeps its state
+  # somewhere other than S3 (`state.type: local`, or the operator's Postgres on
+  # the magma path). Measured 2026-09-24 on `pleme-io-tailnet`: every resource
+  # in it targets the Tailscale API, its state had just been moved off S3, and
+  # this gate still refused to run `plan` because the ambient AWS_PROFILE was
+  # empty — so changing the operator's OWN tailnet required a live SSO session
+  # against an unrelated cloud account. The credential was not protecting
+  # anything; it was load-bearing for a state file that no longer lived there.
+  #
+  # This is deliberately an explicit flag rather than something derived from
+  # `pangea.yml`: reading the workspace's state type at eval time would make
+  # the AWS requirement depend on a YAML parse, and a requirement that can
+  # silently flip is exactly what the `awsProfile` comment above refuses to
+  # accept. A consumer that says "I do not need AWS" says it on purpose.
+  requiresAwsProfile ? true,
+
   # Extra runtime dependencies (nix packages) appended to the default
   # ruby+opentofu toolchain. Common adds: pkgs.sops (for Pangea::Secrets),
   # pkgs.gh, pkgs.curl, pkgs.jq.
@@ -202,12 +224,22 @@ let
   prologue = ''
     set -euo pipefail
     ${
-      if awsProfile != null
+      if !requiresAwsProfile
+      then ''
+        # This workspace declared requiresAwsProfile = false: no AWS resource,
+        # no S3 state. Neither export nor demand a profile — an AWS_PROFILE that
+        # is merely ambient would make the run look account-scoped when nothing
+        # in it reads AWS at all.
+        :
+      ''
+      else if awsProfile != null
       then ''export AWS_PROFILE=${lib.escapeShellArg awsProfile}''
       else ''
         if [ -z "''${AWS_PROFILE:-}" ]; then
           echo "error: no AWS profile. Pass awsProfile to the workspace helper," >&2
-          echo "       or export AWS_PROFILE before running this app." >&2
+          echo "       export AWS_PROFILE before running this app, or — if this" >&2
+          echo "       workspace touches no AWS resource and keeps its state off" >&2
+          echo "       S3 — pass requiresAwsProfile = false." >&2
           exit 2
         fi
       ''
@@ -226,7 +258,34 @@ let
     fi
 
     bundle config set --local path vendor/bundle
-    bundle install --quiet 2>/dev/null
+
+    # ── ★ NEVER DISCARD BUNDLER'S STDERR ────────────────────────────────────
+    # This was `bundle install --quiet 2>/dev/null`. With `set -euo pipefail`
+    # above, a failing install exited with bundler's code and printed NOTHING,
+    # so every wrapper in this helper could die silently on a dependency
+    # problem. Measured 2026-09-24 on `pleme-io-tailnet`: `nix run .#plan`
+    # exited 6 with an empty log, twice, and the cause was unknowable from the
+    # outside — the redirect threw away the only description of the failure.
+    #
+    # `--quiet` stays (it suppresses the routine per-gem chatter on SUCCESS).
+    # The stderr redirect does not: keep the output, and on failure say which
+    # step died before propagating the code, because an exit status with no
+    # message is the most expensive shape a build step can have.
+    # `$?` inside `if ! cmd; then` is the INVERTED status (always 0), which is
+    # the same read-a-value-through-a-transforming-construct bug as the
+    # redirect this block replaced — the first draft of it reported
+    # "failed (exit 0)". Capture the real status with `set +e` around the call.
+    set +e
+    bundle install --quiet
+    bundle_rc=$?
+    set -e
+    if [ "$bundle_rc" -ne 0 ]; then
+      echo "error: bundle install failed (exit $bundle_rc) in $(pwd)." >&2
+      echo "       The gem set for this workspace could not be resolved;" >&2
+      echo "       bundler's own message is above." >&2
+      exit "$bundle_rc"
+    fi
+
     mkdir -p vendor/bundle && echo "$RUBY_STORE" > "$MARKER"
   '';
 
