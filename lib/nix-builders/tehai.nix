@@ -26,6 +26,10 @@ let
         TEHAI_LIVE = live;
         TEHAI_STATE = "${cfg.stateDir}/state.json";
         TEHAI_TIMEOUT_S = toString cfg.timeoutSeconds;
+        # By absolute path, so tehai runs the ssh nix itself uses and its state
+        # names which one (`ssh` in state.json). macOS: /usr/bin/ssh, which
+        # reads /etc/ssh/ssh_config like nix does.
+        TEHAI_SSH = if platform == "nixos" then "${pkgs.openssh}/bin/ssh" else "/usr/bin/ssh";
       };
       package = mkBlueProgramPackage {
         name = "tehai";
