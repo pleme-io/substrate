@@ -1,41 +1,45 @@
 # substrate/lib/build/scripting/blue-program-package.nix
 #
 # mkBlueProgramPackage — wire a blue program (`.b`) into an INSTALLABLE
-# package: a derivation with `bin/<name>` that runs `blue run <program>` with
-# the bidama distribution on BLUE_PATH. The blue sibling of
-# tatara-script-package.nix, for the development ladder's top rung: a tool's
-# logic is blue, and this is the one way it reaches PATH, a launchd daemon or
-# a systemd unit.
+# package: `bin/<name>` runs the program, for PATH, a launchd agent or a
+# systemd unit. The blue sibling of tatara-script-package.nix, for the
+# development ladder's top rung.
 #
-# The wrapper is makeWrapper, not a shell script: the program path, extra PATH
-# entries and environment are flags on the wrapper, so nothing here is shell
-# to maintain.
+# This is a NAME, not an implementation. The one implementation is blue's
+# `mkBlueApp` (`blue/bidamas/mk-bidama.nix`), reached through the consumer's
+# package set as `pkgs.blueLib` — blue's `overlays.default` (or
+# `overlays.bidamas`) puts it there. substrate cannot take blue as an input
+# (blue builds on substrate), so it composes over what the consumer's pkgs
+# carries. From 2026-09-27 to the next day this file was a second copy with a
+# bash makeWrapper; mkBlueApp's wrapper is compiled (makeBinaryWrapper) and
+# runs `blue run --quiet <file> --`, so a command prints only what it writes
+# and every argument a user types goes to the program.
 #
 # Usage:
 #
-#   let
-#     mkBlueProgramPackage = import "${substrate}/lib/build/scripting/blue-program-package.nix" {
-#       inherit pkgs;
-#     };
-#   in
-#     mkBlueProgramPackage {
-#       name = "tehai";
-#       blue = pkgs.blue-with-bidamas;    # blue, wrapped with its bidamas
-#       program = ./tehai-main.b;         # a file, or
-#       # source = ''use("tehai")\nth_main()\n'';
-#       extraPath = [ pkgs.openssh ];
-#       env = { TEHAI_TIMEOUT_S = "2"; };
-#     }
+#   mkBlueProgramPackage = import "${substrate}/lib/build/scripting/blue-program-package.nix" {
+#     inherit pkgs;
+#   };
+#   mkBlueProgramPackage {
+#     name = "tehai";
+#     blue = pkgs.blue-with-bidamas;    # a blue that already resolves the bidamas
+#     source = ''use("tehai")\nth_main()\n'';   # or program = ./main.b;
+#     extraPath = [ pkgs.openssh ];
+#     env = { TEHAI_TIMEOUT_S = "2"; };
+#   }
+#
+# With `pkgs.blueApp` (the same overlay) the blue and the distribution are
+# already bound: `pkgs.blueApp { name; source; tools; env; }`.
 #
 # Arguments:
 #   name       the binary's name, bin/<name>.
-#   blue       a blue binary that already resolves the bidamas the program
-#              uses (the fleet's `blue-with-bidamas`, blue's mkBlueWithBidamas).
+#   blue       a blue binary that resolves the bidamas the program uses.
 #   program    a path to a .b file; or
-#   source     the program's text, written to the store as <name>.b.
-#   extraPath  packages whose bin/ the program may exec (a process boundary).
-#   env        environment set on every run (the caller's own environment
-#              wins where it sets the same name).
+#   source     the program's text (exactly one of the two).
+#   extraPath  packages whose bin/ the program may exec (a process boundary),
+#              suffixed to PATH so a node's own copy wins.
+#   env        environment set on every run as a default (the caller's own
+#              environment wins where it sets the same name).
 { pkgs }:
 {
   name,
@@ -45,23 +49,11 @@
   extraPath ? [ ],
   env ? { },
 }:
-assert pkgs.lib.assertMsg ((program == null) != (source == null))
-  "mkBlueProgramPackage ${name}: give exactly one of `program` (a .b file) or `source` (its text)";
-let
-  lib = pkgs.lib;
-  file = if program != null then program else pkgs.writeText "${name}.b" source;
-  envFlags = lib.concatStringsSep " " (lib.mapAttrsToList (k: v: "--set-default ${lib.escapeShellArg k} ${lib.escapeShellArg v}") env);
-in
-pkgs.runCommand name
-  {
-    nativeBuildInputs = [ pkgs.makeWrapper ];
-    meta.mainProgram = name;
-    passthru = { inherit file; };
-  }
-  ''
-    mkdir -p $out/bin
-    makeWrapper ${blue}/bin/blue $out/bin/${name} \
-      --add-flags "run ${file}" \
-      ${lib.optionalString (extraPath != [ ]) "--prefix PATH : ${lib.makeBinPath extraPath}"} \
-      ${envFlags}
-  ''
+assert pkgs.lib.assertMsg (pkgs ? blueLib)
+  "mkBlueProgramPackage ${name}: pkgs has no blueLib; add blue's overlays.default (or overlays.bidamas) to this package set";
+pkgs.blueLib.mkBlueApp {
+  inherit name blue program source env;
+  # `blue` already carries its distribution; nothing to add on BLUE_PATH.
+  bidamas = { };
+  tools = extraPath;
+}

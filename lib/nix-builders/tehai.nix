@@ -30,12 +30,12 @@ let
       package = mkBlueProgramPackage {
         name = "tehai";
         blue = cfg.blue;
-        # `nil` last: `blue run` prints the program's final value, which
-        # would put a record in the log every interval.
+        # The same entry as blue's own `tehai` package (blue flake.nix
+        # `commands`); this one bakes in the module's environment. The wrapper
+        # runs `blue run --quiet`, so the log holds only what tehai writes.
         source = ''
           use("tehai")
           th_main()
-          nil
         '';
         # macOS: /usr/bin/ssh, which reads /etc/ssh/ssh_config like nix does.
         extraPath = lib.optionals (platform == "nixos") [ pkgs.openssh ];
