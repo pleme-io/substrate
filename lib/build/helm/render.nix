@@ -22,6 +22,10 @@
 #     namespace = "llm";
 #   }
 #
+# `createNamespace = true` puts the Namespace object first, for appliers that
+# create nothing themselves (engenho's node-manifests driver, a plain SSA seed):
+# `helm template --namespace` only STAMPS the name onto every object.
+#
 # Refuses an empty render: a chart whose gates are unmet emits nothing and helm
 # still exits 0, which would otherwise apply an empty manifest and report success.
 { pkgs }:
@@ -32,9 +36,17 @@
   values ? { },
   namespace ? "default",
   release ? name,
+  createNamespace ? false,
 }:
 let
   lib = pkgs.lib;
+  namespaceDoc = pkgs.writeText "${name}-namespace.yaml" ''
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: ${namespace}
+    ---
+  '';
   vendor = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (n: p: "cp -r ${p} chart/charts/${n}") libraries
   );
@@ -51,6 +63,7 @@ pkgs.runCommand "${name}.yaml"
     cp -r ${chart} chart && chmod -R u+w chart
     rm -rf chart/charts chart/Chart.lock && mkdir -p chart/charts
     ${vendor}
-    helm template ${release} chart --namespace ${namespace} -f "$valuesJsonPath" > "$out"
-    grep -q '^kind:' "$out" || { echo "mkHelmRender ${name}: the chart rendered no objects" >&2; exit 1; }
+    helm template ${release} chart --namespace ${namespace} -f "$valuesJsonPath" > rendered.yaml
+    grep -q '^kind:' rendered.yaml || { echo "mkHelmRender ${name}: the chart rendered no objects" >&2; exit 1; }
+    cat ${lib.optionalString createNamespace "${namespaceDoc} "}rendered.yaml > "$out"
   ''
