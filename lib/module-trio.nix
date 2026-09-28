@@ -495,6 +495,31 @@ in
             description = "Environment variables for the user daemon.";
           };
           restartPolicy = restartPolicyOption userDaemonRestartPolicy;
+          # launchd's scheduling class for the daemon AND everything it
+          # spawns. Adaptive (the default, unchanged) runs it in the darwin
+          # BACKGROUND band unless an app holds a transaction on it. Fine for
+          # an indexer; wrong for a daemon that runs work, since its children
+          # inherit the band: on cid (2026-09-28) engenho's llama-server ran at
+          # priority 4 and its Metal shader compile never returned, while the
+          # same command from a shell started in 2 s. Interactive is never
+          # throttled. Darwin only.
+          processType = mkOption {
+            type = types.enum [ "Background" "Standard" "Adaptive" "Interactive" ];
+            default = "Adaptive";
+            description = "launchd ProcessType for the user daemon (Darwin).";
+          };
+          # A daemon reads its config at start. Without a restart trigger, a
+          # rebuild that changes the config leaves the daemon on the old one:
+          # the config file's path is stable, so the unit does not change and
+          # nothing reloads it (cid's engenho stayed on its podman backend
+          # after a rebuild set native, 2026-09-28). On: the rendered config's
+          # digest goes into the daemon's environment, so a new config is a new
+          # unit, and home-manager restarts it.
+          restartOnConfigChange = mkOption {
+            type = types.bool;
+            default = true;
+            description = "Restart the user daemon when its rendered config changes.";
+          };
         };
       } // extraHmOptions;
 
@@ -666,6 +691,14 @@ in
             else typedShikumi;
           homeDir = config.home.homeDirectory;
           yamlFormat = pkgs.formats.yaml {};
+          # daemon.restartOnConfigChange: the digest of exactly what the
+          # daemon will read (the pruned shikumi config), in its environment,
+          # so a changed config is a changed unit and gets restarted.
+          configDigestEnv = optionalAttrs (withUserDaemon && withShikumiConfig
+              && shikumiCfg != null && (cfg.daemon.restartOnConfigChange or false)) {
+            PLEME_CONFIG_DIGEST = builtins.hashString "sha256"
+              (builtins.toJSON (irohaCore.pruneNulls shikumiCfg));
+          };
           mergedHmOptions = hmOptions pkgs;
           mergedServiceOptions = hmServiceOptions pkgs;
           hmOptionsTree = lib.setAttrByPath (hmNamespacePath ++ [ name ]) mergedHmOptions;
@@ -791,7 +824,8 @@ in
                   label = "io.pleme.${name}.daemon";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
-                  env = cfg.daemon.environment;
+                  env = cfg.daemon.environment // configDigestEnv;
+                  processType = cfg.daemon.processType;
                   logDir = "${homeDir}/Library/Logs";
                   restartPolicy = cfg.daemon.restartPolicy;
                 }))
@@ -801,7 +835,7 @@ in
                   description = "${description} daemon";
                   command = "${cfg.package}/bin/${binaryName}";
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
-                  env = cfg.daemon.environment;
+                  env = cfg.daemon.environment // configDigestEnv;
                   restartPolicy = cfg.daemon.restartPolicy;
                 }))
 

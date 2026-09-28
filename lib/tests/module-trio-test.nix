@@ -137,6 +137,27 @@ let
   onFailureKeepAlive = { SuccessfulExit = false; Crashed = true; };
   restartPolicy = import ../hm/restart-policy.nix { inherit lib; };
 
+  # ── User-daemon scheduling class and config-change restart (2026-09-28) ──
+  # A user daemon with a config surface, so its rendered config has a digest.
+  digestTrio = trioLib.mkModuleTrio {
+    name = "digestd";
+    description = "digest daemon";
+    withUserDaemon = true;
+    hmNamespace = "services";
+    withShikumiConfig = true;
+    shikumiDefaults = { port = 1; };
+  };
+  evalDigest = daemon: settings: lib.evalModules {
+    modules = [
+      digestTrio.homeManagerModule
+      hmStubs
+      { services.digestd = { enable = true; package = dummyPkg; daemon = { enable = true; } // daemon; inherit settings; }; }
+    ];
+    specialArgs = { pkgs = pkgsOn true; };
+  };
+  digestOf = e: e.config.launchd.agents."digestd-daemon".config.EnvironmentVariables.PLEME_CONFIG_DIGEST or null;
+  agentProcessTypeOf = e: e.config.launchd.agents."policyd-daemon".config.ProcessType;
+
   # The env the daemon unit was given, wherever mkNixOSService put it.
   daemonEnvOf = e:
     let u = unitOf e;
@@ -276,6 +297,42 @@ let
       expr = (builtins.tryEval (nixosRestartOf
         (evalPolicySystem policyTrio.nixosModule { restartPolicy = "sometimes"; }))).success;
       expected = false;
+    };
+
+    # The scheduling class: unchanged by default, and settable, because a
+    # daemon that runs work must not hand its children the background band
+    # (cid's engenho model server, 2026-09-28).
+    testUserDaemonProcessTypeDefaultsToAdaptive = {
+      expr = agentProcessTypeOf (evalPolicyHome true {});
+      expected = "Adaptive";
+    };
+    testUserDaemonProcessTypeIsSettable = {
+      expr = agentProcessTypeOf (evalPolicyHome true { processType = "Interactive"; });
+      expected = "Interactive";
+    };
+    testUnknownProcessTypeIsRejected = {
+      expr = (builtins.tryEval (agentProcessTypeOf (evalPolicyHome true { processType = "Fast"; }))).success;
+      expected = false;
+    };
+
+    # A config change is a unit change, so the daemon restarts on it: the
+    # digest is present, follows the config, is stable when it is not
+    # changed, and is absent when turned off.
+    testConfigDigestPresent = {
+      expr = digestOf (evalDigest {} { port = 2; }) != null;
+      expected = true;
+    };
+    testConfigDigestFollowsTheConfig = {
+      expr = digestOf (evalDigest {} { port = 2; }) == digestOf (evalDigest {} { port = 3; });
+      expected = false;
+    };
+    testConfigDigestIsStable = {
+      expr = digestOf (evalDigest {} { port = 2; }) == digestOf (evalDigest {} { port = 2; });
+      expected = true;
+    };
+    testConfigDigestOffWhenDisabled = {
+      expr = digestOf (evalDigest { restartOnConfigChange = false; } { port = 2; });
+      expected = null;
     };
 
     # Every policy has a spelling on every service manager.
