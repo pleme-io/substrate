@@ -183,6 +183,30 @@ jobs:
             exit 1
           fi
 
+          # ── DEPENDENCIES BEFORE DEPENDENTS ────────────────────────────────
+          # `helm dependency update` packages a file:// dependency as its
+          # directory stands, `charts/` included, and does NOT update that
+          # dependency's own dependencies. A chart visited before the chart it
+          # depends on therefore vendors a copy with nothing inside, and every
+          # include through it fails as `no template "pleme-lib.…"`. Measured on
+          # helmworks 2026-09-28: all 7 lint failures that lintFailureCeiling was
+          # set to tolerate were this (lareira-cartorio sorts before
+          # pleme-microservice, whose pleme-lib was not yet materialised), not
+          # stale vendored libraries. Depth-first, once per chart, fixes the
+          # order for any depth of file:// chain.
+          declare -A materialised=()
+          materialise() {
+            local c; c=$(realpath -m "$1")
+            [ -n "${materialised[$c]:-}" ] && return 0
+            materialised[$c]=1
+            grep -q '^dependencies:' "$c/Chart.yaml" 2>/dev/null || return 0
+            local dep
+            while IFS= read -r dep; do
+              materialise "$c/$dep"
+            done < <(sed -n 's|^[[:space:]-]*repository:[[:space:]]*["'\'']\{0,1\}file://\([^"'\'' ]*\).*|\1|p' "$c/Chart.yaml")
+            helm dependency update "$c" >/dev/null 2>&1 || true
+          }
+
           scanned=0; linted=0; lint_failed=0; tested=0; ext_tested=0; test_failed=0
           for chart in "$CHARTS_DIR"/*/; do
             [ -f "${chart}Chart.yaml" ] || continue
@@ -191,11 +215,19 @@ jobs:
 
             # Materialise file:// library-chart deps, or every include
             # through them lints as a missing template.
-            if grep -q '^dependencies:' "${chart}Chart.yaml"; then
-              helm dependency update "$chart" >/dev/null 2>&1 || true
+            materialise "$chart"
+
+            # A chart whose schema or `required` demands operator input cannot
+            # lint on its defaults. `ci/lint-values.yaml` (helm chart-testing's
+            # convention) supplies that input, the same file forge's release
+            # lint already reads (forge cli/src/commands/helm.rs), so this gate
+            # and the publish step judge a chart on the same values.
+            lint_values=()
+            if [ -f "${chart}ci/lint-values.yaml" ]; then
+              lint_values=(-f "${chart}ci/lint-values.yaml")
             fi
 
-            if helm lint "$chart" >/tmp/lint.log 2>&1; then
+            if helm lint "$chart" "${lint_values[@]}" >/tmp/lint.log 2>&1; then
               linted=$((linted + 1))
             else
               lint_failed=$((lint_failed + 1))
@@ -239,9 +271,7 @@ jobs:
               [ -f "${fx}Chart.yaml" ] || continue
               fixtures=$((fixtures + 1))
               fname=$(basename "$fx")
-              if grep -q '^dependencies:' "${fx}Chart.yaml"; then
-                helm dependency update "$fx" >/dev/null 2>&1 || true
-              fi
+              materialise "$fx"
               # -f because a fixture keeps its suites at the chart ROOT rather
               # than in tests/ — that is the existing on-disk layout, and
               # relocating N suites to satisfy a discovery default would be a
