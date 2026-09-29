@@ -76,6 +76,7 @@ limit again.
 | writing or calling a reusable workflow (caixa, ansible-collection, per-channel publish), including why a job output is not a workflow output | [`docs/ci/reusable-workflows.md`](./docs/ci/reusable-workflows.md) |
 | finding where a module lives in `lib/` | [`docs/module-hierarchy.md`](./docs/module-hierarchy.md) |
 | looking up what `lib/default.nix` exports | [`docs/exports.md`](./docs/exports.md) |
+| refactoring, extracting a helper, or adding a build behaviour: the neutrality protocol, the gates, what to reuse | [`docs/evolving-substrate.md`](./docs/evolving-substrate.md) |
 | choosing which files a build reads (`prose = "included" \| "excluded"`) | [`lib/build/source-policy.nix`](./lib/build/source-policy.nix) |
 
 ## Import Patterns
@@ -235,6 +236,23 @@ import ./build/rust/overlay.nix
 - New code should use the new paths (`lib/build/rust/overlay.nix`).
 - When moving a file, always create a shim at the old location.
 - The shim format is exactly two lines: comment + import.
+
+## Evolving substrate — every change is neutral or opt-in
+
+- **A refactor proves itself derivation-neutral.** Baseline every check's
+  `drvPath` on both systems before editing, and require them unchanged after.
+  Also evaluate real consumers with `--override-input substrate` at `main` and
+  at your worktree. If a consumer never reaches the code you touched, its
+  identity proves nothing; compare the enclosing string directly instead.
+- **A new behaviour is a typed parameter whose default is today's behaviour.**
+  The consumer that needs it is one permutation of that parameter. Use an enum
+  checked with `lib.assertOneOf`, and test that the default is the identity.
+- **A new flake check lands together with its CI step**, and the workflow's
+  `paths:` must cover every file the check reads. `checks-wired` fails the build
+  otherwise.
+
+Protocol, traps, reusable helpers and backlog:
+[`docs/evolving-substrate.md`](./docs/evolving-substrate.md).
 
 ---
 
