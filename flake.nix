@@ -331,6 +331,17 @@
           source-policy =
             (import ./lib/build/tests/source-policy-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── CLAUDE.md stays loadable (≤ 40,000 bytes) ───────────────────
+          # Measured before the split: 84,727 B, so the file loaded nowhere.
+          # NOT VACUOUS: `over-limit-throws` in the gate's own suite.
+          claude-md-gate =
+            (import ./lib/util/tests/claude-md-gate-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          claude-md-size =
+            (import ./lib/util/claude-md-gate.nix { inherit (nixpkgs) lib; }).check pkgs {
+              name = "substrate";
+              file = ./CLAUDE.md;
+            };
+
           # ── The lockfile path's test RUNNER (opt-in `tests.cargo`) ─────
           # `substrate.rust.<shape>` on the default lockfile path emitted
           # `checks.build` and never `checks.tests`: buildRustCrate cannot
