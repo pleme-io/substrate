@@ -325,6 +325,12 @@
           rust-test-check =
             (import ./lib/build/rust/tests/test-check-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          # ── source-policy: which files of a consumer's tree a build reads ──
+          # NOT VACUOUS: making "excluded" return the tree unfiltered fails
+          # `excluded-drops-top-level-prose` and nothing else.
+          source-policy =
+            (import ./lib/build/tests/source-policy-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── The lockfile path's test RUNNER (opt-in `tests.cargo`) ─────
           # `substrate.rust.<shape>` on the default lockfile path emitted
           # `checks.build` and never `checks.tests`: buildRustCrate cannot
@@ -830,10 +836,17 @@
             devenv = inputs.devenv or null;
             forge = inputs.forge or null;
           };
+          # `prose` (source-policy.nix): which files of `src` the build reads.
+          # Every shape takes it; the default keeps today's derivations.
+          sourcePolicy = import ./lib/build/source-policy.nix { inherit (nixpkgs) lib; };
           callShape = shape: args:
-            import ./lib/build/rust/mk-rust-tool-flake.nix (args // {
+            import ./lib/build/rust/mk-rust-tool-flake.nix ((removeAttrs args [ "prose" ]) // {
               inputs = (args.inputs or {}) // substrateInputs;
               shape = shape;
+              src = sourcePolicy.buildSrc {
+                inherit (args) src;
+                prose = args.prose or "included";
+              };
             });
         in {
           tool      = callShape "tool";

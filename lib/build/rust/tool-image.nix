@@ -91,9 +91,16 @@ in {
   # image-build failure). Requires Cargo.gen.lock in the workspace root
   # (Cargo.build-spec.json is auto-derived via gen IFD when absent).
   genBuild ? false,
+  # Which files of `src` the build reads: "included" (default, the tree as
+  # given) or "excluded" (drop top-level docs/ and *.md). See
+  # ../source-policy.nix.
+  prose ? "included",
   ...
 }:
 let
+  policySrc = (import ../source-policy.nix { inherit (hostPkgs) lib; }).buildSrc {
+    inherit src prose;
+  };
   effectivePackageName = if packageName != null then packageName else toolName;
   hasArch = arch: builtins.elem arch architectures;
 
@@ -110,7 +117,7 @@ let
   in
     if genBuild then
       (import ./lockfile-builder.nix { inherit pkgs; }).mkProject {
-        inherit src;
+        src = policySrc;
         defaultCrateOverrides =
           pkgs.defaultCrateOverrides // plemeCrateOverrides // {
             ${effectivePackageName} = pkgOverride;
@@ -121,8 +128,9 @@ let
       # that SHIPS, so a Cargo.nix that no longer describes Cargo.lock is a
       # hard eval failure here rather than a silently different image.
       (import ./cargo-nix-tie.nix { }).importFresh {
-        inherit cargoNix src;
-        cargoLock = src + "/Cargo.lock";
+        inherit cargoNix;
+        src = policySrc;
+        cargoLock = policySrc + "/Cargo.lock";
         args = {
           inherit pkgs;
           defaultCrateOverrides = pkgs.defaultCrateOverrides // {
