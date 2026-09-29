@@ -664,8 +664,14 @@
           # Separate from selftest-cargo on purpose: that shell's comment
           # commits it to being the minimal shape substrate's builders emit,
           # and the selftest asserts against it. This one is allowed to grow.
+          #
+          # The compiler is the fleet toolchain (`packages.rustToolchain`, the
+          # same fenix pin the builders use), not nixpkgs' rustc. Measured
+          # 2026-09-29: nixpkgs shipped rustc 1.95 while wadachi declared
+          # `rust-version = 1.97`, so its release had failed since 2026-08-08
+          # on the gate alone, a red the builders would never have produced.
           release-gate = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.pkg-config pkgs.protobuf ];
+            packages = [ self.packages.${system}.rustToolchain pkgs.pkg-config pkgs.protobuf ];
             buildInputs = [ pkgs.openssl ];
           };
         });
