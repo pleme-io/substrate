@@ -105,6 +105,12 @@
     # fails LOUDLY as a hash mismatch, never silently, so the failure mode is
     # recoverable; recompute and pin.
     normalizeGoDirective ? false,
+    # Announce each normalization with a one-line trace. Off by default: the
+    # consumer already declared `normalizeGoDirective = true` at its call site,
+    # so the trace only restated it on every eval. Turn it on to audit which
+    # packages are being normalized. The unopted bare-minor warning below is
+    # unaffected, because there the fix is the consumer's own one-line edit.
+    traceGoDirectiveNormalization ? false,
     description ? "${pname} - Kubernetes tool",
     homepage ? null,
     license ? pkgs.lib.licenses.asl20,
@@ -244,6 +250,8 @@
           + "form that still clears a dependency floor is 'go ${lib.versions.majorMinor tool}.0'; a bare "
           + "'go ${lib.versions.majorMinor tool}' sorts BELOW it. "
           + "Otherwise raise the fleet pin in lib/build/go/go-toolchain-pin.json.")
+        else if verdict.verdict == "bare-minor" && normalizeGoDirective && !traceGoDirectiveNormalization
+        then null
         else if verdict.verdict == "bare-minor" && normalizeGoDirective
         # Normalized locally because upstream is unreachable. One line, not a
         # paragraph: there is no action for a reader to take, so the long
