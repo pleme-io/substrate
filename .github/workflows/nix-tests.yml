@@ -391,6 +391,9 @@ jobs:
       - name: checks.rust-determinism-flags (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-determinism-flags'
 
+      - name: checks.rust-build-script-receipt (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-build-script-receipt'
+
       - name: checks.rust-gui-detect (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-gui-detect'
 

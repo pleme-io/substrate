@@ -451,6 +451,10 @@
             (import ./lib/build/rust/tests/shape-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
           rust-determinism-flags =
             (import ./lib/build/rust/tests/determinism-flags-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          # The build-script receipt (`<crate>.opt`) must not carry the build
+          # dir: runs the postInstall fragment on a fixture and byte-compares.
+          rust-build-script-receipt =
+            (import ./lib/build/rust/tests/build-script-receipt-test.nix { }).asCheck pkgs;
 
           # ── The linux ABI is now DERIVED, so the derivation needs a gate ──
           # gui-detect.nix decides, per crate, whether the linux artifact is

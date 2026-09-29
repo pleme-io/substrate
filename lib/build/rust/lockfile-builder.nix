@@ -342,6 +342,7 @@ let
   overrideCompose = import ./crate-override-compose.nix { inherit lib; };
   # I2 corollary — the host tree's resolve section (see `hostBuildSection`).
   hostTreeClosure = import ./host-tree-closure.nix { inherit lib; };
+  buildScriptReceiptNormalize = (import ./build-script-receipt.nix).postInstall;
   # The test RUNNER for this path — `cargo test --frozen` over the
   # Cargo.lock-vendored workspace. See that file for why it runs cargo
   # rather than a buildRustCrate test tree, and for what it does NOT prove.
@@ -1255,6 +1256,24 @@ let
             ++ (overrideExtras.extraRustcOpts or [])
             ++ [ "-Z" "remap-cwd-prefix=." ];
           RUSTC_BOOTSTRAP = "1";
+
+          # ── build-script receipt determinism ─────────────────────────────
+          # nixpkgs tees each build script's stdout into `<crate>.opt` and
+          # installs it into `$lib/lib`. A `cargo:rerun-if-changed=<abs path>`
+          # line records the random darwin build dir, so the output differs on
+          # every build. MEASURED 2026-09-29: `nix build --rebuild` of
+          # rust_engenho-csi (tonic-build) failed "may not be deterministic",
+          # and `.opt` was the only differing file.
+          #
+          # Nothing reads those lines: configure-crate.nix extracts only the
+          # `rustc-*` directives, and dependents read `lib/link` and `env`, never
+          # a dependency's `.opt`. They are a bad state rather than a
+          # behaviour, so they are dropped rather than put behind a parameter.
+          # Composed like extraRustcOpts above, so neither an override's
+          # postInstall nor the caller's is lost.
+          postInstall = (args.postInstall or "")
+            + (overrideExtras.postInstall or "")
+            + buildScriptReceiptNormalize;
         };
         # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
         # (the multi-target universe). Restricts `built` to crates actually
