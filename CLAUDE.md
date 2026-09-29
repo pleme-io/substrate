@@ -251,6 +251,13 @@ import ./build/rust/overlay.nix
   `paths:` must cover every file the check reads. `checks-wired` fails the build
   otherwise.
 
+- **Output only what someone must act on.** A `builtins.trace` or `lib.warn`
+  names an action the reader has to take (commit a lock, fix a `go.mod`). A
+  fact the caller already declared, or progress chatter, is silent by default
+  and reachable through a typed flag (`traceGoDirectiveNormalization`). Every
+  rebuild prints every trace, so an informational one trains people to skim
+  past the warnings that matter.
+
 Protocol, traps, reusable helpers and backlog:
 [`docs/evolving-substrate.md`](./docs/evolving-substrate.md).
 
