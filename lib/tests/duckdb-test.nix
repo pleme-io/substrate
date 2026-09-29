@@ -94,12 +94,5 @@ in
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "duckdb-test" { } ''
-      echo "duckdb: ${result.summary}" > $out
-    ''
-    else throw ''
-      duckdb tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "duckdb-test"; label = "duckdb"; } result;
 }

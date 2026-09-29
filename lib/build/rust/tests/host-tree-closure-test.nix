@@ -136,12 +136,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "rust-host-tree-closure-test" { } ''
-      echo "rust/host-tree-closure: ${result.summary}" > $out
-    ''
-    else throw ''
-      rust/host-tree-closure tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "rust-host-tree-closure-test"; label = "rust/host-tree-closure"; } result;
 }

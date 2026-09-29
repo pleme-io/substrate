@@ -579,6 +579,19 @@
               tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
               goToolchain = goToolchainFor system;
             };
+
+          # ── every check above has a CI step (nix-tests.yml builds x86_64-linux) ──
+          # Measured 2026-09-29: 9 of 26 checks had none. NOT VACUOUS: the
+          # suite's `unwired-check-throws` case, and this check itself fails if a
+          # new check lands without its step.
+          checks-wired-test =
+            (import ./lib/util/tests/checks-wired-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          checks-wired =
+            (import ./lib/util/checks-wired.nix { inherit (nixpkgs) lib; }).check pkgs {
+              names = builtins.attrNames self.checks.x86_64-linux;
+              system = "x86_64-linux";
+              workflowText = builtins.readFile ./.github/workflows/nix-tests.yml;
+            };
         });
 
         # ── The subject set for nix-devshell-cargo-test.yml's own gate ────

@@ -1,3 +1,7 @@
+# ★ UNWIRED (measured 2026-09-29): nothing in substrate imports this file and no
+# checkout under ~/code references `lib/typescript-tool-flake.nix`. Kept, not deleted: wire it into
+# lib/default.nix or retire it deliberately, rather than letting it drift.
+#
 # Complete multi-system flake outputs for a TypeScript CLI tool.
 # Wraps build/typescript/tool.nix's `mkTypescriptTool` + per-system aggregation
 # + module-trio for zero-boilerplate consumer flakes.

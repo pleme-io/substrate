@@ -42,8 +42,10 @@ let
     if ferriteCheck != null then ferriteCheck
     else
       let
-        ferritePin = builtins.fromJSON (builtins.readFile ./ferrite-pin.json);
-        ferriteFlake = builtins.getFlake "github:pleme-io/ferrite/${ferritePin.rev}";
+        ferriteFlake = (import ../../util/pinned-flake.nix { }).fromPin {
+          repo = "ferrite";
+          pinFile = ./ferrite-pin.json;
+        };
         sys = pkgs.stdenv.hostPlatform.system;
       in
       ferriteFlake.packages.${sys}.check

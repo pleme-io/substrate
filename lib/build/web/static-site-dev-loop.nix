@@ -1,3 +1,7 @@
+# ★ UNWIRED (measured 2026-09-29): nothing in substrate imports this file and no
+# checkout under ~/code references `lib/build/web/static-site-dev-loop.nix`. Kept, not deleted: wire it into
+# lib/default.nix or retire it deliberately, rather than letting it drift.
+#
 # ============================================================================
 # STATIC-SITE-DEV-LOOP — packaged dev experience for headless-CMS blogs
 # ============================================================================

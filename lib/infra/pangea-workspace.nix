@@ -9,7 +9,7 @@
 # single pattern that delegates to the pangea CLI.
 #
 # Usage:
-#   let mkPangeaWorkspace = import "${substrate}/lib/pangea-workspace.nix" {
+#   let mkPangeaWorkspace = import "${substrate}/lib/infra/pangea-workspace.nix" {
 #     inherit pkgs;
 #     pangea = inputs.pangea.packages.${system}.default;  # or however pangea is provided
 #   };

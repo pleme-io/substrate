@@ -163,12 +163,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "devshell-preflight-test" { } ''
-      echo "devshell-preflight: ${result.summary}" > $out
-    ''
-    else throw ''
-      devshell-preflight tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "devshell-preflight-test"; label = "devshell-preflight"; } result;
 }

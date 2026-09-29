@@ -388,12 +388,5 @@ in {
 
   # Derivation form for `nix flake check`. Builds iff every test passes;
   # on failure the message names each failing test.
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "mutating-verbs-test" { } ''
-      echo "mutating-verbs: ${result.summary}" > $out
-    ''
-    else throw ''
-      mutating-verbs tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "mutating-verbs-test"; label = "mutating-verbs"; } result;
 }

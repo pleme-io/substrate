@@ -118,12 +118,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "rust-gui-detect-test" { } ''
-      echo "rust/gui-detect: ${result.summary}" > $out
-    ''
-    else throw ''
-      rust/gui-detect tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "rust-gui-detect-test"; label = "rust/gui-detect"; } result;
 }

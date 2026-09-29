@@ -400,9 +400,9 @@ let
         # AUTO-RELEASE bumping the pin on every gen release.
         genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
         genRev = genPin.rev;
-        autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
-        autoGen = autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.host-tool
-          or autoGenFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        pinned = import ../../util/pinned-flake.nix { };
+        autoGenFlake = pinned.atRev { repo = "gen"; rev = genRev; };
+        autoGen = pinned.hostTool autoGenFlake pkgs.stdenv.hostPlatform.system;
       in
         autoGen,
     # Host pkgs for the IFD auto-regen. When `pkgs` is pkgsStatic (cross

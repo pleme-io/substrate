@@ -36,12 +36,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "claude-md-gate-test" { } ''
-      echo "claude-md-gate: ${result.summary}" > $out
-    ''
-    else throw ''
-      claude-md-gate tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "claude-md-gate-test"; label = "claude-md-gate"; } result;
 }

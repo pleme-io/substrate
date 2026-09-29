@@ -234,8 +234,9 @@ let
   genRev = genPin.rev;
   ifdSystem = "x86_64-linux";  # Fixed: IFD-host-arbitrary; the spec is system-agnostic JSON.
   ifdHostPkgs = (import inputs.nixpkgs { system = ifdSystem; });
-  ifdGenFlake = builtins.getFlake "github:pleme-io/gen/${genRev}";
-  ifdGen = ifdGenFlake.packages.${ifdSystem}.host-tool or ifdGenFlake.packages.${ifdSystem}.default;
+  pinned = import ../../util/pinned-flake.nix { };
+  ifdGenFlake = pinned.atRev { repo = "gen"; rev = genRev; };
+  ifdGen = pinned.hostTool ifdGenFlake ifdSystem;
   ifdSpecDrv = (import ./mk-build-spec.nix) {
     inherit src;
     hostPkgs = ifdHostPkgs;

@@ -132,7 +132,7 @@ in rec {
   #
   # Automatically injects Darwin SDK on macOS. When a devenv input is
   # passed, delegates to `devenv.lib.mkShell` with an optional per-kind
-  # devenv module (../devenv/rust-tool.nix, rust-library.nix, rust-service.nix).
+  # devenv module (../../devenv/rust-tool.nix, rust-library.nix, rust-service.nix).
   #
   # Args:
   #   pkgs:              target pkgs (may include fenix overlay)

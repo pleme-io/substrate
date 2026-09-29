@@ -97,6 +97,11 @@ on:
       - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
+      # lib/tests/** + lib/*.nix: checks.duckdb and checks.module-trio live
+      # there. CLAUDE.md: checks.claude-md-size reads it. Added 2026-09-29.
+      - 'lib/tests/**'
+      - 'lib/*.nix'
+      - 'CLAUDE.md'
   pull_request:
     branches:
       - main
@@ -114,6 +119,9 @@ on:
       - 'skills/**'
       - 'flake.nix'
       - '.github/workflows/nix-tests.yml'
+      - 'lib/tests/**'
+      - 'lib/*.nix'
+      - 'CLAUDE.md'
   workflow_dispatch:
 
 jobs:
@@ -364,6 +372,42 @@ jobs:
       # job reads nothing it watches).
       - name: checks.workflow-catalog (.github/workflows — header + migration ratchets)
         run: nix build --no-link -L '.#checks.x86_64-linux.workflow-catalog'
+
+      # Declared in flake.nix and built by nothing until 2026-09-29 (9 of 26).
+      # Each built green on x86_64-linux before wiring (1s–54s). checks-wired
+      # below fails the job if a future check lands without its step here.
+      - name: checks.module-trio (lib — module trio factory)
+        run: nix build --no-link -L '.#checks.x86_64-linux.module-trio'
+
+      - name: checks.source-policy (lib/build — which files a build reads)
+        run: nix build --no-link -L '.#checks.x86_64-linux.source-policy'
+
+      - name: checks.duckdb (lib — duckdb helper suite)
+        run: nix build --no-link -L '.#checks.x86_64-linux.duckdb'
+
+      - name: checks.duckdb-wrapper (lib — duckdb wrapper builds and runs)
+        run: nix build --no-link -L '.#checks.x86_64-linux.duckdb-wrapper'
+
+      - name: checks.rust-determinism-flags (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-determinism-flags'
+
+      - name: checks.rust-gui-detect (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-gui-detect'
+
+      - name: checks.rust-host-tree-closure (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-host-tree-closure'
+
+      - name: checks.claude-md-gate (lib/util — the size gate's own suite)
+        run: nix build --no-link -L '.#checks.x86_64-linux.claude-md-gate'
+
+      - name: checks.claude-md-size (CLAUDE.md stays under the 40,000-byte load limit)
+        run: nix build --no-link -L '.#checks.x86_64-linux.claude-md-size'
+
+      - name: checks.checks-wired-test (lib/util — the wiring gate's own suite)
+        run: nix build --no-link -L '.#checks.x86_64-linux.checks-wired-test'
+
+      - name: checks.checks-wired (every declared check has a step in this job)
+        run: nix build --no-link -L '.#checks.x86_64-linux.checks-wired'
 
   # ══ Family C (see header) ══════════════════════════════════════════
   #

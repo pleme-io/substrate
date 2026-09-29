@@ -51,12 +51,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "source-policy-test" { } ''
-      echo "source-policy: ${result.summary}" > $out
-    ''
-    else throw ''
-      source-policy tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "source-policy-test"; label = "source-policy"; } result;
 }

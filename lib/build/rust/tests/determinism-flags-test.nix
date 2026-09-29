@@ -93,12 +93,5 @@ in {
   inherit (result) total passCount failCount allPassed failures summary;
   inherit tests result;
 
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "rust-determinism-flags-test" { } ''
-      echo "rust/determinism-flags: ${result.summary}" > $out
-    ''
-    else throw ''
-      rust/determinism-flags tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "rust-determinism-flags-test"; label = "rust/determinism-flags"; } result;
 }

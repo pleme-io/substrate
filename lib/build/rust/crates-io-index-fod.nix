@@ -1,3 +1,7 @@
+# ★ UNWIRED (measured 2026-09-29): nothing in substrate imports this file and no
+# checkout under ~/code references `lib/build/rust/crates-io-index-fod.nix`. Kept, not deleted: wire it into
+# lib/default.nix or retire it deliberately, rather than letting it drift.
+#
 # crates-io-index-fod.nix — hermetic FOD of the FULL crates.io registry
 # index, packaged so `cargo generate-lockfile --offline` resolves ANY
 # registry dependency in a clean CARGO_HOME with NO network, NO --impure,

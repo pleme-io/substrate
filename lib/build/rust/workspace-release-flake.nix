@@ -61,7 +61,7 @@ let
   genRev = genPin.rev;
   effectiveGen =
     if gen != null then gen
-    else builtins.getFlake "github:pleme-io/gen/${genRev}";
+    else (import ../../util/pinned-flake.nix { }).atRev { repo = "gen"; rev = genRev; };
 
   mkPerSystem = system: let
     rustWorkspace = import ./workspace-release.nix {

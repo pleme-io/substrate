@@ -58,6 +58,22 @@ rec {
     summary = "${toString (length passed)}/${toString (length tests)} passed";
   };
 
+  # ─── runTests result → `nix flake check` derivation ─────────────────
+  # The one `asCheck` shape: builds iff every test passed, otherwise an eval
+  # error naming each failure. `name` is the derivation name, `label` the
+  # suite's name in the receipt and the error.
+  #
+  #   asCheck = testHelpers.mkAsCheck { name = "duckdb-test"; label = "duckdb"; } result;
+  #   # flake.nix: checks.duckdb = (import ./duckdb-test.nix { inherit lib; }).asCheck pkgs;
+  mkAsCheck = { name, label }: result: pkgs:
+    if result.allPassed
+    then pkgs.runCommand name { } ''
+      echo "${label}: ${result.summary}" > $out
+    ''
+    else throw ''
+      ${label} tests FAILED (${result.summary}):
+        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+
   # ─── NixOS module stubs ────────────────────────────────────────────
   # Generates a stub module with all common NixOS system options.
   # Use with lib.evalModules to test NixOS modules in isolation without

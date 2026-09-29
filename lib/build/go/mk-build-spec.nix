@@ -60,12 +60,10 @@ let
     if gen != null then gen
     else
       let
-        genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
-        autoGenFlake = builtins.getFlake "github:pleme-io/gen/${genPin.rev}";
-        sys = hostPkgs.stdenv.hostPlatform.system;
+        pinned = import ../../util/pinned-flake.nix { };
+        autoGenFlake = pinned.fromPin { repo = "gen"; pinFile = ./gen-pin.json; };
       in
-        autoGenFlake.packages.${sys}.host-tool
-          or autoGenFlake.packages.${sys}.default;
+        pinned.hostTool autoGenFlake hostPkgs.stdenv.hostPlatform.system;
 
   committedSpecPath = src + "/Go.build-spec.json";
   hasCommittedSpec = builtins.pathExists committedSpecPath;

@@ -277,12 +277,5 @@ in {
 
   # Derivation form for `nix flake check`. Builds iff every test passes;
   # on failure the message names each failing test.
-  asCheck = pkgs:
-    if result.allPassed
-    then pkgs.runCommand "rust-workspace-tests-test" { } ''
-      echo "rust workspace-tests: ${result.summary}" > $out
-    ''
-    else throw ''
-      rust workspace-tests tests FAILED (${result.summary}):
-        - ${builtins.concatStringsSep "\n  - " result.failures}'';
+  asCheck = testHelpers.mkAsCheck { name = "rust-workspace-tests-test"; label = "rust workspace-tests"; } result;
 }
