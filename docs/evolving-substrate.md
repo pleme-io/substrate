@@ -138,6 +138,13 @@ These were found during the 2026-09 cleanup wave and have not been started:
 - CI caching for the eval jobs
 - building JSON as data (`builtins.toJSON`) where it is still assembled as strings
 - test gaps in the Go and wasm builders, and eval suites not yet wired into CI
+- darwin binary non-determinism: `nix build --rebuild` of a linked Rust binary
+  (measured on engenho, 2026-09-29) differs in 48 bytes, which are exactly
+  `LC_UUID` (16) plus the code-signature hash derived from it (32). A plain
+  `rustc` binary built in two directories keeps the same UUID, so the input
+  that varies is specific to the buildRustCrate link; not yet identified.
+  Crate outputs (`rust_*-lib`) rebuild identically since the build-script
+  receipt fix.
 
 ## Known red
 
