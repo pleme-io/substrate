@@ -38,8 +38,8 @@ let
         # `commands`); this one bakes in the module's environment. The wrapper
         # runs `blue run --quiet`, so the log holds only what tehai writes.
         source = ''
-          use("tehai")
-          th_main()
+          use("tehai", [:main])
+          main()
         '';
         # macOS: /usr/bin/ssh, which reads /etc/ssh/ssh_config like nix does.
         extraPath = lib.optionals (platform == "nixos") [ pkgs.openssh ];
