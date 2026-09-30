@@ -234,6 +234,14 @@ in {
   # "rust-release". See ./shape.nix for the full statement and the fleet
   # counts behind that decision.
   shape ? "tool",
+  # Extra Rust targets for the DEV SHELL's toolchain, by triple (e.g.
+  # [ "wasm32-unknown-unknown" ]). Each adds fenix's prebuilt rust-std to the
+  # shell only; the build and its artifacts are untouched. Only meaningful with
+  # fenix: nixpkgs' rustc already carries wasm32, which is how blue's wasm
+  # engine test passed in CI until blue started passing fenix (so its static
+  # musl build stopped compiling LLVM) and the shell's toolchain lost the
+  # target. Defaults to [], which builds the shell exactly as before.
+  devShellTargets ? [],
   ...
 }:
 let
@@ -551,9 +559,21 @@ let
     language = "rust";
   };
 
+  # The dev shell's package set: the host set, plus prebuilt rust-std for each
+  # of `devShellTargets`. The same set when the list is empty, so no existing
+  # consumer's shell changes.
+  shellPkgs =
+    if devShellTargets == [ ] || fenix == null then hostPkgs
+    else import nixpkgs {
+      inherit system;
+      overlays = [
+        (rustOverlay.mkRustOverlay { inherit fenix system; targets = devShellTargets; })
+      ];
+    };
+
   # Dev tools for devShell
   devTools = if fenix != null then [
-    hostPkgs.fenixRustToolchain
+    shellPkgs.fenixRustToolchain
   ] else (with hostPkgs; [
     cargo
     rustc
