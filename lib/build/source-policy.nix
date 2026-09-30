@@ -12,6 +12,13 @@
 #               own README is common; choosing "excluded" asserts that nothing
 #               embeds the top-level files.
 #
+# The policy applies to what a build DEPLOYS, not to test checks. A test check
+# restarts nothing, and a test may read prose (engenho's
+# retracted_safety_claims reads docs/*.md), so under "excluded" the Rust
+# shapes hand their cargo test check the unfiltered tree (`testSrc`, set in
+# flake.nix's callShape). Measured 2026-09-29: before that, engenho's test
+# check failed because the filtered tree had no docs/.
+#
 # A new source behaviour is a new value here, not a new filter in a consumer.
 # Any unknown value is an eval error naming the accepted ones.
 { lib }:

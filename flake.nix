@@ -881,7 +881,11 @@
                 inherit (args) src;
                 prose = args.prose or "included";
               };
-            });
+            }
+            # A test check deploys nothing, so it reads the whole tree even
+            # when the build excludes prose. Absent on the default, so every
+            # `included` consumer's derivations are unchanged.
+            // (if (args.prose or "included") == "excluded" then { testSrc = args.src; } else {}));
         in {
           tool      = callShape "tool";
           workspace = callShape "workspace";

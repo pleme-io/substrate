@@ -57,6 +57,8 @@
   #     ];
   #   }
   tests ? null,
+  # Forwarded to the builder's cargo test check; see tool-release.nix.
+  testSrc ? null,
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
@@ -358,4 +360,5 @@ in toolFlake (
   # single statement of "derive it" instead of two that must agree.
   // (if gui != null then { inherit gui; } else {})
   // (if tests != null then { inherit tests; } else {})
+  // (if testSrc != null then { inherit testSrc; } else {})
 )

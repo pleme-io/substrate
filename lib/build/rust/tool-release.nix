@@ -219,6 +219,12 @@ in {
   # the cargo-vendored runner (./workspace-tests.nix), which emits
   # `checks.tests` on the lockfile path too.
   tests ? {},
+  # The tree the cargo test check reads. `null` means `src`. `prose =
+  # "excluded"` (../source-policy.nix) sets it to the unfiltered tree: the
+  # policy exists so a doc edit cannot rebuild a DEPLOYED artifact, and a test
+  # check deploys nothing, while a test may legitimately read prose (engenho's
+  # retracted_safety_claims reads docs/*.md).
+  testSrc ? null,
   testCrateFlags ? [],
   testInputs ? [],
   # The `substrate.rust.<shape>` entry point this consumer came through,
@@ -625,15 +631,17 @@ let
     buildInputs = buildInputs
       ++ builtins.map byTestName (cargoTestDecl.buildInputs or [ ]);
   };
+  cargoTestSrc = if testSrc != null then testSrc else src;
   mkCargoTests = cargoDecl:
     if effectiveMode == "lockfile"
     then (nativeLockfileBuilder.mkProject {
-      inherit src gen;
+      src = cargoTestSrc;
+      inherit gen;
       name = toolName;
       hostPkgs = hostPkgs;
     }).runTests cargoDecl cargoTestInputs
     else nativeLockfileBuilder.mkWorkspaceTests ({
-      inherit src;
+      src = cargoTestSrc;
       name = toolName;
       config = cargoDecl;
     } // cargoTestInputs);
