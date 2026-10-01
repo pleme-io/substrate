@@ -114,7 +114,7 @@ repo/skill. This is navigation infrastructure; its presence is enforced by
 | **Binario** | Caixa kind: a one-shot CLI binary. | `caixa.lisp` `:kind` |
 | **Servico** | Caixa kind: a long-running daemon/service. | `caixa.lisp` `:kind` |
 | **Supervisor** | Caixa kind: a process supervisor composing Servicos. | `caixa.lisp` `:kind` |
-| **Aplicacao** | Caixa kind: a typed mesh of Servicos. | `caixa.lisp` `:kind`; `aplicacao-compose` skill |
+| **Aplicacao** | Caixa kind: a typed mesh of Servicos. | `caixa.lisp` `:kind`; `caixa-author` skill |
 | **tatara-lisp** | The pleme-io declarative authoring language; expands to typed Rust IR. `caixa.lisp` is written in it. | `pleme-io/tatara` |
 | **`mkGoDevShell`** | The substrate Nix function (`lib/build/go/devenv.nix`) that produces `devShells.default` with the exact pinned toolchain CI uses (`go gopls gotools delve gofumpt staticcheck govulncheck forge caixa-validate`). `nix develop` enters it. | `substrate/lib/build/go/devenv.nix` |
 | **`check-all`** | The substrate flake app (`nix run .#check-all`) that runs the full local gate suite (gofumpt, vet, staticcheck, govulncheck, the GSDS analyzers, race tests, coverage). CI invokes it; it is the local reproduction of every CI gate. | substrate flake `apps.check-all` |
@@ -298,7 +298,7 @@ invocation; hand-editing the generated surface is drift
 
 | Act | Procedure |
 |---|---|
-| Create a new GSDS-conformant repo | `pleme-doc-gen scaffold --kind <Biblioteca\|Binario\|Servico> --name N --out .` then `nix run .#check-all` (see the `caixa-mass-generation` skill) |
+| Create a new GSDS-conformant repo | `pleme-doc-gen scaffold --kind <Biblioteca\|Binario\|Servico> --name N --out .` then `nix run .#check-all` (see the `explosive-ecosystem-consumption` skill) |
 | Add a second binary (single→multi) | edit `caixa.lisp` `:ecosystem "go-monorepo"` + add `:binaries [ … ]`, run `pleme-doc-gen caixa --source caixa.lisp --out .`, add `cmd/<bin>/main.go` ([LAYOUT-08](#dimension-repo-layout-and-module-layout)/[VER-11a](#dimension-versioning-and-compatibility-ver)) |
 | Add a subcommand | add a `cli.Command{...}` and register via `app.Add(...)` ([CLI-01](#dimension-cli-ux-cli)/[CLI-02](#dimension-cli-ux-cli)); renaming/removing one is a breaking change ([CLI-13](#dimension-cli-ux-cli)) |
 | Add a config field | add the tagged struct field + `// reload:` marker ([CFG-12](#dimension-configuration-cfg)); a breaking schema change bumps `schema_version` + ships a migration ([CFG-15](#dimension-configuration-cfg)); re-run `gen-config-docs` ([CFG-13](#dimension-configuration-cfg)) |
