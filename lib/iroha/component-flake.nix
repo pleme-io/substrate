@@ -259,6 +259,10 @@ let
             type = lib.types.listOf lib.types.anything;
             default = [ ];
           };
+          warnings = core.mkField {
+            type = "listOfStr";
+            default = [ ];
+          };
         };
       };
 
