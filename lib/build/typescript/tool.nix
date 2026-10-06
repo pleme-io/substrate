@@ -32,6 +32,15 @@
 { pkgs, forgeCmd ? "forge", nodeVersion ? pkgs.nodejs_22 }:
 
 rec {
+  exposeBin = built:
+    pkgs.runCommand built.name {
+      passthru = { unwrapped = built; };
+      meta = built.meta or { };
+    } ''
+      mkdir -p $out/bin
+      ln -s ${built}/bin/* $out/bin/
+    '';
+
   # Build pleme-linker tool from source
   mkPlemeLinker = {plemeLinkerSrc}:
     let
@@ -168,7 +177,7 @@ rec {
         then "--parent-tsconfig ${parentTsconfig}"
         else "";
     in
-      pkgs.runCommand name {
+      exposeBin (pkgs.runCommand name {
         nativeBuildInputs = [plemeLinker];
       } ''
         ${plemeLinker}/bin/pleme-linker build-project \
@@ -180,7 +189,7 @@ rec {
           --bin-name ${binName} \
           ${parentTsconfigArg} \
           ${workspaceDepArgs}
-      '';
+      '');
 
   # Build a TypeScript CLI tool with workspace packages built from source
   # This builds everything in a single derivation (simpler but less granular caching)
@@ -242,7 +251,7 @@ rec {
         then "--parent-tsconfig ${parentTsconfig}"
         else "";
     in
-      pkgs.runCommand name {
+      exposeBin (pkgs.runCommand name {
         nativeBuildInputs = [plemeLinker];
       } ''
         ${plemeLinker}/bin/pleme-linker build-project \
@@ -254,7 +263,7 @@ rec {
           --bin-name ${binName} \
           ${parentTsconfigArg} \
           ${workspaceSrcArgs}
-      '';
+      '');
 
   # Build a TypeScript CLI tool - auto-discovers everything from package.json
   # This is the most minimal interface - just provide src with package.json
