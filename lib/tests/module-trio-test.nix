@@ -101,6 +101,21 @@ let
   etcOf = e: e.config.environment.etc;
   unitOf = e: e.config.systemd.services."testd-daemon" or null;
 
+  anvilTrio = trioLib.mkModuleTrio {
+    name = "anvild";
+    description = "anvil mcp";
+    withAnvilMcp = true;
+  };
+
+  anvilEntry = (lib.evalModules {
+    modules = [
+      anvilTrio.homeManagerModule
+      hmStubs
+      { services.anvild.mcp = { enable = true; package = dummyPkg; }; }
+    ];
+    specialArgs = { pkgs = pkgsOn true; };
+  }).config.blackmatter.components.anvil.mcp.servers.anvild;
+
   # ── Restart policy fixtures ────────────────────────────────────────
   # A tool that names its policy once, in its spec; every arm inherits it.
   policyTrio = trioLib.mkModuleTrio {
@@ -333,6 +348,19 @@ let
     testConfigDigestOffWhenDisabled = {
       expr = digestOf (evalDigest { restartOnConfigChange = false; } { port = 2; });
       expected = null;
+    };
+
+    testAnvilCommandIsTheBareBinaryInPackageForm = {
+      expr = anvilEntry.command;
+      expected = "anvild";
+    };
+    testAnvilEntryCarriesThePackage = {
+      expr = anvilEntry.package.outPath;
+      expected = dummyPkg.outPath;
+    };
+    testAnvilResolvedPathHasOneStorePrefix = {
+      expr = builtins.length (lib.splitString "/nix/store/" "${anvilEntry.package}/bin/${anvilEntry.command}");
+      expected = 2;
     };
 
     # Every policy has a spelling on every service manager.

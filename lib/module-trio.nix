@@ -231,6 +231,7 @@
 { lib }:
 let
   hmHelpers     = import ./hm/service-helpers.nix         { inherit lib; };
+  irohaMcp      = import ./iroha/mcp.nix                  { inherit lib; };
   nixosHelpers  = import ./hm/nixos-service-helpers.nix   { inherit lib; };
   darwinHelpers = import ./hm/darwin-service-helpers.nix  { inherit lib; };
   restartPolicy = import ./hm/restart-policy.nix          { inherit lib; };
@@ -905,19 +906,20 @@ in
             # the parent enable to gate registration too.
             (mkIf (withAnvilMcp && mcpCfg != null && mcpCfg.enable
                    && (!anvilGateOnEnable || (cfg.enable or false))) (
-              hmHelpers.mkAnvilRegistration {
-                inherit name;
-                command = "${mcpCfg.package}/bin/${binaryName}";
-                args = anvilArgs;
-                env = anvilEnv // (
-                  if withShikumiConfig
-                  then { ${shikumiEnvVar} = "${homeDir}/${shikumiConfigPath}"; }
-                  else {}
-                );
-                description = anvilDescription;
-                scopes = mcpCfg.scopes;
-                agents = mcpCfg.agents;
-                package = mcpCfg.package;
+              {
+                blackmatter.components.anvil.mcp.servers.${name} = (irohaMcp.mkMcpRegistration {
+                  inherit name binaryName;
+                  args = anvilArgs;
+                  env = anvilEnv // (
+                    if withShikumiConfig
+                    then { ${shikumiEnvVar} = "${homeDir}/${shikumiConfigPath}"; }
+                    else {}
+                  );
+                  description = anvilDescription;
+                  scopes = mcpCfg.scopes;
+                  agents = mcpCfg.agents;
+                  package = mcpCfg.package;
+                }).serverEntry;
               }
             ))
           ];
