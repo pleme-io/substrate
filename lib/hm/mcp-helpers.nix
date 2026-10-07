@@ -164,14 +164,35 @@ in rec {
     '') server.env);
 
     needsWrapper = server.envFiles != {} || server.env != {};
+
+    script = pkgs.writeShellScript "mcp-${name}" ''
+      ${envFileExports}
+      ${staticExports}
+      exec ${escapeShellArg cmd} ${concatStringsSep " " (map escapeShellArg server.args)}
+    '';
   in
-    if needsWrapper then
-      pkgs.writeShellScript "mcp-${name}" ''
-        ${envFileExports}
-        ${staticExports}
-        exec ${escapeShellArg cmd} ${concatStringsSep " " (map escapeShellArg server.args)}
-      ''
-    else null;
+    if !needsWrapper then null
+    # A wrapper whose inner exec does not exist still BUILDS, still deploys,
+    # and still registers: the agent then reports "Connection closed" with no
+    # other evidence, and the server can stay dead for weeks. Measured
+    # 2026-10-07: `aws` named `aws-api-mcp-server` while its package ships
+    # `bin/awslabs.aws-api-mcp-server` (a namespace-package entry point), so
+    # `${package}/bin/${command}` was a path that nothing wrote.
+    #
+    # Checked here, where the derivation already forces the package, that
+    # becomes a rebuild failure naming the server. Only when `package` is set:
+    # a bare `command` is resolved from the consumer's PATH at RUN time, which
+    # is a different promise and not ours to check.
+    else if server.package == null then script
+    else
+      pkgs.runCommand "mcp-${name}" { } ''
+        if [ ! -x ${escapeShellArg cmd} ]; then
+          echo "mcp server ${escapeShellArg name}: ${cmd} is not an executable file; the package installs:" >&2
+          ls ${escapeShellArg "${server.package}"}/bin >&2 || true
+          exit 1
+        fi
+        ln -s ${script} $out
+      '';
 
   # ─── Resolve Servers ───────────────────────────────────────────────
   # Transforms server option definitions into resolved MCP entry format.
