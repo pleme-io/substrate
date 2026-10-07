@@ -21,6 +21,7 @@
 with lib;
 let
   policies = import ./restart-policy.nix { inherit lib; };
+  classes = import ./workload-class.nix { inherit lib; };
 in
 {
   # ─── System-level launchd daemon (persistent, runs as root) ──────────
@@ -53,6 +54,7 @@ in
     restartPolicy ? null,
     runAtLoad ? true,
     processType ? "Adaptive",
+    workloadClass ? null,
     userName ? "root",
     groupName ? null,
     workingDirectory ? null,
@@ -65,11 +67,10 @@ in
         ProgramArguments = [ command ] ++ args;
         RunAtLoad = runAtLoad;
         KeepAlive = policies.keepAliveOr keepAlive restartPolicy;
-        ProcessType = processType;
         StandardOutPath = "${logDir}/${name}.log";
         StandardErrorPath = "${logDir}/${name}.err";
         UserName = userName;
-      } // optionalAttrs (env != {}) {
+      } // classes.launchdOr { ProcessType = processType; } workloadClass // optionalAttrs (env != {}) {
         EnvironmentVariables = env;
       } // optionalAttrs (groupName != null) {
         GroupName = groupName;

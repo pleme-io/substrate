@@ -173,6 +173,91 @@ let
   digestOf = e: e.config.launchd.agents."digestd-daemon".config.EnvironmentVariables.PLEME_CONFIG_DIGEST or null;
   agentProcessTypeOf = e: e.config.launchd.agents."policyd-daemon".config.ProcessType;
 
+  workloadClasses = import ../hm/workload-class.nix { inherit lib; };
+
+  classTrio = trioLib.mkModuleTrio {
+    name = "classd";
+    description = "class daemon";
+    withSystemDaemon = true;
+    withUserDaemon = true;
+  };
+
+  declaredTrio = trioLib.mkModuleTrio {
+    name = "declaredd";
+    description = "declared daemon";
+    withSystemDaemon = true;
+    withUserDaemon = true;
+    daemonWorkloadClass = "background";
+    userDaemonWorkloadClass = "session-host";
+  };
+
+  evalClassHome = { isDarwin, daemon, warnLib ? lib, trio ? classTrio, ns ? "classd" }: lib.evalModules {
+    modules = [
+      trio.homeManagerModule
+      hmStubs
+      { programs.${ns} = { enable = true; package = dummyPkg; daemon = { enable = true; } // daemon; }; }
+    ];
+    specialArgs = { pkgs = pkgsOn isDarwin; lib = warnLib; };
+  };
+
+  evalClassSystem = { module, daemon, trio ? classTrio, ns ? "classd" }: lib.evalModules {
+    modules = [
+      trio.${module}
+      systemStubs
+      { services.${ns} = { enable = true; package = dummyPkg; daemon = { enable = true; } // daemon; }; }
+    ];
+    specialArgs = { inherit pkgs; };
+  };
+
+  launchdKeys = [ "ProcessType" "Nice" "LowPriorityIO" ];
+  systemdKeys = [ "Nice" "CPUWeight" "IOWeight" ];
+  pick = keys: lib.filterAttrs (k: _: builtins.elem k keys);
+
+  agentConfigOf = ns: e: e.config.launchd.agents."${ns}-daemon".config;
+  userServiceOf = ns: e: e.config.systemd.user.services."${ns}-daemon".Service;
+  launchdDaemonOf = ns: e: e.config.launchd.daemons."${ns}-daemon".serviceConfig;
+  nixosServiceOf = ns: e: e.config.systemd.services."${ns}-daemon".serviceConfig;
+
+  agentSchedOf = class: pick launchdKeys (agentConfigOf "classd" (evalClassHome { isDarwin = true; daemon = { workloadClass = class; }; }));
+  userUnitSchedOf = class: pick systemdKeys (userServiceOf "classd" (evalClassHome { isDarwin = false; daemon = { workloadClass = class; }; }));
+  launchdDaemonSchedOf = class: pick launchdKeys (launchdDaemonOf "classd" (evalClassSystem { module = "darwinModule"; daemon = { workloadClass = class; }; }));
+  nixosUnitSchedOf = class: pick systemdKeys (nixosServiceOf "classd" (evalClassSystem { module = "nixosModule"; daemon = { workloadClass = class; }; }));
+
+  pinnedLaunchd = {
+    session-host   = { ProcessType = "Interactive"; Nice = 0;  LowPriorityIO = false; };
+    latency-server = { ProcessType = "Interactive"; Nice = 0;  LowPriorityIO = false; };
+    service        = { ProcessType = "Standard";    Nice = 0;  LowPriorityIO = false; };
+    background     = { ProcessType = "Background";  Nice = 10; LowPriorityIO = true; };
+    xpc-adaptive   = { ProcessType = "Adaptive"; };
+  };
+  pinnedSystemd = {
+    session-host   = { Nice = 0;  CPUWeight = 100; IOWeight = 100; };
+    latency-server = { Nice = 0;  CPUWeight = 200; IOWeight = 200; };
+    service        = { Nice = 0;  CPUWeight = 100; IOWeight = 100; };
+    background     = { Nice = 10; CPUWeight = 20;  IOWeight = 20; };
+    xpc-adaptive   = { };
+  };
+
+  silentLib = lib // { warn = _: v: v; };
+  throwingLib = lib // { warn = msg: _: throw "warned: ${msg}"; };
+  pinnedWarning = "io.pleme.classd.daemon: workloadClass \"session-host\" renders ProcessType \"Interactive\"; processType \"Background\" beside it is not rendered";
+  onlyPinnedLib = lib // { warn = msg: v: if msg == pinnedWarning then v else throw "unexpected warning: ${msg}"; };
+
+  tearShapedTrio = trioLib.mkModuleTrio {
+    name = "hostd";
+    description = "session host";
+    withUserDaemon = true;
+    daemonWorkloadClass = "session-host";
+  };
+
+  sessionHostBesideBackground = warnLib: evalClassHome {
+    isDarwin = true;
+    inherit warnLib;
+    daemon = { workloadClass = "session-host"; processType = "Background"; };
+  };
+  rendersWithoutThrow = rendersWithoutThrowIn "classd";
+  rendersWithoutThrowIn = ns: e: (builtins.tryEval (builtins.deepSeq (agentConfigOf ns e) true)).success;
+
   # The env the daemon unit was given, wherever mkNixOSService put it.
   daemonEnvOf = e:
     let u = unitOf e;
@@ -328,6 +413,117 @@ let
     testUnknownProcessTypeIsRejected = {
       expr = (builtins.tryEval (agentProcessTypeOf (evalPolicyHome true { processType = "Fast"; }))).success;
       expected = false;
+    };
+
+    testPinnedRowsCoverEveryClass = {
+      expr = [ (builtins.attrNames pinnedLaunchd) (builtins.attrNames pinnedSystemd) ];
+      expected = [ workloadClasses.classes workloadClasses.classes ];
+    };
+    testEveryClassRendersOnLaunchdAgent = {
+      expr = lib.genAttrs workloadClasses.classes agentSchedOf;
+      expected = pinnedLaunchd;
+    };
+    testEveryClassRendersOnUserUnit = {
+      expr = lib.genAttrs workloadClasses.classes userUnitSchedOf;
+      expected = pinnedSystemd;
+    };
+    testEveryClassRendersOnLaunchdDaemon = {
+      expr = lib.genAttrs workloadClasses.classes launchdDaemonSchedOf;
+      expected = pinnedLaunchd;
+    };
+    testEveryClassRendersOnNixosUnit = {
+      expr = lib.genAttrs workloadClasses.classes nixosUnitSchedOf;
+      expected = pinnedSystemd;
+    };
+    testUnknownClassIsRejected = {
+      expr = (builtins.tryEval (agentSchedOf "realtime")).success;
+      expected = false;
+    };
+
+    testNoClassRendersTodaysScheduling = {
+      expr = [
+        (agentSchedOf null)
+        (userUnitSchedOf null)
+        (launchdDaemonSchedOf null)
+        (nixosUnitSchedOf null)
+      ];
+      expected = [ { ProcessType = "Adaptive"; } { } { ProcessType = "Adaptive"; } { } ];
+    };
+    testXpcAdaptiveRendersTodaysUnitsExactly = {
+      expr =
+        let
+          both = f: map f [ {} { workloadClass = "xpc-adaptive"; } ];
+          same = l: builtins.elemAt l 0 == builtins.elemAt l 1;
+        in [
+          (same (both (d: agentConfigOf "classd" (evalClassHome { isDarwin = true; daemon = d; }))))
+          (same (both (d: userServiceOf "classd" (evalClassHome { isDarwin = false; daemon = d; }))))
+          (same (both (d: launchdDaemonOf "classd" (evalClassSystem { module = "darwinModule"; daemon = d; }))))
+          (same (both (d: nixosServiceOf "classd" (evalClassSystem { module = "nixosModule"; daemon = d; }))))
+        ];
+      expected = [ true true true true ];
+    };
+    testNoClassIsTheDefault = {
+      expr = (evalClassHome { isDarwin = true; daemon = {}; }).config.programs.classd.daemon.workloadClass;
+      expected = null;
+    };
+
+    testSpecClassReachesEveryArm = {
+      expr = [
+        (pick launchdKeys (agentConfigOf "declaredd" (evalClassHome { isDarwin = true; daemon = {}; trio = declaredTrio; ns = "declaredd"; })))
+        (pick systemdKeys (userServiceOf "declaredd" (evalClassHome { isDarwin = false; daemon = {}; trio = declaredTrio; ns = "declaredd"; })))
+        (pick launchdKeys (launchdDaemonOf "declaredd" (evalClassSystem { module = "darwinModule"; daemon = {}; trio = declaredTrio; ns = "declaredd"; })))
+        (pick systemdKeys (nixosServiceOf "declaredd" (evalClassSystem { module = "nixosModule"; daemon = {}; trio = declaredTrio; ns = "declaredd"; })))
+      ];
+      expected = [
+        { ProcessType = "Interactive"; Nice = 0; LowPriorityIO = false; }
+        { Nice = 0; CPUWeight = 100; IOWeight = 100; }
+        { ProcessType = "Background"; Nice = 10; LowPriorityIO = true; }
+        { Nice = 10; CPUWeight = 20; IOWeight = 20; }
+      ];
+    };
+    testUserClassDefaultsToTheDaemonClass = {
+      expr = pick launchdKeys (agentConfigOf "hostd" (evalClassHome { isDarwin = true; daemon = {}; trio = tearShapedTrio; ns = "hostd"; }));
+      expected = { ProcessType = "Interactive"; Nice = 0; LowPriorityIO = false; };
+    };
+    testOperatorClassWinsOverTheSpec = {
+      expr = pick launchdKeys (agentConfigOf "hostd" (evalClassHome { isDarwin = true; daemon = { workloadClass = "xpc-adaptive"; }; trio = tearShapedTrio; ns = "hostd"; }));
+      expected = { ProcessType = "Adaptive"; };
+    };
+
+    testSessionHostBesideBackgroundRendersInteractive = {
+      expr = pick launchdKeys (agentConfigOf "classd" (sessionHostBesideBackground silentLib));
+      expected = { ProcessType = "Interactive"; Nice = 0; LowPriorityIO = false; };
+    };
+    testSessionHostBesideBackgroundWarns = {
+      expr = rendersWithoutThrow (sessionHostBesideBackground throwingLib);
+      expected = false;
+    };
+    testTheWarningNamesBothValues = {
+      expr = rendersWithoutThrow (sessionHostBesideBackground onlyPinnedLib);
+      expected = true;
+    };
+    testTheWarningIsTheTablesMessage = {
+      expr = workloadClasses.besideProcessType { daemon = "io.pleme.classd.daemon"; class = "session-host"; processType = "Background"; };
+      expected = pinnedWarning;
+    };
+    testSpecProcessTypeBesideTheSpecClassWarns = {
+      expr = rendersWithoutThrowIn "hostd" (evalClassHome { isDarwin = true; warnLib = throwingLib; daemon = { processType = lib.mkDefault "Interactive"; }; trio = tearShapedTrio; ns = "hostd"; });
+      expected = false;
+    };
+    testClassAloneDoesNotWarn = {
+      expr = rendersWithoutThrow (evalClassHome { isDarwin = true; warnLib = throwingLib; daemon = { workloadClass = "session-host"; }; });
+      expected = true;
+    };
+    testProcessTypeAloneDoesNotWarnAndRenders = {
+      expr =
+        let e = evalClassHome { isDarwin = true; warnLib = throwingLib; daemon = { processType = "Background"; }; };
+        in [ (rendersWithoutThrow e) (agentConfigOf "classd" e).ProcessType ];
+      expected = [ true "Background" ];
+    };
+    testUserUnitBesideProcessTypeDoesNotWarn = {
+      expr = (builtins.tryEval (builtins.deepSeq (userServiceOf "classd"
+        (evalClassHome { isDarwin = false; warnLib = throwingLib; daemon = { workloadClass = "session-host"; processType = "Background"; }; })) true)).success;
+      expected = true;
     };
 
     # A config change is a unit change, so the daemon restarts on it: the

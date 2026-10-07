@@ -91,6 +91,9 @@
 #                     historic default (NixOS Restart=always, launchd
 #                     KeepAlive=true, systemd user units Restart=on-failure),
 #                     so a spec that never names a policy renders unchanged.
+#   daemonWorkloadClass
+#                     a class of ./hm/workload-class.nix or null (default:
+#                     null) — the default of services.<name>.daemon.workloadClass.
 #
 #   withUserDaemon    bool — add programs.<name>.daemon (HM only). Spawns a
 #                     user-level launchd agent (Darwin) or systemd user unit
@@ -106,6 +109,9 @@
 #   userDaemonRestartPolicy
 #                     as daemonRestartPolicy, for programs.<name>.daemon
 #                     (default: daemonRestartPolicy).
+#   userDaemonWorkloadClass
+#                     as daemonWorkloadClass, for programs.<name>.daemon
+#                     (default: daemonWorkloadClass).
 #
 #   withShikumiConfig bool — add services.<name>.settings and deploy a YAML
 #                     config. Used by shikumi-style apps that read a YAML file
@@ -235,6 +241,7 @@ let
   nixosHelpers  = import ./hm/nixos-service-helpers.nix   { inherit lib; };
   darwinHelpers = import ./hm/darwin-service-helpers.nix  { inherit lib; };
   restartPolicy = import ./hm/restart-policy.nix          { inherit lib; };
+  workloadClasses = import ./hm/workload-class.nix        { inherit lib; };
   irohaCore     = import ./iroha/core.nix                 { inherit lib; };
 
   inherit (lib) mkOption mkEnableOption mkIf mkMerge optionalAttrs types literalExpression;
@@ -279,6 +286,7 @@ in
       # filter makes both platforms emit a clean argv. (extraArgs still append.)
       systemDaemonBaseArgs = if daemonSubcommand == "" then [] else [ daemonSubcommand ];
       daemonRestartPolicy  = spec.daemonRestartPolicy or null;
+      daemonWorkloadClass  = spec.daemonWorkloadClass or null;
 
       withUserDaemon       = spec.withUserDaemon       or false;
       userDaemonSubcommand = spec.userDaemonSubcommand or daemonSubcommand;
@@ -286,6 +294,7 @@ in
       userDaemonExtraArgs  = spec.userDaemonExtraArgs  or [];
       userDaemonEnv        = spec.userDaemonEnv        or {};
       userDaemonRestartPolicy = spec.userDaemonRestartPolicy or daemonRestartPolicy;
+      userDaemonWorkloadClass = spec.userDaemonWorkloadClass or daemonWorkloadClass;
 
       # One option for both daemon arms. Its default is the spec's, so the
       # tool states its own policy once and every host inherits it.
@@ -296,6 +305,23 @@ in
           When the service manager starts the daemon again: "always", or
           "on-failure" (exit 0 stays down, anything else is relaunched).
           null keeps the service manager's own default.
+        '';
+      };
+
+      workloadClassOption = default: mkOption {
+        type = types.nullOr workloadClasses.type;
+        inherit default;
+        description = ''
+          Who waits on the daemon, which decides its scheduling: launchd
+          ProcessType, Nice and LowPriorityIO, and systemd Nice, CPUWeight
+          and IOWeight, all from one table (lib/hm/workload-class.nix).
+          "session-host": a person waits on work it hosts, and its children
+          inherit its band. "latency-server": a program blocks on its
+          answer. "service": nothing blocks on it. "background": nothing
+          waits on it. "xpc-adaptive": launchd's Adaptive, boosted only by
+          XPC clients. null declares no class and keeps processType in
+          charge; a class beside an explicit processType decides alone, and
+          that daemon's evaluation warns naming both.
         '';
       };
 
@@ -507,8 +533,9 @@ in
           processType = mkOption {
             type = types.enum [ "Background" "Standard" "Adaptive" "Interactive" ];
             default = "Adaptive";
-            description = "launchd ProcessType for the user daemon (Darwin).";
+            description = "launchd ProcessType for the user daemon (Darwin) when it declares no workloadClass; beside a class it is not rendered.";
           };
+          workloadClass = workloadClassOption userDaemonWorkloadClass;
           # A daemon reads its config at start. Without a restart trigger, a
           # rebuild that changes the config leaves the daemon on the old one:
           # the config file's path is stable, so the unit does not change and
@@ -668,15 +695,28 @@ in
             description = "Environment variables for the daemon.";
           };
           restartPolicy = restartPolicyOption daemonRestartPolicy;
+          workloadClass = workloadClassOption daemonWorkloadClass;
         };
       } // extraSystemOptions;
 
     in
     {
       # ─── home-manager module ────────────────────────────────────────
-      homeManagerModule = { lib, config, pkgs, ... }:
+      homeManagerModule = { lib, config, options, pkgs, ... }:
         let
           cfg = lib.attrByPath (hmNamespacePath ++ [ name ]) {} config;
+          processTypeOpt = lib.attrByPath (hmNamespacePath ++ [ name "daemon" "processType" ]) null options;
+          processTypeSet = processTypeOpt != null
+            && processTypeOpt.highestPrio < (lib.mkOptionDefault null).priority;
+          agentClass =
+            let class = cfg.daemon.workloadClass;
+            in if class != null && processTypeSet
+              then lib.warn (workloadClasses.besideProcessType {
+                daemon = "io.pleme.${name}.daemon";
+                inherit class;
+                processType = cfg.daemon.processType;
+              }) class
+              else class;
           mcpCfg = config.services.${name}.mcp or null;
           # Merge typed-group field values into the shikumi YAML payload.
           # Authored settings (services.<name>.settings) take priority;
@@ -827,6 +867,7 @@ in
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment // configDigestEnv;
                   processType = cfg.daemon.processType;
+                  workloadClass = agentClass;
                   logDir = "${homeDir}/Library/Logs";
                   restartPolicy = cfg.daemon.restartPolicy;
                 }))
@@ -838,6 +879,7 @@ in
                   args = userDaemonBaseArgs ++ cfg.daemon.extraArgs;
                   env = cfg.daemon.environment // configDigestEnv;
                   restartPolicy = cfg.daemon.restartPolicy;
+                  workloadClass = cfg.daemon.workloadClass;
                 }))
 
               (extraHmConfig cfg)
@@ -958,6 +1000,7 @@ in
               # module's own render.
               environment = sys.env // cfg.daemon.environment;
               restartPolicy = cfg.daemon.restartPolicy;
+              workloadClass = cfg.daemon.workloadClass;
             }))
 
             (extraNixosConfig cfg)
@@ -992,6 +1035,7 @@ in
               args = systemDaemonBaseArgs ++ cfg.daemon.extraArgs;
               env = sys.env // cfg.daemon.environment;
               restartPolicy = cfg.daemon.restartPolicy;
+              workloadClass = cfg.daemon.workloadClass;
             }))
 
             (extraDarwinConfig cfg)

@@ -15,6 +15,7 @@
 with lib;
 let
   policies = import ./restart-policy.nix { inherit lib; };
+  classes = import ./workload-class.nix { inherit lib; };
 in
 {
   # ─── Systemd service ──────────────────────────────────────────────────
@@ -55,6 +56,7 @@ in
     # decides Restart=, and null leaves `restart` in charge.
     restartPolicy ? null,
     restartSec ? 5,
+    workloadClass ? null,
     startLimitIntervalSec ? 300,
     startLimitBurst ? 3,
     killMode ? "control-group",
@@ -101,6 +103,7 @@ in
         RestartSec = restartSec;
         KillMode = killMode;
       }
+      // classes.systemdOr {} workloadClass
       // optionalAttrs delegate { Delegate = "yes"; }
       // optionalAttrs (environmentFile != null) { EnvironmentFile = environmentFile; }
       // optionalAttrs (limitNOFILE != null) { LimitNOFILE = limitNOFILE; }

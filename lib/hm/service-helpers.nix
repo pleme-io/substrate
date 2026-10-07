@@ -15,6 +15,7 @@
 with lib;
 let
   policies = import ./restart-policy.nix { inherit lib; };
+  classes = import ./workload-class.nix { inherit lib; };
 in
 {
   # ─── MCP server entry options ─────────────────────────────────────────
@@ -152,6 +153,7 @@ in
     processType ? "Adaptive",
     nice ? null,
     lowPriorityIO ? false,
+    workloadClass ? null,
     maxOpenFiles ? null,
   }: {
     launchd.agents.${name} = {
@@ -161,15 +163,16 @@ in
         ProgramArguments = [command] ++ args;
         RunAtLoad = runAtLoad;
         KeepAlive = policies.keepAliveOr keepAlive restartPolicy;
-        ProcessType = processType;
         StandardOutPath = "${logDir}/${name}.log";
         StandardErrorPath = "${logDir}/${name}.err";
-      } // optionalAttrs (env != {}) {
-        EnvironmentVariables = env;
+      } // classes.launchdOr ({
+        ProcessType = processType;
       } // optionalAttrs (nice != null) {
         Nice = nice;
       } // optionalAttrs lowPriorityIO {
         LowPriorityIO = true;
+      }) workloadClass // optionalAttrs (env != {}) {
+        EnvironmentVariables = env;
       } // optionalAttrs (maxOpenFiles != null) {
         SoftResourceLimits.NumberOfFiles = maxOpenFiles;
         HardResourceLimits.NumberOfFiles = maxOpenFiles;
@@ -220,6 +223,7 @@ in
     # Restart=on-failure.
     restartPolicy ? null,
     restartSec ? 5,
+    workloadClass ? null,
     # ── ★ A START LIMIT THAT CAN ACTUALLY BE REACHED ────────────────────
     # systemd's start limit is `StartLimitBurst` starts within
     # `StartLimitIntervalSec`; its DEFAULT is 5 starts / 10s. With
@@ -267,7 +271,7 @@ in
         ExecStart = concatStringsSep " " ([command] ++ args);
         Restart = policies.restartOr "on-failure" restartPolicy;
         RestartSec = restartSec;
-      } // optionalAttrs (env != {}) {
+      } // classes.systemdOr {} workloadClass // optionalAttrs (env != {}) {
         Environment = mapAttrsToList (k: v: "${k}=${v}") env;
       } // optionalAttrs (preStart != null) {
         ExecStartPre = preStart;

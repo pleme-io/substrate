@@ -69,8 +69,10 @@ Identify:
   `services.<name>.settings` and emits the YAML; typed groups feed
   into that automatically.
 - **Daemon** — what subcommand does it run? What's the gate
-  (`cfg.daemon.enable`, `cfg.sync.enable`, unconditional)? What's the
-  `processType` (Adaptive / Background / Interactive)?
+  (`cfg.daemon.enable`, `cfg.sync.enable`, unconditional)? Who waits on
+  it? That is its `workloadClass` (`session-host`, `latency-server`,
+  `service`, `background`, `xpc-adaptive`; `lib/hm/workload-class.nix`),
+  which replaces a hand-set `processType`.
 - **Bespoke fields** — anything outside the typed groups: top-level
   options (e.g. `favorites` list, `extraSettings` attrs), nullable
   fields, custom validators.
@@ -93,11 +95,12 @@ Use this skeleton (kekkai is the canonical model):
 
     # Daemon. Two patterns:
     #   (a) trio's withUserDaemon — fits when subcommand exists +
-    #       gate is `cfg.daemon.enable` + processType = Adaptive
+    #       gate is `cfg.daemon.enable`; the class sets its scheduling
     withUserDaemon = true;
     userDaemonSubcommand = "daemon";
+    daemonWorkloadClass = "<class>";
     #   (b) custom — wire via extraHmConfigFn (see hikki / shashin)
-    #       when gate or processType differ
+    #       when the gate differs
 
     # Shikumi YAML config at ~/.config/<name>/<name>.yaml.
     withShikumiConfig = true;
@@ -166,7 +169,6 @@ format = {
 Use this when:
 - The daemon gate isn't `cfg.daemon.enable` (e.g. `cfg.sync.enable`)
 - The daemon has no subcommand (bare binary)
-- `processType` isn't the trio default (`Adaptive`)
 - Multiple daemons or activation hooks needed
 
 Pattern (from hikki / shashin):
@@ -196,7 +198,7 @@ extraHmConfigFn = { cfg, pkgs, lib, config, ... }:
         command = "${cfg.package}/bin/<name>";
         args = [ ... ];
         logDir = logDir;
-        processType = "Interactive";  # or Background / Adaptive
+        workloadClass = "session-host";  # a class of lib/hm/workload-class.nix
         keepAlive = true;
       }))
 
