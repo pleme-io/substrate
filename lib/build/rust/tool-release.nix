@@ -196,6 +196,7 @@ in {
   #
   # Defaults to `[]`, so no existing consumer changes.
   devShellPackages ? [],
+  devShellHook ? "",
   # Build-mode switch. `auto` = lockfile-builder when Cargo.build-spec.json
   # exists, else crate2nix Cargo.nix. `lockfile` = force lockfile-builder
   # (errors if spec missing). `cargo-nix` = force the legacy crate2nix path.
@@ -727,6 +728,7 @@ in {
     # Consumer-declared dev-shell tooling, resolved by name against the host
     # package set the shell is actually built from. See `devShellPackages`.
     extraPackages = builtins.map (name: hostPkgs.${name}) devShellPackages;
+    shellHook = devShellHook;
     # Both lists include what `tests.cargo` declared — see devShellSystemInputs.
     inherit (devShellSystemInputs) buildInputs nativeBuildInputs;
   };

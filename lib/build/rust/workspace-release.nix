@@ -45,8 +45,9 @@ in {
   # Extra Rust targets for the dev shell's toolchain; see tool-release.nix.
   # Defaults to [], so no existing consumer changes.
   devShellTargets ? [],
+  devShellHook ? "",
   ...
 }:
   rustTool {
-    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides devShellPackages devShellTargets;
+    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides devShellPackages devShellTargets devShellHook;
   }

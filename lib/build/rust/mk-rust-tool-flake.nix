@@ -59,6 +59,9 @@
   tests ? null,
   # Forwarded to the builder's cargo test check; see tool-release.nix.
   testSrc ? null,
+  devShellPackages ? [],
+  devShellTargets ? [],
+  devShellHook ? "",
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
@@ -361,4 +364,7 @@ in toolFlake (
   // (if gui != null then { inherit gui; } else {})
   // (if tests != null then { inherit tests; } else {})
   // (if testSrc != null then { inherit testSrc; } else {})
+  // (if devShellPackages != [ ] then { inherit devShellPackages; } else {})
+  // (if devShellTargets != [ ] then { inherit devShellTargets; } else {})
+  // (if devShellHook != "" then { inherit devShellHook; } else {})
 )

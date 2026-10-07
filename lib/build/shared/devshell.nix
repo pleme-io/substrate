@@ -145,6 +145,7 @@ in rec {
   #   nativeBuildInputs: native build inputs — NON-DEVENV path only
   #   extraPackages:     extras included in BOTH paths (e.g. crate2nix)
   #   env:               environment variables for both paths
+  #   shellHook:         run on entering the shell, both paths ("" = none)
   mkRustDevShell = {
     pkgs,
     devenv ? null,
@@ -155,6 +156,7 @@ in rec {
     nativeBuildInputs ? [],
     extraPackages ? [],
     env ? {},
+    shellHook ? "",
   }: let
     darwinInputs = darwinHelper.mkDarwinBuildInputs pkgs;
   in
@@ -167,6 +169,8 @@ in rec {
           ++ [ ({ lib, ... }: {
             env = builtins.mapAttrs (_: v: lib.mkDefault v) env;
             packages = extraPackages;
+          } // lib.optionalAttrs (shellHook != "") {
+            enterShell = shellHook;
           }) ];
       }
     else
@@ -193,6 +197,9 @@ in rec {
       # frameworks from the SDK instead.
       // lib.optionalAttrs (buildInputs != [ ]) {
         LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+      }
+      // lib.optionalAttrs (shellHook != "") {
+        inherit shellHook;
       }
       // env);
 }
