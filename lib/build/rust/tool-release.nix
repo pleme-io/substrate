@@ -1,9 +1,13 @@
 # ============================================================================
 # RUST RELEASE BUILDER — unified single-crate + workspace CLI tool builds
 # ============================================================================
-# Builds a Rust CLI tool for 4 targets from any supported host:
+# Builds a Rust CLI tool for these targets from any supported host:
 #   - aarch64-apple-darwin
-#   - x86_64-apple-darwin          (via Rosetta from aarch64-darwin)
+#   - x86_64-apple-darwin          (via Rosetta from aarch64-darwin) — only
+#                                  while the consumer's nixpkgs instantiates
+#                                  x86_64-darwin; 26.11 refuses it, and with
+#                                  that nixpkgs the target is absent rather
+#                                  than an output that throws on evaluation
 #   - x86_64-unknown-linux-musl    (remote builder, static)
 #   - aarch64-unknown-linux-musl   (remote builder, static)
 #
@@ -114,6 +118,12 @@
       ];
     };
 
+  nixpkgsInstantiates = targetSystem:
+    (builtins.tryEval (import nixpkgs {
+      system = targetSystem;
+      config.allowDeprecatedx86_64Darwin = true;
+    })).success;
+
   # Darwin target pkgs MUST use the same fenix toolchain as hostPkgs.
   # On native darwin (target arch == host arch — the common case for
   # operator workstations), the dual-tree dispatch in lockfile-builder
@@ -157,11 +167,12 @@
       pkgs = mkDarwinPkgs "aarch64-darwin";
       isDarwin = true;
     };
+  } // (if nixpkgsInstantiates "x86_64-darwin" then {
     "x86_64-apple-darwin" = {
       pkgs = mkDarwinPkgs "x86_64-darwin";
       isDarwin = true;
     };
-  } // builtins.listToAttrs [
+  } else { }) // builtins.listToAttrs [
     (mkLinuxTarget "x86_64" "x86_64-linux")
     (mkLinuxTarget "aarch64" "aarch64-linux")
   ];

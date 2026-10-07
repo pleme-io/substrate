@@ -1128,8 +1128,9 @@ in rec {
   # RUST TOOL RELEASE BUILDER (standalone import path)
   # ============================================================================
   # Cross-platform CLI tool builds + GitHub releases.
-  # Builds for 4 targets: aarch64-apple-darwin, x86_64-apple-darwin,
-  # x86_64-unknown-linux-musl, aarch64-unknown-linux-musl.
+  # Builds for aarch64-apple-darwin, x86_64-apple-darwin (only while the
+  # consumer's nixpkgs instantiates x86_64-darwin; 26.11 does not),
+  # x86_64-unknown-linux-musl and aarch64-unknown-linux-musl.
   #
   # Usage:
   #   outputs = (import "${substrate}/lib/rust-tool-release-flake.nix" {
