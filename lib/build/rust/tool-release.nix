@@ -237,6 +237,7 @@ in {
   # check deploys nothing, while a test may legitimately read prose (engenho's
   # retracted_safety_claims reads docs/*.md).
   testSrc ? null,
+  metaSrc ? src,
   testCrateFlags ? [],
   testInputs ? [],
   # The `substrate.rust.<shape>` entry point this consumer came through,
@@ -276,7 +277,7 @@ let
   # readable with `nix eval .#gui-verdict`) precisely because a derived
   # decision that nobody can inspect is worse than a declared one.
   guiDetect = import ./gui-detect.nix { inherit (hostPkgs) lib; };
-  guiVerdict = guiDetect.resolve { inherit src packageName gui; };
+  guiVerdict = guiDetect.resolve { src = metaSrc; inherit packageName gui; };
 
   # "gnu" only for a crate that must dlopen; "musl" — the static deploy
   # artifact — for everything else.
@@ -308,7 +309,7 @@ let
   # lockfile-native pipeline when its Cargo.build-spec.json sidecar
   # exists. No per-consumer opt-in required. Falls back to crate2nix
   # only for unmigrated repos that don't yet have a spec.
-  hasBuildSpec = builtins.pathExists (src + "/Cargo.build-spec.json");
+  hasBuildSpec = builtins.pathExists (metaSrc + "/Cargo.build-spec.json");
   hasCargoNix = builtins.pathExists cargoNix;
   # Auto-mode dispatch (2026-05-30: operator-surface doctrine):
   # `lockfile` is always the right default. lockfile-builder handles
@@ -406,7 +407,7 @@ let
     project =
       if effectiveMode == "lockfile"
       then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject {
-        inherit src gen;
+        inherit src metaSrc gen;
         hostPkgs = hostPkgs;
         defaultCrateOverrides = consumerOverrides;
       }

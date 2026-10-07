@@ -59,6 +59,7 @@
   tests ? null,
   # Forwarded to the builder's cargo test check; see tool-release.nix.
   testSrc ? null,
+  metaSrc ? src,
   devShellPackages ? [],
   devShellTargets ? [],
   devShellHook ? "",
@@ -85,13 +86,13 @@ let
   # dep graph available downstream); the TOML path is a graceful
   # fallback that makes `gen lock --reset` repos work seamlessly with
   # the canonical `substrate.rust.tool { src = ./.; }` flake.
-  cargoTomlPath = src + "/Cargo.toml";
+  cargoTomlPath = metaSrc + "/Cargo.toml";
   cargoToml =
     if pathExists cargoTomlPath
     then builtins.fromTOML (readFile cargoTomlPath)
     else throw "mkRustToolFlake: ${toString src}/Cargo.toml missing — not a cargo workspace?";
 
-  hasCommittedSpec = pathExists (src + "/Cargo.build-spec.json");
+  hasCommittedSpec = pathExists (metaSrc + "/Cargo.build-spec.json");
   # Delta-only repos (.gitignore Cargo.build-spec.json, commit the slim
   # Cargo.gen.lock) reconstruct the same BuildSpec shape in PURE NIX —
   # including flake_metadata / workspace_members / root_crate — so the
@@ -104,11 +105,11 @@ let
   # delta exists to eliminate (and what 2h-dead gen-spec CI runs
   # bootstrapping gen-from-gen on 2-core runners looked like).
   deltaSpec =
-    (import ./lockfile-delta.nix { lib = inputs.nixpkgs.lib; }).reconstruct src;
+    (import ./lockfile-delta.nix { lib = inputs.nixpkgs.lib; }).reconstruct metaSrc;
   committedSpec =
     if deltaSpec != null then deltaSpec
     else if hasCommittedSpec
-    then fromJSON (readFile (src + "/Cargo.build-spec.json"))
+    then fromJSON (readFile (metaSrc + "/Cargo.build-spec.json"))
     else null;
 
   # Parse `owner/repo` from a GitHub-style URL string. Mirrors
@@ -281,7 +282,7 @@ let
       tomlPath =
         if rel == null then null
         else if rel == "." then cargoTomlPath
-        else src + "/${rel}/Cargo.toml";
+        else metaSrc + "/${rel}/Cargo.toml";
       toml =
         if tomlPath != null && pathExists tomlPath
         then builtins.fromTOML (readFile tomlPath)
@@ -364,6 +365,7 @@ in toolFlake (
   // (if gui != null then { inherit gui; } else {})
   // (if tests != null then { inherit tests; } else {})
   // (if testSrc != null then { inherit testSrc; } else {})
+  // { inherit metaSrc; }
   // (if devShellPackages != [ ] then { inherit devShellPackages; } else {})
   // (if devShellTargets != [ ] then { inherit devShellTargets; } else {})
   // (if devShellHook != "" then { inherit devShellHook; } else {})

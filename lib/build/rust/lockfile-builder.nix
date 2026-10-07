@@ -349,6 +349,7 @@ let
   workspaceTests = import ./workspace-tests.nix { inherit lib; };
   mkProject = {
     src,
+    metaSrc ? src,
     # Optional human-readable workspace identifier used in error
     # messages (e.g. "mkRustWorkspace: ${name} — Cargo.build-spec.json
     # missing"). Callers like mk-rust-workspace.nix pass this through;
@@ -468,8 +469,8 @@ let
     #    + gen/docs/CARGO-LOCK-DELTA-CONTRACT.md (D1–D4). This is the
     #    deliberate `fromTOML` path the file header's "no fromTOML" note
     #    predates — the delta trades reconstruction for a smaller artifact.
-    deltaSpec = (import ./lockfile-delta.nix { inherit lib; }).reconstruct src;
-    committedPath = src + "/${specFile}";
+    deltaSpec = (import ./lockfile-delta.nix { inherit lib; }).reconstruct metaSrc;
+    committedPath = metaSrc + "/${specFile}";
     committedSpec =
       if deltaSpec != null then deltaSpec
       else if builtins.pathExists committedPath
@@ -557,7 +558,7 @@ let
       if useDelta then deltaSpec
       else if targetSpecDrv != null
       then loadBuildSpecFrom specFile targetSpecDrv
-      else loadBuildSpecFrom specFile src;
+      else loadBuildSpecFrom specFile metaSrc;
     specHost =
       if useDelta then deltaSpec
       else if hostSpecDrv != null && hostSpecDrv != targetSpecDrv

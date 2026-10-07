@@ -881,6 +881,7 @@
                 inherit (args) src;
                 prose = args.prose or "included";
               };
+              metaSrc = args.src;
             }
             # A test check deploys nothing, so it reads the whole tree even
             # when the build excludes prose. Absent on the default, so every
