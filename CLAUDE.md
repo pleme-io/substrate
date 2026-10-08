@@ -1,5 +1,12 @@
 # Substrate
 
+`pending-repro: i18n-embed-fl fl! HashMap order` — i18n-embed-fl 0.9.4's `fl!`
+emits macro args in HashMap order (src/lib.rs:69/86, emitted at :553), so every
+build of `age` 0.11.5 gets a different SVH (`nix build --rebuild`: may not be
+deterministic). `propagated-rlib-deps` stops GC from splitting a consumer from
+the rlib it was compiled against; the cause closes with a patched
+i18n-embed-fl that sorts the keys, carried until upstream does.
+
 `pending-vacuous-guard: infra/wasm-compat` — `lib/infra/tests/wasm-compat-test.nix`
 is the one eval suite deliberately left OUT of CI (2026-07-28), while the other 22
 were wired. Not red, not broken: a tautology. Its 13 assertions compare
