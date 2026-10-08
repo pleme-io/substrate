@@ -63,6 +63,7 @@
   devShellPackages ? [],
   devShellTargets ? [],
   devShellHook ? "",
+  variants ? {},
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
@@ -369,4 +370,5 @@ in toolFlake (
   // (if devShellPackages != [ ] then { inherit devShellPackages; } else {})
   // (if devShellTargets != [ ] then { inherit devShellTargets; } else {})
   // (if devShellHook != "" then { inherit devShellHook; } else {})
+  // (if variants != { } then { inherit variants; } else {})
 )

@@ -255,6 +255,7 @@ in {
   # musl build stopped compiling LLVM) and the shell's toolchain lost the
   # target. Defaults to [], which builds the shell exactly as before.
   devShellTargets ? [],
+  variants ? {},
   ...
 }:
 let
@@ -406,11 +407,11 @@ let
     # native build-machine nixpkgs.
     project =
       if effectiveMode == "lockfile"
-      then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject {
+      then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject ({
         inherit src metaSrc gen;
         hostPkgs = hostPkgs;
         defaultCrateOverrides = consumerOverrides;
-      }
+      } // (if targetInfo ? specFile then { inherit (targetInfo) specFile; } else { }))
       else (import ./cargo-nix-tie.nix { }).importFresh {
         inherit cargoNix src;
         cargoLock = src + "/Cargo.lock";
@@ -479,6 +480,18 @@ let
     else bin;
 
   wrappedNativeBinary = wrapWithRuntimeGen nativeBinary;
+
+  variantBinaries = builtins.mapAttrs (
+    variantName: variant:
+    if effectiveMode != "lockfile" then
+      throw "substrate/rust-release (${toolName}): variant `${variantName}` needs the lockfile builder (a variant is a gen build spec); this build resolved to `${effectiveMode}`."
+    else if !(builtins.isAttrs variant && variant ? specFile && builtins.isString variant.specFile && variant.specFile != "") then
+      throw "substrate/rust-release (${toolName}): variant `${variantName}` must be { specFile = \"Cargo.<variant>.build-spec.json\"; } — the spec gen writes with `gen build . --features <f> --out <file>`."
+    else if targets ? ${variantName} then
+      throw "substrate/rust-release (${toolName}): variant `${variantName}` collides with the target triple of the same name."
+    else
+      wrapWithRuntimeGen (mkBinary nativeTarget (targets.${nativeTarget} // { inherit (variant) specFile; }))
+  ) variants;
 
   # ============================================================================
   # HOST-TOOL BINARY — always-native, never pkgsStatic
@@ -684,6 +697,11 @@ in {
       name = "${toolName}-${targetName}";
       value = withMainProgram binaries.${targetName};
     }) (builtins.attrNames targets)
+  ) // builtins.listToAttrs (
+    builtins.map (variantName: {
+      name = "${toolName}-${variantName}";
+      value = withMainProgram variantBinaries.${variantName};
+    }) (builtins.attrNames variants)
   ) // {
     default = withMainProgram wrappedNativeBinary;
     ${toolName} = withMainProgram wrappedNativeBinary;
