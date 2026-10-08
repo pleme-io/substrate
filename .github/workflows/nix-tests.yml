@@ -394,6 +394,9 @@ jobs:
       - name: checks.rust-build-script-receipt (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-build-script-receipt'
 
+      - name: checks.rust-rlib-dep-retention (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-rlib-dep-retention'
+
       - name: checks.rust-gui-detect (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-gui-detect'
 

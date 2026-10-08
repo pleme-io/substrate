@@ -343,6 +343,7 @@ let
   # I2 corollary — the host tree's resolve section (see `hostBuildSection`).
   hostTreeClosure = import ./host-tree-closure.nix { inherit lib; };
   buildScriptReceiptNormalize = (import ./build-script-receipt.nix).postInstall;
+  rlibDepRetention = import ./rlib-dep-retention.nix { inherit lib; };
   # The test RUNNER for this path — `cargo test --frozen` over the
   # Cargo.lock-vendored workspace. See that file for why it runs cargo
   # rather than a buildRustCrate test tree, and for what it does NOT prove.
@@ -1274,7 +1275,8 @@ let
           # postInstall nor the caller's is lost.
           postInstall = (args.postInstall or "")
             + (overrideExtras.postInstall or "")
-            + buildScriptReceiptNormalize;
+            + buildScriptReceiptNormalize
+            + rlibDepRetention.postInstallFor (map depFor deps.runtime);
         };
         # Iterate `targetCrates` (per-target subset), NOT treeSpec.crates
         # (the multi-target universe). Restricts `built` to crates actually

@@ -455,6 +455,8 @@
           # dir: runs the postInstall fragment on a fixture and byte-compares.
           rust-build-script-receipt =
             (import ./lib/build/rust/tests/build-script-receipt-test.nix { }).asCheck pkgs;
+          rust-rlib-dep-retention =
+            (import ./lib/build/rust/tests/rlib-dep-retention-test.nix { }).asCheck pkgs;
 
           # ── The linux ABI is now DERIVED, so the derivation needs a gate ──
           # gui-detect.nix decides, per crate, whether the linux artifact is
