@@ -162,7 +162,7 @@ let
   };
 
   fleetInput = {
-    fleet = { url = fleetUrl; follows = { nixpkgs = "nixpkgs"; }; };
+    fleet = { url = fleetUrl; };
   };
 
   # ── Fragment Builders ───────────────────────────────────────────────
