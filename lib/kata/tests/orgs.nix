@@ -25,6 +25,8 @@ let
       akeylesslabs = {
         description = "Official Akeyless SDKs";
         cloneMethod = "https";
+        pushPolicy = "pr";
+        prSkill = "akeyless-pr-standards";
       };
       drzln = {
         description = "Personal repositories";
@@ -146,6 +148,27 @@ in
       (w ? flake_deps) || (w ? watch);
     expected = false;
   };
+  pr-push-policy-reaches-the-workspace = {
+    expr =
+      let
+        w = builtins.head (builtins.filter (x: x.name == "akeylesslabs") o.tendWorkspaces);
+      in
+      {
+        inherit (w) push_policy pr_skill;
+      };
+    expected = {
+      push_policy = "pr";
+      pr_skill = "akeyless-pr-standards";
+    };
+  };
+  the-default-push-policy-omits-the-keys = {
+    expr =
+      let
+        w = builtins.head (builtins.filter (x: x.name == "drzln") o.tendWorkspaces);
+      in
+      (w ? push_policy) || (w ? pr_skill);
+    expected = false;
+  };
   # The whole config is one attrset; the consumer's only job is toJSON.
   tend-config-serializes-to-parseable-json = {
     expr = builtins.isString (builtins.toJSON o.tendConfig);
@@ -186,6 +209,19 @@ in
               cloneMethod = "rsync";
             };
           }).orgEntries
+          null
+      )).success;
+    expected = false;
+  };
+  unknown-push-policy-throws = {
+    expr =
+      (builtins.tryEval (
+        builtins.deepSeq
+          (kata.mkOrgs {
+            orgs.bad = {
+              pushPolicy = "force";
+            };
+          }).tendConfig
           null
       )).success;
     expected = false;

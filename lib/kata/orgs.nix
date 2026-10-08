@@ -85,6 +85,9 @@
 #                        attrset (flake_refresh, file_watches, matrix_file…).
 #         flakeDeps   ? null   — attrsOf (listOf str), tend's propagation
 #                        graph. Only pleme-io has one.
+#         pushPolicy  ? "main" — "main" | "pr": what tend's clean-git hooks
+#                        tell a session to do with unpushed work here.
+#         prSkill     ? null   — the skill a "pr" org's instruction names.
 #         extraConfig ? { }    — merged last into the workspace attrs, for
 #                        a tend key this letter does not model yet.
 #       };
@@ -115,6 +118,10 @@ let
   validCloneMethods = [
     "ssh"
     "https"
+  ];
+  validPushPolicies = [
+    "main"
+    "pr"
   ];
 
   # A typed throw beats a wrong-shaped render: an unknown `kind` would be
@@ -235,6 +242,16 @@ let
           default = null;
           description = "tend's flake propagation graph: repo -> the repos that must be bumped when it moves.";
         };
+        pushPolicy = lib.mkOption {
+          type = lib.types.str;
+          default = "main";
+          description = "pushPolicy: main or pr. Renders tend's `push_policy`, which words the clean-git hooks' instruction: push main, or commit on a branch and open a PR. Emitted only when not main.";
+        };
+        prSkill = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = "The skill a pr org's instruction names (tend's `pr_skill`). Emitted only when set.";
+        };
         extraConfig = lib.mkOption {
           type = lib.types.attrsOf lib.types.anything;
           default = { };
@@ -268,9 +285,16 @@ in
             let
               kind = checkEnum "kind" validKinds name (o.kind or "org");
               cloneMethod = checkEnum "cloneMethod" validCloneMethods name (o.cloneMethod or "ssh");
+              pushPolicy = checkEnum "pushPolicy" validPushPolicies name (o.pushPolicy or "main");
             in
             {
-              inherit name kind cloneMethod;
+              inherit
+                name
+                kind
+                cloneMethod
+                pushPolicy
+                ;
+              prSkill = o.prSkill or null;
               description = o.description or name;
               discover = o.discover or true;
               sync = o.sync or true;
@@ -309,6 +333,8 @@ in
         }
         // optionalAttrs (o.flakeDeps != null) { flake_deps = o.flakeDeps; }
         // optionalAttrs (o.watch != null) { watch = o.watch; }
+        // optionalAttrs (o.pushPolicy != "main") { push_policy = o.pushPolicy; }
+        // optionalAttrs (o.prSkill != null) { pr_skill = o.prSkill; }
         // o.extraConfig;
 
       # ── ★ ONE SOURCE FOR BOTH INDEXES ─────────────────────────────────
