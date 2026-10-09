@@ -226,6 +226,21 @@
           # `testSystemDaemonGetsConfigEnvVar`, naming the defect.
           module-trio = import ./lib/tests/module-trio-test.nix { inherit pkgs; };
 
+          # INTERNAL HELM CHART DISTRIBUTION — mkHelmChart (hermetic,
+          # bit-reproducible .tgz) -> mkHelmRepo (OCI image layouts via doca)
+          # -> a real registry in the sandbox -> `helm pull` / `helm dependency
+          # update` from oci://, over a helmworks-shaped fixture. Builds doca
+          # itself, so doca's cargo tests (Helm layout, the in-process registry
+          # round trip, transfer) run here too.
+          #
+          # NOT VACUOUS: the reproducibility comparison ships its control (raw
+          # `helm package` twice differs), and the hermeticity claim its two
+          # negatives (unvendored and wrong-version dependencies fail the build).
+          helm-chart-repo = import ./lib/tests/helm-chart-repo-test.nix {
+            inherit pkgs;
+            doca = self.packages.${system}.oci-push;
+          };
+
           # WORKFLOW-CATALOG — CATALOG REFLECTION for the 89 reusable
           # workflows, which were the one large substrate surface with no
           # catalog while lib/iroha and lib/util/eval-suites both had one.

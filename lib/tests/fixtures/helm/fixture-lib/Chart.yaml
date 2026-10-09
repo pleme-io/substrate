@@ -1,0 +1,5 @@
+apiVersion: v2
+name: fixture-lib
+description: Fake library chart standing in for pleme-lib in substrate's chart-distribution tests.
+type: library
+version: 0.2.0

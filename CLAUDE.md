@@ -270,6 +270,23 @@ Protocol, traps, reusable helpers and backlog:
 
 ---
 
+## ★ Helm charts ship as Nix store paths; ghcr is only the public export
+
+The fleet's own charts are distributed INTERNALLY as store paths, never pulled
+back from ghcr. `mkHelmChart` (`lib/build/helm/chart.nix`) builds one chart as a
+hermetic, bit-reproducible `.tgz`: dependencies vendored from store inputs by
+`lib/build/helm/vendor.nix` (the same vendoring `mkHelmRender` uses), third-party
+subcharts only as fixed-output `vendoredDeps`, Chart.lock dropped, archive
+re-packed with sorted names, fixed mtime/owner, `gzip -n`. `mkHelmChartPackages`
+builds a repo's whole `file://../` sibling graph through it. `mkHelmRepo`
+(`lib/build/helm/repo.nix`) turns charts into `$out/<repository>/<chart>/` OCI
+image layouts plus `charts.json`, written by doca (`oci-push layout`, Helm media
+types, tag = version with `+` as `_`). A node-local registry serves that path as
+`oci://charts.pleme.internal/pleme-io/charts/<chart>`, so Flux, engenho and
+`helm dependency` consume it unchanged; `oci-push push --layout <dir>` exports
+the same digests to ghcr. Proof: `checks.<system>.helm-chart-repo` (hermetic
+with two negatives, reproducible with a control, real registry + `helm pull`).
+
 ## Shikumi Pattern (Nix->YAML->App)
 
 All configuration flows through Nix evaluation, never through shell scripts:

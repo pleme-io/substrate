@@ -102,6 +102,8 @@ on:
       - 'lib/tests/**'
       - 'lib/*.nix'
       - 'CLAUDE.md'
+      # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
+      - 'tools/oci-push/**'
   pull_request:
     branches:
       - main
@@ -122,6 +124,8 @@ on:
       - 'lib/tests/**'
       - 'lib/*.nix'
       - 'CLAUDE.md'
+      # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
+      - 'tools/oci-push/**'
   workflow_dispatch:
 
 jobs:
@@ -378,6 +382,9 @@ jobs:
       # below fails the job if a future check lands without its step here.
       - name: checks.module-trio (lib — module trio factory)
         run: nix build --no-link -L '.#checks.x86_64-linux.module-trio'
+
+      - name: checks.helm-chart-repo (mkHelmChart -> mkHelmRepo -> registry -> helm pull)
+        run: nix build --no-link -L '.#checks.x86_64-linux.helm-chart-repo'
 
       - name: checks.source-policy (lib/build — which files a build reads)
         run: nix build --no-link -L '.#checks.x86_64-linux.source-policy'

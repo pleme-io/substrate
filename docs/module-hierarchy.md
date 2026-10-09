@@ -33,6 +33,9 @@ lib/
 │   ├── java/                      # maven
 │   ├── wasm/                      # build
 │   ├── web/                       # build, docker, github-action
+│   ├── helm/                      # chart (mkHelmChart), repo (mkHelmRepo),
+│   │                              #   render (mkHelmRender), vendor (shared dep
+│   │                              #   vendoring), quirk-apply
 │   └── nixos/                     # aws-ami (NixOS → AWS AMI, packer + direct)
 ├── kube/                          # Kubernetes resource builders (nix-kube)
 │   ├── primitives/                # 29 pure K8s resource builders (no pkgs)

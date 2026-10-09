@@ -77,7 +77,7 @@ lib/
     environment-apps.nix      Env-aware deployment apps
     product-sdlc.nix          Product SDLC app factory
     image-release.nix         Multi-arch OCI release
-    helm-build.nix            Helm chart SDLC
+    helm-build.nix            Helm chart SDLC + mkHelmChartPackages (hermetic chart graph)
     db-migration.nix          K8s migration jobs
     health-supervisor.nix     Health check builder
 
@@ -383,6 +383,10 @@ in rustService {
 | `mkPlatformService` | `service/platform-service.nix` | Complete platform service |
 | `mkImageReleaseApp` | `service/image-release.nix` | Multi-arch OCI release |
 | `mkHelmSdlcApps` | `service/helm-build.nix` | Helm chart lifecycle |
+| `mkHelmChart` | `build/helm/chart.nix` | One chart -> deterministic, hermetic `.tgz` (vendored deps, no network) |
+| `mkHelmChartPackages` | `service/helm-build.nix` | Every chart of a repo as `mkHelmChart`, `file://` sibling graph resolved |
+| `mkHelmRepo` | `build/helm/repo.nix` | Charts -> OCI image layouts (doca) + `charts.json`: the internal chart registry content |
+| `mkHelmRender` | `build/helm/render.nix` | Pinned chart + typed values -> rendered manifests |
 | `mkHealthSupervisor` | `service/health-supervisor.nix` | Health check builder |
 | `mkMigrationJob` | `service/db-migration.nix` | K8s migration Job manifest |
 

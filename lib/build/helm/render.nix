@@ -22,6 +22,11 @@
 #     namespace = "llm";
 #   }
 #
+# Dependencies are placed by vendor.nix, shared with mkHelmChart (chart.nix):
+# `libraries` (unpacked dirs) and, opt-in, `vendoredDeps` (chart archives: a
+# fixed-output fetch or a mkHelmChart output). With no vendoredDeps the build
+# script is byte-identical to before the parameter existed.
+#
 # `createNamespace = true` puts the Namespace object first, for appliers that
 # create nothing themselves (engenho's node-manifests driver, a plain SSA seed):
 # `helm template --namespace` only STAMPS the name onto every object.
@@ -33,6 +38,9 @@
   name,
   chart,
   libraries ? { },
+  # Third-party or sibling charts as archives (see vendor.nix). Default {} is
+  # the identity: the build script is byte-identical to before the parameter.
+  vendoredDeps ? { },
   values ? { },
   namespace ? "default",
   release ? name,
@@ -47,9 +55,10 @@ let
       name: ${namespace}
     ---
   '';
-  vendor = lib.concatStringsSep "\n" (
-    lib.mapAttrsToList (n: p: "cp -r ${p} chart/charts/${n}") libraries
-  );
+  vendor = (import ./vendor.nix { inherit lib; }).commands {
+    dest = "chart/charts";
+    inherit libraries vendoredDeps;
+  };
 in
 pkgs.runCommand "${name}.yaml"
   {

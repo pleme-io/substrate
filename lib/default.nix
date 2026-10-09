@@ -146,7 +146,10 @@
   };
 
   # Helm chart build helpers (lint, package, push, release, bump — bump delegates to forge)
-  helmBuildModule = import ./service/helm-build.nix { inherit pkgs forgeCmd; };
+  helmBuildModule = import ./service/helm-build.nix {
+    inherit pkgs forgeCmd;
+    ociPush = ociPushPkg;
+  };
 
   # Shared cross-cutting middleware (typed, language-agnostic)
   sharedDockerModule = import ./build/shared/docker-image.nix { inherit pkgs; };
@@ -1548,11 +1551,21 @@ in rec {
   #   # nix run .#unittest        (binary runs helm-unittest over the configured charts)
   #   # nix run .#render-check    (binary runs the non-zero-manifest gate)
   #   # nix run .#render-test-ci  (both, with a JSON receipt + exit 0/1/2)
+  #
+  # Internal chart DISTRIBUTION (ghcr is only the public export):
+  #   charts = substrateLib.mkHelmChartPackages { charts = chartDefs; libChartDir = ./charts/pleme-lib; };
+  #   repo   = substrateLib.mkHelmRepo { charts = charts; };   # repository ? "pleme-io/charts"
+  #   # $out/pleme-io/charts/<chart>/ = OCI image layout, served by the node-local
+  #   # registry as oci://charts.pleme.internal/pleme-io/charts/<chart>; $out/charts.json
+  #   # Public export: oci-push push --layout $out/pleme-io/charts/<chart> --registry ghcr.io --image pleme-io/charts/<chart>
   inherit (helmBuildModule)
     mkHelmBumpApp
     mkHelmSdlcApps
     mkHelmAllApps
     mkHelmChartPackages
+    mkHelmChart
+    mkHelmRepo
+    mkHelmRender
     mkHelmRenderTestApps;
   # Note: mkHelmLintApp/PackageApp/PushApp/ReleaseApp/TemplateApp were
   # listed historically but never defined in helm-build.nix; the typed

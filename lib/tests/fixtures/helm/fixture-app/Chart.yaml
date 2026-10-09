@@ -1,0 +1,10 @@
+apiVersion: v2
+name: fixture-app
+description: helmworks-shaped fixture chart (one library dependency, file:// sibling).
+type: application
+version: 0.1.0+nix.1
+appVersion: "1.0.0"
+dependencies:
+  - name: fixture-lib
+    version: "~0.2"
+    repository: file://../fixture-lib

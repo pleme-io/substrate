@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fixture-umbrella
+description: Umbrella over fixture-app (a nested file:// sibling that itself vendors fixture-lib).
+type: application
+version: 0.3.0
+# Flow style on purpose: helmworks writes dependencies both ways, and the
+# sibling scan in mkHelmChartPackages must see this edge.
+dependencies:
+  - {name: fixture-app, version: "0.1.0+nix.1", repository: "file://../fixture-app"}
