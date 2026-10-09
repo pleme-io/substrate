@@ -388,6 +388,9 @@ jobs:
       - name: checks.duckdb-wrapper (lib — duckdb wrapper builds and runs)
         run: nix build --no-link -L '.#checks.x86_64-linux.duckdb-wrapper'
 
+      - name: checks.json-schema-types (lib/types — schemars JSON Schema → option types)
+        run: nix build --no-link -L '.#checks.x86_64-linux.json-schema-types'
+
       - name: checks.rust-determinism-flags (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-determinism-flags'
 

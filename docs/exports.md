@@ -185,6 +185,7 @@ Key type modules:
 - `types.convergence` — Stage typestate: `declared` → `resolved` → `converged` → `verified`
 - `types.validate` — `mkTypedBuilder`, `validateSpec`, `checkBuildResult`
 - `types.assertions` — Lightweight assertion guards: `nonEmptyStr`, `port`, `architecture`, `enum`, etc.
+- `types.jsonSchema` — `fromJsonSchema { lib, schema }` → the root's `lib.types.*` value; `optionsFromJsonSchema { lib, schema }` → `{ <prop> = mkOption …; }` for an object root; `pruneNulls` before rendering. Input: schemars 1.x JSON Schema of a shikumi (serde) config. Suite: `lib/tests/json-schema-types-test.nix` → `checks.json-schema-types`
 
 ### Typed Builder Wrappers (module-system validated)
 

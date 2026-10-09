@@ -55,6 +55,11 @@
   # Makes impossible stage transitions unrepresentable.
   convergence = import ./convergence.nix;
 
+  # ── JSON Schema → option types ──────────────────────────────────
+  # fromJsonSchema / optionsFromJsonSchema: a schemars-emitted schema of a
+  # shikumi (serde) config becomes typed module options. See the file header.
+  jsonSchema = import ./json-schema.nix { inherit lib; };
+
   # ── Assertions ───────────────────────────────────────────────────
   # Lightweight evaluation-time assertion library for builder guards.
   assertions = import ./assertions.nix;

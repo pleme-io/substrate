@@ -438,6 +438,7 @@ in rustService {
 | `substrateTypes.validate` | `types/validate.nix` | Builder wrapping middleware |
 | `substrateTypes.convergence` | `types/convergence.nix` | Stage typestate machine |
 | `substrateTypes.assertions` | `types/assertions.nix` | Assertion guard library |
+| `substrateTypes.jsonSchema` | `types/json-schema.nix` | `fromJsonSchema` / `optionsFromJsonSchema` / `pruneNulls`: a schemars JSON Schema (shikumi config) → module-system option types; the default way to surface a shikumi config as Nix options |
 
 ### Typed Builder Wrappers
 

@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GithubAuth",
+  "description": "How to authenticate to GitHub.",
+  "oneOf": [
+    {
+      "description": "A token, from any secret source.",
+      "type": "object",
+      "properties": {
+        "token": {
+          "$ref": "#/$defs/SecretSource"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "token"
+      ]
+    },
+    {
+      "description": "Borrow the gh CLI's stored credential.",
+      "type": "object",
+      "properties": {
+        "gh_cli": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string",
+              "default": "github.com"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "gh_cli"
+      ]
+    },
+    {
+      "description": "Mint installation tokens as a GitHub App.",
+      "type": "object",
+      "properties": {
+        "app": {
+          "$ref": "#/$defs/GithubApp"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "app"
+      ]
+    },
+    {
+      "description": "Try each in order; the first that yields a token wins.",
+      "type": "object",
+      "properties": {
+        "chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "chain"
+      ]
+    }
+  ],
+  "$defs": {
+    "GithubApp": {
+      "description": "A GitHub App installation.",
+      "type": "object",
+      "properties": {
+        "api_url": {
+          "description": "REST API base URL.",
+          "type": "string",
+          "default": "https://api.github.com"
+        },
+        "app_id": {
+          "description": "The App's numeric id.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "installation_id": {
+          "description": "Installation id; discovered from `owner` when absent.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "owner": {
+          "description": "Org or user the installation belongs to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "private_key": {
+          "description": "PEM private key of the App.",
+          "$ref": "#/$defs/SecretSource"
+        },
+        "refresh_before_secs": {
+          "description": "Refresh the installation token this many seconds before expiry.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "app_id",
+        "private_key"
+      ]
+    },
+    "SecretRef": {
+      "description": "Where to read a secret from.",
+      "oneOf": [
+        {
+          "description": "Read the file at this path.",
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "file"
+          ]
+        },
+        {
+          "description": "Read this environment variable.",
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "env"
+          ]
+        },
+        {
+          "description": "Decrypt one key out of a SOPS file.",
+          "type": "object",
+          "properties": {
+            "sops": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "file",
+                "key"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sops"
+          ]
+        },
+        {
+          "description": "Run this argv and take its stdout.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ]
+        }
+      ]
+    },
+    "SecretSource": {
+      "description": "How a secret value is obtained.",
+      "anyOf": [
+        {
+          "description": "The secret itself, inline.",
+          "type": "string"
+        },
+        {
+          "description": "Resolved from somewhere else at load time.",
+          "$ref": "#/$defs/SecretRef"
+        }
+      ]
+    }
+  }
+}

@@ -398,6 +398,13 @@
           # and the rendered profiles; `duckdb-wrapper` proves the wrapper
           # really loads them in `-c` mode, which ~/.duckdbrc does not.
           duckdb = (import ./lib/tests/duckdb-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
+          # ── lib/types/json-schema.nix: schemars JSON Schema → option types
+          # Real schemars 1.2.2 fixtures (GithubAuth, DaemonConfig); every
+          # rejection is a near-miss pair, every schema refusal paired with
+          # the same schema minus the offending keyword.
+          json-schema-types =
+            (import ./lib/tests/json-schema-types-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
           duckdb-wrapper =
             let
               d = import ./lib/duckdb.nix { inherit (nixpkgs) lib; };
