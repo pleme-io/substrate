@@ -27,6 +27,9 @@ Subcommand CLI: `doca <op> …`.
 | op | meaning |
 |----|---------|
 | `push` | docker-archive tarball → registry (the core; built) |
+| `layout` | Helm chart `.tgz` → OCI image layout(s), offline + deterministic (built; substrate `mkHelmRepo`) |
+| `layout-verify` | verify a layout blob by blob; `--helm` requires Helm config + one chart layer (built) |
+| `push --layout` | OCI image layout → registry, manifests pushed verbatim (digest-preserving; built) |
 | `pull` | registry → docker-archive / OCI-layout |
 | `transfer` | registry → registry copy (the "transferer"; mount-optimized) |
 | `inspect` | fetch + render manifest / config / layers |

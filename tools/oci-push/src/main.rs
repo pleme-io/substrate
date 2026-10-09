@@ -69,6 +69,10 @@ use oci_client::secrets::RegistryAuth;
 use oci_client::{Client, Reference};
 use serde::{Deserialize, Serialize};
 
+mod helm;
+#[cfg(test)]
+mod test_registry;
+
 /// OCI media types — used consistently (config + layer + manifest all OCI) so
 /// no Docker/OCI mixing trips the registry.
 const MT_CONFIG: &str = "application/vnd.oci.image.config.v1+json";
@@ -388,6 +392,52 @@ enum PushError {
         source: std::io::Error,
     },
     Gunzip(std::io::Error),
+    /// A `--helm-chart` input is not a chart archive doca can publish.
+    HelmChart {
+        path: String,
+        detail: &'static str,
+    },
+    /// A chart archive's `Chart.yaml` is not YAML.
+    ChartYaml {
+        path: String,
+        source: serde_yaml::Error,
+    },
+    /// Reading or writing an OCI image layout failed at the filesystem.
+    LayoutIo {
+        path: String,
+        source: std::io::Error,
+    },
+    /// An OCI image layout is not what its own descriptors say it is. Pushing
+    /// it would have the registry reject a digest mid-push, or worse, accept a
+    /// manifest whose blobs are not the bytes it names.
+    LayoutInvalid {
+        path: String,
+        detail: &'static str,
+        subject: String,
+    },
+    /// One layout is one OCI repository, and Helm requires a repository's last
+    /// segment to BE the chart name, so two chart names cannot share one.
+    LayoutMixedCharts {
+        first: String,
+        second: String,
+    },
+    /// Two different archives claim the same chart version: the tag would mean
+    /// two things depending on which was written last.
+    ChartVersionConflict {
+        chart: String,
+        version: String,
+    },
+    /// `push --layout --tag T` named a tag the layout's index does not carry.
+    LayoutTagAbsent {
+        layout: String,
+        tag: String,
+    },
+    /// A layout manifest has no `org.opencontainers.image.ref.name`, so there
+    /// is no tag to push it under unless `--tag` selects one explicitly.
+    LayoutUntagged {
+        layout: String,
+        digest: String,
+    },
 }
 
 impl fmt::Display for PushError {
@@ -535,6 +585,43 @@ A statically linked crypto library has no store path, so a downgrade here is inv
             PushError::CopyReal { path, source } => {
                 write!(f, "oci-push: cannot materialize {path} as a real file: {source}")
             }
+            PushError::HelmChart { path, detail } => {
+                write!(f, "oci-push[helm]: {path}: {detail}")
+            }
+            PushError::ChartYaml { path, source } => {
+                write!(f, "oci-push[helm]: {path}: Chart.yaml is not valid YAML: {source}")
+            }
+            PushError::LayoutIo { path, source } => {
+                write!(f, "oci-push[layout]: {path}: {source}")
+            }
+            PushError::LayoutInvalid { path, detail, subject } => {
+                write!(f, "oci-push[layout]: {path}: {detail}")?;
+                if subject.is_empty() {
+                    Ok(())
+                } else {
+                    write!(f, " ({subject})")
+                }
+            }
+            PushError::LayoutMixedCharts { first, second } => write!(
+                f,
+                "oci-push[layout]: charts '{first}' and '{second}' cannot share one layout \
+                 (one layout is one OCI repository, named after its chart); use --out-root"
+            ),
+            PushError::ChartVersionConflict { chart, version } => write!(
+                f,
+                "oci-push[layout]: two different archives claim {chart} {version}; \
+                 a version tag must name exactly one chart"
+            ),
+            PushError::LayoutTagAbsent { layout, tag } => write!(
+                f,
+                "oci-push[layout]: {layout} has no manifest tagged '{tag}' \
+                 (org.opencontainers.image.ref.name)"
+            ),
+            PushError::LayoutUntagged { layout, digest } => write!(
+                f,
+                "oci-push[layout]: {layout}: manifest {digest} has no \
+                 org.opencontainers.image.ref.name; select it with --tag"
+            ),
         }
     }
 }
@@ -566,6 +653,12 @@ struct PushSpec {
     image: String,
     tags: Vec<String>,
     tarball: String,
+    /// An OCI image layout to push INSTEAD of `tarball` (`push --layout`):
+    /// every manifest in its `index.json` goes up verbatim (bytes, digests and
+    /// media types unchanged), which is how a Helm chart repository built by
+    /// substrate's mkHelmRepo reaches ghcr or any other registry. `tags` empty
+    /// = push each manifest under its own `org.opencontainers.image.ref.name`.
+    layout: Option<String>,
     dest_user: String,
     dest_pass: String,
     /// Force plain HTTP regardless of `protocol_for`'s hostname heuristic.
@@ -691,6 +784,9 @@ impl NativeBackend {
 
 impl PushBackend for NativeBackend {
     fn push_all(&self, spec: &PushSpec) -> Result<(), PushError> {
+        if let Some(layout) = &spec.layout {
+            return push_layout(spec, layout);
+        }
         // ---- parse the docker-archive once ----
         let entries = Self::read_archive(&spec.tarball)?;
         let manifest_bytes = entries
@@ -1199,12 +1295,18 @@ fn parse_reference(s: &str) -> Result<Reference, PushError> {
     })
 }
 
-/// Layer media types accepted when pulling (covers OCI + Docker, gzip + plain).
+/// Layer media types `transfer` accepts from its source: container images
+/// (OCI + Docker, gzip + plain) and Helm charts (the chart layer plus its
+/// optional provenance layer), so a chart mirrors registry-to-registry the
+/// same way an image does. Anything else is refused by oci-client before a
+/// byte is pushed.
 const ACCEPTED_LAYERS: &[&str] = &[
     "application/vnd.oci.image.layer.v1.tar+gzip",
     "application/vnd.oci.image.layer.v1.tar",
     "application/vnd.docker.image.rootfs.diff.tar.gzip",
     "application/vnd.docker.image.rootfs.diff.tar",
+    helm::MT_HELM_CHART,
+    helm::MT_HELM_PROV,
 ];
 
 // ===================== subcommands ===================== //
@@ -1215,6 +1317,7 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut image: Option<String> = None;
     let mut tag: Option<String> = None;
     let mut tarball: Option<String> = None;
+    let mut layout: Option<String> = None;
     let mut dest_user: Option<String> = None;
     let mut dest_pass: Option<String> = None;
     let mut additional: Vec<String> = Vec::new();
@@ -1228,6 +1331,7 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
             "--image" => image = Some(next_value(&mut it, "image")?),
             "--tag" => tag = Some(next_value(&mut it, "tag")?),
             "--tarball" => tarball = Some(next_value(&mut it, "tarball")?),
+            "--layout" => layout = Some(next_value(&mut it, "layout")?),
             "--dest-user" => dest_user = Some(next_value(&mut it, "dest-user")?),
             "--dest-pass" => dest_pass = Some(next_value(&mut it, "dest-pass")?),
             "--backend" => backend = Some(Backend::parse(&next_value(&mut it, "backend")?)?),
@@ -1249,12 +1353,15 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     // Resolution precedence: CLI flag → INPUT_* env → DocaConfig → hard default.
     let cfg = DocaConfig::load()?;
 
+    let layout = layout.or_else(|| env_input("INPUT_LAYOUT"));
     if additional.is_empty() {
         if let Some(s) = env_input("INPUT_ADDITIONAL_TAGS") {
             additional = s.split_whitespace().map(str::to_string).collect();
         }
     }
-    if additional.is_empty() {
+    // The configured default extra tags describe IMAGE releases; a layout
+    // carries its own tags (one per chart version), so it never inherits them.
+    if additional.is_empty() && layout.is_none() {
         additional = cfg.default_additional_tags.clone();
     }
     let backend = match backend {
@@ -1265,11 +1372,20 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         },
     };
 
-    let primary = tag
-        .or_else(|| env_input("INPUT_TAG"))
-        .ok_or(PushError::MissingArg("tag"))?;
+    // A tarball needs a tag. A layout names its own (ref.name); `--tag` then
+    // SELECTS one manifest, and `--additional-tags` alias that one.
+    let primary = tag.or_else(|| env_input("INPUT_TAG"));
     let mut tags = Vec::with_capacity(1 + additional.len());
-    tags.push(primary);
+    match (primary, &layout) {
+        (Some(p), _) => tags.push(p),
+        (None, None) => return Err(PushError::MissingArg("tag")),
+        (None, Some(_)) if !additional.is_empty() => {
+            return Err(PushError::MissingArg(
+                "tag (with --layout, --additional-tags alias the manifest --tag selects)",
+            ))
+        }
+        (None, Some(_)) => {}
+    }
     tags.extend(additional);
 
     // Registry resolves FIRST: the ambient credential store is keyed by host, so
@@ -1299,6 +1415,7 @@ fn cmd_push<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         tarball: tarball
             .or_else(|| env_input("INPUT_TARBALL"))
             .unwrap_or_else(|| String::from("./image.tar.gz")),
+        layout,
         dest_user: dest_user
             .or_else(|| env_input("INPUT_DEST_USER"))
             .or_else(|| ambient.as_ref().map(|(u, _)| u.clone()))
@@ -1383,6 +1500,190 @@ fn push_with_retry_inner(
             }
         }
     }
+}
+
+/// `push --layout` — push every manifest of an OCI image layout VERBATIM.
+///
+/// The layout was already verified end to end by `helm::read_layout` (each
+/// blob hashed and sized against its descriptor), so nothing here re-encodes:
+/// blobs go up as stored and the manifest goes up as its exact bytes through
+/// `push_manifest_raw`, so the digest the registry reports is the digest the
+/// layout (and mkHelmRepo's charts.json) already named. Re-serialising through
+/// `OciImageManifest` would only be digest-preserving while oci-client's
+/// canonical form happened to match ours.
+fn push_layout(spec: &PushSpec, layout: &str) -> Result<(), PushError> {
+    let images = helm::read_layout(Path::new(layout))?;
+    // (image, tags to push it under)
+    let mut plan: Vec<(&helm::LayoutImage, Vec<String>)> = Vec::new();
+    match spec.tags.first() {
+        Some(selector) => {
+            let img = images
+                .iter()
+                .find(|i| i.tag.as_deref() == Some(selector.as_str()))
+                .ok_or_else(|| PushError::LayoutTagAbsent {
+                    layout: layout.to_string(),
+                    tag: selector.clone(),
+                })?;
+            plan.push((img, spec.tags.clone()));
+        }
+        None => {
+            for img in &images {
+                let tag = img.tag.clone().ok_or_else(|| PushError::LayoutUntagged {
+                    layout: layout.to_string(),
+                    digest: img.manifest_digest.clone(),
+                })?;
+                plan.push((img, vec![tag]));
+            }
+        }
+    }
+
+    let cfg = client_config_for(&spec.registry, spec.insecure, &spec.ca_cert)?;
+    let client = Client::new(cfg);
+    let auth = RegistryAuth::Basic(spec.dest_user.clone(), spec.dest_pass.clone());
+    runtime()?.block_on(async {
+        client.store_auth_if_needed(&spec.registry, &auth).await;
+        for (img, tags) in &plan {
+            let first = spec.reference(&tags[0]);
+            let first_ref = parse_reference(&first)?;
+            for (digest, bytes) in &img.blobs {
+                client
+                    .push_blob(&first_ref, bytes, digest)
+                    .await
+                    .map_err(|e| PushError::OciPush {
+                        tag: tags[0].clone(),
+                        detail: error_chain(&e),
+                    })?;
+            }
+            for tag in tags {
+                let reference_str = spec.reference(tag);
+                let reference = parse_reference(&reference_str)?;
+                let content_type = img.manifest_media_type.parse().map_err(|_| {
+                    PushError::LayoutInvalid {
+                        path: layout.to_string(),
+                        detail: "manifest mediaType is not a valid HTTP header value",
+                        subject: img.manifest_digest.clone(),
+                    }
+                })?;
+                eprintln!("oci-push[layout]: pushing {reference_str} ({})", img.manifest_digest);
+                client
+                    .push_manifest_raw(&reference, img.manifest.clone(), content_type)
+                    .await
+                    .map_err(|e| PushError::OciPush {
+                        tag: tag.clone(),
+                        detail: error_chain(&e),
+                    })?;
+            }
+        }
+        Ok::<(), PushError>(())
+    })
+}
+
+/// `layout` — write Helm chart archives as OCI image layouts, offline.
+///
+///   oci-push layout --helm-chart a.tgz [--helm-chart b.tgz …] --out <dir>
+///   oci-push layout --helm-chart a.tgz … --out-root <dir> [--repository pleme-io/charts]
+///                   [--summary <file.json>]
+///
+/// `--out` writes ONE layout and refuses charts of two names; `--out-root`
+/// writes `<dir>/<chart-name>/` per chart, which is the shape a registry maps
+/// onto `<repository>/<chart-name>`. `--summary` writes a canonical JSON list
+/// of {chart, version, tag, digest, chartDigest, layout}. The output is a pure
+/// function of the archives: same bytes in, same bytes out, any argument order.
+fn cmd_layout<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut charts: Vec<String> = Vec::new();
+    let mut out: Option<String> = None;
+    let mut out_root: Option<String> = None;
+    let mut repository: Option<String> = None;
+    let mut summary: Option<String> = None;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--helm-chart" => charts.push(next_value(&mut it, "helm-chart")?),
+            "--out" => out = Some(next_value(&mut it, "out")?),
+            "--out-root" => out_root = Some(next_value(&mut it, "out-root")?),
+            "--repository" => repository = Some(next_value(&mut it, "repository")?),
+            "--summary" => summary = Some(next_value(&mut it, "summary")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    if charts.is_empty() {
+        return Err(PushError::MissingArg("helm-chart"));
+    }
+    let parsed = charts
+        .iter()
+        .map(|c| helm::HelmChart::read(c))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut written: Vec<(String, helm::LayoutEntry)> = Vec::new();
+    match (out, out_root) {
+        (Some(dir), None) => {
+            for e in helm::write_layout(Path::new(&dir), &parsed)? {
+                written.push((String::from("."), e));
+            }
+        }
+        (None, Some(root)) => {
+            for (name, group) in helm::group_by_name(parsed) {
+                let dir = Path::new(&root).join(&name);
+                for e in helm::write_layout(&dir, &group)? {
+                    written.push((name.clone(), e));
+                }
+            }
+        }
+        _ => return Err(PushError::MissingArg("out OR --out-root (exactly one)")),
+    }
+    for (_, e) in &written {
+        println!("{}\t{}\t{}", e.chart, e.tag, e.manifest_digest);
+    }
+    if let Some(path) = summary {
+        let bytes = helm::summary_json(repository.as_deref(), &written);
+        fs::write(&path, bytes).map_err(|source| PushError::LayoutIo { path, source })?;
+    }
+    Ok(())
+}
+
+/// `layout-verify --layout <dir>` — verify an OCI image layout offline (every
+/// blob hashed and sized against its descriptor) and print one line per
+/// manifest: tag, manifest digest, config media type, layer media types.
+/// `--helm` additionally requires each manifest to be a Helm chart as
+/// `helm pull` accepts one (Helm config + exactly one chart layer).
+fn cmd_layout_verify<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut layout: Option<String> = None;
+    let mut require_helm = false;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--layout" => layout = Some(next_value(&mut it, "layout")?),
+            "--helm" => require_helm = true,
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    let layout = layout.ok_or(PushError::MissingArg("layout"))?;
+    let images = helm::read_layout(Path::new(&layout))?;
+    if images.is_empty() {
+        return Err(PushError::LayoutInvalid {
+            path: layout,
+            detail: "index.json lists no manifests",
+            subject: String::new(),
+        });
+    }
+    for img in &images {
+        if require_helm
+            && (img.config_media_type != helm::MT_HELM_CONFIG
+                || img.layer_media_types.iter().filter(|m| *m == helm::MT_HELM_CHART).count() != 1)
+        {
+            return Err(PushError::LayoutInvalid {
+                path: layout,
+                detail: "not a Helm chart manifest (needs the Helm config and exactly one chart layer)",
+                subject: img.manifest_digest.clone(),
+            });
+        }
+        println!(
+            "{}\t{}\t{}\t{}",
+            img.tag.as_deref().unwrap_or("-"),
+            img.manifest_digest,
+            img.config_media_type,
+            img.layer_media_types.join(",")
+        );
+    }
+    Ok(())
 }
 
 /// `transfer` — copy an image from one registry to another (native oci-client:
@@ -3335,6 +3636,8 @@ fn run() -> Result<(), PushError> {
         Some("harden-rootfs") => cmd_harden_rootfs(args),
         Some("unpack") => cmd_unpack(args),
         Some("crypto-version") => cmd_crypto_version(args),
+        Some("layout") => cmd_layout(args),
+        Some("layout-verify") => cmd_layout_verify(args),
         // Back-compat: a leading flag means the legacy flat `push` form.
         Some(flag) if flag.starts_with("--") => {
             let rest = std::iter::once(flag.to_string()).chain(args);
@@ -3690,6 +3993,7 @@ mod tests {
             image: "pleme-io/foo".into(),
             tags: vec![],
             tarball: String::new(),
+            layout: None,
             dest_user: String::new(),
             dest_pass: String::new(),
             insecure: false,
@@ -4093,6 +4397,7 @@ mod tests {
             image: String::from("pleme-io/thing"),
             tags: vec![String::from("1.0.0")],
             tarball: String::from("/nonexistent.tar"),
+            layout: None,
             dest_user: String::from("u"),
             dest_pass: String::from("p"),
             insecure: false,
