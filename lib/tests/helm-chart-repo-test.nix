@@ -18,10 +18,10 @@
 #                    CONTROL: raw `helm package` of the same chart twice,
 #                    seconds apart, DIFFERS — so the comparison can see a
 #                    difference when there is one.
-#   layout         — every chart is an OCI image layout under
-#                    <repository>/<chart>, verified blob by blob by doca,
-#                    tagged with the version (`+` spelled `_`), with Helm's
-#                    config and chart-layer media types.
+#   layout         — the repository is ONE OCI image layout (porto's
+#                    contract), verified blob by blob by doca, each manifest
+#                    named `<chart>:<version>` (`+` spelled `_`, no registry
+#                    host), with Helm's config and chart-layer media types.
 #   consumable     — the layout pushed (doca push --layout) to a real
 #                    registry (CNCF distribution, loopback, in the sandbox) is
 #                    pulled by `helm pull oci://` byte-identical to the archive
@@ -148,23 +148,23 @@ pkgs.runCommand "helm-chart-repo-test"
     pass "reproducible: fixture-app manifest digest $digest in both repos"
 
     # ── layout ────────────────────────────────────────────────────────────
-    layout=${repo}/pleme-io/charts/fixture-app
-    oci-push layout-verify --helm --layout "$layout" > verify.txt
-    expected="0.1.0_nix.1	$digest	application/vnd.cncf.helm.config.v1+json	application/vnd.cncf.helm.chart.content.v1.tar+gzip"
-    [ "$(cat verify.txt)" = "$expected" ] || { cat verify.txt >&2; fail "layout tag/digest/media types"; }
+    oci-push layout-verify --helm --layout ${repo}/layout > verify.txt
+    expected="fixture-app:0.1.0_nix.1	$digest	application/vnd.cncf.helm.config.v1+json	application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    [ "$(head -1 verify.txt)" = "$expected" ] || { cat verify.txt >&2; fail "layout ref.name/digest/media types"; }
+    [ "$(cut -f1 verify.txt | tr '\n' ' ')" = "fixture-app:0.1.0_nix.1 fixture-umbrella:0.3.0 " ] \
+      || { cat verify.txt >&2; fail "ref.names are not <chart>:<tag>"; }
     [ "$(jq -r .repository ${repo}/charts.json)" = pleme-io/charts ] || fail "charts.json repository"
     [ "$(jq -r '.charts | length' ${repo}/charts.json)" = 2 ] || fail "charts.json chart count"
-    pass "layout: verified, tag 0.1.0_nix.1, Helm media types"
+    pass "layout: one repository layout, ref.name fixture-app:0.1.0_nix.1, Helm media types"
 
     # ── consumable ────────────────────────────────────────────────────────
     REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY="$TMPDIR/registry-data" \
       registry serve ${registryConfig} > registry.log 2>&1 &
     for _ in $(seq 1 100); do curl -sf http://127.0.0.1:5000/v2/ >/dev/null && break; sleep 0.1; done
     curl -sf http://127.0.0.1:5000/v2/ >/dev/null || { cat registry.log >&2; fail "registry did not start"; }
-    for c in fixture-app fixture-umbrella; do
-      oci-push push --layout ${repo}/pleme-io/charts/$c --registry 127.0.0.1:5000 \
-        --image pleme-io/charts/$c --dest-user nix --dest-pass nix
-    done
+    # porto's routing, applied by doca: <chart>:<tag> -> pleme-io/charts/<chart>:<tag>
+    oci-push push --layout ${repo}/layout --registry 127.0.0.1:5000 \
+      --image pleme-io/charts --dest-user nix --dest-pass nix
     served=$(curl -sfI -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
       http://127.0.0.1:5000/v2/pleme-io/charts/fixture-app/manifests/0.1.0_nix.1 \
       | tr -d '\r' | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: //p')

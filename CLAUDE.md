@@ -279,12 +279,13 @@ hermetic, bit-reproducible `.tgz`: dependencies vendored from store inputs by
 subcharts only as fixed-output `vendoredDeps`, Chart.lock dropped, archive
 re-packed with sorted names, fixed mtime/owner, `gzip -n`. `mkHelmChartPackages`
 builds a repo's whole `file://../` sibling graph through it. `mkHelmRepo`
-(`lib/build/helm/repo.nix`) turns charts into `$out/<repository>/<chart>/` OCI
-image layouts plus `charts.json`, written by doca (`oci-push layout`, Helm media
-types, tag = version with `+` as `_`). A node-local registry serves that path as
+(`lib/build/helm/repo.nix`) turns charts into ONE OCI image layout at
+`$out/layout` (ref.name `<chart>:<tag>`, `+` as `_`, Helm media types, written by
+doca `oci-push layout`) plus `charts.json`. porto mounts `{ repository =
+"pleme-io/charts"; layout = "${repo}/layout"; }` and serves
 `oci://charts.pleme.internal/pleme-io/charts/<chart>`, so Flux, engenho and
-`helm dependency` consume it unchanged; `oci-push push --layout <dir>` exports
-the same digests to ghcr. Proof: `checks.<system>.helm-chart-repo` (hermetic
+`helm dependency` consume it unchanged; `oci-push push --layout ${repo}/layout
+--image pleme-io/charts` exports the same digests to ghcr. Proof: `checks.<system>.helm-chart-repo` (hermetic
 with two negatives, reproducible with a control, real registry + `helm pull`).
 
 ## Shikumi Pattern (Nix->YAML->App)

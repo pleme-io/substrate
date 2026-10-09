@@ -258,7 +258,7 @@ mod tests {
         let reg = TestRegistry::start();
         let dir = helm::tests::scratch("roundtrip");
         let chart = HelmChart::from_archive("t", helm::tests::chart_tgz("app", "0.1.0+nix.1")).unwrap();
-        let entries = helm::write_layout(&dir, &[chart.clone()]).unwrap();
+        let entries = helm::write_layout(&dir, &[chart.clone()], helm::RefStyle::Version).unwrap();
 
         push_layout(&spec(&reg.addr, "pleme-io/charts/app", &dir, vec![]), &dir.display().to_string()).unwrap();
 
@@ -291,6 +291,32 @@ mod tests {
         assert_eq!(data.digest.as_deref(), Some(entries[0].manifest_digest.as_str()));
     }
 
+    /// A whole-repository layout (`<chart>:<tag>` refs, porto's contract)
+    /// pushed with `--image pleme-io/charts` lands at
+    /// `pleme-io/charts/<chart>:<tag>`, digests intact; `--tag app:…` selects
+    /// one chart and `--additional-tags` alias it inside that chart's repo.
+    #[test]
+    fn repository_layout_pushes_each_chart_to_its_own_repository() {
+        let reg = TestRegistry::start();
+        let dir = helm::tests::scratch("repo-push");
+        let a = HelmChart::from_archive("a", helm::tests::chart_tgz("app", "0.1.0+nix.1")).unwrap();
+        let o = HelmChart::from_archive("o", helm::tests::chart_tgz("other", "2.0.0")).unwrap();
+        let entries = helm::write_layout(&dir, &[a, o], helm::RefStyle::ChartVersion).unwrap();
+        let layout = dir.display().to_string();
+        push_layout(&spec(&reg.addr, "pleme-io/charts", &dir, vec![]), &layout).unwrap();
+        push_layout(
+            &spec(&reg.addr, "pleme-io/charts", &dir, vec!["other:2.0.0".into(), "stable".into()]),
+            &layout,
+        )
+        .unwrap();
+        let st = reg.store.lock().unwrap();
+        let get = |r: &str, t: &str| st.manifests.get(&(r.to_string(), t.to_string())).map(|m| sha256_digest(&m.1));
+        assert_eq!(get("pleme-io/charts/app", "0.1.0_nix.1"), Some(entries[0].manifest_digest.clone()));
+        assert_eq!(get("pleme-io/charts/other", "2.0.0"), Some(entries[1].manifest_digest.clone()));
+        assert_eq!(get("pleme-io/charts/other", "stable"), get("pleme-io/charts/other", "2.0.0"));
+        assert!(get("pleme-io/charts", "2.0.0").is_none(), "never pushed to the bare repository");
+    }
+
     /// `--tag` selects one manifest and `--additional-tags` alias it; a tag the
     /// layout does not carry is refused before any upload.
     #[test]
@@ -299,7 +325,7 @@ mod tests {
         let dir = helm::tests::scratch("select");
         let a = HelmChart::from_archive("a", helm::tests::chart_tgz("app", "0.1.0")).unwrap();
         let b = HelmChart::from_archive("b", helm::tests::chart_tgz("app", "0.2.0")).unwrap();
-        helm::write_layout(&dir, &[a, b]).unwrap();
+        helm::write_layout(&dir, &[a, b], helm::RefStyle::Version).unwrap();
         let layout = dir.display().to_string();
 
         push_layout(&spec(&reg.addr, "c/app", &dir, vec!["0.2.0".into(), "latest".into()]), &layout).unwrap();
@@ -325,7 +351,7 @@ mod tests {
         let reg = TestRegistry::start();
         let dir = helm::tests::scratch("transfer");
         let chart = HelmChart::from_archive("t", helm::tests::chart_tgz("app", "0.3.0")).unwrap();
-        let entries = helm::write_layout(&dir, &[chart]).unwrap();
+        let entries = helm::write_layout(&dir, &[chart], helm::RefStyle::Version).unwrap();
         push_layout(&spec(&reg.addr, "src/app", &dir, vec![]), &dir.display().to_string()).unwrap();
 
         let src = [reg.addr.as_str(), "/src/app:0.3.0"].concat();

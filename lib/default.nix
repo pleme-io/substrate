@@ -1555,9 +1555,10 @@ in rec {
   # Internal chart DISTRIBUTION (ghcr is only the public export):
   #   charts = substrateLib.mkHelmChartPackages { charts = chartDefs; libChartDir = ./charts/pleme-lib; };
   #   repo   = substrateLib.mkHelmRepo { charts = charts; };   # repository ? "pleme-io/charts"
-  #   # $out/pleme-io/charts/<chart>/ = OCI image layout, served by the node-local
-  #   # registry as oci://charts.pleme.internal/pleme-io/charts/<chart>; $out/charts.json
-  #   # Public export: oci-push push --layout $out/pleme-io/charts/<chart> --registry ghcr.io --image pleme-io/charts/<chart>
+  #   # $out/layout = ONE OCI image layout, ref.name "<chart>:<tag>"; porto mounts
+  #   # { repository = "pleme-io/charts"; layout = "${repo}/layout"; } and serves
+  #   # oci://charts.pleme.internal/pleme-io/charts/<chart>; $out/charts.json lists digests.
+  #   # Public export: oci-push push --layout ${repo}/layout --registry ghcr.io --image pleme-io/charts
   inherit (helmBuildModule)
     mkHelmBumpApp
     mkHelmSdlcApps

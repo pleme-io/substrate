@@ -1504,6 +1504,13 @@ fn push_with_retry_inner(
 
 /// `push --layout` — push every manifest of an OCI image layout VERBATIM.
 ///
+/// A ref.name `<tag>` goes to `<image>:<tag>`; a ref.name `<chart>:<tag>` (a
+/// whole-repository layout, `oci-push layout --ref-name chart-version`) goes to
+/// `<image>/<chart>:<tag>` — the same routing porto applies when it serves the
+/// layout, so `--image pleme-io/charts` exports a repository to ghcr exactly as
+/// the fleet sees it internally. `--tag` selects by full ref.name; each
+/// `--additional-tags` entry aliases it within the same chart repository.
+///
 /// The layout was already verified end to end by `helm::read_layout` (each
 /// blob hashed and sized against its descriptor), so nothing here re-encodes:
 /// blobs go up as stored and the manifest goes up as its exact bytes through
@@ -1513,8 +1520,12 @@ fn push_with_retry_inner(
 /// canonical form happened to match ours.
 fn push_layout(spec: &PushSpec, layout: &str) -> Result<(), PushError> {
     let images = helm::read_layout(Path::new(layout))?;
-    // (image, tags to push it under)
-    let mut plan: Vec<(&helm::LayoutImage, Vec<String>)> = Vec::new();
+    // (image, references to push it under)
+    let image_for = |repo: Option<&str>| match repo {
+        Some(r) => [spec.image.as_str(), "/", r].concat(),
+        None => spec.image.clone(),
+    };
+    let mut plan: Vec<(&helm::LayoutImage, Vec<(String, String)>)> = Vec::new();
     match spec.tags.first() {
         Some(selector) => {
             let img = images
@@ -1524,38 +1535,48 @@ fn push_layout(spec: &PushSpec, layout: &str) -> Result<(), PushError> {
                     layout: layout.to_string(),
                     tag: selector.clone(),
                 })?;
-            plan.push((img, spec.tags.clone()));
+            let (repo, tag) = helm::split_ref_name(selector);
+            let image = image_for(repo);
+            let mut refs = vec![(image.clone(), tag.to_string())];
+            for extra in &spec.tags[1..] {
+                refs.push((image.clone(), helm::split_ref_name(extra).1.to_string()));
+            }
+            plan.push((img, refs));
         }
         None => {
             for img in &images {
-                let tag = img.tag.clone().ok_or_else(|| PushError::LayoutUntagged {
+                let name = img.tag.as_deref().ok_or_else(|| PushError::LayoutUntagged {
                     layout: layout.to_string(),
                     digest: img.manifest_digest.clone(),
                 })?;
-                plan.push((img, vec![tag]));
+                let (repo, tag) = helm::split_ref_name(name);
+                plan.push((img, vec![(image_for(repo), tag.to_string())]));
             }
         }
     }
+    let reference_of = |image: &str, tag: &str| {
+        [spec.registry.as_str(), "/", image, ":", tag].concat()
+    };
 
     let cfg = client_config_for(&spec.registry, spec.insecure, &spec.ca_cert)?;
     let client = Client::new(cfg);
     let auth = RegistryAuth::Basic(spec.dest_user.clone(), spec.dest_pass.clone());
     runtime()?.block_on(async {
         client.store_auth_if_needed(&spec.registry, &auth).await;
-        for (img, tags) in &plan {
-            let first = spec.reference(&tags[0]);
+        for (img, refs) in &plan {
+            let first = reference_of(&refs[0].0, &refs[0].1);
             let first_ref = parse_reference(&first)?;
             for (digest, bytes) in &img.blobs {
                 client
                     .push_blob(&first_ref, bytes, digest)
                     .await
                     .map_err(|e| PushError::OciPush {
-                        tag: tags[0].clone(),
+                        tag: first.clone(),
                         detail: error_chain(&e),
                     })?;
             }
-            for tag in tags {
-                let reference_str = spec.reference(tag);
+            for (image, tag) in refs {
+                let reference_str = reference_of(image, tag);
                 let reference = parse_reference(&reference_str)?;
                 let content_type = img.manifest_media_type.parse().map_err(|_| {
                     PushError::LayoutInvalid {
@@ -1581,13 +1602,17 @@ fn push_layout(spec: &PushSpec, layout: &str) -> Result<(), PushError> {
 /// `layout` — write Helm chart archives as OCI image layouts, offline.
 ///
 ///   oci-push layout --helm-chart a.tgz [--helm-chart b.tgz …] --out <dir>
-///   oci-push layout --helm-chart a.tgz … --out-root <dir> [--repository pleme-io/charts]
+///                   [--ref-name version|chart-version] [--repository pleme-io/charts]
 ///                   [--summary <file.json>]
+///   oci-push layout --helm-chart a.tgz … --out-root <dir>   (one layout per chart)
 ///
-/// `--out` writes ONE layout and refuses charts of two names; `--out-root`
-/// writes `<dir>/<chart-name>/` per chart, which is the shape a registry maps
-/// onto `<repository>/<chart-name>`. `--summary` writes a canonical JSON list
-/// of {chart, version, tag, digest, chartDigest, layout}. The output is a pure
+/// `--out` writes ONE layout. `--ref-name version` (default) names manifests
+/// `<tag>` and refuses two chart names (the layout is `<repository>/<chart>`);
+/// `--ref-name chart-version` names them `<chart>:<tag>` and holds a whole
+/// repository — the shape porto mounts as `{repository, layout}` and serves as
+/// `<repository>/<chart>:<tag>`. `--out-root` writes `<dir>/<chart>/` per chart
+/// (`version` refs). `--summary` writes a canonical JSON list of {chart,
+/// version, tag, refName, digest, chartDigest, layout}. The output is a pure
 /// function of the archives: same bytes in, same bytes out, any argument order.
 fn cmd_layout<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut charts: Vec<String> = Vec::new();
@@ -1595,9 +1620,11 @@ fn cmd_layout<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut out_root: Option<String> = None;
     let mut repository: Option<String> = None;
     let mut summary: Option<String> = None;
+    let mut style = helm::RefStyle::Version;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--helm-chart" => charts.push(next_value(&mut it, "helm-chart")?),
+            "--ref-name" => style = helm::RefStyle::parse(&next_value(&mut it, "ref-name")?)?,
             "--out" => out = Some(next_value(&mut it, "out")?),
             "--out-root" => out_root = Some(next_value(&mut it, "out-root")?),
             "--repository" => repository = Some(next_value(&mut it, "repository")?),
@@ -1616,14 +1643,14 @@ fn cmd_layout<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
     let mut written: Vec<(String, helm::LayoutEntry)> = Vec::new();
     match (out, out_root) {
         (Some(dir), None) => {
-            for e in helm::write_layout(Path::new(&dir), &parsed)? {
+            for e in helm::write_layout(Path::new(&dir), &parsed, style)? {
                 written.push((String::from("."), e));
             }
         }
         (None, Some(root)) => {
             for (name, group) in helm::group_by_name(parsed) {
                 let dir = Path::new(&root).join(&name);
-                for e in helm::write_layout(&dir, &group)? {
+                for e in helm::write_layout(&dir, &group, helm::RefStyle::Version)? {
                     written.push((name.clone(), e));
                 }
             }
@@ -1631,7 +1658,7 @@ fn cmd_layout<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
         _ => return Err(PushError::MissingArg("out OR --out-root (exactly one)")),
     }
     for (_, e) in &written {
-        println!("{}\t{}\t{}", e.chart, e.tag, e.manifest_digest);
+        println!("{}\t{}\t{}", e.chart, e.ref_name, e.manifest_digest);
     }
     if let Some(path) = summary {
         let bytes = helm::summary_json(repository.as_deref(), &written);

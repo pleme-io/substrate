@@ -276,9 +276,10 @@ in
   # One chart -> one deterministic, hermetic .tgz (lib/build/helm/chart.nix).
   inherit mkHelmChart;
 
-  # Charts -> one store path of OCI image layouts + charts.json, served by the
-  # node-local registry as oci://charts.pleme.internal/<repository>/<chart>
-  # (lib/build/helm/repo.nix). Needs doca (`ociPush`).
+  # Charts -> one store path: ONE OCI image layout ($out/layout, ref.name
+  # "<chart>:<tag>") + charts.json, mounted by porto and served as
+  # oci://charts.pleme.internal/<repository>/<chart> (lib/build/helm/repo.nix).
+  # Needs doca (`ociPush`).
   mkHelmRepo = import ../build/helm/repo.nix { inherit pkgs; doca = ociPush; };
 
   # A pinned chart + typed values -> rendered manifests (lib/build/helm/render.nix).

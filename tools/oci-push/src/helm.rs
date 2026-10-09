@@ -210,12 +210,57 @@ pub(crate) fn group_by_name(charts: Vec<HelmChart>) -> BTreeMap<String, Vec<Helm
     groups
 }
 
+/// How a layout names its manifests (`org.opencontainers.image.ref.name`).
+///
+/// * `Version` — `<tag>`: the layout IS one chart's OCI repository
+///   (`<repository>/<chart>`); one chart name per layout.
+/// * `ChartVersion` — `<chart>:<tag>`: the layout is a whole chart
+///   REPOSITORY (`<repository>`), every chart in it. This is the shape porto
+///   (the node-local registry) mounts as `{repository, layout}`, routing
+///   `<chart>:<tag>` to `<repository>/<chart>:<tag>`, and the shape
+///   `push --layout` exports the same way. No registry host ever appears in a
+///   ref.name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RefStyle {
+    Version,
+    ChartVersion,
+}
+
+impl RefStyle {
+    pub(crate) fn parse(s: &str) -> Result<RefStyle, PushError> {
+        match s {
+            "version" => Ok(RefStyle::Version),
+            "chart-version" => Ok(RefStyle::ChartVersion),
+            _ => Err(PushError::MissingArg("ref-name version|chart-version")),
+        }
+    }
+
+    fn ref_name(self, c: &HelmChart) -> String {
+        match self {
+            RefStyle::Version => c.tag(),
+            RefStyle::ChartVersion => [c.name.as_str(), ":", c.tag().as_str()].concat(),
+        }
+    }
+}
+
+/// Split a layout ref.name into (repository suffix, tag): `"app:0.1.0"` →
+/// (`Some("app")`, `"0.1.0"`), `"0.1.0"` → (`None`, `"0.1.0"`). An OCI tag
+/// cannot contain `:`, so the split is unambiguous.
+pub(crate) fn split_ref_name(r: &str) -> (Option<&str>, &str) {
+    match r.rsplit_once(':') {
+        Some((repo, tag)) => (Some(repo), tag),
+        None => (None, r),
+    }
+}
+
 /// What one written manifest is, for the summary consumers read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LayoutEntry {
     pub chart: String,
     pub version: String,
     pub tag: String,
+    /// The manifest's `org.opencontainers.image.ref.name` in the layout.
+    pub ref_name: String,
     pub manifest_digest: String,
     pub chart_digest: String,
 }
@@ -232,24 +277,29 @@ fn blob_path(dir: &Path, digest: &str) -> PathBuf {
     dir.join("blobs").join("sha256").join(hex)
 }
 
-/// Write one OCI image layout holding every version of ONE chart.
+/// Write one OCI image layout: every version of ONE chart (`RefStyle::Version`)
+/// or every chart of a repository (`RefStyle::ChartVersion`).
 ///
-/// Refuses charts of different names (one layout = one OCI repository) and
-/// two different archives claiming the same version (which would make the tag
-/// mean two things). Identical archives are deduplicated. Manifests are listed
-/// in `index.json` sorted by tag, so the file is a function of the chart set,
-/// not of argument order.
-pub(crate) fn write_layout(dir: &Path, charts: &[HelmChart]) -> Result<Vec<LayoutEntry>, PushError> {
+/// Refuses, under `Version`, charts of different names (that layout is one
+/// chart's OCI repository), and always two different archives claiming the
+/// same chart version (the tag would mean two things). Identical archives are
+/// deduplicated. Manifests are listed in `index.json` sorted by ref.name, so
+/// the file is a function of the chart set, not of argument order.
+pub(crate) fn write_layout(
+    dir: &Path,
+    charts: &[HelmChart],
+    style: RefStyle,
+) -> Result<Vec<LayoutEntry>, PushError> {
     let mut by_tag: BTreeMap<String, &HelmChart> = BTreeMap::new();
     let first = charts.first().ok_or(PushError::MissingArg("helm-chart"))?;
     for c in charts {
-        if c.name != first.name {
+        if style == RefStyle::Version && c.name != first.name {
             return Err(PushError::LayoutMixedCharts {
                 first: first.name.clone(),
                 second: c.name.clone(),
             });
         }
-        if let Some(prev) = by_tag.get(&c.tag()) {
+        if let Some(prev) = by_tag.get(&style.ref_name(c)) {
             if prev.content != c.content {
                 return Err(PushError::ChartVersionConflict {
                     chart: c.name.clone(),
@@ -258,7 +308,7 @@ pub(crate) fn write_layout(dir: &Path, charts: &[HelmChart]) -> Result<Vec<Layou
             }
             continue;
         }
-        by_tag.insert(c.tag(), c);
+        by_tag.insert(style.ref_name(c), c);
     }
 
     let blobs = dir.join("blobs").join("sha256");
@@ -269,7 +319,7 @@ pub(crate) fn write_layout(dir: &Path, charts: &[HelmChart]) -> Result<Vec<Layou
 
     let mut entries = Vec::with_capacity(by_tag.len());
     let mut manifests = Vec::with_capacity(by_tag.len());
-    for (tag, c) in &by_tag {
+    for (ref_name, c) in &by_tag {
         let manifest = c.manifest();
         let manifest_digest = sha256_digest(&manifest);
         for bytes in [&c.config, &c.content, &manifest] {
@@ -280,13 +330,14 @@ pub(crate) fn write_layout(dir: &Path, charts: &[HelmChart]) -> Result<Vec<Layou
             _ => Map::new(),
         };
         let mut ann = Map::new();
-        ann.insert(ANN_REF_NAME.into(), Value::from(tag.as_str()));
+        ann.insert(ANN_REF_NAME.into(), Value::from(ref_name.as_str()));
         desc.insert("annotations".into(), Value::Object(ann));
         manifests.push(Value::Object(desc));
         entries.push(LayoutEntry {
             chart: c.name.clone(),
             version: c.version.clone(),
-            tag: tag.clone(),
+            tag: c.tag(),
+            ref_name: ref_name.clone(),
             manifest_digest,
             chart_digest: c.chart_digest(),
         });
@@ -441,6 +492,7 @@ pub(crate) fn summary_json(repository: Option<&str>, entries: &[(String, LayoutE
             m.insert("chart".into(), Value::from(e.chart.as_str()));
             m.insert("version".into(), Value::from(e.version.as_str()));
             m.insert("tag".into(), Value::from(e.tag.as_str()));
+            m.insert("refName".into(), Value::from(e.ref_name.as_str()));
             m.insert("digest".into(), Value::from(e.manifest_digest.as_str()));
             m.insert("chartDigest".into(), Value::from(e.chart_digest.as_str()));
             m.insert("layout".into(), Value::from(layout.as_str()));
@@ -572,7 +624,7 @@ pub(crate) mod tests {
     fn layout_validates_and_names_the_tag() {
         let dir = scratch("layout-validates");
         let c = HelmChart::from_archive("t", chart_tgz("app", "0.1.0+b")).unwrap();
-        let entries = write_layout(&dir, &[c.clone()]).unwrap();
+        let entries = write_layout(&dir, &[c.clone()], RefStyle::Version).unwrap();
         assert_eq!(entries.len(), 1);
         let images = read_layout(&dir).unwrap();
         assert_eq!(images.len(), 1);
@@ -594,8 +646,8 @@ pub(crate) mod tests {
         let b = HelmChart::from_archive("b", chart_tgz("app", "0.2.0")).unwrap();
         let d1 = scratch("order-1");
         let d2 = scratch("order-2");
-        write_layout(&d1, &[a.clone(), b.clone()]).unwrap();
-        write_layout(&d2, &[b, a.clone(), a]).unwrap();
+        write_layout(&d1, &[a.clone(), b.clone()], RefStyle::Version).unwrap();
+        write_layout(&d2, &[b, a.clone(), a], RefStyle::Version).unwrap();
         let f1 = all_files(&d1);
         assert_eq!(f1, all_files(&d2));
         // 2 configs + 2 charts + 2 manifests + index.json + oci-layout
@@ -607,22 +659,37 @@ pub(crate) mod tests {
         let a = HelmChart::from_archive("a", chart_tgz("app", "0.1.0")).unwrap();
         let other = HelmChart::from_archive("o", chart_tgz("other", "0.1.0")).unwrap();
         assert!(matches!(
-            write_layout(&scratch("mixed"), &[a.clone(), other]),
+            write_layout(&scratch("mixed"), &[a.clone(), other.clone()], RefStyle::Version),
             Err(PushError::LayoutMixedCharts { .. })
         ));
         let mut forged = a.clone();
         forged.content.push(0);
         assert!(matches!(
-            write_layout(&scratch("conflict"), &[a, forged]),
+            write_layout(&scratch("conflict"), &[a.clone(), forged], RefStyle::ChartVersion),
             Err(PushError::ChartVersionConflict { .. })
         ));
+    }
+
+    /// The porto contract: ONE layout for the whole repository, each manifest
+    /// named `<chart>:<tag>` (`+` as `_`), no registry host.
+    #[test]
+    fn repository_layout_names_every_manifest_chart_colon_tag() {
+        let dir = scratch("repo-layout");
+        let a = HelmChart::from_archive("a", chart_tgz("app", "0.1.0+nix.1")).unwrap();
+        let o = HelmChart::from_archive("o", chart_tgz("other", "2.0.0")).unwrap();
+        let entries = write_layout(&dir, &[o, a], RefStyle::ChartVersion).unwrap();
+        let refs: Vec<_> = read_layout(&dir).unwrap().into_iter().map(|i| i.tag.unwrap()).collect();
+        assert_eq!(refs, vec!["app:0.1.0_nix.1".to_string(), "other:2.0.0".to_string()]);
+        assert_eq!(entries[0].tag, "0.1.0_nix.1");
+        assert_eq!(split_ref_name("app:0.1.0_nix.1"), (Some("app"), "0.1.0_nix.1"));
+        assert_eq!(split_ref_name("0.1.0"), (None, "0.1.0"));
     }
 
     #[test]
     fn verifier_catches_a_tampered_blob_and_a_wrong_size() {
         let dir = scratch("tamper");
         let c = HelmChart::from_archive("t", chart_tgz("app", "0.1.0")).unwrap();
-        write_layout(&dir, &[c.clone()]).unwrap();
+        write_layout(&dir, &[c.clone()], RefStyle::Version).unwrap();
         // control: untampered layout verifies
         assert!(read_layout(&dir).is_ok());
         let chart_blob = blob_path(&dir, &c.chart_digest());
@@ -643,11 +710,12 @@ pub(crate) mod tests {
             tag: "0.1.0".into(),
             manifest_digest: "sha256:aa".into(),
             chart_digest: "sha256:bb".into(),
+            ref_name: "app:0.1.0".into(),
         };
         let s = String::from_utf8(summary_json(Some("pleme-io/charts"), &[("app".into(), e)])).unwrap();
         assert_eq!(
             s,
-            "{\"charts\":[{\"chart\":\"app\",\"chartDigest\":\"sha256:bb\",\"digest\":\"sha256:aa\",\"layout\":\"app\",\"tag\":\"0.1.0\",\"version\":\"0.1.0\"}],\"repository\":\"pleme-io/charts\"}\n"
+            "{\"charts\":[{\"chart\":\"app\",\"chartDigest\":\"sha256:bb\",\"digest\":\"sha256:aa\",\"layout\":\"app\",\"refName\":\"app:0.1.0\",\"tag\":\"0.1.0\",\"version\":\"0.1.0\"}],\"repository\":\"pleme-io/charts\"}\n"
         );
     }
 }
