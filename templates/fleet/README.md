@@ -15,7 +15,7 @@ nix flake init -t github:pleme-io/substrate#fleet
 | Machine declarations | `lib/nodes.nix`, `lib/darwin-nodes.nix` | one entry per machine |
 | Fleet stacks | `lib/node-layers.nix` | the ordered module lists a class of machine takes |
 | Machines | `nodes/<host>/` | `layers.nix`, `default.nix`, `configuration.nix`, hardware |
-| Typed surfaces | `modules/pleme/{shared,nixos,darwin}` | options + one renderer per platform |
+| Concepts | `modules/pleme/{shared,nixos,darwin}` | one module-trio concept per file + its renderers |
 | Profiles | `profiles/*.nix` | thin enable-flips over vocabulary modules |
 | Proofs | `parts/*.nix` | one proof per renderer |
 | Secrets | `secrets.yaml`, `.sops.yaml` | SOPS/age |

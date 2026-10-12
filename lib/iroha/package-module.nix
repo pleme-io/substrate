@@ -70,6 +70,8 @@
 #                   same per-platform dispatch as the user daemon: darwin →
 #                   launchd.agents."<name>-http", linux →
 #                   systemd.user.services."<name>-http";
+#     file        ? null            — the declaring file, so option declarations
+#                   name it rather than the class tag;
 #     extra       ? { homeManager ? null; nixos ? null; darwin ? null; }
 #                   — per-class extension modules appended to the corresponding
 #                   emitted module's imports (NOT gated on enable);
@@ -504,7 +506,8 @@ let
           ++ extraImports
           ++ [ fragment ]
           ++ lib.optional (extraMod != null) extraMod;
-        };
+        }
+        // lib.optionalAttrs (args ? file) { _file = toString args.file; };
     in
     {
       homeManager = mkClassModule core.classes.homeManager (lib.optional (

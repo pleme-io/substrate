@@ -21,7 +21,6 @@ let
     "lib/node-layers.nix"
     "lib/nodes.nix"
     "lib/darwin-nodes.nix"
-    "modules/pleme/shared/default.nix"
     "modules/pleme/nixos/default.nix"
     "modules/pleme/darwin/default.nix"
     "profiles/server-base.nix"
@@ -48,11 +47,19 @@ let
     )
   );
 
-  surfaceFiles = s: [
-    "modules/pleme/nixos/${s}.nix"
-    "modules/pleme/darwin/${s}.nix"
-    "parts/${s}.nix"
-  ];
+  surfaceFiles = s: [ "parts/${s}.nix" ];
+
+  conceptSource = s: builtins.readFile (templateDir + "/modules/pleme/shared/${s}.nix");
+
+  kindOf =
+    s:
+    let
+      m = builtins.match ''.*kind = "([a-z]+)";.*'' (lib.replaceStrings [ "\n" ] [ " " ] (conceptSource s));
+    in
+    if m == null then "binary" else builtins.head m;
+
+  aggregatorNames =
+    platform: builtins.readFile (templateDir + "/modules/pleme/${platform}/default.nix");
 
   missing = builtins.filter (f: !(builtins.pathExists (templateDir + "/${f}"))) (
     layoutFiles
@@ -66,7 +73,10 @@ let
       nixosModules.sops = "sops-nixos";
       darwinModules.sops = "sops-darwin";
     };
-    substrate = { inherit kata iroha; };
+    substrate = {
+      inherit kata iroha;
+      moduleTrio = import ../../module-trio.nix { inherit lib; };
+    };
   };
 
   f = import (templateDir + "/lib/fleet.nix") {
@@ -105,6 +115,27 @@ in
   template-has-a-shared-surface = {
     expr = sharedSurfaces != [ ];
     expected = true;
+  };
+  every-shared-concept-is-declared-through-the-trio = {
+    expr = builtins.filter (s: !(lib.hasInfix "mkModuleTrio" (conceptSource s))) sharedSurfaces;
+    expected = [ ];
+  };
+  the-template-ships-a-binary-a-package-and-a-registry = {
+    expr = lib.sort lib.lessThan (map kindOf sharedSurfaces);
+    expected = [
+      "binary"
+      "package"
+      "registry"
+    ];
+  };
+  every-concept-is-imported-by-both-platform-aggregators = {
+    expr = lib.genAttrs [ "nixos" "darwin" ] (
+      p: builtins.filter (s: !(lib.hasInfix "../shared/${s}.nix" (aggregatorNames p))) sharedSurfaces
+    );
+    expected = {
+      nixos = [ ];
+      darwin = [ ];
+    };
   };
   blanks-validate = {
     expr = f.config.name;

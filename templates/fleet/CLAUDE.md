@@ -29,10 +29,15 @@ modules/pleme (typed surfaces)  →  profiles/ (composed)  →  nodes/<n>/ (iden
   (hostname, platform). `base` is the machine itself and is always selected.
   Parking a role is removing its name from the selection; no file is deleted.
 - `profiles/` are thin enable-flips over vocabulary modules.
-- `modules/pleme/shared/<x>.nix` declares a typed surface;
-  `modules/pleme/{nixos,darwin}/<x>.nix` render it per platform; `parts/<x>.nix`
-  is its proof. A surface without a renderer and a proof is not finished. A
-  surface a second fleet needs moves to the vocabulary.
+- `modules/pleme/shared/<x>.nix` declares one concept through the module-trio
+  factory (`inputs.substrate.moduleTrio.mkModuleTrio`, kind `binary`,
+  `package`, `registry` or `service`), which gives it the same typed surface on
+  the nixos, darwin and home-manager arms; an arm that cannot host it refuses
+  with a typed reason. A registry concept names its renderers in
+  `modules/pleme/{nixos,darwin}/<x>.nix`; `parts/<x>.nix` is its proof. The
+  examples are `site` (registry), `tools` (package) and `hello` (binary); the
+  law is `theory/MODULE-TRIO.md`. A concept a second fleet needs moves to the
+  vocabulary.
 - `parts/` wires the flake. Each renderer (`nixos`, `darwin`, `deploy`, every
   surface) has a proof under `checks`.
 - Secrets go only through the backend `fleet.nix` declares (`sops`, recipients

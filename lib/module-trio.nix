@@ -226,12 +226,29 @@
 #                       };
 #                     Renders to options.<hmNamespace>.<name>.{appearance,storage}.* and serializes to YAML.
 #
+# ── Concept kinds (theory/MODULE-TRIO.md) ──────────────────────────────────
+#
+#   kind              "binary" (default; every field above) | "package" |
+#                     "registry" | "service". The other kinds live in
+#                     ./module-trio/concepts.nix and take one `namespace`
+#                     (default "pleme") for all three arms.
+#   namespace         binary only, optional: one option root for all three
+#                     arms instead of services.<name> + <hmNamespace>.<name>.
+#   support           { nixos, darwin, homeManager } of `support.renders` or
+#                     `support.refuses <why> <detail>` (./module-trio/support.nix).
+#                     Enabling a concept on a refusing arm fails an assertion
+#                     naming the reason. A binary spec without `support`
+#                     returns the untouched arms.
+#
 # ── Returns ────────────────────────────────────────────────────────────────
 #
 #   {
 #     homeManagerModule = { lib, config, pkgs, ... }: { options, config };
 #     nixosModule       = { lib, config, pkgs, ... }: { options, config };
 #     darwinModule      = { lib, config, pkgs, ... }: { options, config };
+#     module            = the arm matching the evaluation class (schema alone
+#                         when classless, for proof harnesses);
+#     concept           = { name, kind, path, paths, support };
 #   }
 #
 { lib }:
@@ -245,16 +262,19 @@ let
   irohaCore     = import ./iroha/core.nix                 { inherit lib; };
 
   inherit (lib) mkOption mkEnableOption mkIf mkMerge optionalAttrs types literalExpression;
-in
-{
-  mkModuleTrio = spec:
+
+  support = import ./module-trio/support.nix { inherit lib; };
+  concepts = import ./module-trio/concepts.nix { inherit lib; };
+
+  binaryTrio = spec:
     let
       name              = spec.name;
       description       = spec.description;
       binaryName        = spec.binaryName       or name;
       packageAttr       = spec.packageAttr      or name;
 
-      hmNamespace       = spec.hmNamespace      or "programs";
+      hmNamespace       = spec.hmNamespace      or spec.namespace or "programs";
+      systemNamespacePath = lib.splitString "." (spec.namespace or "services") ++ [ name ];
       hmNamespacePath   = lib.splitString "." hmNamespace;
 
       withMcp           = spec.withMcp          or false;
@@ -970,11 +990,11 @@ in
       # ─── NixOS module (system-level systemd) ────────────────────────
       nixosModule = { lib, config, pkgs, ... }:
         let
-          cfg = config.services.${name};
+          cfg = lib.getAttrFromPath systemNamespacePath config;
           sys = systemShikumi { inherit cfg pkgs; };
         in
         {
-          options.services.${name} = systemOptions pkgs;
+          options = lib.setAttrByPath systemNamespacePath (systemOptions pkgs);
 
           config = mkIf cfg.enable (mkMerge [
             { environment.systemPackages = [ cfg.package ]; }
@@ -1012,11 +1032,11 @@ in
       # ─── nix-darwin module (system-level launchd) ───────────────────
       darwinModule = { lib, config, pkgs, ... }:
         let
-          cfg = config.services.${name};
+          cfg = lib.getAttrFromPath systemNamespacePath config;
           sys = systemShikumi { inherit cfg pkgs; };
         in
         {
-          options.services.${name} = systemOptions pkgs;
+          options = lib.setAttrByPath systemNamespacePath (systemOptions pkgs);
 
           config = mkIf cfg.enable (mkMerge [
             { environment.systemPackages = [ cfg.package ]; }
@@ -1044,4 +1064,75 @@ in
           ]);
         };
     };
+
+  mkBinary = spec:
+    let
+      name = spec.name;
+      trio = binaryTrio spec;
+      where = "module-trio: binary ${name}";
+      systemPath = lib.splitString "." (spec.namespace or "services") ++ [ name ];
+      paths = {
+        nixos = systemPath;
+        darwin = systemPath;
+        homeManager = lib.splitString "." (spec.hmNamespace or spec.namespace or "programs") ++ [ name ];
+      };
+      sup = support.normalize {
+        inherit where;
+        defaults = support.allRender;
+        given = spec.support or { };
+      };
+      armOf = {
+        nixos = trio.nixosModule;
+        darwin = trio.darwinModule;
+        homeManager = trio.homeManagerModule;
+      };
+      modules = lib.genAttrs support.arms (arm:
+        if !(spec ? support) || sup.${arm}.verdict == "renders" then armOf.${arm}
+        else {
+          imports = [
+            armOf.${arm}
+            (support.refusalModule {
+              enablePath = paths.${arm} ++ [ "enable" ];
+              path = paths.${arm};
+              inherit arm;
+              verdict = sup.${arm};
+            })
+          ];
+        });
+    in
+    {
+      homeManagerModule = modules.homeManager;
+      nixosModule = modules.nixos;
+      darwinModule = modules.darwin;
+      module = support.dispatch { inherit where modules; };
+      concept = {
+        inherit name paths;
+        kind = "binary";
+        path = paths.homeManager;
+        support = sup;
+      };
+    };
+
+  constructors = {
+    binary = mkBinary;
+    package = concepts.mkPackage;
+    registry = concepts.mkRegistry;
+    service = concepts.mkService;
+  };
+
+  kinds = builtins.attrNames constructors;
+in
+{
+  inherit kinds;
+
+  support = {
+    inherit (support) arms reasons renders refuses;
+  };
+
+  mkModuleTrio = spec:
+    let
+      kind = spec.kind or "binary";
+    in
+    if constructors ? ${kind} then constructors.${kind} spec
+    else throw "module-trio: kind '${toString kind}' is not one of ${lib.concatStringsSep ", " kinds}.";
 }

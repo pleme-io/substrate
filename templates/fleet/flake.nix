@@ -35,6 +35,8 @@
         ./parts/darwin.nix
         ./parts/deploy.nix
         ./parts/site.nix
+        ./parts/tools.nix
+        ./parts/hello.nix
         ./parts/proofs.nix
         ./parts/canonical.nix
       ];

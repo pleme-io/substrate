@@ -198,6 +198,8 @@
         kata = import ./lib/kata { lib = nixpkgs.lib; };
         kataPath = ./lib/kata;
 
+        moduleTrio = import ./lib/module-trio.nix { lib = nixpkgs.lib; };
+
         templates.fleet = {
           path = ./templates/fleet;
           description = "kata-standard private fleet repo — fill in fleet.nix, node hardware, secrets; all behavior from the vocabulary";
@@ -225,6 +227,7 @@
           # render fails exactly `testSystemRendersShikumiYaml` and
           # `testSystemDaemonGetsConfigEnvVar`, naming the defect.
           module-trio = import ./lib/tests/module-trio-test.nix { inherit pkgs; };
+          module-trio-kinds = import ./lib/tests/module-trio-kinds-test.nix { inherit pkgs; };
 
           # INTERNAL HELM CHART DISTRIBUTION — mkHelmChart (hermetic,
           # bit-reproducible .tgz) -> mkHelmRepo (OCI image layouts via doca)

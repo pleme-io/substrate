@@ -1,6 +1,6 @@
 { lib, ... }: {
   networking.hostName = "alpha";
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-  pleme.site.timeZone = "UTC";
+  pleme.site.selected = "utc";
   system.stateVersion = "26.05";
 }
