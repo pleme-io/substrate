@@ -61,16 +61,7 @@ let
   );
 
   stubInputs = {
-    nixpkgs.lib = lib // {
-      nixosSystem = args: {
-        kind = "nixos";
-        inherit args;
-      };
-    };
-    nix-darwin.lib.darwinSystem = args: {
-      kind = "darwin";
-      inherit args;
-    };
+    nixpkgs.lib = lib;
     sops-nix = {
       nixosModules.sops = "sops-nixos";
       darwinModules.sops = "sops-darwin";
@@ -78,7 +69,19 @@ let
     substrate = { inherit kata iroha; };
   };
 
-  f = import (templateDir + "/lib/fleet.nix") { inputs = stubInputs; };
+  f = import (templateDir + "/lib/fleet.nix") {
+    inputs = stubInputs;
+    universes = {
+      nixosSystem = args: {
+        kind = "nixos";
+        inherit args;
+      };
+      darwinSystem = args: {
+        kind = "darwin";
+        inherit args;
+      };
+    };
+  };
   nodes = import (templateDir + "/lib/nodes.nix") { inputs = stubInputs; };
 
   selectionOf =

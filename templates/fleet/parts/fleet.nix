@@ -1,6 +1,13 @@
 { inputs, ... }:
 let
-  fleet = import ../lib/fleet.nix { inherit inputs; };
+  specialArgs = { inherit inputs; };
+  fleet = import ../lib/fleet.nix {
+    inherit inputs;
+    universes = {
+      nixosSystem = args: inputs.nixpkgs.lib.nixosSystem (args // { inherit specialArgs; });
+      darwinSystem = args: inputs.nix-darwin.lib.darwinSystem (args // { inherit specialArgs; });
+    };
+  };
 in
 {
   _module.args.fleet = fleet;
