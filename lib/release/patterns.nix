@@ -218,6 +218,11 @@
       backend = "tatara-lisp";
       role = "nix flake check + lock verification";
     };
+    kijun-lint = {
+      uses = "pleme-io/actions/kijun-lint@main";
+      backend = "tatara-lisp";
+      role = "kijun (blue Nix linter) from a flake ref; skips with a notice while the ref does not exist";
+    };
     rust-gate = {
       uses = "pleme-io/actions/rust-gate@main";
       backend = "tatara-lisp";
@@ -253,6 +258,11 @@
       uses = "pleme-io/actions/ansible-collection-build@main";
       backend = "tatara-lisp";
       role = "ansible-galaxy collection build";
+    };
+    nix-node-matrix = {
+      uses = "pleme-io/actions/nix-node-matrix@main";
+      backend = "tatara-lisp";
+      role = "fleet node names (or auto per system) -> job matrix of system toplevel refs";
     };
   };
 
@@ -315,7 +325,7 @@
     nix-flake-update = {
       uses = "pleme-io/actions/nix-flake-update@main";
       backend = "tatara-lisp";
-      role = "nix flake update + auto-PR (specific case of dependency-update)";
+      role = "nix flake update, verify refs built against the new lock, then push to the branch or open a PR";
     };
     pr-comment = {
       uses = "pleme-io/actions/pr-comment@main";

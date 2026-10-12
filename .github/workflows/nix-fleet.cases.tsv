@@ -1,0 +1,15 @@
+ci-everything	inputs.flake-update=off;inputs.lint=true;inputs.eval-checks=["a"];inputs.advisory-checks=["b"];needs.plan.outputs.node-count=2;failure()=false;cancelled()=false	policy,plan,lint,eval-checks,advisory-checks,nodes	flake-update
+
+ci-checks-only	inputs.flake-update=off;inputs.lint=false;inputs.eval-checks=["a"];inputs.advisory-checks=[];needs.plan.outputs.node-count=0;failure()=false;cancelled()=false	policy,plan,eval-checks	lint,advisory-checks,nodes,flake-update
+
+ci-nodes-without-checks	inputs.flake-update=off;inputs.lint=false;inputs.eval-checks=[];inputs.advisory-checks=[];needs.plan.outputs.node-count=1;failure()=false;cancelled()=false	policy,plan,nodes	lint,eval-checks,advisory-checks,flake-update
+
+ci-a-gating-check-failed	inputs.flake-update=off;inputs.lint=true;inputs.eval-checks=["a"];inputs.advisory-checks=[];needs.plan.outputs.node-count=2;failure()=true;cancelled()=false	policy,plan,lint,eval-checks	advisory-checks,nodes,flake-update
+
+ci-plan-yielded-nothing	inputs.flake-update=off;inputs.lint=true;inputs.eval-checks=[];inputs.advisory-checks=[];needs.plan.outputs.node-count=;failure()=false;cancelled()=false	policy,plan,lint	eval-checks,advisory-checks,nodes,flake-update
+
+flake-update-push	inputs.flake-update=push;inputs.lint=true;inputs.eval-checks=["a"];inputs.advisory-checks=["b"];needs.plan.outputs.node-count=2;failure()=false;cancelled()=false	policy,flake-update	plan,lint,eval-checks,advisory-checks,nodes
+
+flake-update-pr	inputs.flake-update=pr;inputs.lint=true;inputs.eval-checks=["a"];inputs.advisory-checks=[];needs.plan.outputs.node-count=2;failure()=false;cancelled()=false	policy,flake-update	plan,lint,eval-checks,advisory-checks,nodes
+
+flake-update-report-only	inputs.flake-update=none;inputs.lint=false;inputs.eval-checks=[];inputs.advisory-checks=[];needs.plan.outputs.node-count=0;failure()=false;cancelled()=false	policy,flake-update	plan,lint,eval-checks,advisory-checks,nodes

@@ -1,0 +1,216 @@
+# Nix fleet repo CI on the private self-hosted pool: runner policy, lint, eval-check and node-toplevel matrices, scheduled flake update.
+# jobs: { ci: { uses: pleme-io/substrate/.github/workflows/nix-fleet.yml@main, secrets: inherit, with: { eval-checks: '["fleet-dns"]', nodes: plo rio } } }
+name: nix-fleet
+
+on:
+  workflow_call:
+    inputs:
+      runner-labels:
+        description: 'JSON array of runner labels every job runs on. The default is the private self-hosted pool (plo).'
+        type: string
+        default: '["self-hosted","pleme-private"]'
+      system:
+        description: 'The system checks are read from: checks.<system>.<name>.'
+        type: string
+        default: x86_64-linux
+      eval-checks:
+        description: 'JSON array of flake check names built as a gating matrix.'
+        type: string
+        default: '[]'
+      advisory-checks:
+        description: 'JSON array of known-red check names built as an advisory matrix that never fails the run.'
+        type: string
+        default: '[]'
+      nodes:
+        description: 'Nodes whose system toplevel is built, one matrix row each: words, a JSON array, or auto (every configuration of `system`). Empty builds none.'
+        type: string
+        default: ''
+      node-attr-template:
+        description: 'Attribute path built per node; NODE is the node name.'
+        type: string
+        default: nixosConfigurations.NODE.config.system.build.toplevel
+      lint:
+        description: 'Run the lint job: kijun and the canonical-format check.'
+        type: boolean
+        default: true
+      canonical-check:
+        description: 'Flake check that holds every .nix file to nixfmt --strict. Empty skips it.'
+        type: string
+        default: nix-canonical
+      kijun-ref:
+        description: 'Flake ref of kijun. A ref that does not exist yet skips with a notice. Empty skips kijun.'
+        type: string
+        default: 'github:pleme-io/blue#kijun'
+      kijun-args:
+        description: 'kijun arguments; {path} is the repo root, appended when absent.'
+        type: string
+        default: 'check --json'
+      kijun-fail-on-findings:
+        description: 'Fail the lint job on kijun findings instead of reporting them.'
+        type: boolean
+        default: false
+      cache-push:
+        description: 'Push every built closure into the sui cache store on the runner.'
+        type: boolean
+        default: false
+      cache-store-path:
+        description: 'sui cache store directory on the runner. Empty is sui''s default.'
+        type: string
+        default: ''
+      flake-update:
+        description: 'off runs the CI jobs. none, pr or push runs only the flake update: none reports, pr opens a PR, push commits to the default branch. Every mode builds flake-update-verify before publishing.'
+        type: string
+        default: 'off'
+      flake-update-inputs:
+        description: 'Space-separated inputs to update; empty updates all.'
+        type: string
+        default: ''
+      flake-update-verify:
+        description: 'Space-separated flake refs that must build against the new lock before it is published.'
+        type: string
+        default: ''
+    secrets:
+      BOT_PAT:
+        description: 'Org-scoped token: private flake inputs, and the flake-update push.'
+        required: false
+      SUI_SIGNING_KEY:
+        description: 'Signing key for cache-push.'
+        required: false
+    outputs:
+      node-count:
+        description: 'Nodes in the build matrix.'
+        value: ${{ jobs.plan.outputs.node-count }}
+      kijun-ran:
+        description: '"true" when kijun ran.'
+        value: ${{ jobs.lint.outputs.kijun-ran }}
+      flake-update-reason:
+        description: 'nix-flake-update reason: unchanged, published, report-only, verify-failed, push-rejected, ...'
+        value: ${{ jobs.flake-update.outputs.reason }}
+      flake-update-commit:
+        description: 'The lock commit, when one was made.'
+        value: ${{ jobs.flake-update.outputs.commit-sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: runner policy
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/runner-policy@main
+        with:
+          runner-labels: ${{ inputs.runner-labels }}
+
+  plan:
+    name: plan node matrix
+    needs: policy
+    if: inputs.flake-update == 'off'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    outputs:
+      node-matrix: ${{ steps.nodes.outputs.matrix }}
+      node-count: ${{ steps.nodes.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: nodes
+        uses: pleme-io/actions/nix-node-matrix@main
+        with:
+          nodes: ${{ inputs.nodes }}
+          attr-template: ${{ inputs.node-attr-template }}
+          system: ${{ inputs.system }}
+          github-token: ${{ secrets.BOT_PAT }}
+
+  lint:
+    name: lint
+    needs: policy
+    if: inputs.lint && inputs.flake-update == 'off'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    outputs:
+      kijun-ran: ${{ steps.kijun.outputs.ran }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: kijun
+        if: inputs.kijun-ref != ''
+        uses: pleme-io/actions/kijun-lint@main
+        with:
+          flake-ref: ${{ inputs.kijun-ref }}
+          args: ${{ inputs.kijun-args }}
+          fail-on-findings: ${{ inputs.kijun-fail-on-findings }}
+          github-token: ${{ secrets.BOT_PAT }}
+      - if: inputs.canonical-check != ''
+        uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: .#checks.${{ inputs.system }}.${{ inputs.canonical-check }}
+          github-token: ${{ secrets.BOT_PAT }}
+
+  eval-checks:
+    name: check ${{ matrix.check }}
+    needs: policy
+    if: inputs.flake-update == 'off' && inputs.eval-checks != '[]'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(inputs.eval-checks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
+          github-token: ${{ secrets.BOT_PAT }}
+          cache-push: ${{ inputs.cache-push }}
+          cache-store-path: ${{ inputs.cache-store-path }}
+          cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
+
+  advisory-checks:
+    name: known red ${{ matrix.check }} (advisory)
+    needs: policy
+    if: inputs.flake-update == 'off' && inputs.advisory-checks != '[]'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        check: ${{ fromJSON(inputs.advisory-checks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
+          github-token: ${{ secrets.BOT_PAT }}
+
+  nodes:
+    name: node ${{ matrix.node }}
+    needs: [plan, eval-checks]
+    if: ${{ !failure() && !cancelled() && inputs.flake-update == 'off' && needs.plan.outputs.node-count != '0' && needs.plan.outputs.node-count != '' }}
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.node-matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: ${{ matrix.flake-ref }}
+          github-token: ${{ secrets.BOT_PAT }}
+          cache-push: ${{ inputs.cache-push }}
+          cache-store-path: ${{ inputs.cache-store-path }}
+          cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
+
+  flake-update:
+    name: flake update (${{ inputs.flake-update }})
+    needs: policy
+    if: inputs.flake-update != 'off'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    outputs:
+      reason: ${{ steps.update.outputs.reason }}
+      commit-sha: ${{ steps.update.outputs.commit-sha }}
+    steps:
+      - id: update
+        uses: pleme-io/actions/nix-flake-update@main
+        with:
+          mode: ${{ inputs.flake-update }}
+          inputs-to-update: ${{ inputs.flake-update-inputs }}
+          verify: ${{ inputs.flake-update-verify }}
+          github-token: ${{ secrets.BOT_PAT }}
