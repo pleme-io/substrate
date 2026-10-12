@@ -383,6 +383,9 @@ jobs:
       - name: checks.module-trio (lib — module trio factory)
         run: nix build --no-link -L '.#checks.x86_64-linux.module-trio'
 
+      - name: checks.module-trio-kinds (lib — every concept kind x every arm)
+        run: nix build --no-link -L '.#checks.x86_64-linux.module-trio-kinds'
+
       - name: checks.helm-chart-repo (mkHelmChart -> mkHelmRepo -> registry -> helm pull)
         run: nix build --no-link -L '.#checks.x86_64-linux.helm-chart-repo'
 
