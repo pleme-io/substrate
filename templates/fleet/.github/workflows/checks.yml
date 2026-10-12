@@ -1,0 +1,16 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  fleet:
+    uses: pleme-io/substrate/.github/workflows/nix-fleet.yml@main
+    secrets: inherit
+    with:
+      runner-labels: '["self-hosted","pleme-private"]'
+      eval-checks: '["fleet-proofs"]'
+      nodes: auto

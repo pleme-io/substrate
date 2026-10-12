@@ -30,6 +30,7 @@ let
   orgs = import ./orgs.nix { inherit lib; };
   fleetConfig = import ./fleet-config.nix { inherit lib; };
   fleet = import ./fleet.nix { inherit lib; };
+  nodeLayers = import ./node-layers.nix { inherit lib; };
 in
 domains
 // sshAliases
@@ -43,6 +44,7 @@ domains
 // orgs
 // fleetConfig
 // fleet
+// nodeLayers
 // {
   catalog = import ./catalog.nix { inherit lib; };
   tests = import ./tests { inherit lib; };

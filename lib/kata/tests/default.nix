@@ -23,6 +23,7 @@ let
     orgs = ./orgs.nix;
     fleet-config = ./fleet-config.nix;
     fleet = ./fleet.nix;
+    node-layers = ./node-layers.nix;
     catalog = ./catalog.nix;
     template = ./template.nix;
   };

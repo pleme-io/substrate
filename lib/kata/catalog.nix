@@ -98,6 +98,21 @@
     exports = [ "mkFleet" ];
   };
 
+  node-layers = {
+    file = "node-layers.nix";
+    tier = "kernel";
+    maturity = "Working";
+    since = "2026-10-12";
+    description = "A machine is a selection of layers. selectNodeLayers turns a node's layer catalogue + its selection into the module list (base required and selected, no unknown or duplicate name; selected/parked published read-only at a caller-chosen option path). mkNodeDeclarer turns the fleet's stacks into the ONE machine-declaration door: mkNode/mkDarwinNode read system/tags from the blank, refuse a missing blank, a class mismatch, an unknown stack or hm selection, and append the universal set to every machine. mkLayerProof is the per-renderer proof every fleet repo runs: each node of a class has a configuration, selects base, and is named for itself.";
+    subsumes = "nix repo lib/node-layer-selection.nix and the mkNode/mkDarwinNode engine of lib/node-layers.nix (promoted; the nix copies are frozen parity oracles, the stacks and layers stay private data).";
+    dependsOn = [ ];
+    exports = [
+      "selectNodeLayers"
+      "mkNodeDeclarer"
+      "mkLayerProof"
+    ];
+  };
+
   kubeconfig = {
     file = "kubeconfig.nix";
     tier = "standard";

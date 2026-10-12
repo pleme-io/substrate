@@ -50,8 +50,15 @@
       class = "nixos";
       system = "x86_64-linux";
       tags = [ "server" ];
-      profiles = [ "server-base" ];
+      profiles = [ "node/alpha" ];
       deploy = { }; # deploy-rs by default; null = local-only
+    };
+    beta = {
+      class = "darwin";
+      system = "aarch64-darwin";
+      tags = [ "workstation" ];
+      profiles = [ "node/beta" ];
+      deploy = null;
     };
   };
 
