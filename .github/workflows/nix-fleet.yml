@@ -50,11 +50,15 @@ on:
         type: boolean
         default: false
       cache-push:
-        description: 'Push every built closure into the sui cache store on the runner.'
+        description: 'Push every built closure into the fleet sui origin (pleme-io/actions/sui-cache-push), or into a local store on the runner when cache-store-path is set.'
         type: boolean
         default: false
+      cache-url:
+        description: 'The sui origin cache-push uploads to. Empty is the runner pool''s SUI_CACHE_URL (http://rio:5000 on the fleet pools).'
+        type: string
+        default: ''
       cache-store-path:
-        description: 'sui cache store directory on the runner. Empty is sui''s default.'
+        description: 'Set only to push into a sui cache store directory on the runner itself instead of the remote origin.'
         type: string
         default: ''
       flake-update:
@@ -155,13 +159,20 @@ jobs:
         check: ${{ fromJSON(inputs.eval-checks) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pleme-io/actions/nix-build@main
+      - id: build
+        uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
           github-token: ${{ secrets.BOT_PAT }}
-          cache-push: ${{ inputs.cache-push }}
+          cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
+      - if: inputs.cache-push && inputs.cache-store-path == '' && steps.build.outputs.out-path != ''
+        uses: pleme-io/actions/sui-cache-push@main
+        with:
+          paths: ${{ steps.build.outputs.out-path }}
+          cache-url: ${{ inputs.cache-url }}
+          signing-key: ${{ secrets.SUI_SIGNING_KEY }}
 
   advisory-checks:
     name: known red ${{ matrix.check }} (advisory)
@@ -190,13 +201,20 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.node-matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pleme-io/actions/nix-build@main
+      - id: build
+        uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: ${{ matrix.flake-ref }}
           github-token: ${{ secrets.BOT_PAT }}
-          cache-push: ${{ inputs.cache-push }}
+          cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
+      - if: inputs.cache-push && inputs.cache-store-path == '' && steps.build.outputs.out-path != ''
+        uses: pleme-io/actions/sui-cache-push@main
+        with:
+          paths: ${{ steps.build.outputs.out-path }}
+          cache-url: ${{ inputs.cache-url }}
+          signing-key: ${{ secrets.SUI_SIGNING_KEY }}
 
   flake-update:
     name: flake update (${{ inputs.flake-update }})
