@@ -307,7 +307,7 @@ in rec {
   # non-empty token is present so a public-repo fetch never depends on
   # having a working token at all.
   nixosRebuildSwitchStep =
-    ''ulimit -s unlimited; PATH="$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#git)/bin:$PATH"; ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using binary cache (sui): $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
+    ''ulimit -s unlimited; ulimit -n "$(ulimit -Hn)"; PATH="$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#git)/bin:$PATH"; ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using binary cache (sui): $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
 
   # ── Shared app wrapper ───────────────────────────────────────────
   #
