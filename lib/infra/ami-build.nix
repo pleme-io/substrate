@@ -306,8 +306,13 @@ in rec {
   # credential is actually needed or working. Emit the flag only when a
   # non-empty token is present so a public-repo fetch never depends on
   # having a working token at all.
-  nixosRebuildSwitchStep =
-    ''ulimit -s unlimited; ulimit -n "$(ulimit -Hn)"; PATH="$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#git)/bin:$PATH"; ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using binary cache (sui): $ATTIC_URL"; nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild switch --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
+  nixosRebuildStep =
+    action:
+    ''ulimit -s unlimited; ulimit -n "$(ulimit -Hn)"; PATH="$(nix --extra-experimental-features 'nix-command flakes' build --no-link --print-out-paths nixpkgs#git)/bin:$PATH"; ACCESS_TOKENS_OPT=""; [ -n "$GITHUB_TOKEN" ] && ACCESS_TOKENS_OPT="--option access-tokens github.com=$GITHUB_TOKEN"; if [ -n "$ATTIC_URL" ]; then echo "Using binary cache (sui): $ATTIC_URL"; nixos-rebuild ${action} --flake $FLAKE_REF $ACCESS_TOKENS_OPT --option extra-substituters "$ATTIC_URL" --option require-sigs false $NIX_BUILD_OPTS; else nixos-rebuild ${action} --flake $FLAKE_REF $ACCESS_TOKENS_OPT $NIX_BUILD_OPTS; fi'';
+
+  nixosRebuildSwitchStep = nixosRebuildStep "switch";
+
+  nixosRebuildBootStep = nixosRebuildStep "boot";
 
   # ── Shared app wrapper ───────────────────────────────────────────
   #
@@ -411,6 +416,7 @@ in rec {
     # When true, a Degraded hardening report also fails the build.
     # Default `false` matches `kindling harden`'s exit semantics.
     hardeningStrict ? false,
+    expectDisconnect ? true,
     # ── SELF-DESTRUCT TTL — the orphan backstop ──────────────────────
     # Hours after boot at which the builder powers ITSELF off. Combined
     # with `shutdown_behavior = "terminate"` (nixosSourceDefaults) that
@@ -620,7 +626,7 @@ in rec {
               # expect_disconnect=true in place regardless — it is still
               # sound defensive coverage for a genuine, separate failure
               # mode, just not what actually happened here.
-              expect_disconnect = true;
+              expect_disconnect = expectDisconnect;
             };
           }];
         post-processor.manifest = {
