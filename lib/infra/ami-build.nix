@@ -203,6 +203,14 @@ in rec {
   # lineage whose aarch64 default is `t4g.medium`
   # (blackmatter-kubernetes/lib/k3s-ami.nix). This was a latent fleet bug,
   # not merely a gap for the new arm64 work.
+  archProfiles = {
+    x86_64 = { amiArchitecture = "x86_64"; buildInstance = "c7i.4xlarge"; testInstance = "t3.medium"; };
+    arm64 = { amiArchitecture = "arm64"; buildInstance = "c7g.4xlarge"; testInstance = "t4g.medium"; };
+  };
+  archProfile = architecture:
+    archProfiles.${architecture}
+      or (throw "ami-build: architecture must be one of ${builtins.concatStringsSep ", " (builtins.attrNames archProfiles)}, got ${architecture}");
+
   vcpuForSize = {
     "large" = 2; "xlarge" = 4; "2xlarge" = 8;
     "4xlarge" = 16; "8xlarge" = 32; "12xlarge" = 48; "16xlarge" = 64;
@@ -374,9 +382,10 @@ in rec {
     name ? "build-template.pkr.json",
     amiName,
     flakeRef,
-    sourceAmiFilter ? { name = "nixos/25.*"; architecture = "x86_64"; },
+    architecture ? "x86_64",
+    sourceAmiFilter ? { name = "nixos/25.*"; architecture = (archProfile architecture).amiArchitecture; },
     sourceAmiOwners ? [ "427812963091" ],
-    instanceType ? "c7i.4xlarge",
+    instanceType ? (archProfile architecture).buildInstance,
     volumeSize ? 30,
     region ? "us-east-1",
     iops ? 8000,
@@ -629,7 +638,8 @@ in rec {
   mkTestTemplate = {
     name ? "test-template.pkr.json",
     region ? "us-east-1",
-    instanceType ? "t3.medium",
+    architecture ? "x86_64",
+    instanceType ? (archProfile architecture).testInstance,
     # Test userdata (JSON string) — injected as EC2 user_data.
     # Provides a minimal cluster-config for kindling-init to bootstrap.
     # If null, no userdata is injected (basic boot check only).
@@ -694,9 +704,10 @@ in rec {
     # When false: uses sourceAmiFilter to find base AMI (like mkBuildTemplate)
     # When true: uses source_ami variable (like mkTestTemplate)
     sourceAmiVariable ? false,
-    sourceAmiFilter ? { name = "nixos/25.*"; architecture = "x86_64"; },
+    architecture ? "x86_64",
+    sourceAmiFilter ? { name = "nixos/25.*"; architecture = (archProfile architecture).amiArchitecture; },
     sourceAmiOwners ? [ "427812963091" ],
-    instanceType ? "c7i.4xlarge",
+    instanceType ? (archProfile architecture).buildInstance,
     volumeSize ? 30,
     region ? "us-east-1",
     # ── Two parameters mkBuildTemplate has and this did NOT ──────────────
