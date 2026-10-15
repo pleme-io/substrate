@@ -92,7 +92,7 @@ in {
     [ "echo '[hardening] inlining ${toString (builtins.length resolved)} profile(s) + applying'" ]
     ++ emitAll
     ++ [
-      "nix --extra-experimental-features 'nix-command flakes' run github:pleme-io/kindling --accept-flake-config -- harden ${profileArgs} --format ${format} ${strictArg}"
+      "nix --extra-experimental-features 'nix-command flakes' run github:pleme-io/kindling --accept-flake-config \${GITHUB_TOKEN:+--option access-tokens github.com=$GITHUB_TOKEN} -- harden ${profileArgs} --format ${format} ${strictArg}"
       "rm -rf /tmp/kindling-harden"
     ];
 }
