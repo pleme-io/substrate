@@ -268,7 +268,7 @@ in rec {
   # than guessing — an unrecognized type is exactly the case where
   # this table has no evidence to size from, so it defers to the
   # known-safe value instead of extrapolating.
-  nixBuildOptsFor = { instanceType, perJobRamGb ? 4 }:
+  nixBuildJobsFor = { instanceType, perJobRamGb ? 4 }:
     let
       spec = amiBuilderInstanceSpecs.${instanceType} or null;
       maxJobs =
@@ -277,7 +277,82 @@ in rec {
       cores =
         if spec == null then 1
         else pkgs.lib.max 1 (spec.vcpu / maxJobs);
-    in "--option max-jobs ${toString maxJobs} --option cores ${toString cores}";
+    in { inherit maxJobs cores; };
+
+  nixBuildOptsFor = args:
+    let j = nixBuildJobsFor args;
+    in "--option max-jobs ${toString j.maxJobs} --option cores ${toString j.cores}";
+
+  hardeningStackNames = {
+    base = [ "base" ];
+    hardened = [ "base" "hardened" ];
+    ami-full = [ "base" "hardened" "ami-snapshot" ];
+    cis-level-1 = [ "cis-level-1" ];
+  };
+
+  mkKindlingBuildSpec = {
+    amiName,
+    flakeRef,
+    architecture ? "x86_64",
+    region ? "us-east-1",
+    instanceType ? (archProfile architecture).buildInstance,
+    volumeSize ? 30,
+    owner ? "platform",
+    purpose ? "NixOS AMI build for ${amiName}",
+    environment ? "dev",
+    extraTags ? {},
+    hardeningStack ? null,
+    hardeningStrict ? false,
+    imageKind ? "plain",
+    action ? "boot",
+    kindlingRef ? "github:pleme-io/kindling",
+    perJobRamGb ? 4,
+  }:
+    let
+      jobs = nixBuildJobsFor { inherit instanceType perJobRamGb; };
+      profiles = if hardeningStack == null then [] else hardeningStackNames.${hardeningStack};
+      hardeningDir = "/tmp/kindling-harden";
+      hardening = import ./hardening-profiles { inherit pkgs; };
+    in {
+      ami_name = amiName;
+      flake_ref = flakeRef;
+      nix_build_opts = nixBuildOptsFor { inherit instanceType perJobRamGb; };
+      inherit region architecture;
+      instance_type = instanceType;
+      volume_size = volumeSize;
+      inherit owner purpose environment;
+      extra_tags = extraTags;
+      provisioners =
+        map (n: { file = { destination = "${hardeningDir}/${n}.yaml"; content = hardening.text.${n}; }; }) profiles
+        ++ [{
+          expect_disconnect = false;
+          environment_vars = [{
+            name = "NIX_CONFIG";
+            parts = [ "extra-experimental-features = nix-command flakes\naccess-tokens = github.com=" { var = "github_token"; } ];
+          }];
+          commands = [
+            ([ "nix" "run" kindlingRef "--accept-flake-config" "--"
+               "ami-build" "--flake-ref" { env = "FLAKE_REF"; }
+               "--action" action "--image-kind" imageKind ]
+             ++ pkgs.lib.concatMap (n: [ "--harden" n ]) profiles
+             ++ pkgs.lib.optionals (profiles != []) [ "--harden-profile-dir" hardeningDir ]
+             ++ pkgs.lib.optional hardeningStrict "--harden-strict"
+             ++ [ "--max-jobs" (toString jobs.maxJobs) "--cores" (toString jobs.cores) ])
+          ];
+        }];
+    };
+
+  mkTestSpec = {
+    architecture ? "x86_64",
+    region ? "us-east-1",
+    owner ? "platform",
+    purpose ? "AMI validation test instance",
+    environment ? "dev",
+    commands,
+  }: {
+    inherit region architecture owner purpose environment;
+    provisioners = [{ inherit commands; expect_disconnect = false; }];
+  };
 
   # The FIRST `nixos-rebuild switch` every mkBuildTemplate provisioner runs
   # is unavoidably raw shell, not a `kindling ami-build` call — `kindling`
@@ -831,8 +906,10 @@ in rec {
   # Configuration follows the shikumi pattern: Nix option → YAML config → Rust reads config.
   mkAmiBuildPipeline = {
     forgePackage,
-    buildTemplate,
-    testTemplate,
+    buildTemplate ? null,
+    testTemplate ? null,
+    buildSpec ? null,
+    testSpec ? null,
     ssmParameter,
     amiName,
     region ? "us-east-1",
@@ -854,9 +931,10 @@ in rec {
     makePublic ? false,
   }: let
     # Generate pipeline config as YAML via Nix (JSON is valid YAML)
-    pipelineConfig = pkgs.writeText "pipeline-config.yaml" (builtins.toJSON ({
-      build_template = "${buildTemplate}";
-      test_template = "${testTemplate}";
+    pipelineConfig =
+      assert (buildTemplate == null) != (buildSpec == null);
+      assert (testTemplate == null) != (testSpec == null);
+      pkgs.writeText "pipeline-config.yaml" (builtins.toJSON ({
       ssm = ssmParameter;
       ami_name = amiName;
       inherit region;
@@ -864,7 +942,9 @@ in rec {
       cluster_test_instance_type = clusterTestInstanceType;
       cluster_test_timeout = clusterTestTimeout;
       make_public = makePublic;
-    } // (if skipClusterTest || clusterTestConfig == null then {}
+    } // (if buildSpec != null then { build_spec = buildSpec; } else { build_template = "${buildTemplate}"; })
+    // (if testSpec != null then { test_spec = testSpec; } else { test_template = "${testTemplate}"; })
+    // (if skipClusterTest || clusterTestConfig == null then {}
       else { cluster_test = { config = "${clusterTestConfig}"; }; })
     // (if atticSsm == null then {}
       else { attic = {
