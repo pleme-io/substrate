@@ -73,9 +73,13 @@ on:
         description: 'Space-separated flake refs that must build against the new lock before it is published.'
         type: string
         default: ''
+      token-source:
+        description: 'Where every job takes its GitHub token (pleme-io/actions/github-token): app is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where public reads go anonymous; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
-        description: 'Org-scoped token: private flake inputs, and the flake-update push.'
+        description: 'Long-lived fallback token, presented only when token-source is pat.'
         required: false
       SUI_SIGNING_KEY:
         description: 'Signing key for cache-push.'
@@ -117,13 +121,18 @@ jobs:
       node-count: ${{ steps.nodes.outputs.count }}
     steps:
       - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - id: nodes
         uses: pleme-io/actions/nix-node-matrix@main
         with:
           nodes: ${{ inputs.nodes }}
           attr-template: ${{ inputs.node-attr-template }}
           system: ${{ inputs.system }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
 
   lint:
     name: lint
@@ -134,6 +143,11 @@ jobs:
       kijun-ran: ${{ steps.kijun.outputs.ran }}
     steps:
       - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - id: kijun
         if: inputs.kijun-ref != ''
         uses: pleme-io/actions/kijun-lint@main
@@ -141,12 +155,12 @@ jobs:
           flake-ref: ${{ inputs.kijun-ref }}
           args: ${{ inputs.kijun-args }}
           fail-on-findings: ${{ inputs.kijun-fail-on-findings }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
       - if: inputs.canonical-check != ''
         uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: .#checks.${{ inputs.system }}.${{ inputs.canonical-check }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
 
   eval-checks:
     name: check ${{ matrix.check }}
@@ -159,11 +173,16 @@ jobs:
         check: ${{ fromJSON(inputs.eval-checks) }}
     steps:
       - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - id: build
         uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
           cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
@@ -186,10 +205,15 @@ jobs:
         check: ${{ fromJSON(inputs.advisory-checks) }}
     steps:
       - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
 
   nodes:
     name: node ${{ matrix.node }}
@@ -201,11 +225,16 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.node-matrix) }}
     steps:
       - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - id: build
         uses: pleme-io/actions/nix-build@main
         with:
           flake-ref: ${{ matrix.flake-ref }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
           cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
@@ -225,10 +254,15 @@ jobs:
       reason: ${{ steps.update.outputs.reason }}
       commit-sha: ${{ steps.update.outputs.commit-sha }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - id: update
         uses: pleme-io/actions/nix-flake-update@main
         with:
           mode: ${{ inputs.flake-update }}
           inputs-to-update: ${{ inputs.flake-update-inputs }}
           verify: ${{ inputs.flake-update-verify }}
-          github-token: ${{ secrets.BOT_PAT }}
+          github-token: ${{ steps.token.outputs.token }}
