@@ -131,7 +131,8 @@ rec {
   mkGoOverlay = { goToolchain ? null }: final: prev:
     let
       tc = if goToolchain != null then goToolchain else prev.callPackage ./toolchain.nix {};
-      mm = prev.lib.versions.majorMinor tc.version;
+      pinnedVersion = (builtins.fromJSON (builtins.readFile ./go-toolchain-pin.json)).version;
+      mm = prev.lib.versions.majorMinor (if goToolchain != null then goToolchain.version else pinnedVersion);
       # `prev.callPackage <module.nix>` rather than `prev.buildGoModule.override`
       # here, deliberately: nixpkgs aliases buildGoModule = buildGo1XXModule, so
       # overriding both attrs through each other creates a cycle. At the
