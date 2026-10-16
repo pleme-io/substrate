@@ -25,6 +25,10 @@ on:
         description: 'Nodes whose system toplevel is built, one matrix row each: words, a JSON array, or auto (every configuration of `system`). Empty builds none.'
         type: string
         default: ''
+      node-max-parallel:
+        description: 'Node toplevel builds run at once. One nixosConfiguration evaluation peaks at 10-13 GB, and the private pool''s runners share one host (rio, 26 GB, no swap), where two at once trip earlyoom and the jobs die with exit 143. Raise it only for a pool whose hosts hold that many evaluations.'
+        type: number
+        default: 1
       node-attr-template:
         description: 'Attribute path built per node; NODE is the node name.'
         type: string
@@ -222,6 +226,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.runner-labels) }}
     strategy:
       fail-fast: false
+      max-parallel: ${{ inputs.node-max-parallel }}
       matrix: ${{ fromJSON(needs.plan.outputs.node-matrix) }}
     steps:
       - uses: actions/checkout@v4
