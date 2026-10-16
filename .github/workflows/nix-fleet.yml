@@ -240,6 +240,7 @@ jobs:
         with:
           flake-ref: ${{ matrix.flake-ref }}
           github-token: ${{ steps.token.outputs.token }}
+          eval-first: "true"
           cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
