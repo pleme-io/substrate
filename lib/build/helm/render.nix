@@ -45,6 +45,7 @@
   namespace ? "default",
   release ? name,
   createNamespace ? false,
+  includeCrds ? false,
 }:
 let
   lib = pkgs.lib;
@@ -72,7 +73,7 @@ pkgs.runCommand "${name}.yaml"
     cp -r ${chart} chart && chmod -R u+w chart
     rm -rf chart/charts chart/Chart.lock && mkdir -p chart/charts
     ${vendor}
-    helm template ${release} chart --namespace ${namespace} -f "$valuesJsonPath" > rendered.yaml
+    helm template ${release} chart --namespace ${namespace}${lib.optionalString includeCrds " --include-crds"} -f "$valuesJsonPath" > rendered.yaml
     grep -q '^kind:' rendered.yaml || { echo "mkHelmRender ${name}: the chart rendered no objects" >&2; exit 1; }
     cat ${lib.optionalString createNamespace "${namespaceDoc} "}rendered.yaml > "$out"
   ''
