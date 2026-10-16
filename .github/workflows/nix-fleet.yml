@@ -29,6 +29,10 @@ on:
         description: 'Node toplevel builds run at once. One nixosConfiguration evaluation peaks at 10-13 GB, and the private pool''s runners share one host (rio, 26 GB, no swap), where two at once trip earlyoom and the jobs die with exit 143. Raise it only for a pool whose hosts hold that many evaluations.'
         type: number
         default: 1
+      node-max-silent-time:
+        description: 'Seconds a node build may print nothing before nix kills it. A cache-missed onnxruntime test phase is silent for over an hour, past the 3600 s rio sets; 10800 stays inside the 6 h job limit. 0 keeps the daemon''s setting.'
+        type: number
+        default: 10800
       node-attr-template:
         description: 'Attribute path built per node; NODE is the node name.'
         type: string
@@ -241,6 +245,7 @@ jobs:
           flake-ref: ${{ matrix.flake-ref }}
           github-token: ${{ steps.token.outputs.token }}
           eval-first: "true"
+          max-silent-time: ${{ inputs.node-max-silent-time != 0 && inputs.node-max-silent-time || '' }}
           cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
           cache-signing-key: ${{ secrets.SUI_SIGNING_KEY }}
