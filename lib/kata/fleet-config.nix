@@ -154,6 +154,22 @@ let
         default = { };
         description = "The fleet's machines (mkHostMatrix node shape, profile names unresolved).";
       };
+      devices = mkOption {
+        type = types.attrsOf (
+          types.submodule {
+            options.kind = mkOption {
+              type = types.enum [
+                "router"
+                "repeater"
+                "appliance"
+              ];
+              description = "What the device is.";
+            };
+          }
+        );
+        default = { };
+        description = "Machines the fleet names and reaches but does not build: a device has a domains location and no node.";
+      };
       apps = freeAttrs "iroha.mkManifest `apps` (ecosystem schema verbatim).";
       appClasses = freeAttrs "iroha.mkManifest `classes`.";
       vpnLinks = freeAttrs "kata.mkWireguardLinks `registry` — attrsOf link (point-to-point or hub-and-spoke). When non-empty, mkFleet exposes `wireguard` (the per-node projection).";

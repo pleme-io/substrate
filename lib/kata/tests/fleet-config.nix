@@ -42,6 +42,28 @@ in
   # ── Liveness (status / statusReason) ─────────────────────────────────
   # Backward compatibility: an existing fleet.nix that has never heard of
   # `status` still validates, and every node in it is live.
+  devices-default-empty = {
+    expr = good.devices;
+    expected = { };
+  };
+  device-kind-accepted = {
+    expr =
+      (kata.validateFleet {
+        name = "demo";
+        devices.roteador.kind = "router";
+      }).devices.roteador.kind;
+    expected = "router";
+  };
+  device-kind-outside-enum-rejected = {
+    expr =
+      (builtins.tryEval (
+        (kata.validateFleet {
+          name = "demo";
+          devices.roteador.kind = "toaster";
+        }).devices.roteador.kind
+      )).success;
+    expected = false;
+  };
   node-status-defaults-live = {
     expr = {
       status = good.nodes.rio.status;

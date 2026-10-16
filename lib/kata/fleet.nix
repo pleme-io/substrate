@@ -223,6 +223,16 @@ let
       deployNodes = builtins.attrNames (lib.filterAttrs (_: n: n.deploy != null) cfg.nodes);
 
       crossInvariants = {
+        devices-are-not-nodes = {
+          expr = builtins.filter (d: cfg.nodes ? ${d}) (builtins.attrNames cfg.devices);
+          expected = [ ];
+        };
+        devices-have-domains = {
+          expr = builtins.filter (d: !(cfg.domains.locations or { } ? ${d})) (
+            builtins.attrNames cfg.devices
+          );
+          expected = [ ];
+        };
         deployed-nodes-have-domains = {
           expr = builtins.filter (n: !(cfg.domains.locations or { } ? ${n})) deployNodes;
           expected = [ ];
