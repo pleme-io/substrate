@@ -78,6 +78,10 @@ name: reusable-autoheal
 on:
   workflow_call:
     inputs:
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where the repo GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
       artifact:
         description: "Human name of what is healed, for annotations (e.g. 'Cargo.gen.lock')."
         type: string
@@ -203,16 +207,21 @@ jobs:
       # dependency fails to authenticate during resolution. This action owns the
       # BOT_PAT > GITHUB_TOKEN order and the checkout-extraheader unset that
       # makes the rewrite actually take effect.
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: pleme-io/actions/git-credentials@main
         if: inputs.git-credentials
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.token }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: DeterminateSystems/nix-installer-action@main
         if: inputs.nix
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action REMOVED 2026-08-14 — the same drop
       # nix-devshell-cargo-test.yml and pangea-operator's ci.yml already made
       # on 2026-07-25, applied to the two sites that were missed. It is EOL'd

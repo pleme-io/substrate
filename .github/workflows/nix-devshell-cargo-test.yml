@@ -33,6 +33,10 @@ name: nix-devshell-cargo-test
 on:
   workflow_call:
     inputs:
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where the repo GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
       runner:
         # Empty = route by CALLER repo visibility. The old default was a
         # literal "ubuntu-24.04", which silently billed GitHub-hosted minutes
@@ -127,10 +131,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action is EOL'd upstream (repo-scoped, can't carry a
       # fleet closure -- purify skill's own standing guidance) and outright
       # broken on a self-hosted ARC runner (`xz: not found` unpacking its
@@ -152,11 +161,10 @@ jobs:
       # extraheader (it silently wins over url.insteadOf by prefix match if
       # left in place) and route github.com through BOT_PAT instead.
       - name: Configure git credentials for private git dependencies (cargo)
-        env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
-        run: |
-          git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
-          git config --unset-all http.https://github.com/.extraheader || true
+        uses: pleme-io/actions/git-credentials@main
+        with:
+          bot-pat: ${{ steps.token.outputs.token }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # ── devShell preflight (wired 2026-07-28) ──────────────────────────
       #

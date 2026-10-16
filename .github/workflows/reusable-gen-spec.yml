@@ -64,6 +64,10 @@ name: reusable-gen-spec
 on:
   workflow_call:
     inputs:
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where the repo GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
       gen-ref:
         description: "gen flake ref to run (pin for reproducibility)."
         type: string
@@ -85,6 +89,7 @@ jobs:
     secrets: inherit
     with:
       artifact: "Cargo.gen.lock"
+      token-source: ${{ inputs.token-source }}
       paths: "Cargo.gen.lock"
       detect: "nix run ${{ inputs.gen-ref }} -- confirm"
       repair: "nix run ${{ inputs.gen-ref }} -- build . --commit"
