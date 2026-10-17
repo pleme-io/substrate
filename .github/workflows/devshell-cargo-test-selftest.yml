@@ -107,7 +107,8 @@ jobs:
       # Points cargo at the fixture crate: substrate has no root Cargo.toml,
       # so the inherited `--workspace` default would find nothing to do and
       # a "success" would mean nothing.
-      test-args: "--manifest-path lib/util/tests/fixtures/selftest-crate/Cargo.toml"
+      manifest-path: lib/util/tests/fixtures/selftest-crate/Cargo.toml
+      test-args: ""
     secrets: inherit
 
   # ── GREEN-EVIDENCE: the tests did not merely "not fail", they RAN ─────

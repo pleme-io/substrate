@@ -84,6 +84,14 @@ on:
           own.
         type: boolean
         default: true
+      manifest-path:
+        description: >-
+          Cargo.toml of the crate or workspace both cargo fmt and cargo test
+          act on, for a repo whose crate is not at the root. Empty uses the
+          repo root, as before.
+        required: false
+        type: string
+        default: ""
       devshell-args:
         description: >-
           Extra arguments passed to `nix develop` itself (NOT to `cargo
@@ -218,7 +226,7 @@ jobs:
         if: ${{ inputs.fmt-check }}
         run: >-
           nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}"
-          -c cargo fmt --all -- --check
+          -c cargo fmt --all ${{ inputs.manifest-path != '' && format('--manifest-path {0}', inputs.manifest-path) || '' }} -- --check
 
       - name: cargo test (inside .#${{ inputs.devshell }})
         env:
@@ -227,4 +235,4 @@ jobs:
           # backend (which does not) -- same fix as release.yml's own
           # CARGO_NET_GIT_FETCH_WITH_CLI wiring.
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-        run: nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.test-args }}
+        run: nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.manifest-path != '' && format('--manifest-path {0}', inputs.manifest-path) || '' }} ${{ inputs.test-args }}
