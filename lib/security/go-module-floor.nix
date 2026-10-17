@@ -15,13 +15,23 @@
           for floor in ${floors}; do
             module="''${floor%@*}"
             want="''${floor#*@}"
-            have="$(go list -m -f '{{.Version}}' "$module" 2>/dev/null || true)"
+            have="$(go list -mod=mod -m -e -f '{{if not .Error}}{{.Version}}{{end}}' "$module")"
             if [ -n "$have" ] && [ "$have" != "$want" ] \
               && [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | head -n1)" = "$have" ]; then
+              echo "go-module-floor: $module $have -> $want"
               go get "$module@$want"
             fi
           done
           go mod tidy
+          for floor in ${floors}; do
+            module="''${floor%@*}"
+            want="''${floor#*@}"
+            have="$(go list -mod=mod -m -e -f '{{if not .Error}}{{.Version}}{{end}}' "$module")"
+            if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | head -n1)" != "$want" ]; then
+              echo "go-module-floor: $module is $have after the raise, below $want" >&2
+              exit 1
+            fi
+          done
         '';
         postInstall = (previous.postInstall or "") + ''
           cp go.mod "$out/.go-module-floor.mod"
