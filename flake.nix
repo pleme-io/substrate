@@ -760,6 +760,8 @@
           # rebuild every Go package in the closure, which is the exact thing
           # lib/build/rust/overlay.nix refuses to do for rustc/cargo.
           goToolchain = goToolchainFor system;
+          tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+          docaPkg = self.packages.${system}.oci-push;
         });
 
         # NOTE: Named `rustOverlays` (not `overlays`) because flake-parts reserves
@@ -1174,9 +1176,11 @@
           # Omitting it leaves Go builds on the consumer's `pkgs.go`, which
           # mkHardenedGoBinary's CVE floor will reject at eval if it is stale.
           goToolchain ? null,
+          tataraScript ? inputs.tatara-lisp.packages.${system}.tatara-script,
+          docaPkg ? self.packages.${system}.oci-push,
         }:
           import ./lib {
-            inherit pkgs system crate2nix fenix forge goToolchain;
+            inherit pkgs system crate2nix fenix forge goToolchain tataraScript docaPkg;
           };
       };
     };

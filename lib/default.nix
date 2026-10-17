@@ -47,6 +47,8 @@
   # rejects such a build at eval time unless the consumer's `go` already clears
   # the floor.
   goToolchain ? null,
+  tataraScript ? null,
+  docaPkg ? null,
 }: let
   # Import Rust overlay module (always available, doesn't need fenix at import time)
   rustOverlayModule = import ./build/rust/overlay.nix;
@@ -2257,6 +2259,24 @@ in rec {
   inherit (cveGateModule) mkCveGateApp mkScanFloorApp;
   inherit (sbomEmitModule) mkSbomApp mkSbomAttestApp;
   inherit (cosignSignModule) mkCosignSignApp mkCosignVerifyApp;
+
+  hardenedImageModule = import ./build/oci/hardened-image-set/module.nix { inherit (pkgs) lib; };
+  mkHardenedImageSet = args: import ./build/oci/hardened-image-set ({
+    inherit (pkgs) lib;
+    inherit pkgs system;
+    substrateLib = {
+      inherit mkPackageImage mkDistrolessImage mkVendorRewrap hardenedBases
+        mkCveGateApp mkSbomAttestApp mkCosignSignApp;
+    };
+    vulnixPkg = pkgs.vulnix;
+    grypePkg = pkgs.grype;
+    tataraScript =
+      if tataraScript != null then tataraScript
+      else throw "mkHardenedImageSet: pass `tataraScript` (a CVE claim file reached the reconcile gate)";
+    docaPkg =
+      if docaPkg != null then docaPkg
+      else throw "mkHardenedImageSet: pass `docaPkg` (substrate.packages.<system>.oci-push)";
+  } // args);
 
   inherit (sharedDevShellModule) mkTypedDevShell mkRustServiceDevShell mkGoGrpcDevShell;
   sharedDevShell = sharedDevShellModule;
