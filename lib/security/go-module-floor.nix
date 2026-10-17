@@ -1,5 +1,13 @@
 { lib }:
 {
+  withGoSymbolTable =
+    drv:
+    drv.overrideAttrs (old: {
+      ldflags = lib.filter (flag: flag != "-s") (
+        lib.concatMap (flag: lib.splitString " " flag) (old.ldflags or [ ])
+      );
+    });
+
   withGoModuleFloor =
     {
       requires,

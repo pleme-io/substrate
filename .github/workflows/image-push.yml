@@ -208,6 +208,10 @@ on:
         description: "Path (relative to the repo root) to a .trivyignore-format file of named, tracked exceptions for the scanBeforePush gate -- each entry must carry its own justification, never a blanket severity loosening. Empty (default) = no exceptions. Only consulted when scanBeforePush is true."
         type: string
         default: ""
+      scanGoReachability:
+        description: "Judge Go binaries' findings by symbol reachability: govulncheck in binary mode reads each flagged Go binary in the image, and a trivy match govulncheck reports as not affected (the vulnerable symbols are not linked) is dropped. Any govulncheck error fails the gate. Only consulted when scanBeforePush is true."
+        type: boolean
+        default: false
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -798,6 +802,7 @@ jobs:
           fail-on-severity: ${{ inputs.scanFailOnSeverity }}
           ignore-unfixed: ${{ inputs.scanIgnoreUnfixed }}
           ignore-file: ${{ inputs.scanIgnoreFile }}
+          go-reachability: ${{ inputs.scanGoReachability }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
