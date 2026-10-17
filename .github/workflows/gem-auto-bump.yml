@@ -34,6 +34,14 @@ on:
       bump-type:
         type: string
         default: patch
+      runner-labels:
+        description: 'JSON array of runner labels, e.g. ["self-hosted","pleme-private"]. Empty keeps the visibility-derived label.'
+        type: string
+        default: ''
+      token-source:
+        description: 'pat presents BOT_PAT (the default); app presents the self-hosted runner host''s short-lived App token (pleme-io/actions/github-token), falling back to BOT_PAT.'
+        type: string
+        default: 'pat'
     secrets:
       BOT_PAT:
         required: false
@@ -50,13 +58,18 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     if: github.actor != 'github-actions[bot]'
     steps:
+      - id: token
+        if: inputs.token-source != 'pat'
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       - id: changes
         shell: bash
@@ -85,6 +98,6 @@ jobs:
       - if: steps.changes.outputs.skip == 'false'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"

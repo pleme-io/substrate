@@ -50,6 +50,15 @@ name: gem-ci
 
 on:
   workflow_call:
+    inputs:
+      runner-labels:
+        description: 'JSON array of runner labels, e.g. ["self-hosted","pleme-private"]. Empty keeps the visibility-derived label.'
+        type: string
+        default: ''
+      token-source:
+        description: 'pat presents BOT_PAT (the default); app presents the self-hosted runner host''s short-lived App token (pleme-io/actions/github-token), falling back to BOT_PAT.'
+        type: string
+        default: 'pat'
     secrets:
       BOT_PAT:
         description: >-
@@ -65,9 +74,14 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
     steps:
+      - id: token
+        if: inputs.token-source != 'pat'
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
