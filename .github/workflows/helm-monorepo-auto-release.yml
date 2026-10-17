@@ -49,6 +49,10 @@ on:
         description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
         type: string
         default: ""
+      token-source:
+        description: "pat (the default) keeps BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN; app also offers the self-hosted runner host's short-lived App token (pleme-io/actions/github-token) as the ghcr-token rung."
+        type: string
+        default: "pat"
     secrets:
       BOT_PAT:
         description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io/charts namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
@@ -83,7 +87,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - id: token
+        if: inputs.token-source != 'pat'
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+
       - name: Install Nix
+        if: runner.environment == 'github-hosted'
         uses: DeterminateSystems/nix-installer-action@main
         with:
           github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
@@ -98,7 +109,7 @@ jobs:
           client: helm
           username: ${{ github.actor }}
           bot-pat: ${{ secrets.BOT_PAT }}
-          ghcr-token: ${{ secrets.GHCR_TOKEN }}
+          ghcr-token: ${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Hermetic supply chain (the law): mirror every third-party subchart this
