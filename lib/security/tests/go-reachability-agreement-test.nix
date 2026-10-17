@@ -13,10 +13,10 @@ let
   linked = mkFixture { pname = "go-reachability-linked"; ldflags = [ ]; };
   stripped = mkFixture { pname = "go-reachability-stripped"; ldflags = [ "-s" "-w" ]; };
 
-  image = pkgs.dockerTools.buildImage {
+  image = pkgs.dockerTools.buildLayeredImage {
     name = "go-reachability-fixture";
     tag = "0";
-    copyToRoot = [
+    contents = [
       (pkgs.linkFarm "go-reachability-fixtures" [
         { name = "linked"; path = linked; }
         { name = "stripped"; path = stripped; }
