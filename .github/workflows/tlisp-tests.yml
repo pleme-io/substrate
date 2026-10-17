@@ -50,7 +50,7 @@ jobs:
     # Same caller-visibility runner routing as catalog-check.yml: a bare
     # metered label charges every private consumer, which is what exhausted
     # the org's Actions spending limit on 2026-08-08.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       # Discovers each <base>.test.tlisp, runs its (deftest …) forms against

@@ -252,7 +252,7 @@ jobs:
   # not default to ubuntu-24.04 unconditionally.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

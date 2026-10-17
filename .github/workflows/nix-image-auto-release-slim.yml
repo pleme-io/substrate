@@ -215,7 +215,7 @@ permissions:
 jobs:
   cve-suppression-visibility:
     name: CVE-suppression visibility (report-only)
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     continue-on-error: true
     permissions:
       contents: read
@@ -227,7 +227,7 @@ jobs:
 
   resolve:
     name: Resolve runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
@@ -235,7 +235,7 @@ jobs:
         id: resolve
         uses: pleme-io/actions/runner-resolve@main
         with:
-          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
+          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
           override: ${{ inputs.runner }}
 
   publish:

@@ -160,7 +160,7 @@ concurrency:
 jobs:
   bump:
     name: Bump workspace + tag
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # ── The TAG waits for the test gate ───────────────────────────────────
     # The tag this job pushes is itself a release: tag-triggered workflows
     # (binary builds, GitHub Releases marked Latest) fire on it, and a private
@@ -285,7 +285,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     steps:
       - name: A disabled test gate requires a typed reason
         if: ${{ inputs.require-tests == false && inputs.require-tests-waiver == '' }}
@@ -331,7 +331,7 @@ jobs:
     # need two things that reusable cannot express — an injected nextest and
     # the release-gate fallback — so this is a different job, not a copy.
     if: inputs.require-tests
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -445,7 +445,7 @@ jobs:
   ship:
     name: Ship workspace to registry
     needs: [bump, test]
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # privacy posture 2026-07-05: private repos bump+tag only — no public
     # registry publish; see pangea-architectures PRIVACY-WAVES.md. Publishing
     # a new version from a private repo leaks code to crates.io and undoes
@@ -525,7 +525,7 @@ jobs:
   # seconds once the bootstrap converges, so it's safe to leave armed.
   drip:
     name: Drip-publish remaining capacity
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # Three arms, and the third is the one that makes this job trustworthy
     # rather than opt-in:
     #

@@ -58,7 +58,7 @@ permissions:
 
 jobs:
   watch:
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

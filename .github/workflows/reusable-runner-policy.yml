@@ -1,0 +1,24 @@
+name: reusable-runner-policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: reusables route private callers to the self-hosted pool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/runner-policy@main
+        with:
+          reusables-as-private: "true"

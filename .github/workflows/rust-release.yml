@@ -61,15 +61,18 @@ jobs:
       matrix:
         include:
           - slug: darwin-arm64
+            # runner-policy: allow a native darwin build; the self-hosted pool is linux x86_64 only
             runner: macos-14
             rust_target: aarch64-apple-darwin
           - slug: darwin-x86_64
+            # runner-policy: allow a native darwin build; the self-hosted pool is linux x86_64 only
             runner: macos-13
             rust_target: x86_64-apple-darwin
           - slug: linux-x86_64
-            runner: ubuntu-24.04
+            runner: ${{ github.event.repository.private && 'pleme-private' || 'ubuntu-24.04' }}
             rust_target: x86_64-unknown-linux-gnu
           - slug: linux-arm64
+            # runner-policy: allow a native linux arm64 build; the self-hosted pool is linux x86_64 only
             runner: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
     steps:
@@ -109,7 +112,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
     permissions:
       contents: write
     steps:
@@ -146,7 +149,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
 

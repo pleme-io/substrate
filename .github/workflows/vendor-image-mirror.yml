@@ -160,7 +160,7 @@ permissions:
 jobs:
   mirror:
     name: pull + scan + mirror ${{ inputs.zot-repo }}:${{ inputs.zot-tag }}
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       # ── `admitted` NOW MEANS WHAT ITS NAME SAYS, and it did not before ──────
       # This was `steps.pull-scan.outputs.admitted` alone -- i.e. "cleared the

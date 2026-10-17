@@ -249,7 +249,7 @@ jobs:
     # (the job STARTS, so continue-on-error correctly absorbs any step
     # failure), public -> ubuntu-latest (free hosted minutes, unchanged). Same
     # idiom, same file, same rationale as `resolve`.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     # report-only advisory (fail-on-violation:false); the no-cve-suppression
     # tatara-script has a not-yet-root-caused runtime error, so it must never
     # false-red a consumer's release. Remove once the script bug is fixed.
@@ -288,7 +288,7 @@ jobs:
     # failing before it ever reached the self-hosted pool this whole routing
     # exists to reach -- the routing job was itself the one still paying for
     # GitHub-hosted minutes.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:
@@ -296,7 +296,7 @@ jobs:
         id: resolve
         uses: pleme-io/actions/runner-resolve@main
         with:
-          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04' }}
+          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
           override: ${{ inputs.runner }}
 
   publish:

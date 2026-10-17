@@ -125,7 +125,7 @@ jobs:
     # ubuntu-24.04 rather than -latest for the PUBLIC arm: tatara-script's
     # release binary is linked against glibc 2.39 and dies instantly on
     # 22.04's 2.35, so the floor is pinned rather than floating.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'ubuntu-latest') || 'ubuntu-24.04') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04') }}
     permissions:
       contents: read
     steps:
