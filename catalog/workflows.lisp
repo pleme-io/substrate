@@ -784,7 +784,7 @@
 (defworkflow nix-fleet
   :file      "nix-fleet.yml"
   :pattern   nix
-  :inputs    (runner-labels system eval-checks advisory-checks nodes node-attr-template lint canonical-check kijun-ref kijun-args kijun-fail-on-findings cache-push cache-url cache-store-path flake-update flake-update-inputs flake-update-verify token-source)
+  :inputs    (runner-labels system eval-checks advisory-checks nodes node-max-parallel node-max-silent-time node-eval-stack-kib node-attr-template lint canonical-check kijun-ref kijun-args kijun-fail-on-findings cache-push cache-url cache-store-path flake-update flake-update-inputs flake-update-verify token-source)
   :outputs   (node-count kijun-ran flake-update-reason flake-update-commit)
   :secrets   (BOT_PAT SUI_SIGNING_KEY)
   :consumers 1)

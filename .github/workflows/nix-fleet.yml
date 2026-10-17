@@ -33,6 +33,10 @@ on:
         description: 'Seconds a node build may print nothing before nix kills it. A cache-missed onnxruntime test phase is silent for over an hour, past the 3600 s rio sets; 10800 stays inside the 6 h job limit. 0 keeps the daemon''s setting.'
         type: number
         default: 10800
+      node-eval-stack-kib:
+        description: 'Soft stack limit in KiB every node evaluation runs under, hard limit left unlimited: the limit the node''s reconciler evaluates its own toplevel under. sentinela runs with systemd''s default, 8192 KiB soft and unlimited hard; the private pool''s runners carry LimitSTACK=infinity, so without this a toplevel that overflows on the node evaluates green here (pleme-io/nix 4389f3bc, 2026-10-17). Empty evaluates under the runner''s own limit.'
+        type: string
+        default: '8192'
       node-attr-template:
         description: 'Attribute path built per node; NODE is the node name.'
         type: string
@@ -223,6 +227,29 @@ jobs:
           flake-ref: .#checks.${{ inputs.system }}.${{ matrix.check }}
           github-token: ${{ steps.token.outputs.token }}
 
+  node-eval:
+    name: node eval ${{ matrix.node }}
+    needs: plan
+    if: ${{ inputs.flake-update == 'off' && needs.plan.outputs.node-count != '0' && needs.plan.outputs.node-count != '' }}
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.node-max-parallel }}
+      matrix: ${{ fromJSON(needs.plan.outputs.node-matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: ${{ matrix.flake-ref }}
+          github-token: ${{ steps.token.outputs.token }}
+          eval-only: "true"
+          eval-stack-kib: ${{ inputs.node-eval-stack-kib }}
+
   nodes:
     name: node ${{ matrix.node }}
     needs: [plan, eval-checks]
@@ -245,6 +272,7 @@ jobs:
           flake-ref: ${{ matrix.flake-ref }}
           github-token: ${{ steps.token.outputs.token }}
           eval-first: "true"
+          eval-stack-kib: ${{ inputs.node-eval-stack-kib }}
           max-silent-time: ${{ inputs.node-max-silent-time != 0 && inputs.node-max-silent-time || '' }}
           cache-push: ${{ inputs.cache-push && inputs.cache-store-path != '' }}
           cache-store-path: ${{ inputs.cache-store-path }}
