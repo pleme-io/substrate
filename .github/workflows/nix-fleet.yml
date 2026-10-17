@@ -52,7 +52,7 @@ on:
       kijun-args:
         description: 'kijun arguments; {path} is the repo root, appended when absent.'
         type: string
-        default: 'check --json'
+        default: 'check --json --root {path}'
       kijun-fail-on-findings:
         description: 'Fail the lint job on kijun findings instead of reporting them.'
         type: boolean
