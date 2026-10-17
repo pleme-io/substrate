@@ -1,0 +1,113 @@
+(define (die what)
+  (log-error (string-append "go-reachability: " what))
+  (exit 1))
+
+(define args (argv))
+
+(if (< (length args) 4)
+  (die "usage: go-reachability.tlisp <trivy|grype> <report.json> <image-archive|rootfs-dir> <work-dir>")
+  #t)
+
+(define fmt (nth 0 args))
+(define report (nth 1 args))
+(define source (nth 2 args))
+(define work (nth 3 args))
+(define govulncheck (env-get "GOVULNCHECK" "govulncheck"))
+(define vuln-db (env-get "GO_REACHABILITY_DB" ""))
+
+(if (not (or (equal? fmt "trivy") (equal? fmt "grype")))
+  (die (string-append "unknown report format '" fmt "' (expected trivy or grype)"))
+  #t)
+
+(if (not (is-file? report)) (die (string-append "report not found: " report)) #t)
+
+(define (status-of r) (alist-get r "status" -1))
+(define (stdout-of r) (alist-get r "stdout" ""))
+(define (stderr-of r) (alist-get r "stderr" ""))
+
+(define (must what r)
+  (if (= (status-of r) 0)
+    (stdout-of r)
+    (die (string-append what " failed (exit " (string-format "{}" (status-of r)) "): " (stderr-of r)))))
+
+(define (lines text)
+  (filter (lambda (l) (not (equal? l ""))) (map string-trim (string-split text "\n"))))
+
+(define targets-query
+  (if (equal? fmt "trivy")
+    ".Results[]? | select(.Type == \"gobinary\" and ((.Vulnerabilities // []) | length > 0)) | .Target | ltrimstr(\"/\")"
+    ".matches[]? | select(.artifact.type == \"go-module\") | .artifact.locations[]?.path | ltrimstr(\"/\")"))
+
+(define finding-keys-query
+  (if (equal? fmt "trivy")
+    ".Results[]? | select(.Type == \"gobinary\") | (.Target | ltrimstr(\"/\")) as $t | (.Vulnerabilities // [])[] | \"\\($t)\\t\\(.VulnerabilityID)\""
+    ".matches[]? | select(.artifact.type == \"go-module\") | . as $m | (.artifact.locations[]?.path | ltrimstr(\"/\")) as $t | \"\\($t)\\t\\($m.vulnerability.id)\""))
+
+(define dropped-query
+  (if (equal? fmt "trivy")
+    "($d | split(\"\\n\") | map(select(length > 0))) as $drop | (.Results[]? | select(.Type == \"gobinary\")) |= ((.Target | ltrimstr(\"/\")) as $t | .Vulnerabilities |= ((. // []) | map(select(([.VulnerabilityID] | map(\"\\($t)\\t\\(.)\")) as $ks | any($ks[]; . as $k | any($drop[]; . == $k)) | not))))"
+    "($d | split(\"\\n\") | map(select(length > 0))) as $drop | def unreached: .artifact.type == \"go-module\" and ([.artifact.locations[]?.path | ltrimstr(\"/\")] as $ps | ([.vulnerability.id] + [(.relatedVulnerabilities // [])[].id]) as $ids | any($ps[]; . as $p | any($ids[]; (\"\\($p)\\t\\(.)\") as $k | any($drop[]; . == $k)))); .goReachabilityDropped = [.matches[]? | select(unreached)] | .matches |= map(select(unreached | not))"))
+
+(define targets (distinct (lines (must "listing Go binaries that carry a finding" (exec-capture "jq" "-r" targets-query report)))))
+
+(mkdir-p work)
+(define verdict-file (path-join work "verdicts.tsv"))
+(define raw-file (path-join work "report.raw.json"))
+(write-file raw-file (read-file report))
+
+(define (unpack archive)
+  (let ((layers-dir (path-join work "archive"))
+        (rootfs (path-join work "rootfs")))
+    (mkdir-p layers-dir)
+    (mkdir-p rootfs)
+    (must "unpacking the image archive" (exec-capture "tar" "-xf" archive "-C" layers-dir))
+    (for-each
+      (lambda (layer)
+        (must (string-append "unpacking layer " layer)
+              (exec-capture "tar" "-xf" (path-join layers-dir layer) "-C" rootfs)))
+      (lines (must "reading manifest.json"
+               (exec-capture "jq" "-r" ".[0].Layers[]" (path-join layers-dir "manifest.json")))))
+    rootfs))
+
+(define (run-govulncheck bin)
+  (if (equal? vuln-db "")
+    (exec-capture govulncheck "-mode=binary" "-format" "openvex" bin)
+    (exec-capture govulncheck "-db" vuln-db "-mode=binary" "-format" "openvex" bin)))
+
+(define (unreached-keys rootfs target)
+  (let ((bin (path-join rootfs target))
+        (vex (path-join work (string-append (string-replace target "/" "_") ".openvex.json"))))
+    (if (not (is-file? bin))
+      (die (string-append "the report names " target " but the image carries no such file, so its reachability cannot be judged"))
+      #t)
+    (write-file vex (must (string-append "govulncheck on " target) (run-govulncheck bin)))
+    (lines (must (string-append "reading govulncheck's verdict for " target)
+             (exec-capture "jq" "-r" "--arg" "t" target
+               ".statements[]? | select(.status == \"not_affected\") | .vulnerability | ([.name] + (.aliases // []))[] | \"\\($t)\\t\\(.)\""
+               vex)))))
+
+(define (finding-keys file)
+  (distinct (lines (must "listing Go findings" (exec-capture "jq" "-r" finding-keys-query file)))))
+
+(define (verdict-lines before after)
+  (map (lambda (k) (string-append (if (> (length (filter (lambda (a) (equal? a k)) after)) 0) "reachable" "unreachable") "\t" k))
+       before))
+
+(cond
+  ((null? targets)
+    (write-file verdict-file "")
+    (log-info "go-reachability: no Go binary carries a finding")
+    (exit 0))
+  ((not (path-exists? source))
+    (die (string-append "Go binaries carry findings, but '" source "' is neither the image archive nor its unpacked root, so the binaries cannot be read")))
+  (else
+    (let* ((rootfs (if (is-dir? source) source (unpack source)))
+           (drop (distinct (flatten (map (lambda (t) (unreached-keys rootfs t)) targets))))
+           (drop-file (path-join work "unreached.tsv")))
+      (write-file drop-file (string-join "\n" drop))
+      (write-file report (must "filtering the report by reachability"
+                           (exec-capture "jq" "--rawfile" "d" drop-file dropped-query raw-file)))
+      (let ((verdicts (verdict-lines (finding-keys raw-file) (finding-keys report))))
+        (write-file verdict-file (string-append (string-join "\n" verdicts) "\n"))
+        (for-each (lambda (v) (log-info (string-append "go-reachability: " v))) verdicts)
+        (exit 0)))))

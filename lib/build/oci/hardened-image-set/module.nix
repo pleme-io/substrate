@@ -189,6 +189,12 @@ in
       description = "Whether `vulnix-scan:<service>` is generated over the delivered closure.";
     };
 
+    goReachability = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Whether `grype-scan:<service>` judges Go findings with substrate's go-reachability primitive, the same one pleme-io/actions/image-scan runs for `go-reachability: true`.";
+    };
+
     bundledCryptoFloor = mkOption {
       type = types.nullOr types.str;
       default = null;

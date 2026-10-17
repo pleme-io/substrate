@@ -104,6 +104,7 @@ on:
       - 'CLAUDE.md'
       # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
       - 'tools/oci-push/**'
+      - 'lib/security/**'
   pull_request:
     branches:
       - main
@@ -126,6 +127,7 @@ on:
       - 'CLAUDE.md'
       # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
       - 'tools/oci-push/**'
+      - 'lib/security/**'
   workflow_dispatch:
 
 jobs:
@@ -366,6 +368,9 @@ jobs:
 
       - name: checks.web-static-spa-image (lib/build/web — port rule, no libc, shaped /bin/sh)
         run: nix build --no-link -L '.#checks.x86_64-linux.web-static-spa-image'
+
+      - name: checks.go-reachability-agreement (lib/security — the trivy and grype paths give one verdict per Go finding)
+        run: nix build --no-link -L '.#checks.x86_64-linux.go-reachability-agreement'
 
       # CATALOG REFLECTION for the reusable-workflow library itself — the one
       # large substrate surface that had no catalog while lib/iroha and

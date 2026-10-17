@@ -588,7 +588,8 @@ let
         failOn = [ "Negligible" ];
         failOnAny = true;
         ignoreFile = mergeGrypeIgnoreFiles cfg;
-        inherit grypePkg;
+        goReachability = cfg.goReachability;
+        inherit grypePkg tataraScript;
       };
       claims = map (c: c // { key = "${c.name}|${c.version}|${c.cve}"; })
         (grypeClaimsOf cfg);
@@ -674,7 +675,7 @@ let
     (name: cfg: {
       inherit (cfg) service upstreamImage hardeningRationale publishName
         publishTag hardeningTarget vulnixWhitelist grypeIgnoreFile
-        trivyAnalysableTargets;
+        trivyAnalysableTargets goReachability;
       pushTag = "${cfg.publishTag}${archSuffix}";
       cveClaims = claimsView cfg;
       cveClaimFiles = claimFilesOf cfg;

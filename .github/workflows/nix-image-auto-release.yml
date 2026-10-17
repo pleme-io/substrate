@@ -79,6 +79,10 @@ on:
           content. See hardened-images/vex/README-scoping.md.
         type: string
         default: ""
+      scan-go-reachability:
+        description: "Judge the scan-before-push gate's Go findings with substrate's go-reachability primitive (pleme-io/actions/image-scan go-reachability), the same one the grype-scan app runs for an image with goReachability = true, so the two gates give one verdict per Go finding. False (default) keeps the gate unchanged."
+        type: boolean
+        default: false
       boot-check-cmd:
         description: "Correctness gate, run AFTER the CVE scan and BEFORE the push (a CVE-clean image that crashes at boot is worse than useless -- a hardened-images incident, 2026-07-17: mysql+rabbitmq both passed 0-CVE scans and neither could boot). Health command exec'd inside the started container via pleme-io/actions/container-boot-check (e.g. 'mysqladmin ping --silent', 'rabbitmq-diagnostics -q ping'). Empty (default) = no boot-check -- every existing caller keeps its current behavior unchanged; opt in per consumer, same shape as scan-before-push."
         type: string
@@ -542,6 +546,7 @@ jobs:
           ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
           ignore-file: ${{ inputs.scan-ignore-file }}
           vex: ${{ inputs.scan-vex-file }}
+          go-reachability: ${{ inputs.scan-go-reachability }}
 
       # Second-opinion CVE-database gate (grype) -- sibling to the trivy gate
       # above, same artifact (the app builds `images_.<name>` as an ordinary

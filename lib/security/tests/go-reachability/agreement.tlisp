@@ -1,0 +1,92 @@
+(define args (argv))
+(define script (nth 0 args))
+(define archive (nth 1 args))
+(define linked (nth 2 args))
+(define stripped (nth 3 args))
+(define out (nth 4 args))
+
+(define failures (list))
+
+(define (check! ok what)
+  (if ok
+    (log-info (string-append "ok: " what))
+    (begin
+      (log-error (string-append "FAIL: " what))
+      (set! failures (append failures (list what))))))
+
+(define (trivy-target t)
+  (string-append "{\"Target\":\"" t "\",\"Type\":\"gobinary\",\"Vulnerabilities\":["
+                 "{\"VulnerabilityID\":\"GO-2026-5932\",\"PkgName\":\"golang.org/x/crypto\",\"Severity\":\"UNKNOWN\"},"
+                 "{\"VulnerabilityID\":\"GO-9999-0001\",\"PkgName\":\"golang.org/x/crypto\",\"Severity\":\"HIGH\"}]}"))
+
+(define (grype-match t id related)
+  (string-append "{\"vulnerability\":{\"id\":\"" id "\",\"severity\":\"Unknown\"},"
+                 "\"relatedVulnerabilities\":[" related "],"
+                 "\"artifact\":{\"type\":\"go-module\",\"name\":\"golang.org/x/crypto\",\"version\":\"v0.54.0\","
+                 "\"locations\":[{\"path\":\"/" t "\"}]}}"))
+
+(define (grype-target t)
+  (string-append (grype-match t "GO-2026-5932" "") ","
+                 (grype-match t "GO-9999-0001" "{\"id\":\"CVE-9999-0001\"}")))
+
+(define (write-reports! dir targets)
+  (mkdir-p dir)
+  (write-file (path-join dir "trivy.json")
+              (string-append "{\"Results\":[" (string-join "," (map trivy-target targets)) "]}"))
+  (write-file (path-join dir "grype.json")
+              (string-append "{\"matches\":[" (string-join "," (map grype-target targets)) "],\"ignoredMatches\":[]}")))
+
+(define (lines text)
+  (filter (lambda (l) (not (equal? l ""))) (map string-trim (string-split text "\n"))))
+
+(define (run-primitive fmt dir)
+  (exec-capture "tatara-script" script fmt (path-join dir (string-append fmt ".json"))
+                archive (path-join dir (string-append fmt "-work"))))
+
+(define (verdicts fmt dir)
+  (let ((r (run-primitive fmt dir)))
+    (check! (= (alist-get r "status" -1) 0)
+            (string-append fmt ": the primitive judged every Go finding (" (alist-get r "stderr" "") ")"))
+    (let ((f (path-join dir (string-append fmt "-work/verdicts.tsv"))))
+      (if (is-file? f) (lines (read-file f)) (list)))))
+
+(define (has? xs x) (> (length (filter (lambda (y) (equal? y x)) xs)) 0))
+
+(define (same-set? a b)
+  (and (= (length a) (length b))
+       (= (length (filter (lambda (x) (has? b x)) a)) (length a))))
+
+(define dir (path-join out "agree"))
+(write-reports! dir (list linked stripped))
+
+(define tv (verdicts "trivy" dir))
+(define gv (verdicts "grype" dir))
+
+(for-each (lambda (v) (log-info (string-append "trivy  " v))) tv)
+(for-each (lambda (v) (log-info (string-append "grype  " v))) gv)
+
+(check! (same-set? tv gv) "the trivy and grype paths return the same verdict for every Go finding")
+(check! (has? tv (string-append "unreachable\t" linked "\tGO-2026-5932"))
+        "GO-2026-5932 is unreachable in a symbol-carrying binary that never links openpgp")
+(check! (has? tv (string-append "reachable\t" linked "\tGO-9999-0001"))
+        "a finding whose symbol the binary calls stays reachable")
+(check! (has? tv (string-append "reachable\t" stripped "\tGO-2026-5932"))
+        "a stripped binary, which govulncheck cannot read symbols from, keeps GO-2026-5932 as reachable")
+(check! (has? tv (string-append "reachable\t" stripped "\tGO-9999-0001"))
+        "a stripped binary keeps every finding as reachable")
+(check! (= (length tv) 4) "four Go findings judged, one verdict each")
+
+(define grype-after (json-parse (read-file (path-join dir "grype.json"))))
+(check! (= (length (alist-get grype-after "matches" (list))) 3) "grype keeps the three reachable matches")
+(check! (= (length (alist-get grype-after "goReachabilityDropped" (list))) 1) "grype records the one dropped match")
+
+(define blind-dir (path-join out "blind"))
+(write-reports! blind-dir (list "nix/store/no-such-binary/bin/absent"))
+(check! (not (= (alist-get (run-primitive "trivy" blind-dir) "status" 0) 0))
+        "a finding on a binary the image does not carry fails the run instead of passing it")
+(check! (not (= (alist-get (run-primitive "grype" blind-dir) "status" 0) 0))
+        "the same blind case fails on the grype path")
+
+(if (null? failures)
+  (begin (write-file (path-join out "verdicts.tsv") (string-append (string-join "\n" tv) "\n")) (exit 0))
+  (begin (log-error (string-format "{} agreement check(s) failed" (length failures))) (exit 1)))

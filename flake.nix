@@ -611,6 +611,12 @@
               goToolchain = goToolchainFor system;
             };
 
+          go-reachability-agreement =
+            import ./lib/security/tests/go-reachability-agreement-test.nix {
+              inherit pkgs;
+              tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
+            };
+
           # ── every check above has a CI step (nix-tests.yml builds x86_64-linux) ──
           # Measured 2026-09-29: 9 of 26 checks had none. NOT VACUOUS: the
           # suite's `unwired-check-throws` case, and this check itself fails if a
@@ -1091,6 +1097,9 @@
           relver = import ./lib/build/relver.nix {
             pkgs = import nixpkgs { inherit system; };
           };
+          go-reachability = (import ./lib/security/go-reachability.nix {
+            pkgs = import nixpkgs { inherit system; };
+          }).bundle;
           # sql-apply: typed SQL migration runner. `nix run …#sql-apply -- apply …`
           # replaces lib/service/db-migration.nix's writeShellScript runner (and
           # the database CLI it shelled to), which is what forced a busybox base
