@@ -113,7 +113,7 @@ let
         generated and scans the delivered closure), or delete the
         `trivyAnalysableTargets` declaration if the blindness was never measured.
       ''
-    else cfg // { _name = name; };
+    else cfg // { _name = name; _declared = evaluated.config; };
 
   evaluatedImages = lib.mapAttrs evalOne images;
 
@@ -305,6 +305,20 @@ let
           parsed;
     in
     if files == null then { } else lib.foldl' mergeOne { } files;
+
+  claimsView = cfg: {
+    grype = map (c: { inherit (c) cve class until; file = baseNameOf (toString c.file);
+                      package = "${c.name}-${c.version}"; })
+      (grypeClaimsOf cfg);
+    vulnix = map (c: { inherit (c) cve until; file = baseNameOf (toString c.file);
+                       package = lib.head (lib.splitString "|" c.key); })
+      (vulnixClaimsOf cfg);
+  };
+
+  claimFilesOf = cfg:
+    let norm = f: if f == null then [ ] else if builtins.isList f then f else [ f ];
+    in map (p: baseNameOf (toString p))
+      (norm cfg.vulnixWhitelist ++ norm cfg.grypeIgnoreFile);
 
   vulnixClaimsOf = cfg:
     let
@@ -662,18 +676,14 @@ let
         publishTag hardeningTarget vulnixWhitelist grypeIgnoreFile
         trivyAnalysableTargets;
       pushTag = "${cfg.publishTag}${archSuffix}";
-      cveClaims = {
-        grype = map (c: { inherit (c) cve class until; file = baseNameOf (toString c.file);
-                          package = "${c.name}-${c.version}"; })
-          (grypeClaimsOf cfg);
-        vulnix = map (c: { inherit (c) cve until; file = baseNameOf (toString c.file);
-                           package = lib.head (lib.splitString "|" c.key); })
-          (vulnixClaimsOf cfg);
-      };
-      cveClaimFiles =
-        let norm = f: if f == null then [ ] else if builtins.isList f then f else [ f ];
-        in map (p: baseNameOf (toString p))
-          (norm cfg.vulnixWhitelist ++ norm cfg.grypeIgnoreFile);
+      cveClaims = claimsView cfg;
+      cveClaimFiles = claimFilesOf cfg;
+      cveClaimsEnable = cfg._declared.cveClaims.enable;
+      cveClaimsDormant =
+        if cfg._declared.cveClaims.enable then { grype = [ ]; vulnix = [ ]; }
+        else claimsView cfg._declared;
+      cveClaimFilesDormant =
+        if cfg._declared.cveClaims.enable then [ ] else claimFilesOf cfg._declared;
       cveClaimReconcileClaims = {
         grype = claimReconcileClaimsJson {
           scanner = "grype"; service = cfg.service;
