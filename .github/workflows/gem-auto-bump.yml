@@ -96,8 +96,29 @@ jobs:
           bump-type: ${{ inputs.bump-type }}
 
       - if: steps.changes.outputs.skip == 'false'
-        uses: pleme-io/actions/git-push-with-token@main
+        uses: actions/checkout@v4
         with:
-          token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
-          branch: main
-          push-tags: "true"
+          repository: pleme-io/actions
+          ref: main
+          path: .pleme-actions
+
+      - if: steps.changes.outputs.skip == 'false'
+        id: push-src
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/git-push-with-token.tlisp"
+          cat .pleme-actions/_tlisp-stdlib/stdlib.tlisp > "$out"
+          echo >> "$out"
+          cat .pleme-actions/git-push-with-token/run.tlisp >> "$out"
+          rm -rf .pleme-actions
+          echo "script-file=$out" >> "$GITHUB_OUTPUT"
+
+      - if: steps.changes.outputs.skip == 'false'
+        uses: pleme-io/actions/tatara-script@main
+        with:
+          script-file: ${{ steps.push-src.outputs.script-file }}
+        env:
+          GIT_PUSH_TOKEN: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          BRANCH: main
+          PUSH_TAGS: "true"
