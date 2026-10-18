@@ -381,7 +381,16 @@ enum PushError {
         tag: String,
         prefix: String,
     },
-    WriteGithubOutput(std::io::Error),
+WriteGithubOutput(std::io::Error),
+WriteAuthFile {
+    path: String,
+    source: std::io::Error,
+},
+AuthFileParse {
+    path: String,
+    source: serde_json::Error,
+},
+NoAuthFile,
     NoPlatformMatch {
         reference: String,
         os: String,
@@ -551,6 +560,16 @@ A statically linked crypto library has no store path, so a downgrade here is inv
             PushError::ReadCaCert { path, source } => {
                 write!(f, "oci-push: cannot read CA cert {path}: {source}")
             }
+PushError::WriteAuthFile { path, source } => {
+    write!(f, "oci-push: cannot write credential store {path}: {source}")
+}
+PushError::AuthFileParse { path, source } => {
+    write!(f, "oci-push: credential store {path} is not JSON: {source}")
+}
+PushError::NoAuthFile => write!(
+    f,
+    "oci-push: no credential store path: set --authfile, REGISTRY_AUTH_FILE, DOCKER_CONFIG or HOME"
+),
             PushError::Chmod { path, source } => {
                 write!(f, "oci-push: chmod {path} failed: {source}")
             }
@@ -1084,6 +1103,118 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let sextet = |shift: u32| char::from(T[usize::try_from((n >> shift) & 63).unwrap_or(0)]);
+        out.push(sextet(18));
+        out.push(sextet(12));
+        out.push(if chunk.len() > 1 { sextet(6) } else { '=' });
+        out.push(if chunk.len() > 2 { sextet(0) } else { '=' });
+    }
+    out
+}
+
+fn login_merged(
+    existing: Option<&str>,
+    registry: &str,
+    user: &str,
+    pass: &str,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut doc = match existing.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(text) => serde_json::from_str::<serde_json::Value>(text)?,
+        None => serde_json::json!({}),
+    };
+    if !doc.is_object() {
+        doc = serde_json::json!({});
+    }
+    let mut cred = String::with_capacity(user.len() + pass.len() + 1);
+    cred.push_str(user);
+    cred.push(':');
+    cred.push_str(pass);
+    let entry = serde_json::json!({ "auth": base64_encode(cred.as_bytes()) });
+    let root = doc.as_object_mut().expect("doc is an object");
+    let auths = root
+        .entry("auths")
+        .or_insert_with(|| serde_json::json!({}));
+    if !auths.is_object() {
+        *auths = serde_json::json!({});
+    }
+    auths
+        .as_object_mut()
+        .expect("auths is an object")
+        .insert(registry.to_string(), entry);
+    Ok(doc)
+}
+
+fn cmd_login<I: Iterator<Item = String>>(mut it: I) -> Result<(), PushError> {
+    let mut registry: Option<String> = None;
+    let mut user: Option<String> = None;
+    let mut pass: Option<String> = None;
+    let mut authfile: Option<String> = None;
+    while let Some(flag) = it.next() {
+        match flag.as_str() {
+            "--registry" => registry = Some(next_value(&mut it, "registry")?),
+            "--dest-user" => user = Some(next_value(&mut it, "dest-user")?),
+            "--dest-pass" => pass = Some(next_value(&mut it, "dest-pass")?),
+            "--authfile" => authfile = Some(next_value(&mut it, "authfile")?),
+            other => return Err(PushError::UnknownFlag(other.to_string())),
+        }
+    }
+    let registry = registry
+        .or_else(|| env_input("INPUT_REGISTRY"))
+        .ok_or(PushError::MissingArg("registry"))?;
+    let user = user
+        .or_else(|| env_input("INPUT_DEST_USER"))
+        .ok_or(PushError::MissingArg("dest-user"))?;
+    let pass = pass
+        .or_else(|| env_input("INPUT_DEST_PASS"))
+        .ok_or(PushError::MissingArg("dest-pass"))?;
+    let path = authfile
+        .or_else(|| env_input("INPUT_AUTHFILE"))
+        .map(PathBuf::from)
+        .or_else(|| credential_store_paths().into_iter().next())
+        .ok_or(PushError::NoAuthFile)?;
+    let shown = path.display().to_string();
+    let existing = fs::read_to_string(&path).ok();
+    let doc = login_merged(existing.as_deref(), &registry, &user, &pass).map_err(|source| {
+        PushError::AuthFileParse {
+            path: shown.clone(),
+            source,
+        }
+    })?;
+    let body = serde_json::to_vec_pretty(&doc).map_err(PushError::Json)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|source| PushError::WriteAuthFile {
+            path: shown.clone(),
+            source,
+        })?;
+    }
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|source| PushError::WriteAuthFile {
+                path: shown.clone(),
+                source,
+            })?;
+        file.write_all(&body).map_err(|source| PushError::WriteAuthFile {
+            path: shown.clone(),
+            source,
+        })?;
+    }
+    eprintln!("oci-push: logged in to {registry} ({shown})");
+    Ok(())
 }
 
 /// Where a docker/podman-style credential store lives, most specific first.
@@ -3657,6 +3788,7 @@ fn run() -> Result<(), PushError> {
         Some("list") => cmd_list(args),
         Some("resolve") => cmd_resolve(args),
         Some("tag") => cmd_tag(args),
+        Some("login") => cmd_login(args),
         Some("delete") => cmd_delete(args),
         Some("vendored-crates") => cmd_vendored_crates(args),
         Some("config-show") => cmd_config_show(args),
@@ -4277,6 +4409,44 @@ mod tests {
         assert_eq!(base64_decode("YWI=").unwrap(), b"ab");
         assert_eq!(base64_decode("").unwrap(), b"");
     }
+
+#[test]
+fn base64_encode_round_trips_every_padding_length() {
+    for raw in ["", "u", "us", "use", "user:pass", "x-access-token:ghs_AbC/+=9"] {
+        let enc = base64_encode(raw.as_bytes());
+        assert_eq!(base64_decode(&enc), Some(raw.as_bytes().to_vec()), "{raw}");
+    }
+    assert_eq!(base64_encode(b"user:pass"), "dXNlcjpwYXNz");
+}
+
+#[test]
+fn login_merges_into_an_existing_store_and_the_lookup_reads_it_back() {
+    let d = std::env::temp_dir().join("ocipush-login-merge");
+    let _ = fs::remove_dir_all(&d);
+    let p = write_cfg(
+        &d,
+        "config.json",
+        r#"{"auths":{"docker.io":{"auth":"YTpi"}},"credsStore":"none"}"#,
+    );
+    let doc = login_merged(fs::read_to_string(&p).ok().as_deref(), "ghcr.io", "u3", "p3").unwrap();
+    fs::write(&p, serde_json::to_vec(&doc).unwrap()).unwrap();
+    assert_eq!(
+        docker_config_credentials_in(&[p.clone()], "ghcr.io"),
+        Some((String::from("u3"), String::from("p3")))
+    );
+    assert_eq!(
+        docker_config_credentials_in(&[p.clone()], "docker.io"),
+        Some((String::from("a"), String::from("b")))
+    );
+    assert_eq!(doc.get("credsStore").and_then(|v| v.as_str()), Some("none"));
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn login_starts_a_store_that_does_not_exist() {
+    let doc = login_merged(None, "ghcr.io", "u", "p").unwrap();
+    assert_eq!(doc["auths"]["ghcr.io"]["auth"].as_str(), Some("dTpw"));
+}
 
     #[test]
     fn base64_rejects_junk_rather_than_panicking() {
