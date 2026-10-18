@@ -31,10 +31,15 @@
             fi
           done
           go mod tidy
+          built="$(go list -mod=mod -e -deps -f '{{with .Module}}{{.Path}}{{end}}' ./...)"
           for floor in ${floors}; do
             module="''${floor%@*}"
             want="''${floor#*@}"
             have="$(go list -mod=mod -m -e -f '{{if not .Error}}{{.Version}}{{end}}' "$module")"
+            if ! printf '%s\n' "$built" | grep -qxF "$module"; then
+              [ -n "$have" ] && echo "go-module-floor: $module $have provides no package to this build"
+              continue
+            fi
             if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | head -n1)" != "$want" ]; then
               echo "go-module-floor: $module is $have after the raise, below $want" >&2
               exit 1
