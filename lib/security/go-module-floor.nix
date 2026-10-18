@@ -17,7 +17,7 @@
     let
       floors = lib.concatStringsSep " " (lib.mapAttrsToList (m: v: "${m}@${v}") requires);
       raise = _: previous: {
-        preBuild = (previous.preBuild or "") + ''
+        preBuild = (previous.preBuild or "") + "\n" + ''
           export HOME="$TMPDIR/home"
           mkdir -p "$HOME"
           for floor in ${floors}; do
@@ -41,7 +41,7 @@
             fi
           done
         '';
-        postInstall = (previous.postInstall or "") + ''
+        postInstall = (previous.postInstall or "") + "\n" + ''
           cp go.mod "$out/.go-module-floor.mod"
           cp go.sum "$out/.go-module-floor.sum"
         '';
@@ -53,9 +53,9 @@
         overrideModAttrs = lib.composeExtensions (old.passthru.overrideModAttrs or (_: _: { })) raise;
         goModuleFloor = requires;
       };
-      postConfigure = (old.postConfigure or "") + ''
-        cp vendor/.go-module-floor.mod go.mod
-        cp vendor/.go-module-floor.sum go.sum
+      postConfigure = (old.postConfigure or "") + "\n" + ''
+        cp "''${goModules:-vendor}/.go-module-floor.mod" go.mod
+        cp "''${goModules:-vendor}/.go-module-floor.sum" go.sum
       '';
     });
 }
