@@ -41,7 +41,13 @@ on:
       # triggering anything, which reads exactly like a green build.
       - 'flake.nix'
       - '.github/workflows/sql-apply-image-release.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      ghcr:
+        description: "Push the image to ghcr.io/pleme-io/sql-apply. Off by default: private artifacts are delivered through nix (sui, flake pins), never a private ghcr package (operator rule 2026-10-18). The binary stays `nix run github:pleme-io/substrate#sql-apply`."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,6 +56,7 @@ permissions:
 
 jobs:
   release:
+    if: inputs.ghcr
     uses: ./.github/workflows/nix-image-auto-release.yml
     with:
       release-app: "release:sql-apply"
