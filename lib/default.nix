@@ -2240,6 +2240,11 @@ in rec {
   # (ordinary Nix laziness, not machinery this primitive builds).
   mkHardenedPkgs = mkHardenedPkgsModule;
 
+  inherit (import ./security/go-module-floor.nix { inherit (pkgs) lib; })
+    withGoModuleFloor
+    withGoSymbolTable
+    ;
+
   # Build-time CVE gate (mkCveGateApp: trivy|grype against a docker-archive
   # tarball or Nix store path) + SBOM emission/attestation (mkSbomApp,
   # mkSbomAttestApp: syft + cosign attest) + cosign keyless signing/
