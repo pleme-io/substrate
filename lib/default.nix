@@ -695,7 +695,7 @@ in rec {
   #       host = "github.com"; credentialFile = "/nix/store/…"; };
   #   };
   goPrivateModuleBuilder = ./build/go/private-module.nix;
-  inherit ((import ./build/go/private-module.nix)) mkGoPrivateModule mkGoPrivateModuleOverlay;
+  inherit ((import ./build/go/private-module.nix)) mkGoPrivateModule mkGoPrivateModuleOverlay replaceWithFlakeInputs;
 
   # ============================================================================
   # GO SERVICE DOCKER IMAGE BUILDER (standalone import path)

@@ -65,7 +65,44 @@
 #       goproxy = "https://athens.internal.pleme.io";
 #     };
 #   };
+let
+  replaceWithFlakeInputs = pkgs: { pname, src, modules, modRoot ? null }: let
+    lib = pkgs.lib;
+    root = if modRoot == null then "." else modRoot;
+    gomod = builtins.readFile "${src}/${root}/go.mod";
+    requiredVersion = mod: let
+      hits = lib.concatMap (l: let m = builtins.match "[[:space:]]*(require[[:space:]]+)?${lib.escapeRegex mod}[[:space:]]+([^[:space:]]+).*" l; in
+        if m == null then [ ] else [ (lib.elemAt m 1) ]) (lib.splitString "\n" gomod);
+    in if hits == [ ]
+      then throw "substrate.replaceWithFlakeInputs: ${pname} lists ${mod} but its go.mod requires no such module."
+      else builtins.head hits;
+    pseudoCommit = v: let m = builtins.match ".*-[0-9]{14}-([0-9a-f]{12})([+]incompatible)?" v; in
+      if m == null then null else builtins.head m;
+    checkRev = mod: input: let
+      want = pseudoCommit (requiredVersion mod);
+      rev = input.rev or null;
+    in if want == null || rev == null || lib.hasPrefix want rev then true
+      else throw ("substrate.replaceWithFlakeInputs: ${pname} requires ${mod} at commit ${want} "
+        + "(go.mod ${requiredVersion mod}) but the flake input is locked at ${rev}. "
+        + "Move them together: nix flake update <input> to that commit, or go get ${mod}@${rev}.");
+    dirOf = mod: ".private-modules/" + lib.replaceStrings [ "/" ] [ "_" ] mod;
+    _revs = lib.all (x: x) (lib.mapAttrsToList checkRev modules);
+    script = lib.concatStringsSep "\n" (lib.mapAttrsToList (mod: input: ''
+      mkdir -p "$(dirname ${dirOf mod})"
+      cp -r --no-preserve=mode ${input} ${dirOf mod}
+      go mod edit -replace=${mod}=./${dirOf mod}
+    '') modules);
+  in builtins.seq _revs {
+    postPatch = ''
+      pushd ${root} >/dev/null
+      ${script}
+      popd >/dev/null
+    '';
+  };
+in
 {
+  inherit replaceWithFlakeInputs;
+
   # Build a Go binary whose dependency closure includes PRIVATE org modules,
   # hermetically + reproducibly + without `--impure`.
   mkGoPrivateModule = pkgs: {
@@ -107,7 +144,7 @@
       (check.nonEmptyStr "version" version)
       (check.nonEmptyStr "vendorHash" vendorHash)
       (check.attrs "privateFetch" privateFetch)
-      (check.enum "privateFetch.kind" [ "deploy-token" "athens-goproxy" ] fetchKind)
+      (check.enum "privateFetch.kind" [ "deploy-token" "athens-goproxy" "flake-inputs" ] fetchKind)
       (check.listOfStr "privateFetch.privatePrefixes" privatePrefixes)
       (check.list "tags" tags)
       (check.bool "doCheck" doCheck)
@@ -121,7 +158,7 @@
     # deps). Reject at eval time rather than fetch a closure that silently drops
     # the private module.
     _prefixCheck =
-      if privatePrefixes == []
+      if privatePrefixes == [] && fetchKind != "flake-inputs"
       then throw ("substrate.mkGoPrivateModule: ${pname} declares privateFetch "
         + "but `privatePrefixes` is empty. List the private module prefixes "
         + "(e.g. [ \"github.com/pleme-io\" ]) so GOPRIVATE/GONOSUMCHECK exempt them.")
@@ -185,8 +222,13 @@
       export GOFLAGS="''${GOFLAGS:-}"
     '';
 
+    replaced = if fetchKind == "flake-inputs"
+      then replaceWithFlakeInputs pkgs { inherit pname src modRoot; modules = privateFetch.modules or { }; }
+      else { };
+
     vendorPreBuild =
-      commonPreBuild
+      if fetchKind == "flake-inputs" then ""
+      else commonPreBuild
       + (if fetchKind == "deploy-token" then deployTokenPreBuild else athensPreBuild);
 
     # ── Mirror tool.nix: ldflags + from-source goToolchain version assert ──
@@ -247,6 +289,7 @@
       mainProgram = pname;
     } // lib.optionalAttrs (homepage != null) { inherit homepage; };
   }
+  // replaced
   // lib.optionalAttrs (subPackages != null) { inherit subPackages; }
   // lib.optionalAttrs (modRoot != null) { inherit modRoot; }
   // extraAttrs)));
