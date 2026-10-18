@@ -180,14 +180,14 @@ let
     then oci.mkDistrolessImage {
       inherit package;
       inherit (cfg) service publishName publishTag entrypoint cmd
-        exposedPorts volumes env extraContents writablePaths
+        exposedPorts volumes env extraContents writablePaths workdir
         shell entrypointTools user maxLayers;
       labels = versionLabels cfg // packageLabels cfg;
     }
     else oci.mkPackageImage {
       inherit package;
       inherit (cfg) service publishName publishTag entrypoint cmd
-        exposedPorts volumes env extraContents writablePaths user;
+        exposedPorts volumes env extraContents writablePaths workdir user;
       base = oci.bases.${cfg.base};
       labels = versionLabels cfg // packageLabels cfg;
     };

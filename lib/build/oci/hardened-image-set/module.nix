@@ -183,6 +183,12 @@ in
       description = "Paths the non-root user can write at boot.";
     };
 
+    workdir = mkOption {
+      type = types.str;
+      default = "/";
+      description = "The image's working directory.";
+    };
+
     hardeningTarget = mkOption {
       type = types.bool;
       default = true;
