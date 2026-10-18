@@ -61,13 +61,13 @@ jobs:
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: DeterminateSystems/nix-installer-action@main
+        if: runner.environment == 'github-hosted'
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "${{ inputs.source-dir }} -> target"
           shared-key: retirada-ci-watch
-      - run: nix shell nixpkgs#gcc -c cargo build --release --features watch-cli --bin retirada-ci-watch
+      - run: nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#gcc -c cargo build --release --features watch-cli --bin retirada-ci-watch
         working-directory: ${{ inputs.source-dir }}
       - name: Watch for starved jobs
         working-directory: ${{ inputs.source-dir }}
