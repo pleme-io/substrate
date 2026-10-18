@@ -193,6 +193,10 @@ in
     expr = lib.hasInfix "pleme-io/substrate/.github/workflows/nix-fleet.yml@main" workflow;
     expected = true;
   };
+  checks-workflow-never-cancels-a-main-run = {
+    expr = lib.hasInfix "cancel-in-progress: ${"$"}{{ github.ref != 'refs/heads/main' }}" workflow;
+    expected = true;
+  };
   checks-workflow-runs-on-the-private-pool = {
     expr = lib.hasInfix "runner-labels: '[\"self-hosted\",\"pleme-private\"]'" workflow;
     expected = true;
