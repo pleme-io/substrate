@@ -216,6 +216,19 @@ let
       architecture = arch;
     };
 
+  binary = (import ./crate2nix-builders.nix { inherit pkgs crate2nix; }).mkCrate2nixTool {
+    toolName = packageName;
+    inherit
+      src
+      cargoNix
+      crateOverrides
+      useLockfileBuilder
+      specFile
+      ;
+    buildInputs = allBuildInputs;
+    nativeBuildInputs = allNativeBuildInputs;
+  };
+
   dockerImage-amd64 = if hasArch "amd64" then mkDockerImage "amd64" else null;
   dockerImage-arm64 = if hasArch "arm64" then mkDockerImage "arm64" else null;
 
@@ -251,6 +264,7 @@ in
     (if dockerImage-amd64 != null then { inherit dockerImage-amd64; } else { })
     // (if dockerImage-arm64 != null then { inherit dockerImage-arm64; } else { })
     // {
+      inherit binary;
       default = if dockerImage-amd64 != null then dockerImage-amd64 else dockerImage-arm64;
     };
 
