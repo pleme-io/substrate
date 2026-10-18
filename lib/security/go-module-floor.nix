@@ -30,7 +30,7 @@
               go get "$module@$want"
             fi
           done
-          go mod tidy
+          go mod tidy -e
           built="$(go list -mod=mod -e -deps -f '{{with .Module}}{{.Path}}{{end}}' ./...)"
           for floor in ${floors}; do
             module="''${floor%@*}"
