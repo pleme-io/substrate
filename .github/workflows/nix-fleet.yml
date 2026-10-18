@@ -6,9 +6,13 @@ on:
   workflow_call:
     inputs:
       runner-labels:
-        description: 'JSON array of runner labels every job runs on. The default is the private self-hosted pool (plo).'
+        description: 'JSON array of runner labels every job runs on. The default is the private self-hosted pool (rio and plo).'
         type: string
         default: '["self-hosted","pleme-private"]'
+      eval-runner-labels:
+        description: 'JSON array of runner labels for the jobs that evaluate the flake (eval and advisory checks, node toplevels, the flake-update verify), whose evaluation runs inside the runner unit. Empty is runner-labels. The fleet pools: pleme-eval-heavy is plo, whose runner holds a toplevel evaluation.'
+        type: string
+        default: ''
       system:
         description: 'The system checks are read from: checks.<system>.<name>.'
         type: string
@@ -121,7 +125,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/runner-policy@main
         with:
-          runner-labels: ${{ inputs.runner-labels }}
+          runner-labels: ${{ inputs.runner-labels }} ${{ inputs.eval-runner-labels }}
 
   plan:
     name: plan node matrix
@@ -178,7 +182,7 @@ jobs:
     name: check ${{ matrix.check }}
     needs: policy
     if: inputs.flake-update == 'off' && inputs.eval-checks != '[]'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}
     strategy:
       fail-fast: false
       matrix:
@@ -209,7 +213,7 @@ jobs:
     name: known red ${{ matrix.check }} (advisory)
     needs: policy
     if: inputs.flake-update == 'off' && inputs.advisory-checks != '[]'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -231,7 +235,7 @@ jobs:
     name: node eval ${{ matrix.node }}
     needs: plan
     if: ${{ inputs.flake-update == 'off' && needs.plan.outputs.node-count != '0' && needs.plan.outputs.node-count != '' }}
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}
     strategy:
       fail-fast: false
       max-parallel: ${{ inputs.node-max-parallel }}
@@ -254,7 +258,7 @@ jobs:
     name: node ${{ matrix.node }}
     needs: [plan, eval-checks]
     if: ${{ !failure() && !cancelled() && inputs.flake-update == 'off' && needs.plan.outputs.node-count != '0' && needs.plan.outputs.node-count != '' }}
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}
     strategy:
       fail-fast: false
       max-parallel: ${{ inputs.node-max-parallel }}
@@ -288,7 +292,7 @@ jobs:
     name: flake update (${{ inputs.flake-update }})
     needs: policy
     if: inputs.flake-update != 'off'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}
     outputs:
       reason: ${{ steps.update.outputs.reason }}
       commit-sha: ${{ steps.update.outputs.commit-sha }}
