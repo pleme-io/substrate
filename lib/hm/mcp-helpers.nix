@@ -46,9 +46,33 @@ in rec {
         description = "Whether this MCP server is active.";
       };
 
+      transport = mkOption {
+        type = types.enum [ "stdio" "http" ];
+        default = "stdio";
+        description = ''
+          stdio: anvil launches `command` locally. http: a remote MCP server at
+          `url` (streamable HTTP); the agent owns the connection and its auth
+          (OAuth or static `headers`), so `command`, `args`, `env`, `envFiles`
+          and `package` are not used.
+        '';
+      };
+
+      url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Remote MCP endpoint. Required when transport = \"http\".";
+      };
+
+      headers = mkOption {
+        type = types.attrsOf types.str;
+        default = {};
+        description = "Static HTTP headers for an http server. Never put a secret here: it lands in the Nix store.";
+      };
+
       command = mkOption {
         type = types.str;
-        description = "Executable command (binary name or path).";
+        default = "";
+        description = "Executable command (binary name or path). Required when transport = \"stdio\".";
       };
 
       args = mkOption {
@@ -204,14 +228,23 @@ in rec {
   #   resolved = mcpHelpers.mkResolvedServers pkgs cfg.mcp.servers;
   mkResolvedServers = pkgs: servers: let
     enabled = filterAttrs (_: s: s.enable) servers;
-  in mapAttrs (name: server: let
-    wrapper = mkMcpWrapper pkgs name server;
-    directCmd = _mkCommandPath server;
-  in {
-    type = "stdio";
-    command = if wrapper != null then "${wrapper}" else directCmd;
-    args = if wrapper != null then [] else server.args;
-  }) enabled;
+  in mapAttrs (name: server:
+    if (server.transport or "stdio") == "http" then
+      assert server.url != null
+        || throw "mcp server ${name}: transport = \"http\" needs `url`";
+      { type = "http"; inherit (server) url; }
+      // optionalAttrs (server.headers != {}) { inherit (server) headers; }
+    else
+      assert server.command != ""
+        || throw "mcp server ${name}: transport = \"stdio\" needs `command`";
+      let
+        wrapper = mkMcpWrapper pkgs name server;
+        directCmd = _mkCommandPath server;
+      in {
+        type = "stdio";
+        command = if wrapper != null then "${wrapper}" else directCmd;
+        args = if wrapper != null then [] else server.args;
+      }) enabled;
 
   # ─── Per-Agent Filtering ───────────────────────────────────────────
   # Filters resolved servers for a specific agent. Servers with empty
@@ -478,6 +511,14 @@ in rec {
             ++ optionals (configFile != null) [ "--config" configFile ];
           description = "Splunk (holofote, observe-only) — ${label} ${url}";
         };
+      credEnvs = [ ];
+    };
+    clickhouse-cloud = {
+      serverPrefix = "clickhouse";
+      mkServer = { url ? "https://mcp.clickhouse.cloud/mcp" }: {
+        transport = "http"; inherit url;
+        description = "ClickHouse Cloud (remote MCP, read-only) — ${url}";
+      };
       credEnvs = [ ];
     };
     kubernetes = {

@@ -1009,4 +1009,31 @@ in runTests [
     (evaled.config.home.activation == { })
     "settings sourced from the declaring module's own option (the documented usage) must resolve through evalModules without infinite recursion, and empty preferences must still produce no activation entry")
 
+  (let
+    fleet = mcpHelpers.mkMcpFleet { } {
+      scope = "akeyless"; homeDir = "/home/op";
+      entries = [{ kind = "clickhouse-cloud"; name = "cloud"; enable = true; }];
+    };
+    srv = fleet.servers."clickhouse-cloud";
+  in mkTest "mcp-fleet-clickhouse-cloud-is-http-without-creds"
+    (srv.transport == "http" && srv.url == "https://mcp.clickhouse.cloud/mcp"
+      && srv.envFiles == { } && fleet.homeFiles == { } && fleet.sopsSecrets == { })
+    "the clickhouse-cloud kind should be one http server named clickhouse-<name> with no credential side-effects: the agent owns OAuth")
+
+  (let
+    servers = {
+      remote = { enable = true; transport = "http"; url = "https://mcp.example.com/mcp"; headers = { }; };
+      off = { enable = false; transport = "http"; url = "https://x"; headers = { }; };
+    };
+    resolved = mcpHelpers.mkResolvedServers { } servers;
+  in mkTest "mcp-resolve-http-server"
+    (resolved == { remote = { type = "http"; url = "https://mcp.example.com/mcp"; }; })
+    "an http server should resolve to { type = http; url } with no wrapper and no command, and a disabled one should be dropped")
+
+  (mkTest "mcp-resolve-http-without-url-throws"
+    (!(builtins.tryEval (builtins.deepSeq
+      (mcpHelpers.mkResolvedServers { } { r = { enable = true; transport = "http"; url = null; headers = { }; }; })
+      true)).success)
+    "an http server with no url should be eval-rejected rather than written as an entry the agent cannot connect")
+
 ]
