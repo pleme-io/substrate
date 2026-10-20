@@ -288,12 +288,14 @@ in rec {
   #
   # Example:
   #   servers = mcpHelpers.mkFilterForAgentAndScope cfg.mcp.servers resolved "claude" "pleme";
-  mkFilterForAgentAndScope = serverDefs: resolvedServers: agentName: scopeName:
+  mkFilterForAgentAndScopeWith = { exclusive ? false }: serverDefs: resolvedServers: agentName: scopeName:
     filterAttrs (sname: _:
       let srv = serverDefs.${sname}; in
       (srv.agents == [] || elem agentName srv.agents) &&
-      (srv.scopes == [] || elem scopeName srv.scopes)
+      ((!exclusive && srv.scopes == []) || elem scopeName srv.scopes)
     ) resolvedServers;
+
+  mkFilterForAgentAndScope = mkFilterForAgentAndScopeWith { };
 
   # ─── Context Wrapper Generator ──────────────────────────────────
   # Generates a shell wrapper binary for an org context + agent pair.
@@ -313,8 +315,9 @@ in rec {
     ctxName, scope, ctxEnv ? {},
     agentName, agent,
     serverDefs, resolvedServers,
+    mcpExclusive ? false, mcpStrict ? false,
   }: let
-    scopedServers = mkFilterForAgentAndScope serverDefs resolvedServers agentName scope;
+    scopedServers = mkFilterForAgentAndScopeWith { exclusive = mcpExclusive; } serverDefs resolvedServers agentName scope;
 
     settingsJson = pkgs.writeText "${agentName}-${ctxName}-settings.json"
       (builtins.toJSON agent.settings);
@@ -343,7 +346,8 @@ in rec {
       mkdir -p "$CLAUDE_CONFIG_DIR"
     '';
 
-    extraArgsStr = concatStringsSep " " (map escapeShellArg (agent.extraArgs or []));
+    extraArgsStr = concatStringsSep " " (map escapeShellArg
+      ((optional mcpStrict "--strict-mcp-config") ++ (agent.extraArgs or [])));
 
     # Optional shell snippet executed after env setup but before exec.
     # Used by context consumers (e.g. anvil's claude.ai-connector

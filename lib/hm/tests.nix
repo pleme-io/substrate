@@ -691,6 +691,18 @@ in runTests [
 
   (let
     serverDefs = {
+      s1 = { agents = ["claude"]; scopes = ["akeyless"]; };
+      s2 = { agents = []; scopes = []; };
+      s3 = { agents = []; scopes = ["pleme"]; };
+    };
+    resolved = { s1 = {}; s2 = {}; s3 = {}; };
+    filtered = mcpHelpers.mkFilterForAgentAndScopeWith { exclusive = true; } serverDefs resolved "claude" "akeyless";
+  in mkTest "filter-agent-and-scope-exclusive"
+    (filtered ? s1 && !(filtered ? s2) && !(filtered ? s3))
+    "exclusive scope filtering should drop unscoped (global) servers")
+
+  (let
+    serverDefs = {
       s1 = { agents = []; scopes = []; };
     };
     resolved = { s1 = { type = "stdio"; command = "/bin/test"; }; };
