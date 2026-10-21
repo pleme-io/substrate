@@ -331,6 +331,8 @@ jobs:
 
       - name: checks.flake-checks-gate (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.flake-checks-gate'
+      - name: checks.callable-path (lib/util)
+        run: nix build --no-link -L '.#checks.x86_64-linux.callable-path'
 
       - name: checks.devshell-preflight (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.devshell-preflight'
