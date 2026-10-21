@@ -411,6 +411,12 @@
           flake-checks-gate =
             (import ./lib/util/tests/flake-checks-gate-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          callable-path =
+            (import ./lib/util/tests/callable-path-test.nix {
+              inherit (nixpkgs) lib;
+              builders = self.lib.${system};
+            }).asCheck pkgs;
+
           # ── lib/duckdb.nix: tuned duckdb, settings carried by -init ────
           # Refusals at eval (unknown setting, '%' memory, unknown profile)
           # and the rendered profiles; `duckdb-wrapper` proves the wrapper
@@ -768,7 +774,16 @@
           goToolchain = goToolchainFor system;
           tataraScript = inputs.tatara-lisp.packages.${system}.tatara-script;
           docaPkg = self.packages.${system}.oci-push;
-        });
+        } // (let
+          callablePath = import ./lib/util/callable-path.nix;
+          perSystemPackage = shape: { src, pkgs ? null, name ? null, ... } @ args:
+            (self.rust.${shape} (builtins.removeAttrs args [ "pkgs" "name" ])).packages.${system}.default;
+        in {
+          rustToolReleaseFlakeBuilder =
+            callablePath.mk ./lib/build/rust/tool-release-flake.nix (perSystemPackage "tool");
+          rustWorkspaceReleaseFlakeBuilder =
+            callablePath.mk ./lib/build/rust/workspace-release-flake.nix (perSystemPackage "workspace");
+        }));
 
         # NOTE: Named `rustOverlays` (not `overlays`) because flake-parts reserves
         # `flake.overlays` for nixpkgs overlay functions (final: prev: { ... }).
