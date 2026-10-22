@@ -2,29 +2,14 @@
 #
 # Centralized configuration for CI/CD tokens and runtime tool paths.
 # Environment variables override defaults for security.
-{ pkgs }:
+{ pkgs, atticToken ? "", ghcrToken ? "" }:
 
 rec {
   # ============================================================================
   # CENTRALIZED TOKENS & SECRETS
   # ============================================================================
-  # Environment variables override defaults for security in CI/CD
-  # Set ATTIC_TOKEN and GHCR_TOKEN to override these defaults
-  #
-  # For CI/CD: Inject tokens via Kubernetes secrets or GitHub secrets
-  # For local dev: Uses defaults below (falling back if env vars not set)
-
-  # Returns "" when env var is not set (pure flake eval) — shell scripts do runtime file read.
-  # CI/CD: set ATTIC_TOKEN/GHCR_TOKEN before `nix run` to embed tokens in the built app.
-  defaultAtticToken = builtins.getEnv "ATTIC_TOKEN";
-
-  defaultGhcrToken = let
-    ghcrToken = builtins.getEnv "GHCR_TOKEN";
-    githubToken = builtins.getEnv "GITHUB_TOKEN";
-  in
-    if ghcrToken != ""
-    then ghcrToken
-    else githubToken;  # Returns "" if both unset — shell scripts handle runtime fallback
+  defaultAtticToken = atticToken;
+  defaultGhcrToken = ghcrToken;
 
   # ============================================================================
   # RUNTIME TOOLS CONFIGURATION

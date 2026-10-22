@@ -417,6 +417,14 @@
               builders = self.lib.${system};
             }).asCheck pkgs;
 
+          no-ambient-nixpkgs =
+            (import ./lib/util/tests/no-ambient-nixpkgs-test.nix {
+              inherit (nixpkgs) lib;
+              inherit system;
+              root = ./.;
+              exports = self;
+            }).asCheck pkgs;
+
           # ── lib/duckdb.nix: tuned duckdb, settings carried by -init ────
           # Refusals at eval (unknown setting, '%' memory, unknown profile)
           # and the rendered profiles; `duckdb-wrapper` proves the wrapper

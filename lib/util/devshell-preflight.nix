@@ -176,7 +176,7 @@ let
     devShells declared for ${system}: ${availableList}
 
     The overwhelmingly common cause is a stale substrate pin: a devenv-backed
-    devShell asserts on `builtins.getEnv "PWD"`, which is empty under a
+    devShell asserts on the PWD environment variable, which is empty under a
     non-interactive CI `nix develop`.
 
     ${levers}

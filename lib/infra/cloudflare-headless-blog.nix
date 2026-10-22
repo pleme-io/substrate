@@ -29,7 +29,7 @@
 #   - `substrate/lib/build/rust/cloudflare-worker-flake.nix` (builds the worker)
 #   - `substrate/lib/build/web/cloudflare-pages-deploy.nix` (pushes dist/)
 
-{ lib ? (import <nixpkgs> {}).lib }:
+{ lib }:
 
 rec {
   # Return the full Ruby body for `pangea/<name>.rb`.

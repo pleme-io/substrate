@@ -173,7 +173,7 @@ let
       patch set still applies. Copy the matching patch from the fleet nixpkgs
       anchor and add it to the table in this file:
 
-        <nixpkgs>/pkgs/development/compilers/go/go_no_vendor_checks-${mm}.patch
+        pkgs/development/compilers/go/go_no_vendor_checks-${mm}.patch
 
       Do not reuse an older variant on a hope.
     '');

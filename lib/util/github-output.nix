@@ -40,7 +40,7 @@
 # In a workflow the caller redirects and does nothing else:
 #
 #   nix eval --raw --impure --expr '…' >> "$GITHUB_OUTPUT"
-{ lib ? (import <nixpkgs> { }).lib }:
+{ lib }:
 let
   # A key must be a plain identifier. GitHub does not document a grammar, so
   # this is deliberately NARROWER than whatever the runner tolerates: every key

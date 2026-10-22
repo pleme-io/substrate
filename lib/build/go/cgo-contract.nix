@@ -81,8 +81,7 @@ let
         that claims to be static, which no later gate in this repo would catch.
 
         Re-measure against the resolved nixpkgs and extend this probe:
-          nix eval --impure --json --expr 'let p = import <nixpkgs> {}; in
-            builtins.attrNames p.buildGoModule'
+          nix eval --json nixpkgs#buildGoModule --apply builtins.attrNames
       '';
 
   # placeCgo :: contract -> int -> attrs

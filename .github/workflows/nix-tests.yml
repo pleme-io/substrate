@@ -62,72 +62,22 @@ on:
     branches:
       - main
     paths:
-      # lib/build/**  — was three named subtrees (estante, rust, go). Widened
-      #                 2026-07-28: lib/build/shared/*-test.nix loads
-      #                 `lib/build/<ecosystem>/quirk-apply.nix` across EVERY
-      #                 ecosystem, so a change under lib/build/python (or any
-      #                 future subtree) can break a watched suite. Naming
-      #                 subtrees one at a time reproduces the defect this
-      #                 workflow exists to fix: the next subtree added is
-      #                 unwatched by default. The wildcard fails the other
-      #                 way, which is the correct direction for a gate.
-      # lib/infra/**  — mutating-verbs, plus the eight infra eval suites.
-      # lib/util/**   — darwin-test.nix already ran below while nothing
-      #                 watched the tree it tests; the two gate suites and
-      #                 the eval-suites catalog live here too.
-      # lib/types/**  — 144 assertions (tests + assertion-tests + the two
-      # lib/kube/**   —  57 assertions   property suites); watched from
-      # lib/hm/**     —  65 assertions   2026-07-28, when they first ran.
-      # lib/iroha/**  — checks.iroha, and lib/kata/** checks.kata: both
-      # lib/kata/**     declared for months and built by no job until
-      #                 2026-07-28, so neither tree was watched either.
-      # skills/**     — checks.skill-map lints exactly these.
-      # flake.nix     — declares `checks.<system>.*`; dropping a check
-      #                 there is exactly the regression this gates.
-      - 'lib/build/**'
-      - 'lib/infra/**'
-      - 'lib/util/**'
-      - 'lib/types/**'
-      - 'lib/kube/**'
-      - 'lib/hm/**'
-      - 'lib/iroha/**'
-      - 'lib/kata/**'
-      - 'lib/ci/**'
+      - 'lib/**'
       - '.github/workflows/*.yml'
       - 'skills/**'
       - 'flake.nix'
-      - '.github/workflows/nix-tests.yml'
-      # lib/tests/** + lib/*.nix: checks.duckdb and checks.module-trio live
-      # there. CLAUDE.md: checks.claude-md-size reads it. Added 2026-09-29.
-      - 'lib/tests/**'
-      - 'lib/*.nix'
       - 'CLAUDE.md'
-      # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
       - 'tools/oci-push/**'
-      - 'lib/security/**'
   pull_request:
     branches:
       - main
     paths:
-      - 'lib/build/**'
-      - 'lib/infra/**'
-      - 'lib/util/**'
-      - 'lib/types/**'
-      - 'lib/kube/**'
-      - 'lib/hm/**'
-      - 'lib/iroha/**'
-      - 'lib/kata/**'
-      - 'lib/ci/**'
+      - 'lib/**'
       - '.github/workflows/*.yml'
       - 'skills/**'
       - 'flake.nix'
-      - '.github/workflows/nix-tests.yml'
-      - 'lib/tests/**'
-      - 'lib/*.nix'
       - 'CLAUDE.md'
-      # tools/oci-push/**: checks.helm-chart-repo builds doca (and its cargo tests).
       - 'tools/oci-push/**'
-      - 'lib/security/**'
   workflow_dispatch:
 
 jobs:
@@ -333,6 +283,8 @@ jobs:
         run: nix build --no-link -L '.#checks.x86_64-linux.flake-checks-gate'
       - name: checks.callable-path (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.callable-path'
+      - name: checks.no-ambient-nixpkgs (lib/util)
+        run: nix build --no-link -L '.#checks.x86_64-linux.no-ambient-nixpkgs'
 
       - name: checks.devshell-preflight (lib/util)
         run: nix build --no-link -L '.#checks.x86_64-linux.devshell-preflight'

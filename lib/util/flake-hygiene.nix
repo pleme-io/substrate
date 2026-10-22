@@ -11,7 +11,7 @@
 #   let hygiene = import ../util/flake-hygiene.nix { inherit lib; };
 #   in hygiene.assertSingleNixpkgs inputs // hygiene.assertStablePin inputs // ...
 #
-{ lib ? (import <nixpkgs> {}).lib }:
+{ lib }:
 
 let
   versions = import ./versions.nix;
