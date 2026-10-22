@@ -415,7 +415,9 @@ jobs:
         id: env
         run: >-
           nix eval --impure --raw --expr
-          'import (builtins.getFlake "github:pleme-io/substrate").testEnvPath {
+          'let substrate = builtins.getFlake "github:pleme-io/substrate"; in
+           import substrate.testEnvPath {
+             lib       = substrate.inputs.nixpkgs.lib;
              system    = builtins.currentSystem;
              devshell  = "${{ inputs.test-devshell }}";
              devShells = (builtins.getFlake (toString ./.)).devShells or {};

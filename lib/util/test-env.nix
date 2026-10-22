@@ -55,7 +55,7 @@
   devShells ? { },
   fallback ? "github:pleme-io/substrate",
   fallbackShell ? "release-gate",
-  lib ? (import <nixpkgs> { }).lib,
+  lib,
 }:
 let
   githubOutput = import ./github-output.nix { inherit lib; };
