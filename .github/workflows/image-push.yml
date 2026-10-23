@@ -738,7 +738,7 @@ jobs:
           # hermetic, which is what the comment above already claims this line
           # achieves. It also means a consumer's rust-toolchain.toml can no
           # longer reach out to the network from inside an image build.
-          nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#git --command nix run github:pleme-io/gen -- build .
+          nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#git --command nix run github:pleme-io/substrate#gen -- build .
           if ! git diff --exit-code Cargo.gen.lock; then
             echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
             exit 1

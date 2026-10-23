@@ -52,8 +52,8 @@ jobs:
     with:
       artifact: "Go.gen.lock"
       paths: "Go.gen.lock Go.build-spec.json"
-      detect: "nix run github:pleme-io/gen -- confirm"
-      repair: "nix run github:pleme-io/gen -- build . --commit"
-      regen: "nix run github:pleme-io/gen -- build ."
+      detect: "nix run github:pleme-io/substrate#gen -- confirm"
+      repair: "nix run github:pleme-io/substrate#gen -- build . --commit"
+      regen: "nix run github:pleme-io/substrate#gen -- build ."
       fix-hint: "gen build . && git commit Go.gen.lock Go.build-spec.json"
       toolchain: "nixpkgs#go"

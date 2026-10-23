@@ -63,7 +63,28 @@
           ((equal? rev "")
             (print-line (string-format "  {}  pin has no `rev` field" label))
             #f)
-          (else (check-rev label rev)))))))
+          (else
+            (let ((fresh (check-rev label rev))
+                  (versioned (check-version label rev (alist-get pin "version" ""))))
+              (and fresh versioned))))))))
+
+(define (cargo-version toml)
+  (let ((hits (filter (lambda (l) (string-starts-with? l "version = \""))
+                      (map string-trim (string-split toml "\n")))))
+    (cond
+      ((null? hits) "")
+      (else (string-replace (string-replace (first hits) "version = \"" "") "\"" "")))))
+
+(define (check-version label rev pinned)
+  (let* ((r (git-show rev "Cargo.toml"))
+         (actual (if (= (status-of r) 0) (cargo-version (stdout-of r)) "")))
+    (cond
+      ((equal? actual pinned)
+        (print-line (string-format "  {}  {} version {}" label rev actual))
+        #t)
+      (else
+        (print-line (string-format "  {}  {} version MISMATCH pin {} gen {}" label rev pinned actual))
+        #f))))
 
 (define (check-rev label rev)
   (let* ((gen-r (git-show rev "Cargo.gen.lock"))
@@ -103,8 +124,7 @@
 
 (define verdicts
   (list
-    (check-pin "go  " "lib/build/go/gen-pin.json")
-    (check-pin "rust" "lib/build/rust/gen-pin.json")))
+    (check-pin "gen" "lib/build/gen-pin.json")))
 
 (define bad (length (filter (lambda (v) (not v)) verdicts)))
 

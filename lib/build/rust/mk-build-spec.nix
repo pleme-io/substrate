@@ -145,7 +145,7 @@ let
     mkdir -p $out
     export CARGO_HOME=$PWD/.cargo
     export HOME=$PWD
-    gen build . ${targetArg} > /dev/null
+    gen build . --write-build-spec ${targetArg} > /dev/null
     if [ ! -f Cargo.build-spec.json ]; then
       echo "mkBuildSpec: gen build did not produce Cargo.build-spec.json" >&2
       exit 1

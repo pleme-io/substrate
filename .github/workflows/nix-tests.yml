@@ -210,7 +210,7 @@ jobs:
       # single consumer. That is the 35s-per-eval tax this exists to prevent.
       - name: INV-4 — the pinned gen must evaluate without building
         run: |
-          for f in lib/build/rust/gen-pin.json lib/build/go/gen-pin.json; do
+          for f in lib/build/gen-pin.json; do
             rev=$(nix eval --impure --raw --expr "(builtins.fromJSON (builtins.readFile ./$f)).rev")
             echo "::group::$f -> $rev"
             nix eval --option allow-import-from-derivation false \

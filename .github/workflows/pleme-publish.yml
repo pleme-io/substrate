@@ -64,8 +64,8 @@ jobs:
     with:
       artifact: "Cargo.gen.lock"
       paths: "Cargo.gen.lock"
-      detect: "nix run github:pleme-io/gen -- confirm"
-      repair: "nix run github:pleme-io/gen -- build . --commit"
-      regen: "nix run github:pleme-io/gen -- build ."
+      detect: "nix run github:pleme-io/substrate#gen -- confirm"
+      repair: "nix run github:pleme-io/substrate#gen -- build . --commit"
+      regen: "nix run github:pleme-io/substrate#gen -- build ."
       fix-hint: "gen build . && git commit Cargo.lock Cargo.gen.lock"
       toolchain: "nixpkgs#cargo nixpkgs#rustc"

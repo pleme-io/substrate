@@ -239,7 +239,7 @@ let
   # lock cycle is broken; `gen-pin.json` is the single source of truth).
   # The IFD pays a one-time cost per (gen rev × src state); subsequent
   # evals hit nix's drv cache.
-  genPin = fromJSON (readFile ./gen-pin.json);
+  genPin = fromJSON (readFile ../gen-pin.json);
   genRev = genPin.rev;
   ifdSystem = "x86_64-linux";  # Fixed: IFD-host-arbitrary; the spec is system-agnostic JSON.
   ifdHostPkgs = (import inputs.nixpkgs { system = ifdSystem; });

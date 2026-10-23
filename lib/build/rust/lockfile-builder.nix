@@ -397,11 +397,11 @@ let
       let
         # gen rev from substrate's `gen-pin.json` (NOT flake.lock — gen
         # is no longer a flake input, which broke the substrate↔gen lock
-        # cycle). `gen-pin.json` lives next to this file and is the single
+        # cycle). `lib/build/gen-pin.json` is the single
         # source of truth for the gen pin. This IFD-time `getFlake`
         # against the locked rev does NOT grow any lock. Kept current by
         # AUTO-RELEASE bumping the pin on every gen release.
-        genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+        genPin = builtins.fromJSON (builtins.readFile ../gen-pin.json);
         genRev = genPin.rev;
         pinned = import ../../util/pinned-flake.nix { };
         autoGenFlake = pinned.atRev { repo = "gen"; rev = genRev; };

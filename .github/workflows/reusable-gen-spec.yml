@@ -69,9 +69,9 @@ on:
         type: string
         default: 'app'
       gen-ref:
-        description: "gen flake ref to run (pin for reproducibility)."
+        description: "gen flake ref to run. The default is substrate's one gen pin (lib/build/gen-pin.json), the same gen every substrate build and the nix profile run."
         type: string
-        default: "github:pleme-io/gen"
+        default: "github:pleme-io/substrate#gen"
       runner:
         description: "Runner override. Empty uses the shared default (ubuntu-latest)."
         type: string

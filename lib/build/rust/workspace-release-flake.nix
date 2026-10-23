@@ -57,7 +57,7 @@ let
   # auto-fetched gen tracks the bump automatically. Caching is handled
   # by nix's flake-cache against the locked rev. This IFD-time
   # `getFlake` does NOT grow any lock.
-  genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+  genPin = builtins.fromJSON (builtins.readFile ../gen-pin.json);
   genRev = genPin.rev;
   effectiveGen =
     if gen != null then gen

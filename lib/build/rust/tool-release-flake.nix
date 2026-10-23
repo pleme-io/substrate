@@ -62,7 +62,7 @@ let
   # no longer a flake input, which broke the substrate↔gen lock cycle).
   # `gen-pin.json` is the single source of truth for the gen pin; the
   # IFD-time `getFlake` against the locked rev does NOT grow any lock.
-  genPin = builtins.fromJSON (builtins.readFile ./gen-pin.json);
+  genPin = builtins.fromJSON (builtins.readFile ../gen-pin.json);
   genRev = genPin.rev;
   effectiveGen =
     if gen != null then gen

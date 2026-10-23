@@ -1,97 +1,64 @@
-# gen-pin-gate.nix — every `lib/build/**/gen-pin.json` must be well-shaped, and
-# two pins at DIFFERENT revs may not carry the SAME hash.
-#
-# ── THE DEFECT THIS EXISTS TO CATCH, measured 2026-08-08 ────────────────
-#
-#   lib/build/go/gen-pin.json    rev e8feaecf…  sha256-Iu1fjgg1v+ZsIxrGX…
-#   lib/build/rust/gen-pin.json  rev bd36597c…  sha256-Iu1fjgg1v+ZsIxrGX…
-#
-# Two revs 13 days apart carrying a BYTE-IDENTICAL hash. That is impossible
-# for content-addressed source unless one of them is simply wrong, and one
-# was: measured with `nix flake prefetch`, `e8feaecf…` is really
-# `sha256-9dySUYlj9sZKHBDQ1nSsbeLttlHohbDTorhTax4NDHY=`. The Go pin had been
-# copied from the Rust pin with the rev edited and the hash left behind.
-#
-# Nothing caught it because nothing compared the two FILES. Each is
-# individually well-formed, and each is only exercised when its own ecosystem
-# takes the IFD path — which for Go is never (see build/go/lockfile-builder.nix).
-# So the wrong pin sat correct-looking and unused, and would have failed with
-# a hash mismatch the first time a Go IFD build ran.
-#
-# ── WHY CROSS-FILE, NOT PER-FILE ────────────────────────────────────────
-#
-# A per-file shape check passes both of the above. The information that
-# something is wrong exists ONLY in the relationship between the two files,
-# which is exactly the kind of invariant a hand-maintained set never holds.
-# `readDir` discovers the pins rather than a hand-list, so a third ecosystem's
-# pin is covered the day it lands, not the day someone remembers to add it.
-#
-# TIER: eval-rejected (a Nix `throw`). Not unrepresentable — nothing stops a
-# human writing a wrong hash — but the wrong hash cannot survive an eval.
 { lib }:
 let
-  buildDir = ../build;
+  root = ../..;
+  pinPath = "lib/build/gen-pin.json";
+  pinFile = root + "/${pinPath}";
+  workflowDir = root + "/.github/workflows";
 
-  # Discover, never hand-list.
+  pin = if builtins.pathExists pinFile then builtins.fromJSON (builtins.readFile pinFile) else null;
+
+  semver = v: builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" v != null;
+
+  shapeErrors =
+    if pin == null then [ "${pinPath}: missing — it is the one gen pin" ]
+    else
+      (lib.optional (!(pin ? rev)) "${pinPath}: missing `rev`")
+      ++ (lib.optional (!(pin ? sha256)) "${pinPath}: missing `sha256`")
+      ++ (lib.optional (!(pin ? version)) "${pinPath}: missing `version` (gen's Cargo.toml version at `rev`; `gen --version` is compared to it)")
+      ++ (lib.optional (pin ? rev && builtins.stringLength pin.rev != 40)
+            "${pinPath}: `rev` is not a 40-char commit sha (got ${toString (builtins.stringLength pin.rev)} chars)")
+      ++ (lib.optional (pin ? sha256 && !(lib.hasPrefix "sha256-" pin.sha256))
+            "${pinPath}: `sha256` is not SRI-shaped (must start `sha256-`)")
+      ++ (lib.optional (pin ? version && !(semver pin.version))
+            "${pinPath}: `version` is not x.y.z (got ${pin.version})");
+
   ecosystems = builtins.attrNames
-    (lib.filterAttrs (_: t: t == "directory") (builtins.readDir buildDir));
+    (lib.filterAttrs (_: t: t == "directory") (builtins.readDir (root + "/lib/build")));
 
-  pinsFound = builtins.filter (p: p != null) (map
-    (eco:
-      let f = buildDir + "/${eco}/gen-pin.json";
-      in if builtins.pathExists f
-         then { name = eco; path = "lib/build/${eco}/gen-pin.json"; value = builtins.fromJSON (builtins.readFile f); }
-         else null)
-    ecosystems);
+  strayPins = builtins.filter
+    (eco: builtins.pathExists (root + "/lib/build/${eco}/gen-pin.json"))
+    ecosystems;
 
-  # ── shape ────────────────────────────────────────────────────────────
-  shapeErrors = builtins.concatMap
-    (p:
-      let v = p.value; in
-      (lib.optional (!(v ? rev)) "${p.path}: missing `rev`")
-      ++ (lib.optional (!(v ? sha256)) "${p.path}: missing `sha256`")
-      ++ (lib.optional (v ? rev && builtins.stringLength v.rev != 40)
-            "${p.path}: `rev` is not a 40-char commit sha (got ${toString (builtins.stringLength v.rev)} chars) — an abbreviated rev is not reproducible")
-      ++ (lib.optional (v ? sha256 && !(lib.hasPrefix "sha256-" v.sha256))
-            "${p.path}: `sha256` is not SRI-shaped (must start `sha256-`)"))
-    pinsFound;
+  strayErrors = map
+    (eco: "lib/build/${eco}/gen-pin.json: a second gen pin. Delete it; ${pinPath} is the only one")
+    strayPins;
 
-  # ── cross-file distinctness: the half that caught the real defect ────
-  byHash = lib.groupBy (p: p.value.sha256 or "<none>") pinsFound;
+  workflows = builtins.attrNames
+    (lib.filterAttrs (n: t: t == "regular" && (lib.hasSuffix ".yml" n || lib.hasSuffix ".yaml" n))
+      (if builtins.pathExists workflowDir then builtins.readDir workflowDir else { }));
 
-  collisions = lib.filterAttrs
-    (_: group:
-      builtins.length group > 1
-      && builtins.length (lib.unique (map (p: p.value.rev or "<none>") group)) > 1)
-    byHash;
+  unpinned = name:
+    let
+      lines = lib.splitString "\n" (builtins.readFile (workflowDir + "/${name}"));
+      code = builtins.filter (l: !(lib.hasPrefix "#" (lib.trim l))) lines;
+    in
+    builtins.any (l: builtins.match ".*github:pleme-io/gen([^-a-zA-Z0-9_/].*)?" l != null) code;
 
-  collisionErrors = lib.mapAttrsToList
-    (hash: group: ''
-      the same hash is recorded for DIFFERENT revs — at most one can be right:
-            hash = ${hash}
-      ${builtins.concatStringsSep "\n" (map (p: "        ${p.path}  rev ${builtins.substring 0 12 (p.value.rev or "?")}") group)}
-          Measure the truth, do not guess which one to keep:
-            nix flake prefetch --json github:pleme-io/gen/<rev> | jq -r .hash'')
-    collisions;
+  workflowErrors = map
+    (name: ".github/workflows/${name}: runs `github:pleme-io/gen` (gen main). Run `github:pleme-io/substrate#gen`, the pin")
+    (builtins.filter unpinned workflows);
 
-  errors = shapeErrors ++ collisionErrors;
+  errors = shapeErrors ++ strayErrors ++ workflowErrors;
 in
 if errors != [ ] then
   throw ''
-    gen-pin-gate: ${toString (builtins.length errors)} problem(s) across ${toString (builtins.length pinsFound)} gen pin(s).
+    gen-pin-gate: ${toString (builtins.length errors)} problem(s).
 
-    ${builtins.concatStringsSep "\n\n    " errors}
+    ${builtins.concatStringsSep "\n    " errors}
 
-    A gen pin names the exact gen revision an ecosystem's IFD path fetches.
-    A wrong hash is not caught by anything else: each file is individually
-    well-formed, and a pin is only exercised when its own ecosystem takes the
-    IFD path — so a wrong one sits correct-looking until the first build that
-    needs it.
+    Bump gen by editing ${pinPath} only:
+      nix flake prefetch --json github:pleme-io/gen/<rev>   # -> sha256
+      git -C <gen> show <rev>:Cargo.toml                     # -> version
   ''
 else
-  # Report shape shared with every other eval suite: `{ total; passed; }`, so
-  # eval-suites.nix's `fromPassedTotal` reads it and its assertion floor
-  # applies. One "assertion" per pin checked — a floor of 2 means a future
-  # change that stops discovering a pin goes RED rather than trivially green,
-  # which is the non-vacuity property that matters for a readDir-driven check.
-  { total = builtins.length pinsFound; passed = builtins.length pinsFound; }
+  { total = 1 + builtins.length ecosystems + builtins.length workflows; passed = 1 + builtins.length ecosystems + builtins.length workflows; }

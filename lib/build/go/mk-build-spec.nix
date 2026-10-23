@@ -61,7 +61,7 @@ let
     else
       let
         pinned = import ../../util/pinned-flake.nix { };
-        autoGenFlake = pinned.fromPin { repo = "gen"; pinFile = ./gen-pin.json; };
+        autoGenFlake = pinned.fromPin { repo = "gen"; pinFile = ../gen-pin.json; };
       in
         pinned.hostTool autoGenFlake hostPkgs.stdenv.hostPlatform.system;
 

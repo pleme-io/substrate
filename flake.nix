@@ -52,7 +52,7 @@
     # +128 lines per lock update; the lock had bloated past 2600 nodes).
     #
     # Instead, gen is built FROM A PINNED SOURCE
-    # (`lib/build/rust/gen-pin.json` — rev + sha256) using substrate's
+    # (`lib/build/gen-pin.json` — rev + sha256) using substrate's
     # OWN tool-builder (`self.mkRustToolFlake`). No `inputs.gen` ⇒ no
     # cycle ⇒ the lock collapses to a small, stable size. Bumping gen is
     # a 2-line edit to `gen-pin.json` (rev + sha256) — NO lock growth.
@@ -126,7 +126,7 @@
     #
     # `gen-pin.json` (rev + sha256) is the single source of truth for
     # the gen pin — bump = edit those two fields, NO lock growth.
-    genPin = builtins.fromJSON (builtins.readFile ./lib/build/rust/gen-pin.json);
+    genPin = builtins.fromJSON (builtins.readFile ./lib/build/gen-pin.json);
     # FOD fetch — system-independent (content-addressed by sha256), so a
     # single fetch serves every system.
     genSrc = (import nixpkgs { system = builtins.head systems; }).fetchFromGitHub {
@@ -163,7 +163,7 @@
       src = genSrc;
       member = "gen-cli";
     };
-    genFor = system: genFlake.packages.${system}.default;
+    genFor = system: (import ./lib/util/pinned-flake.nix { }).hostTool genFlake system;
 
     # ── the fleet Go compiler, built from SUBSTRATE's nixpkgs ──────────────
     #
@@ -190,6 +190,8 @@
         # Self-test surface: checks.<system>.iroha (every letter's suite).
         iroha = import ./lib/iroha { lib = nixpkgs.lib; };
         irohaPath = ./lib/iroha;
+
+        inherit genPin;
 
         # kata (型) — the fleet-standard layer above iroha: typed fleet
         # blanks (fleet-config), registries (domains/users), one-call

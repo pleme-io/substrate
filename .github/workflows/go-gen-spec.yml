@@ -45,9 +45,9 @@ on:
   workflow_call:
     inputs:
       gen-ref:
-        description: "gen flake ref to run (pin for reproducibility)."
+        description: "gen flake ref to run. The default is substrate's one gen pin (lib/build/gen-pin.json)."
         type: string
-        default: "github:pleme-io/gen"
+        default: "github:pleme-io/substrate#gen"
       runner:
         description: "Runner override; empty uses the shared default."
         type: string

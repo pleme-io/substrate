@@ -253,13 +253,8 @@ let
     # bare `or` defaults. Four of the 24 cases read ONE field without deepSeq,
     # because Nix is lazy and a check that is never forced is dead in
     # production while a deepSeq-ing suite reports it green.
-    # Cross-file distinctness over every lib/build/**/gen-pin.json, discovered
-    # by readDir rather than hand-listed. Caught a real defect on 2026-08-08:
-    # go/ and rust/ recorded the SAME sha256 for revs 13 days apart, and the
-    # Go one was wrong (measured e8feaecf -> sha256-9dySUYl…, not the recorded
-    # sha256-Iu1fjgg…). Nothing else compared the two FILES, and a pin is only
-    # exercised when its own ecosystem takes the IFD path — which for Go is
-    # never — so it sat correct-looking and unused.
+    # One gen pin (lib/build/gen-pin.json), no second pin under lib/build/,
+    # and no workflow running gen main.
     "util/gen-pin" = {
       min = 2;
       verdict = fromPassedTotal (import ../util/gen-pin-gate.nix { inherit lib; });
