@@ -717,7 +717,7 @@ in {
     # SDLC-tool variant: built against host's regular nixpkgs (no
     # pkgsStatic). Consumed by substrate's gen-IFD wire and by any
     # other "I just need this binary to run on this system" use case.
-    host-tool = hostToolBinary;
+    host-tool = withMainProgram hostToolBinary;
     # Unwrapped variant for substrate-internal consumers that need
     # the raw rust-crate output (e.g. nix-bundle, source attribution,
     # debugging). Reaches the same store path the binary would have

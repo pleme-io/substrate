@@ -2,7 +2,7 @@
   "schema_version": 2,
   "cargo_lock_sha256": "594a013d812a56a86db0f0eb6cac389a252757bdc4c90da811d51a77e10e3850",
   "manifest_sha256": {
-    "Cargo.toml": "a63aa61bdcf71b131e9d2d5bb20d58d50e87e07dbae84bda9e5b0791a249b1d8"
+    "Cargo.toml": "06b8c9c2c1b2383d1dc672c41a06606e9f0b8b7131b4a3589e14e0616b64a3d8"
   },
   "target_resolves": {
     "base": {
@@ -38,7 +38,7 @@
       "edition": "2021",
       "binaries": [
         {
-          "name": "service-image-fixture",
+          "name": "svc-fixture",
           "path": "src/main.rs"
         }
       ]

@@ -5,7 +5,7 @@ edition = "2021"
 repository = "https://github.com/pleme-io/service-image-fixture"
 
 [[bin]]
-name = "service-image-fixture"
+name = "svc-fixture"
 path = "src/main.rs"
 
 [dependencies]

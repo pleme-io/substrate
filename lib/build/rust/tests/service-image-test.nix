@@ -48,6 +48,10 @@ let
       (throws (builtins.attrNames (rust.service { inherit src; architectures = [ "riscv64" ]; }).packages.x86_64-linux))
       "an unknown image architecture must fail at eval")
 
+    (testHelpers.mkTest "host-tool-names-its-main-program"
+      ((tool.packages.x86_64-linux.host-tool.meta.mainProgram or null) == "svc-fixture")
+      "packages.host-tool must carry meta.mainProgram, or `nix run` execs bin/<pname> (substrate#gen ran bin/gen-cli)")
+
     (testHelpers.mkTest "tool-shape-emits-no-image"
       (!(has tool "x86_64-linux" "dockerImage-amd64"))
       "only the service shape emits images")
