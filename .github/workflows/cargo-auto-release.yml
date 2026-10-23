@@ -26,6 +26,14 @@ name: cargo-auto-release
 on:
   workflow_call:
     inputs:
+      use-bot-pat:
+        description: >-
+          Use the BOT_PAT secret for checkout, push and private git
+          dependencies. Set false for a repo whose whole dependency closure is
+          public, so the job runs on GITHUB_TOKEN alone.
+        type: boolean
+        required: false
+        default: true
       bump-type:
         type: string
         required: false
@@ -182,7 +190,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so
       # a build that reads a sibling PRIVATE pleme-io repo (≈20 of them
@@ -192,7 +200,7 @@ jobs:
       # the checkout-extraheader unset that makes the rewrite take effect.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: bump
@@ -230,7 +238,7 @@ jobs:
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
           # The three lockfiles a bump touches are all GENERATED. `gen-spec`
@@ -259,13 +267,13 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # Same reason as the bump job: `cargo publish` verifies the package by
       # BUILDING it, which resolves every git dependency.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/cargo-publish-crate@main
@@ -378,14 +386,14 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
 
       # Same reason as bump and ship: cargo resolves every git dependency
       # while packaging, and ~20 sibling pleme-io repos went private
       # 2026-07-23.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Idempotent by contract: already-on-registry is an explicit green
