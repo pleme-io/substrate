@@ -64,6 +64,8 @@
   devShellTargets ? [],
   devShellHook ? "",
   variants ? {},
+  architectures ? null,
+  image ? {},
 }:
 let
   inherit (builtins) fromJSON readFile pathExists length;
@@ -371,4 +373,6 @@ in toolFlake (
   // (if devShellTargets != [ ] then { inherit devShellTargets; } else {})
   // (if devShellHook != "" then { inherit devShellHook; } else {})
   // (if variants != { } then { inherit variants; } else {})
+  // (if architectures != null then { inherit architectures; } else {})
+  // (if image != { } then { inherit image; } else {})
 )

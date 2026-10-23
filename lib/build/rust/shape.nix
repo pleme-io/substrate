@@ -139,6 +139,8 @@ rec {
   # pass-through.
   known = [ "tool" "workspace" "library" "service" "binary" ];
 
+  imageShapes = [ "service" ];
+
   # Validate a caller's `shape`, returning it unchanged or throwing.
   # `who` is the builder/consumer name, used only in the message.
   normalize = who: shape:
@@ -170,6 +172,7 @@ rec {
       requested = s;
       builder = currentBuilder;
       selectsBuilder = false;
+      emitsImages = builtins.elem s imageShapes;
       # Identity handed to test-check.nix, so its diagnostics name the shape.
       who = "rust-release[shape=${s}]/${who}";
     };

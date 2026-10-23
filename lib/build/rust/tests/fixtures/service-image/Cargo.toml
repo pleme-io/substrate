@@ -1,0 +1,11 @@
+[package]
+name = "service-image-fixture"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/pleme-io/service-image-fixture"
+
+[[bin]]
+name = "service-image-fixture"
+path = "src/main.rs"
+
+[dependencies]

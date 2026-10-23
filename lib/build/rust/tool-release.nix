@@ -256,6 +256,8 @@ in {
   # target. Defaults to [], which builds the shell exactly as before.
   devShellTargets ? [],
   variants ? {},
+  architectures ? [ "amd64" "arm64" ],
+  image ? {},
   ...
 }:
 let
@@ -534,6 +536,13 @@ let
   shapeSpec = import ./shape.nix { inherit (hostPkgs) lib; };
   resolvedShape = shapeSpec.resolve toolName shape;
 
+  serviceImages =
+    if !resolvedShape.emitsImages then {}
+    else import ./service-image.nix { inherit nixpkgs; } {
+      inherit toolName repo linuxAbi architectures image;
+      binaries = builtins.mapAttrs (_: withMainProgram) binaries;
+    };
+
   releaseHelpers = import ../../util/release-helpers.nix;
 
   releaseApp = releaseHelpers.mkReleaseApp {
@@ -702,7 +711,7 @@ in {
       name = "${toolName}-${variantName}";
       value = withMainProgram variantBinaries.${variantName};
     }) (builtins.attrNames variants)
-  ) // {
+  ) // serviceImages // {
     default = withMainProgram wrappedNativeBinary;
     ${toolName} = withMainProgram wrappedNativeBinary;
     # SDLC-tool variant: built against host's regular nixpkgs (no

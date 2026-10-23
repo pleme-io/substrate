@@ -488,6 +488,11 @@
           # the closed set and the `callShape` sites drifting apart.
           rust-shape =
             (import ./lib/build/rust/tests/shape-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          rust-service-image =
+            (import ./lib/build/rust/tests/service-image-test.nix {
+              inherit (nixpkgs) lib;
+              inherit (self) rust;
+            }).asCheck pkgs;
           rust-determinism-flags =
             (import ./lib/build/rust/tests/determinism-flags-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
           # The build-script receipt (`<crate>.opt`) must not carry the build
