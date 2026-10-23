@@ -29,7 +29,28 @@ rec {
       index,
       parser ? "package-lock.json",
       osvScanner ? pkgs.osv-scanner,
+      accepted ? [ ],
     }:
+    let
+      wellFormed =
+        a:
+        builtins.isString (a.id or null)
+        && builtins.isString (a.why or null)
+        && a.why != ""
+        && builtins.match "[0-9]{4}-[0-9]{2}-[0-9]{2}" (a.until or "") != null;
+      malformed = builtins.filter (a: !(wellFormed a)) accepted;
+      config = pkgs.writeText "osv-scanner-${name}.toml" (
+        lib.concatMapStrings (a: ''
+          [[IgnoredVulns]]
+          id = ${builtins.toJSON a.id}
+          ignoreUntil = ${a.until}T00:00:00Z
+          reason = ${builtins.toJSON a.why}
+        '') accepted
+      );
+      configArg = lib.optionalString (accepted != [ ]) "--config ${config}";
+    in
+    assert lib.assertMsg (malformed == [ ])
+      "lockfile-gate-${name}: every accepted advisory needs id, a non-empty why and until = \"YYYY-MM-DD\"; refused: ${builtins.toJSON malformed}";
     pkgs.runCommand "lockfile-gate-${name}"
       {
         nativeBuildInputs = [ osvScanner ];
@@ -37,7 +58,7 @@ rec {
       }
       ''
         export HOME="$TMPDIR"
-        osv-scanner scan source --offline --lockfile "${parser}:${lockfile}"
+        osv-scanner scan source --offline ${configArg} --lockfile "${parser}:${lockfile}"
         touch "$out"
       '';
 
