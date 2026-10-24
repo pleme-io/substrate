@@ -17,6 +17,7 @@
   crate2nix,
   flake-utils,
   fenix ? null,
+  fenixFromSubstrate ? false,
   devenv ? null,
   forge ? null,
   # gen powers substrate's IFD spec-regen path. Consumers can pass
@@ -67,7 +68,10 @@ let
     rustWorkspace = import ./workspace-release.nix {
       inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
-      fenix = if fenix != null then fenix else null;
+      fenix = import ./fenix-resolve.nix {
+        inherit fenix fenixFromSubstrate;
+        src = args.src or null;
+      };
       forge = if forge != null then forge.packages.${system}.default else null;
       gen = effectiveGen.packages.${system}.host-tool or effectiveGen.packages.${system}.default;
     };

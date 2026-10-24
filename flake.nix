@@ -532,6 +532,9 @@
           rust-host-tree-closure =
             (import ./lib/build/rust/tests/host-tree-closure-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          rust-fenix-resolve =
+            (import ./lib/build/rust/tests/fenix-resolve-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── INV-4 ("No Import-from-Derivation") — the CHECKER ───────────
           # `docs/cia/cache-theory.md` §INV-4 declared the invariant, named a
           # checker `ifd_avoidance`, and marked it manual-fix. That checker did

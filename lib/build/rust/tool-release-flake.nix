@@ -29,6 +29,7 @@
   crate2nix,
   flake-utils,
   fenix ? null,
+  fenixFromSubstrate ? false,
   devenv ? null,
   forge ? null,
   # Substrate-bound gen flake input. When supplied, the consumer's
@@ -72,7 +73,10 @@ let
     rustTool = import ./tool-release.nix {
       inherit system nixpkgs devenv;
       crate2nix = crate2nix.packages.${system}.default;
-      fenix = if fenix != null then fenix else null;
+      fenix = import ./fenix-resolve.nix {
+        inherit fenix fenixFromSubstrate;
+        src = args.src or null;
+      };
       forge = if forge != null then forge.packages.${system}.default else null;
       # gen is wired in AS A BUILD TOOL for the IFD auto-regen path.
       # Prefer the `host-tool` output (native dynamic, no pkgsStatic)

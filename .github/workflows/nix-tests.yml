@@ -408,6 +408,9 @@ jobs:
       - name: checks.rust-host-tree-closure (lib/build/rust)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-host-tree-closure'
 
+      - name: checks.rust-fenix-resolve (lib/build/rust)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-fenix-resolve'
+
       - name: checks.claude-md-gate (lib/util — the size gate's own suite)
         run: nix build --no-link -L '.#checks.x86_64-linux.claude-md-gate'
 
