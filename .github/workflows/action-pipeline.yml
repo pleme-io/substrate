@@ -61,11 +61,20 @@ on:
         required: false
         type: string
         default: ""
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
 
 jobs:
   pipeline:
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - name: Checkout the consumer repo
         uses: actions/checkout@v4
 
@@ -80,7 +89,7 @@ jobs:
       # the clone a plain URL.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # The actions repo is fetched as DATA into RUNNER_TEMP — deliberately

@@ -223,12 +223,16 @@ on:
         description: "Judge Go binaries' findings by symbol reachability: govulncheck in binary mode reads each flagged Go binary in the image, and a trivy match govulncheck reports as not affected (the vulnerable symbols are not linked) is dropped. Any govulncheck error fails the gate. Only consulted when scanBeforePush is true."
         type: boolean
         default: false
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
-        description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
       GHCR_TOKEN:
-        description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
+        description: "Optional dedicated registry token. registry-login prefers the opt-in PAT (token-source pat), then this, then GITHUB_TOKEN."
         required: false
       ECR_TOKEN:
         description: >-
@@ -289,6 +293,11 @@ jobs:
       # env export is not sufficient on its own.
       ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       # BEFORE the checkout and everything expensive after it: refuse a publish
       # that would bill the org's ONE shared storage allowance. This file
       # already treats repository visibility as load-bearing -- resolve-runner's
@@ -348,7 +357,7 @@ jobs:
       # across the fleet with a private git dependency is covered, not just
       # this one consumer.
       #
-      # Same BOT_PAT > GHCR_TOKEN precedence this file already uses for
+      # Same github-token > GHCR_TOKEN precedence this file already uses for
       # registry auth (see registry-login below) -- pangea-operator's own
       # caller only forwards its token as GHCR_TOKEN, never under the name
       # BOT_PAT, so preferring BOT_PAT alone would silently no-op for
@@ -439,7 +448,7 @@ jobs:
       # needs this credential for by this point in the job.
       - name: Configure git credentials for private git dependencies (cargo, gen)
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
         run: |
           git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --unset-all http.https://github.com/.extraheader || true
@@ -462,7 +471,7 @@ jobs:
       # Cargo.gen.lock freshness check below already uses).
       - name: Diagnose private git-dependency credential (fast pre-flight)
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
         run: |
           set -uo pipefail
 
@@ -484,7 +493,7 @@ jobs:
           sed 's/^/  - /' /tmp/private_dep_urls.txt
 
           if [ -z "${GIT_AUTH_TOKEN}" ]; then
-            echo "::warning::GIT_AUTH_TOKEN is EMPTY -- both secrets.BOT_PAT and secrets.GHCR_TOKEN resolved unset in this job's context. Any PRIVATE repo among the deps above will fail to clone. Two known causes, root-caused live 2026-07-23 (see pangea-operator's incident): (1) the caller workflow uses an explicit 'secrets:' mapping (not 'secrets: inherit') that forgot to map BOT_PAT/GHCR_TOKEN through -- check the caller's job; (2) THE MORE LIKELY CAUSE if the caller DOES map it correctly: pleme-io is a GitHub FREE-plan org, and GitHub Free-tier orgs do NOT deliver org-level Actions secrets to PRIVATE repos at all (only to public ones) -- the org secret's 'visibility: all' setting is a silent no-op for a private repo on Free. Fix: set a REPO-LEVEL secret of the same name directly on the consuming repo (e.g. 'gh secret set BOT_PAT --repo <owner>/<repo> < ~/.config/github/classic') -- a repo-level secret always reaches its own repo's workflows regardless of org plan tier, and takes precedence over an org-level secret of the same name."
+            echo "::warning::GIT_AUTH_TOKEN is EMPTY -- the github-token step presented no token (no host-minted App token on this runner, token-source=${{ inputs.token-source }}) and secrets.GHCR_TOKEN is unset. Any PRIVATE repo among the deps above will fail to clone. A private repo builds on the self-hosted pool, whose host mints the App token; a hosted runner has none."
           else
             echo "GIT_AUTH_TOKEN is non-empty (${#GIT_AUTH_TOKEN} chars)."
           fi
@@ -509,13 +518,13 @@ jobs:
               case "$api_status" in
                 401)
                   if [ -z "${GIT_AUTH_TOKEN}" ]; then
-                    echo "::error::DIAGNOSIS: GIT_AUTH_TOKEN is EMPTY (see the warning above for the two known causes -- on pleme-io specifically, the GitHub FREE-plan org-secret-to-private-repo restriction is the likely one; set a repo-level secret)."
+                    echo "::error::DIAGNOSIS: GIT_AUTH_TOKEN is EMPTY (see the warning above: no host-minted App token on this runner and no GHCR_TOKEN)."
                   else
                     echo "::error::DIAGNOSIS: GitHub API returned 401 for ${repo_path} with a NON-EMPTY token -- the token value itself is invalid, expired, or malformed (NOT a scope/permission issue -- a valid-but-underscoped token would 404, not 401). Rotate/regenerate the credential."
                   fi
                   ;;
                 404)
-                  echo "::error::DIAGNOSIS: GitHub API returned 404 for ${repo_path} -- the token authenticates but cannot see this specific repo. If BOT_PAT is a FINE-GRAINED PAT, add ${repo_path} to its repository access allowlist: GitHub -> Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens -> BOT_PAT -> Repository access."
+                  echo "::error::DIAGNOSIS: GitHub API returned 404 for ${repo_path} -- the token authenticates but cannot see this specific repo. An App token sees only the repos its installation covers; a fine-grained PAT (token-source=pat) only the repos on its allowlist."
                   ;;
                 200)
                   echo "::error::DIAGNOSIS: GitHub API sees ${repo_path} fine (200) but git ls-remote still failed -- inconsistent with a simple credential problem; the token may lack git-clone-specific permissions (fine-grained PATs need explicit 'Contents: Read' repository permission, distinct from general API read access) or something else is wrong. Investigate manually."
@@ -561,7 +570,7 @@ jobs:
       # coexist in the single file nix.conf's netrc-file can point at.
       - name: Prepare Nix netrc for private git fetches
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
           EXTRA_NETRC: ${{ inputs.netrcFile }}
         run: |
           netrc_path="${RUNNER_TEMP}/nix-git-netrc"
@@ -579,7 +588,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           # pleme-io's default build pattern is IFD-self-derive: gen-based
           # crates (tatara-lisp and friends) generate their Cargo build spec
           # via an Import-From-Derivation marked `__noChroot`. The strict
@@ -655,7 +664,7 @@ jobs:
             #
             # Same shape as the fleet nix config's access-tokens, which is
             # generated from one typed source for exactly this reason.
-            access-tokens = github.com/pleme-io=${{ secrets.BOT_PAT || secrets.GHCR_TOKEN }}
+            access-tokens = github.com/pleme-io=${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
             netrc-file = ${{ env.NIX_GIT_NETRC_PATH }}
             ${{ secrets.ECR_TOKEN && 'extra-experimental-features = configurable-impure-env' || '' }}
             ${{ secrets.ECR_TOKEN && format('impure-env = ECR_TOKEN={0}', secrets.ECR_TOKEN) || '' }}
@@ -818,7 +827,7 @@ jobs:
           ignore-file: ${{ inputs.scanIgnoreFile }}
           go-reachability: ${{ inputs.scanGoReachability }}
 
-      # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
+      # Token-resolution overlay: PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: docker → ~/.docker/config.json,
       # which the doca push step below reads the resolved token back out of).
       - name: Login to registry
@@ -827,7 +836,7 @@ jobs:
           registry: ${{ inputs.registry }}
           client: docker
           username: ${{ github.actor }}
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -856,7 +865,7 @@ jobs:
         run: |
           set -euo pipefail
           # The registry-login step above already resolved the ONE typed
-          # credential precedence (BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN, owned
+          # credential precedence (PAT > GHCR_TOKEN > GITHUB_TOKEN, owned
           # by registry-login/run.tlisp) and docker-login'd it into
           # ~/.docker/config.json. doca's native backend takes an explicit
           # --dest-pass (it doesn't read a docker config file), so read the

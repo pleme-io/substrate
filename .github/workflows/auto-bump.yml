@@ -34,10 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     if: github.actor != 'github-actions[bot]'
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Compute the next tag from content changes
         id: next
@@ -62,5 +67,5 @@ jobs:
         if: steps.next.outputs.skip == 'false'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           push-tags: "true"

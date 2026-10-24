@@ -57,8 +57,13 @@ on:
         type: string
         required: false
         default: ""
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing. The ghcr push takes BOT_PAT only under pat, else GITHUB_TOKEN: the App token carries no packages permission.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
 
 permissions:
@@ -73,10 +78,15 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - id: bump
         uses: pleme-io/actions/helm-bump@main
@@ -94,7 +104,7 @@ jobs:
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
 
@@ -103,11 +113,16 @@ jobs:
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     if: needs.bump.outputs.bumped == 'true'
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/helm-publish@main
         with:
@@ -115,7 +130,7 @@ jobs:
           chart-path: ${{ inputs.chart-path }}
         env:
           # ghcr.io accepts GITHUB_TOKEN as the OCI registry password
-          GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ steps.token.outputs.pat || secrets.GITHUB_TOKEN }}
 
       # ── VERIFY THE ARTIFACT, NEVER THE EXIT CODE ──────────────────────────
       #
@@ -141,7 +156,7 @@ jobs:
       - name: verify the published chart is resolvable
         shell: bash
         env:
-          GHCR_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          GHCR_TOKEN: ${{ steps.token.outputs.pat || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # Read the SAME Chart.yaml the bump and publish steps operated on.

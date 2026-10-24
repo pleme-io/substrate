@@ -78,9 +78,9 @@
 #   it needs a step-level oracle or a test of the `changes` script itself.
 #
 #   THE DISPATCH-OR-NOT AXIS IS UNASSERTABLE HERE. The final step is gated on
-#   `steps.changes.outputs.skip == 'false' && env.HAS_BOT_PAT != 'true'`, where
-#   HAS_BOT_PAT is derived from `secrets.BOT_PAT != ''`. That is a genuine
-#   do-it/don't-do-it decision (with a PAT the tag push already triggered
+#   `steps.changes.outputs.skip == 'false' && steps.token.outputs.token == ''`,
+#   where the token is the github-token step's App or PAT. That is a genuine
+#   do-it/don't-do-it decision (with that token the tag push already triggered
 #   release.yml, so dispatching again would duplicate the release), but it is
 #   step-level AND secret-derived. Modelling it with a context key would read
 #   as coverage and be none.

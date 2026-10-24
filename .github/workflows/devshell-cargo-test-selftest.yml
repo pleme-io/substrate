@@ -116,12 +116,17 @@ jobs:
     name: supported devShell -> cargo reports tests executed
     runs-on: ubuntu-24.04
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # `cargo test` exits 0 on a suite that ran ZERO tests, so the exit
       # code is not evidence of execution. Grep cargo's own summary line
@@ -141,12 +146,17 @@ jobs:
     name: broken devShell -> preflight refuses (deliberate break)
     runs-on: ubuntu-24.04
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Mirrors the `Preflight` step in nix-devshell-cargo-test.yml, pointed
       # at a devShell this flake does not declare. Asserts three things, all

@@ -115,12 +115,16 @@ on:
         description: "Runner label for the lightweight `discover` job specifically (distinct from `runner`, which is the JSON array of labels for the build-matrix cells). Empty = route by CALLER repo visibility — private repos → vars.PRIVATE_BUILDER_RUNNER, public repos → ubuntu-latest — via github.event.repository.private, never an org-level Actions variable (pleme-io's GitHub Free org plan doesn't share org vars/secrets into private repos' workflow context)."
         type: string
         default: ""
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       GHCR_TOKEN:
         description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
         required: false
       BOT_PAT:
-        description: "Cross-repo-scoped PAT for the Nix installer's GitHub API calls (needed when a flake input is a private pleme-io repo). Falls back to GITHUB_TOKEN."
+        description: "Long-lived PAT for the Nix installer's GitHub API calls, presented only when token-source is pat."
         required: false
 
 permissions:
@@ -139,10 +143,15 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       - id: matrix
         uses: pleme-io/actions/build-matrix@main
         with:

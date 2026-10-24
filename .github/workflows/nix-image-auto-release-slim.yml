@@ -177,12 +177,16 @@ on:
         description: "Flake package attr producing the image's `pkgs.closureInfo` output dir (a `store-paths` file), the cartorio SBOM source (e.g. 'vectorClosureInfo'). `nix build .#<attr>` here is a local cache hit off the just-built image closure. Required when cartorio-attest is true."
         type: string
         default: ""
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
-        description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
       GHCR_TOKEN:
-        description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
+        description: "Optional dedicated registry token. registry-login prefers the opt-in PAT (token-source pat), then this, then GITHUB_TOKEN."
         required: false
       ECR_TOKEN:
         description: >-
@@ -253,6 +257,11 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       - name: Free disk space (hosted runners only)
@@ -266,12 +275,12 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           determinate: false
           extra-conf: |
             sandbox = relaxed
-            ${{ (secrets.ECR_TOKEN || secrets.BOT_PAT) && 'extra-experimental-features = configurable-impure-env' || '' }}
-            ${{ (secrets.ECR_TOKEN || secrets.BOT_PAT) && format('impure-env = {0}{1}', secrets.ECR_TOKEN && format('ECR_TOKEN={0} ', secrets.ECR_TOKEN) || '', secrets.BOT_PAT && format('GH_TOKEN={0}', secrets.BOT_PAT) || '') || '' }}
+            ${{ (secrets.ECR_TOKEN || steps.token.outputs.token) && 'extra-experimental-features = configurable-impure-env' || '' }}
+            ${{ (secrets.ECR_TOKEN || steps.token.outputs.token) && format('impure-env = {0}{1}', secrets.ECR_TOKEN && format('ECR_TOKEN={0} ', secrets.ECR_TOKEN) || '', steps.token.outputs.token && format('GH_TOKEN={0}', steps.token.outputs.token) || '') || '' }}
             ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
             ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
             ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
@@ -374,7 +383,7 @@ jobs:
           registry: ${{ inputs.registry-host }}
           client: docker
           username: ${{ github.actor }}
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 

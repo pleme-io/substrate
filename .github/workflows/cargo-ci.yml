@@ -169,6 +169,10 @@ on:
         required: false
         type: string
         default: ""
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
 
 jobs:
   # ── Runner resolution — the leg this workflow never had ────────────────
@@ -207,6 +211,11 @@ jobs:
     needs: resolve-runner
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       # ── THE THIRD CREDENTIAL PATH (wired 2026-08-01) ──────────────────
@@ -241,18 +250,18 @@ jobs:
       # would silently do nothing here.
       #
       # Scoped to the job: ARC runners are ephemeral pods, so this file dies
-      # with the pod. Skipped entirely when BOT_PAT is absent, leaving a
-      # public-dep-only repo byte-identical to before.
+      # with the pod. Skipped entirely when the github-token step resolves no
+      # token, leaving a public-dep-only repo byte-identical to before.
       # The absent-token guard is in the SHELL, not in `if:`. The `secrets`
       # context is not available in a step-level `if:` — it renders empty, so
       # `if: secrets.BOT_PAT != ''` would be permanently false and this step
       # would never run, on any repo, while looking correct.
       - name: Configure system git credentials for private cargo git deps
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           if [ -z "${GIT_AUTH_TOKEN}" ]; then
-            echo "BOT_PAT not set — skipping; a repo with private cargo git deps will fail in flake-check."
+            echo "no App or PAT token resolved — skipping; a repo with private cargo git deps will fail in flake-check."
             exit 0
           fi
           sudo git config --system \
@@ -273,13 +282,13 @@ jobs:
           # the same rev in the same run — which is the clearest possible
           # evidence the two are unrelated mechanisms.
           #
-          # BOT_PAT first, and the fallback is a courtesy rather than a fix:
+          # The resolved token first, and the fallback is a courtesy rather than a fix:
           # the auto-provided GITHUB_TOKEN is scoped to the RUNNING repo, so it
           # cannot read a different private repo and will still 404. It only
           # buys the higher authenticated rate limit for public deps. A repo
-          # with private deps needs BOT_PAT to be present; if flake-check 404s
-          # with this wired, that missing org secret is the thing to check.
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          # with private deps needs the runner host's App token; if flake-check
+          # 404s with this wired, the github-token step's source is the thing to check.
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: nix build ${{ inputs.build-targets }}
         if: ${{ inputs.build-targets != '' }}
@@ -287,7 +296,7 @@ jobs:
           # Same private-dep credential path as the flake-check step above:
           # nix's GitHub fetcher is separate from cargo's git, and runs
           # anonymous (404 on a private dep) without its own token.
-          GITHUB_TOKEN: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
         run: nix build ${{ inputs.build-targets }}
 
       # A green `nix flake check` is only as strong as the check set it had
@@ -322,4 +331,5 @@ jobs:
       test-args: ${{ inputs.test-args }}
       fmt-check: ${{ inputs.fmt-check }}
       devshell-args: ${{ inputs.devshell-args }}
+      token-source: ${{ inputs.token-source }}
     secrets: inherit

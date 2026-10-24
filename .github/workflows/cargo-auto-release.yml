@@ -29,11 +29,12 @@ on:
       use-bot-pat:
         description: >-
           Use the BOT_PAT secret for checkout, push and private git
-          dependencies. Set false for a repo whose whole dependency closure is
-          public, so the job runs on GITHUB_TOKEN alone.
+          dependencies (github-token source pat). Default false: every job
+          takes the token-source token, the runner host's App token by
+          default, with GITHUB_TOKEN where there is none.
         type: boolean
         required: false
-        default: true
+        default: false
       bump-type:
         type: string
         required: false
@@ -87,6 +88,10 @@ on:
         type: string
         required: false
         default: ""
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing. use-bot-pat: true selects pat.'
+        type: string
+        default: 'app'
     secrets:
       # required:false, deliberately. GitHub validates the WHOLE reusable call
       # graph at startup, BEFORE any job `if:` is evaluated, so a
@@ -100,6 +105,7 @@ on:
       CRATES_API_TOKEN:
         required: false
       BOT_PAT:
+        description: 'Long-lived PAT, presented only when token-source is pat or use-bot-pat is true.'
         required: false
 
 permissions:
@@ -187,20 +193,25 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.use-bot-pat && 'pat' || inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so
       # a build that reads a sibling PRIVATE pleme-io repo (≈20 of them
       # flipped private 2026-07-23; 84 consumers depend on one) fails with
       # "failed to authenticate when downloading repository" — mado tripped
-      # exactly this. The action owns the BOT_PAT > GITHUB_TOKEN order AND
+      # exactly this. The action owns the App token > BOT_PAT > GITHUB_TOKEN order AND
       # the checkout-extraheader unset that makes the rewrite take effect.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: bump
@@ -238,7 +249,7 @@ jobs:
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
           # The three lockfiles a bump touches are all GENERATED. `gen-spec`
@@ -263,17 +274,22 @@ jobs:
     # Nothing depends on this job, so a visibility-skip fails nothing downstream.
     if: needs.bump.outputs.bumped == 'true' && !github.event.repository.private
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.use-bot-pat && 'pat' || inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Same reason as the bump job: `cargo publish` verifies the package by
       # BUILDING it, which resolves every git dependency.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/cargo-publish-crate@main
@@ -382,18 +398,23 @@ jobs:
       && needs.bump.outputs.bumped != 'true'
       && !github.event.repository.private
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.use-bot-pat && 'pat' || inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ inputs.use-bot-pat && secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Same reason as bump and ship: cargo resolves every git dependency
       # while packaging, and ~20 sibling pleme-io repos went private
       # 2026-07-23.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ inputs.use-bot-pat && secrets.BOT_PAT || '' }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Idempotent by contract: already-on-registry is an explicit green

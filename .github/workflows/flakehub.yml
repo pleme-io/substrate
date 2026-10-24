@@ -16,6 +16,11 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           sparse-checkout: |
@@ -26,7 +31,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Publish to FlakeHub
         uses: DeterminateSystems/flakehub-push@main

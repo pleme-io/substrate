@@ -17,7 +17,8 @@ name: rust-binary-auto-release
 # DESIGN: SPLIT (bump-reusable + existing rust-binary-release.yml)
 # ----------------------------------------------------------------
 # This workflow is BUMP + TAG ONLY. It does NOT build binaries. The
-# tag push (made with BOT_PAT, NOT the default GITHUB_TOKEN) triggers
+# tag push (made with the github-token App or PAT token, NOT the
+# default GITHUB_TOKEN) triggers
 # the consumer's release-binaries.yml, which calls the existing
 # pleme-io/substrate/.github/workflows/rust-binary-release.yml@main
 # matrix builder. This reuses the proven matrix instead of
@@ -27,10 +28,11 @@ name: rust-binary-auto-release
 #   .github/workflows/auto-release.yml      -> this workflow (on push main)
 #   .github/workflows/release-binaries.yml  -> rust-binary-release.yml (on tag v*)
 #
-# IMPORTANT: the tag push MUST use secrets.BOT_PAT. The default
-# GITHUB_TOKEN does NOT trigger downstream workflows on tag push, so
-# without BOT_PAT the binary build never runs. BOT_PAT is provided via
-# `secrets: inherit` from the consumer.
+# IMPORTANT: the tag push MUST use the github-token output: the runner
+# host's App token (token-source: app, the default, self-hosted only) or
+# BOT_PAT (token-source: pat). The default GITHUB_TOKEN does NOT trigger
+# downstream workflows on tag push, so without one the binary build
+# never runs.
 #
 # FLIP TO CRATES.IO LATER
 # -----------------------
@@ -104,8 +106,13 @@ on:
         required: false
         default: ""
         description: "Explicit runner label override; empty = route by caller repo visibility."
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, whose tag push triggers release-binaries.yml; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes, and that does NOT trigger downstream.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
 
 permissions:
@@ -126,10 +133,15 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Bump package.version, skipping when no source changed since the
       # last tag. regenerate-cargo-nix MUST be false: this app has git
@@ -175,11 +187,11 @@ jobs:
           # which is exactly why it was still wrong.
           add-paths: "Cargo.toml Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
 
-      # Push with BOT_PAT so the tag push triggers the consumer's
-      # release-binaries.yml (GITHUB_TOKEN would NOT trigger it).
+      # Push with the github-token step's App or PAT token so the tag push
+      # triggers the consumer's release-binaries.yml (GITHUB_TOKEN would NOT).
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"

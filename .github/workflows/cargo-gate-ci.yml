@@ -74,6 +74,10 @@ on:
         required: false
         type: string
         default: "stable"
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
 
 jobs:
   gate:
@@ -84,6 +88,11 @@ jobs:
         os: ${{ fromJSON(inputs.os-matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       # Private pleme-io git deps resolve over HTTPS during `cargo test`, and a
@@ -91,7 +100,7 @@ jobs:
       # originals had no credential step at all.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # fmt + test gate. clippy is driven separately below so its advisory

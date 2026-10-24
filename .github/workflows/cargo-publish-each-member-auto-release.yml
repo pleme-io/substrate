@@ -82,6 +82,10 @@ on:
         type: string
         required: false
         default: "false"
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, whose tag push triggers downstream workflows; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes, and that does NOT trigger downstream.'
+        type: string
+        default: 'app'
     secrets:
       CRATES_API_TOKEN:
         # required:false, deliberately — this is the same defect
@@ -100,7 +104,7 @@ on:
         description: "crates.io publish token."
       BOT_PAT:
         required: false
-        description: "Optional PAT for cross-workflow tag triggers."
+        description: "Long-lived PAT, presented only when token-source is pat."
 
 permissions:
   contents: write
@@ -135,10 +139,15 @@ jobs:
       github.actor != 'github-actions[bot]'
       && (!github.event.repository.private || inputs.publish-from-private == 'true')
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/cargo-publish-each-member@main
         with:
@@ -154,7 +163,7 @@ jobs:
         if: success()
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
           # Same generated-lockfile race as `cargo-auto-release.yml` — see the

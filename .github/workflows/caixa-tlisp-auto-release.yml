@@ -48,6 +48,10 @@ on:
         type: string
         required: false
         default: ""
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       # required:false for every secret, deliberately — see the note in
       # cargo-auto-release.yml. GitHub validates the whole reusable call graph
@@ -55,7 +59,7 @@ on:
       # would break every caller of the polymorphic auto-release.yml including
       # repos that never reach this arm.
       BOT_PAT:
-        description: "Org PAT used to push the release commit and tag. Falls back to GITHUB_TOKEN."
+        description: "Long-lived PAT that pushes the release commit and tag, presented only when token-source is pat."
         required: false
 
 permissions:
@@ -71,12 +75,17 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       # fetch-depth: 0 so caixa-bump can see the last tag and decide whether
       # anything actually moved.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: Bump the manifest and refresh its embedded file hashes
         id: bump
@@ -99,4 +108,4 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}

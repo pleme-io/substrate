@@ -25,6 +25,11 @@ jobs:
     name: doca native push -> ghcr.io -> inspect
     runs-on: ubuntu-latest
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       # Mirrors substrate/.github/workflows/image-push.yml: upstream Nix (not
@@ -34,7 +39,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           determinate: false
           extra-conf: |
             sandbox = relaxed

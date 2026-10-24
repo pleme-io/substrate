@@ -62,6 +62,10 @@ on:
         type: boolean
         required: false
         default: false
+      token-source:
+        description: 'Where each job takes its packages token (pleme-io/actions/github-token): pat presents BOT_PAT; app or none present github.token, since the runner host App token carries no packages permission.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
         description: >-
@@ -88,6 +92,11 @@ jobs:
       # scope -- and only one of them is destructive.
       packages: ${{ steps.parse.outputs.json }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - name: Parse the package list once
         id: parse
         env:
@@ -96,7 +105,7 @@ jobs:
           printf 'json=%s\n' "$(echo "$PACKAGES" | grep -v '^[[:space:]]*$' | jq -Rn '[inputs]' -c)" >> "$GITHUB_OUTPUT"
       - name: Report what retention would remove
         env:
-          GH_TOKEN: ${{ secrets.BOT_PAT || github.token }}
+          GH_TOKEN: ${{ steps.token.outputs.pat || github.token }}
           PACKAGES: ${{ inputs.packages }}
           KEEP: ${{ inputs.min-versions-to-keep }}
           IGNORE: ${{ inputs.ignore-versions }}
@@ -127,6 +136,11 @@ jobs:
       matrix:
         package: ${{ fromJSON(needs.report.outputs.packages) }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - name: Delete old versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
@@ -135,4 +149,4 @@ jobs:
           package-type: container
           min-versions-to-keep: ${{ inputs.min-versions-to-keep }}
           ignore-versions: ${{ inputs.ignore-versions }}
-          token: ${{ secrets.BOT_PAT || github.token }}
+          token: ${{ steps.token.outputs.pat || github.token }}

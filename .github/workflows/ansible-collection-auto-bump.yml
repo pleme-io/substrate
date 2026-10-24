@@ -33,10 +33,14 @@ on:
       bump-type:
         type: string
         default: patch
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, whose tag push triggers release.yml; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes and release.yml is dispatched instead.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
         required: false
-        description: "Optional PAT for tag pushes to trigger downstream workflows. Falls back to GITHUB_TOKEN if absent."
+        description: "Long-lived PAT, presented only when token-source is pat."
 
 permissions:
   contents: write
@@ -56,10 +60,15 @@ jobs:
     runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
     if: github.actor != 'github-actions[bot]'
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - id: changes
         shell: bash
@@ -87,7 +96,7 @@ jobs:
       - if: steps.changes.outputs.skip == 'false'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
 
@@ -95,13 +104,12 @@ jobs:
       # plain tag pushes (GH security restriction), but `gh workflow run`
       # IS allowed under the same token with `actions: write`. So we
       # explicitly dispatch the release workflow on the freshly-cut tag.
-      # When BOT_PAT is configured, the tag push above would have already
-      # triggered the release workflow; calling dispatch a second time
-      # would create a duplicate, so skip in that case.
-      - if: steps.changes.outputs.skip == 'false' && env.HAS_BOT_PAT != 'true'
+      # When the push used a github-token (App or PAT), the tag push above
+      # already triggered the release workflow; calling dispatch a second
+      # time would create a duplicate, so skip in that case.
+      - if: steps.changes.outputs.skip == 'false' && steps.token.outputs.token == ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HAS_BOT_PAT: ${{ secrets.BOT_PAT != '' && 'true' || 'false' }}
         shell: bash
         run: |
           new_tag=$(git describe --tags --abbrev=0)

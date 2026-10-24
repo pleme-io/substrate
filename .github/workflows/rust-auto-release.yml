@@ -21,8 +21,8 @@ name: rust-auto-release
 # secrets passed through:
 #   CRATES_API_TOKEN — org-level secret; this workflow bridges to
 #                      CARGO_REGISTRY_TOKEN env that cargo reads.
-#   BOT_PAT          — optional PAT with `repo` scope. If present,
-#                      tag pushes can trigger downstream workflows.
+#   BOT_PAT          — optional PAT with `repo` scope, presented only
+#                      when token-source is pat.
 
 on:
   workflow_call:
@@ -123,6 +123,10 @@ on:
         type: string
         required: false
         default: "--workspace --no-fail-fast"
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
     secrets:
       # required:false, deliberately. GitHub validates the WHOLE reusable call
       # graph at startup, BEFORE any job `if:` is evaluated, so a
@@ -138,7 +142,7 @@ on:
         description: "Registry publish token (crates.io API token with publish scope)."
       BOT_PAT:
         required: false
-        description: "Optional PAT with repo scope for cross-workflow tag triggers."
+        description: "Optional PAT with repo scope, presented only when token-source is pat."
 
 permissions:
   contents: write
@@ -219,10 +223,15 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       new-version: ${{ steps.bump.outputs.new-version }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so a
       # workspace whose members read a sibling PRIVATE pleme-io repo fails with
@@ -235,7 +244,7 @@ jobs:
       # same placement: after checkout, before anything cargo touches.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: bump
@@ -253,7 +262,7 @@ jobs:
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-push-with-token@main
         with:
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           branch: main
           push-tags: "true"
           # PARITY with cargo-auto-release.yml:218 — this reusable was the
@@ -333,6 +342,11 @@ jobs:
     if: inputs.require-tests
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       - name: Install Nix
@@ -374,7 +388,7 @@ jobs:
         uses: pleme-io/actions/nix-setup@main
         id: nix
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           nextest: "true"
 
       # Same private-git-dep credential fix as nix-devshell-cargo-test.yml:
@@ -383,7 +397,7 @@ jobs:
       # extraheader silently wins over url.insteadOf by prefix match.
       - name: Configure git credentials for private git dependencies (cargo)
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --unset-all http.https://github.com/.extraheader || true
@@ -488,12 +502,17 @@ jobs:
         || (inputs.require-tests == false && needs.test.result == 'skipped')
       )
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       # Re-checkout to pick up the bumped Cargo.toml from main.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so a
       # workspace whose members read a sibling PRIVATE pleme-io repo fails with
@@ -506,7 +525,7 @@ jobs:
       # same placement: after checkout, before anything cargo touches.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/rust-workspace-publish@main
@@ -618,11 +637,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so a
       # workspace whose members read a sibling PRIVATE pleme-io repo fails with
@@ -635,7 +659,7 @@ jobs:
       # same placement: after checkout, before anything cargo touches.
       - uses: pleme-io/actions/git-credentials@main
         with:
-          bot-pat: ${{ secrets.BOT_PAT }}
+          bot-pat: ${{ steps.token.outputs.pat }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: pleme-io/actions/rust-workspace-publish@main

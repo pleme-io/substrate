@@ -197,6 +197,10 @@ on:
           Default false: every existing caller behaves exactly as before. The
           workflow still declares `contents: write` because the default mode
           needs it, so the caller must still grant it.
+      token-source:
+        description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
+        type: string
+        default: 'app'
 
     outputs:
       artifact-name:
@@ -223,7 +227,7 @@ on:
       # only ONE of the two blockers; this was the other.
       BOT_PAT:
         required: false
-        description: "PAT with read access to private pleme-io repos. Omit for public-only dependency graphs."
+        description: "Long-lived PAT with read access to private pleme-io repos, presented only when token-source is pat."
 
 permissions:
   contents: write
@@ -259,6 +263,11 @@ jobs:
           || '[{"os":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","suffix":"linux-x86_64"},{"os":"ubuntu-latest","target":"aarch64-unknown-linux-gnu","suffix":"linux-aarch64"},{"os":"macos-latest","target":"x86_64-apple-darwin","suffix":"macos-x86_64"},{"os":"macos-latest","target":"aarch64-apple-darwin","suffix":"macos-aarch64"}]')) }}
     runs-on: ${{ matrix.os }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
 
       # ── Private git-dependency credential ────────────────────────────────
@@ -278,12 +287,12 @@ jobs:
       # the `secrets` context is not available in `if:`, and an unguarded
       # rewrite with an empty token would emit
       # `https://x-access-token:@github.com/` and break PUBLIC fetches for
-      # every existing caller. So a caller that passes no BOT_PAT is exactly
-      # unaffected.
+      # every existing caller. So a job the github-token step gives no token is
+      # exactly unaffected.
       - name: Configure git credentials for private git dependencies
         shell: bash
         env:
-          GIT_AUTH_TOKEN: ${{ secrets.BOT_PAT }}
+          GIT_AUTH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           if [ -n "${GIT_AUTH_TOKEN:-}" ]; then
             git config --global url."https://x-access-token:${GIT_AUTH_TOKEN}@github.com/".insteadOf "https://github.com/"

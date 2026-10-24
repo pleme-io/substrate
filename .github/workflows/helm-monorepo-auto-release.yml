@@ -50,15 +50,15 @@ on:
         type: string
         default: ""
       token-source:
-        description: "pat (the default) keeps BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN; app also offers the self-hosted runner host's short-lived App token (pleme-io/actions/github-token) as the ghcr-token rung."
+        description: "Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, used for the Nix installer only, since it carries no packages permission; pat also puts BOT_PAT first on the registry-login ladder; none presents nothing."
         type: string
-        default: "pat"
+        default: "app"
     secrets:
       BOT_PAT:
-        description: "Org PAT with write:packages, preferred by registry-login for OCI push to the org-shared ghcr.io/pleme-io/charts namespace (a repo-scoped GITHUB_TOKEN 403s cross-namespace). Reaches public repos only on the Free plan; private repos fall through to GITHUB_TOKEN."
+        description: "Long-lived PAT with write:packages, presented only when token-source is pat."
         required: false
       GHCR_TOKEN:
-        description: "Optional dedicated registry token. registry-login prefers BOT_PAT, then this, then GITHUB_TOKEN."
+        description: "Optional dedicated registry token. registry-login tries BOT_PAT (pat only), then this, then GITHUB_TOKEN."
         required: false
 
 permissions:
@@ -88,16 +88,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: token
-        if: inputs.token-source != 'pat'
         uses: pleme-io/actions/github-token@main
         with:
           source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
 
       - name: Install Nix
         if: runner.environment == 'github-hosted'
         uses: DeterminateSystems/nix-installer-action@main
         with:
-          github-token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Token-resolution overlay: BOT_PAT > GHCR_TOKEN > GITHUB_TOKEN lives
       # ONCE in the registry-login action (client: helm → helm's own registry
@@ -108,8 +108,8 @@ jobs:
           registry: ${{ inputs.registry }}
           client: helm
           username: ${{ github.actor }}
-          bot-pat: ${{ secrets.BOT_PAT }}
-          ghcr-token: ${{ steps.token.outputs.token || secrets.GHCR_TOKEN }}
+          bot-pat: ${{ steps.token.outputs.pat }}
+          ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Hermetic supply chain (the law): mirror every third-party subchart this

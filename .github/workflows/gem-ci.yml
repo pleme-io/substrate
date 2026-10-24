@@ -56,14 +56,12 @@ on:
         type: string
         default: ''
       token-source:
-        description: 'pat presents BOT_PAT (the default); app presents the self-hosted runner host''s short-lived App token (pleme-io/actions/github-token), falling back to BOT_PAT.'
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
         type: string
-        default: 'pat'
+        default: 'app'
     secrets:
       BOT_PAT:
-        description: >-
-          PAT able to read private pleme-io flake inputs. Optional: a repo
-          whose inputs are all public is byte-identical without it.
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
 
 jobs:
@@ -77,11 +75,11 @@ jobs:
     runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - id: token
-        if: inputs.token-source != 'pat'
         uses: pleme-io/actions/github-token@main
         with:
           source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
       - uses: pleme-io/actions/nix-flake-check@main
         with:
-          github-token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}

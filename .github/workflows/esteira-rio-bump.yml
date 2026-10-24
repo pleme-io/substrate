@@ -23,9 +23,13 @@ on:
         description: "ARC scale-set name / self-hosted label to run on"
         type: string
         default: "rio"
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, which pushes a tag that triggers the release workflow; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes, and that does NOT trigger downstream.'
+        type: string
+        default: 'app'
     secrets:
       BOT_PAT:
-        description: "PAT used to push the tag so the release workflow triggers; falls back to GITHUB_TOKEN (which will NOT trigger downstream)."
+        description: "Long-lived PAT, presented only when token-source is pat."
         required: false
 
 permissions:
@@ -36,10 +40,15 @@ jobs:
     runs-on: ${{ inputs.runner }}
     if: github.actor != 'github-actions[bot]'
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.BOT_PAT || secrets.GITHUB_TOKEN || github.token }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN || github.token }}
 
       - name: Skip when no relevant changes since last tag
         id: changes

@@ -39,13 +39,13 @@ on:
         type: string
         default: ''
       token-source:
-        description: 'pat presents BOT_PAT (the default); app presents the self-hosted runner host''s short-lived App token (pleme-io/actions/github-token), falling back to BOT_PAT.'
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, whose tag push triggers downstream workflows; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes, and that does NOT trigger downstream.'
         type: string
-        default: 'pat'
+        default: 'app'
     secrets:
       BOT_PAT:
         required: false
-        description: "Optional PAT for tag pushes to trigger downstream workflows. Falls back to GITHUB_TOKEN if absent."
+        description: "Long-lived PAT, presented only when token-source is pat."
 
 permissions:
   contents: write
@@ -62,14 +62,14 @@ jobs:
     if: github.actor != 'github-actions[bot]'
     steps:
       - id: token
-        if: inputs.token-source != 'pat'
         uses: pleme-io/actions/github-token@main
         with:
           source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - id: changes
         shell: bash
@@ -119,6 +119,6 @@ jobs:
         with:
           script-file: ${{ steps.push-src.outputs.script-file }}
         env:
-          GIT_PUSH_TOKEN: ${{ steps.token.outputs.token || secrets.BOT_PAT || secrets.GITHUB_TOKEN }}
+          GIT_PUSH_TOKEN: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
           BRANCH: main
           PUSH_TAGS: "true"
