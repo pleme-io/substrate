@@ -21,6 +21,13 @@ let
   excluded = policy.buildSrc { src = fixture; prose = "excluded"; };
   has = root: rel: builtins.pathExists (root + "/${rel}");
 
+  workspace = ./fixtures/member-source;
+  own = crateName: relativePath:
+    policy.memberSrc { src = workspace; inherit crateName relativePath; memberSource = "own"; };
+  ownA = own "a" "crates/a";
+  ownB = own "b" "crates/b";
+  ownE = own "e" "crates/e";
+
   tests = [
     (testHelpers.mkTest "included-is-identity"
       (policy.buildSrc { src = fixture; } == fixture
@@ -43,6 +50,49 @@ let
     (testHelpers.mkTest "unknown-value-throws"
       (!(builtins.tryEval (policy.buildSrc { src = fixture; prose = "stripped"; })).success)
       "an unknown prose value must be an eval error, never a silent no-op")
+
+    (testHelpers.mkTest "member-workspace-is-identity"
+      (policy.memberSrc { src = workspace; crateName = "a"; relativePath = "crates/a"; } == workspace
+        && policy.memberSrc { src = workspace; crateName = "a"; relativePath = "crates/a"; memberSource = "workspace"; } == workspace)
+      "the default must hand every member the whole tree, so adopting the parameter changes no derivation")
+
+    (testHelpers.mkTest "member-own-root-crate-is-identity"
+      (own "root" "." == workspace && own "root" "" == workspace)
+      "a crate at the workspace root owns the whole tree")
+
+    (testHelpers.mkTest "member-own-keeps-member-manifests-and-declared"
+      (lib.all (has ownA) [ "Cargo.toml" "Cargo.lock" "crates/a/Cargo.toml" "crates/a/src/lib.rs" "shared/data.txt" ])
+      "own must keep the member, the root manifests and every declared source")
+
+    (testHelpers.mkTest "member-own-drops-siblings-prose-and-root-orphan"
+      (lib.all (r: !(has ownA r)) [ "crates/b" "other" "docs" "src" "crates/e" ])
+      "own must drop every path the member neither owns nor declares")
+
+    (testHelpers.mkTest "member-own-drops-build-only-dirs"
+      (!(has ownA "crates/a/tests") && !(has ownA "crates/a/benches") && !(has ownB "crates/a"))
+      "own must drop tests/ and benches/, which buildRustCrate never compiles")
+
+    (testHelpers.mkTest "member-own-declared-file-inside-tests-survives"
+      (has ownE "crates/e/tests/fixture.txt" && !(has ownE "crates/e/tests/t.rs"))
+      "a declared source re-admits exactly that path inside a build-only dir")
+
+    (testHelpers.mkTest "member-own-escaping-source-throws"
+      (!(builtins.tryEval (builtins.deepSeq (toString (own "c" "crates/c")) true)).success)
+      "a declared source outside the workspace root must be an eval error")
+
+    (testHelpers.mkTest "member-own-missing-source-throws"
+      (!(builtins.tryEval (builtins.deepSeq (toString (own "d" "crates/d")) true)).success)
+      "a declared source that does not exist must be an eval error")
+
+    (testHelpers.mkTest "member-unknown-value-throws"
+      (!(builtins.tryEval (toString (policy.memberSrc { src = workspace; crateName = "a"; relativePath = "crates/a"; memberSource = "narrow"; }))).success)
+      "an unknown memberSource value must be an eval error")
+
+    (testHelpers.mkTest "member-failure-hint-names-the-fix"
+      (policy.memberFailureHint { crateName = "a"; relativePath = "crates/a"; } == { }
+        && lib.hasInfix "[package.metadata.substrate] sources"
+          (policy.memberFailureHint { crateName = "a"; relativePath = "crates/a"; memberSource = "own"; }).failureHook)
+      "a narrowed member's failure must name the declaration that fixes it")
   ];
 
   result = testHelpers.runTests tests;

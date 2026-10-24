@@ -84,7 +84,7 @@ limit again.
 | finding where a module lives in `lib/` | [`docs/module-hierarchy.md`](./docs/module-hierarchy.md) |
 | looking up what `lib/default.nix` exports | [`docs/exports.md`](./docs/exports.md) |
 | refactoring, extracting a helper, or adding a build behaviour: the neutrality protocol, the gates, what to reuse | [`docs/evolving-substrate.md`](./docs/evolving-substrate.md) |
-| choosing which files a build reads (`prose = "included" \| "excluded"`) | [`lib/build/source-policy.nix`](./lib/build/source-policy.nix) |
+| choosing which files a build reads (`prose = "included" \| "excluded"`; `memberSource = "workspace" \| "own"`: each workspace member reads its own directory, the root `Cargo.toml`/`Cargo.lock` and the paths it declares in `[package.metadata.substrate] sources`, so an edit rebuilds only the crates that read it) | [`lib/build/source-policy.nix`](./lib/build/source-policy.nix) |
 
 ## Import Patterns
 

@@ -1,0 +1,5 @@
+[package]
+name = "e"
+
+[package.metadata.substrate]
+sources = ["tests/fixture.txt"]

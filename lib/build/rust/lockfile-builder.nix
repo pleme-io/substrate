@@ -340,6 +340,7 @@ let
   # `gen-cargo/src/quirks.rs::REGISTRY` (Rust source of truth).
   quirkApply = import ./quirk-apply.nix { inherit lib; };
   overrideCompose = import ./crate-override-compose.nix { inherit lib; };
+  sourcePolicy = import ../source-policy.nix { inherit lib; };
   # I2 corollary — the host tree's resolve section (see `hostBuildSection`).
   hostTreeClosure = import ./host-tree-closure.nix { inherit lib; };
   buildScriptReceiptNormalize = (import ./build-script-receipt.nix).postInstall;
@@ -427,6 +428,7 @@ let
     # opt-out via `strictTransientLock = false` is supported for
     # legacy repos mid-migration but should not be permanent.
     strictTransientLock ? true,
+    memberSource ? "workspace",
   }: let
     specInvariants = import ./spec-invariants.nix;
     # I4 — per-platform spec emission. gen-cargo's --filter-platform
@@ -652,8 +654,28 @@ let
               !(isWorkspaceRootSrcDir || isUnderWorkspaceRootSrc);
         };
 
+    narrowsMember = crate:
+      (assert lib.assertOneOf "substrate/lockfile-builder: memberSource" memberSource sourcePolicy.memberSourceValues;
+        memberSource != "workspace")
+      && (crate.source.kind or null) == "path"
+      && !(crateClaimsRoot crate);
+
     filteredWorkspaceSrcFor = crate:
-      if crateClaimsRoot crate then src else rootOrphanFilteredSrc;
+      if crateClaimsRoot crate then src
+      else if narrowsMember crate then sourcePolicy.memberSrc {
+        inherit src memberSource;
+        crateName = crate.name;
+        relativePath = crate.source.relative_path;
+      }
+      else rootOrphanFilteredSrc;
+
+    memberHintFor = crate:
+      if narrowsMember crate then sourcePolicy.memberFailureHint {
+        inherit memberSource;
+        crateName = crate.name;
+        relativePath = crate.source.relative_path;
+      }
+      else { };
     # If regen wasn't possible (gen unavailable) but the committed spec
     # had violations, surface a traced warning so the operator knows
     # the build is running on synthesized fallbacks instead of a true
@@ -1085,6 +1107,7 @@ let
           crateRenames = declaredRenames
             // edgeRenamesFor treeSpec (deps.runtime ++ deps.build);
         } // binsFor key crate
+          // memberHintFor crate
         # Defensive: ALWAYS forward `links` from the top-level
         # CrateSpec field (gen-cargo populates this from cargo
         # metadata's pkg.links — set IF the upstream Cargo.toml has

@@ -46,8 +46,9 @@ in {
   # Defaults to [], so no existing consumer changes.
   devShellTargets ? [],
   devShellHook ? "",
+  memberSource ? "workspace",
   ...
 }:
   rustTool {
-    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides devShellPackages devShellTargets devShellHook;
+    inherit toolName packageName src repo cargoNix buildInputs nativeBuildInputs crateOverrides devShellPackages devShellTargets devShellHook memberSource;
   }

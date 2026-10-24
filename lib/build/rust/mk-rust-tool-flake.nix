@@ -60,6 +60,7 @@
   # Forwarded to the builder's cargo test check; see tool-release.nix.
   testSrc ? null,
   metaSrc ? src,
+  memberSource ? null,
   devShellPackages ? [],
   devShellTargets ? [],
   devShellHook ? "",
@@ -368,6 +369,7 @@ in toolFlake (
   // (if gui != null then { inherit gui; } else {})
   // (if tests != null then { inherit tests; } else {})
   // (if testSrc != null then { inherit testSrc; } else {})
+  // (if memberSource != null then { inherit memberSource; } else {})
   // { inherit metaSrc; }
   // (if devShellPackages != [ ] then { inherit devShellPackages; } else {})
   // (if devShellTargets != [ ] then { inherit devShellTargets; } else {})

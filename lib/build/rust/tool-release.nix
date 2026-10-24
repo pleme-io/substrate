@@ -238,6 +238,7 @@ in {
   # retracted_safety_claims reads docs/*.md).
   testSrc ? null,
   metaSrc ? src,
+  memberSource ? "workspace",
   testCrateFlags ? [],
   testInputs ? [],
   # The `substrate.rust.<shape>` entry point this consumer came through,
@@ -410,7 +411,7 @@ let
     project =
       if effectiveMode == "lockfile"
       then (import ./lockfile-builder.nix { pkgs = targetPkgs; }).mkProject ({
-        inherit src metaSrc gen;
+        inherit src metaSrc gen memberSource;
         hostPkgs = hostPkgs;
         defaultCrateOverrides = consumerOverrides;
       } // (if targetInfo ? specFile then { inherit (targetInfo) specFile; } else { }))

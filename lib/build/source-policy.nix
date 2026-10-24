@@ -1,6 +1,6 @@
 # source-policy.nix — which files of a consumer's tree a build reads.
 #
-# One typed parameter today, `prose`:
+# Two typed parameters: `memberSource` (`memberSrc`, below) and `prose`:
 #
 #   "included"  (default) the tree exactly as given. Today's behaviour; no
 #               consumer's derivation changes by adopting this file.
@@ -35,9 +35,79 @@ let
         (lib.filter (n: entries.${n} == "regular" && lib.hasSuffix ".md" n) names);
     in
     docsDir ++ markdown;
+
+  memberSourceValues = [ "workspace" "own" ];
+
+  declareHint = crateName: relativePath:
+    "declare it in ${relativePath}/Cargo.toml as [package.metadata.substrate] sources = [ \"<path relative to ${relativePath}>\" ], or build with memberSource = \"workspace\"";
+
+  rootRelative = crateName: relativePath: path:
+    let
+      step = acc: segment:
+        if segment == "" || segment == "." then acc
+        else if segment == ".." then
+          (if acc == [ ] then throw ''
+            substrate source-policy: crate `${crateName}` declares source `${path}`, which leaves the workspace root.
+            A member build reads only the workspace tree; ${declareHint crateName relativePath} with a path inside it.
+          '' else lib.init acc)
+        else acc ++ [ segment ];
+    in
+    lib.concatStringsSep "/" (lib.foldl' step [ ] (lib.splitString "/" path));
+
+  declaredSources = { src, crateName, relativePath }:
+    let
+      manifest = src + "/${relativePath}/Cargo.toml";
+      sources =
+        if builtins.pathExists manifest
+        then ((builtins.fromTOML (builtins.readFile manifest)).package.metadata.substrate.sources or [ ])
+        else [ ];
+    in
+    if builtins.isList sources && lib.all builtins.isString sources then sources
+    else throw ''
+      substrate source-policy: ${relativePath}/Cargo.toml [package.metadata.substrate] sources must be a list of strings.
+    '';
+
+  memberSrc = { src, crateName, relativePath, memberSource ? "workspace" }:
+    assert lib.assertOneOf "substrate source-policy: memberSource" memberSource memberSourceValues;
+    let
+      member = rootRelative crateName relativePath relativePath;
+    in
+    if memberSource == "workspace" || member == "" then src
+    else
+      let
+        declared = map
+          (p: rootRelative crateName relativePath "${relativePath}/${p}")
+          (declaredSources { inherit src crateName relativePath; });
+        missing = lib.filter (p: !(builtins.pathExists (src + "/${p}"))) declared;
+        kept = [ "Cargo.toml" "Cargo.lock" member ] ++ declared;
+        buildOnly = map (d: "${member}/${d}") [ "tests" "benches" "examples" ];
+        under = rel: k: rel == k || lib.hasPrefix "${k}/" rel;
+        ancestorOf = rel: k: lib.hasPrefix "${rel}/" k;
+        reaches = rel: ks: lib.any (k: under rel k || ancestorOf rel k) ks;
+        root = toString (src.origSrc or src);
+      in
+      if missing != [ ] then throw ''
+        substrate source-policy: crate `${crateName}` declares sources that do not exist: ${lib.concatStringsSep ", " missing}.
+        Fix the path in ${relativePath}/Cargo.toml [package.metadata.substrate] sources (paths are relative to ${relativePath}).
+      ''
+      else lib.cleanSourceWith {
+        inherit src;
+        name = "${crateName}-source";
+        filter = path: type:
+          let rel = lib.removePrefix (root + "/") (toString path);
+          in
+          (lib.any (under rel) kept || (type == "directory" && lib.any (ancestorOf rel) kept))
+          && !(lib.any (under rel) buildOnly && !(reaches rel declared));
+      };
+
+  memberFailureHint = { crateName, relativePath, memberSource ? "workspace" }:
+    if memberSource == "workspace" then { }
+    else {
+      failureHook = "echo ${lib.escapeShellArg "substrate: ${crateName} builds from ${relativePath} plus its declared sources (memberSource = \"own\"). If the error above names a missing file outside ${relativePath}, ${declareHint crateName relativePath}."} >&2";
+    };
 in
 {
-  inherit proseValues;
+  inherit proseValues memberSourceValues memberSrc memberFailureHint;
 
   # buildSrc { src, prose ? "included" } -> a source the builders consume.
   # A non-path `src` (already a store path string, a fetched tree) passes
