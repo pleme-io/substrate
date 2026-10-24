@@ -29,7 +29,7 @@
   crate2nix,
   flake-utils,
   fenix ? null,
-  fenixFromSubstrate ? false,
+  fenixFromSubstrate ? true,
   devenv ? null,
   forge ? null,
   # Substrate-bound gen flake input. When supplied, the consumer's

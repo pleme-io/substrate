@@ -17,7 +17,7 @@
   crate2nix,
   flake-utils,
   fenix ? null,
-  fenixFromSubstrate ? false,
+  fenixFromSubstrate ? true,
   devenv ? null,
   forge ? null,
   # gen powers substrate's IFD spec-regen path. Consumers can pass
