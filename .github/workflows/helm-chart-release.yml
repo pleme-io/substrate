@@ -65,7 +65,7 @@ jobs:
   publish:
     name: Lint, package & push chart
     needs: derive-version
-    uses: pleme-io/substrate/.github/workflows/helm-publish.yml@main
+    uses: ./.github/workflows/helm-publish.yml
     with:
       chartPath: ${{ inputs.chart-path }}
       registry: ${{ inputs.oci-registry }}

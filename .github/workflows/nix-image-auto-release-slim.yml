@@ -1,22 +1,4 @@
 name: nix-image-auto-release-slim
-#
-# An EXPERIMENT: nix-image-auto-release with the heavy legs removed, to measure
-# what the scan / attest / sign steps actually cost a caller in wall-clock.
-#
-# ── STATUS: no consumer, and NOT a drop-in replacement ──────────────────────
-#
-# Measured 2026-09-19: 0 callers across the locally-cloned fleet, against 40
-# for nix-image-auto-release. It takes the same inputs as its sibling but
-# declares NO `secrets:` block, so a caller relying on BOT_PAT / GHCR_TOKEN /
-# ECR_TOKEN being declared gets a different contract, not a faster one.
-#
-# ── WHY IT IS NAMED SEPARATELY ──────────────────────────────────────────────
-#
-# It shipped carrying `name: nix-image-auto-release` — its sibling's name. Two
-# reusable workflows under one name are indistinguishable in the Actions UI and
-# in any log that prints the workflow name, which is how an experiment gets
-# mistaken for the thing it is an experiment about.
-
 on:
   workflow_call:
     inputs:
@@ -62,20 +44,7 @@ on:
         default: ""
       scan-vex-file:
         description: >-
-          Path (relative to the repo root) to an OpenVEX document for the
-          scan-before-push gate. DISTINCT FROM scan-ignore-file ON PURPOSE: an
-          ignorefile says "stop telling me", a VEX statement is a published,
-          machine-readable claim WITH a justification that a downstream auditor
-          can read and dispute. Collapsing them would turn a compliance
-          mechanism into a suppression one. Use VEX for a finding that is REAL
-          in the SBOM and assessed not-affected in THIS artifact (no upstream
-          fix exists, or the vulnerable package is provably absent); use the
-          ignorefile only where no defensible claim can be made. Empty (default)
-          = no VEX, byte-identical trivy argv to before this input existed.
-          NOTE trivy matches a pre-publish (--input) statement by COMPONENT
-          purl, so such a document is image-independent BY SHAPE -- its scoping
-          comes from passing ONE document per image here, never from its
-          content. See hardened-images/vex/README-scoping.md.
+          Path (relative to the repo root) to an OpenVEX document for the scan-before-push gate. DISTINCT FROM scan-ignore-file ON PURPOSE: an ignorefile says "stop telling me", a VEX statement is a published, machine-readable claim WITH a justification that a downstream auditor can read and dispute. Collapsing them would turn a compliance mechanism into a suppression one. Use VEX for a finding that is REAL in the SBOM and assessed not-affected in THIS artifact (no upstream fix exists, or the vulnerable package is provably absent); use the ignorefile only where no defensible claim can be made. Empty (default) = no VEX, byte-identical trivy argv to before this input existed. NOTE trivy matches a pre-publish (--input) statement by COMPONENT purl, so such a document is image-independent BY SHAPE -- its scoping comes from passing ONE document per image here, never from its content. See hardened-images/vex/README-scoping.md.
         type: string
         default: ""
       boot-check-cmd:
@@ -96,17 +65,7 @@ on:
         default: false
       boot-check-expect-log:
         description: >-
-          Boot-check an image that CANNOT fully start in isolation -- a
-          Kubernetes controller with no cluster, or a one-shot CLI. Passes when
-          this exact string appears in `docker logs` (stdout+stderr), regardless
-          of exit code, proving the binary LOADED (shared libs resolved, no
-          glibc collision, no SIGSEGV before main) and reached its own startup
-          path. It does NOT prove the process serves traffic. Takes precedence
-          over boot-check-cmd. WHY THIS EXISTS: with boot-check-cmd empty AND
-          boot-check-still-running false, NEITHER boot-check step below runs --
-          the image ships with no load verification at all, silently, in a green
-          run. Measured 2026-08-01: 11 Go controller/operator images in
-          hardened-images are in exactly that state.
+          Boot-check an image that CANNOT fully start in isolation -- a Kubernetes controller with no cluster, or a one-shot CLI. Passes when this exact string appears in `docker logs` (stdout+stderr), regardless of exit code, proving the binary LOADED (shared libs resolved, no glibc collision, no SIGSEGV before main) and reached its own startup path. It does NOT prove the process serves traffic. Takes precedence over boot-check-cmd. WHY THIS EXISTS: with boot-check-cmd empty AND boot-check-still-running false, NEITHER boot-check step below runs -- the image ships with no load verification at all, silently, in a green run. Measured 2026-08-01: 11 Go controller/operator images in hardened-images are in exactly that state.
         type: string
         default: ""
       vulnix-scan:
@@ -181,254 +140,50 @@ on:
         description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
         type: string
         default: 'app'
-    secrets:
-      BOT_PAT:
-        description: "Long-lived PAT, presented only when token-source is pat."
-        required: false
-      GHCR_TOKEN:
-        description: "Optional dedicated registry token. registry-login prefers the opt-in PAT (token-source pat), then this, then GITHUB_TOKEN."
-        required: false
-      ECR_TOKEN:
-        description: >-
-          Password for the SOURCE registry a vendor rewrap PULLS FROM, when
-          that registry is private (lib/build/oci/hardened-base.nix's
-          `srcCredsEnv` / `srcCredsUser`). Orthogonal to BOT_PAT/GHCR_TOKEN,
-          which authenticate the DESTINATION push -- a rewrap of a private
-          upstream needs both, at opposite ends of the same job. The variable
-          NAME is fixed at `ECR_TOKEN` because a `secrets:` key cannot be
-          computed from an input, and the consumer's own `srcCredsEnv` must
-          name the SAME string for the derivation's `impureEnvVars` entry to
-          match; a consumer that names anything else gets an unauthenticated
-          pull, not a mismatch error (pleme-io/hardened-images' three
-          classicHardenedClickhouse* entries already declare exactly
-          `srcCredsEnv = "ECR_TOKEN"`). Optional: absent, every existing
-          caller is byte-identical -- an image with no `srcCredsEnv` never
-          reads it, and the derivation's own `${ECR_TOKEN:?…}` guard refuses
-          an unauthenticated pull rather than silently attempting one.
-          NOTE this carries a STATIC secret. `aws ecr get-login-password`
-          mints a ~12h token, so an ECR consumer wants a value minted per run
-          (pleme-io/actions/aws-assume-role -> ECR_TOKEN) rather than a repo
-          secret that goes stale; this input is the transport, not the
-          lifetime policy.
-        required: false
-
 permissions:
   contents: read
   packages: write
-
+  id-token: write
 jobs:
-  cve-suppression-visibility:
-    name: CVE-suppression visibility (report-only)
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
-    continue-on-error: true
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pleme-io/actions/no-cve-suppression@main
-        with:
-          fail-on-violation: "false"
-
-  resolve:
-    name: Resolve runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
-    outputs:
-      runner: ${{ steps.resolve.outputs.runner }}
-    steps:
-      - name: Resolve runner
-        id: resolve
-        uses: pleme-io/actions/runner-resolve@main
-        with:
-          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
-          override: ${{ inputs.runner }}
-
-  publish:
-    name: Build + push Nix image
-    needs: resolve
-    runs-on: ${{ needs.resolve.outputs.runner }}
-    if: github.actor != 'github-actions[bot]'
+  release:
     permissions:
       contents: read
       packages: write
       id-token: write
-    env:
-      ECR_TOKEN: ${{ secrets.ECR_TOKEN }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working-directory }}
-    steps:
-      - id: token
-        uses: pleme-io/actions/github-token@main
-        with:
-          source: ${{ inputs.token-source }}
-          pat: ${{ secrets.BOT_PAT }}
-      - uses: actions/checkout@v4
-
-      - name: Free disk space (hosted runners only)
-        if: contains(needs.resolve.outputs.runner, 'ubuntu')
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /usr/local/share/boost /usr/local/lib/android "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" 2>/dev/null || true
-          sudo docker image prune -af 2>/dev/null || true
-          df -h /
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        with:
-          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
-          determinate: false
-          extra-conf: |
-            sandbox = relaxed
-            ${{ (secrets.ECR_TOKEN || steps.token.outputs.token) && 'extra-experimental-features = configurable-impure-env' || '' }}
-            ${{ (secrets.ECR_TOKEN || steps.token.outputs.token) && format('impure-env = {0}{1}', secrets.ECR_TOKEN && format('ECR_TOKEN={0} ', secrets.ECR_TOKEN) || '', steps.token.outputs.token && format('GH_TOKEN={0}', steps.token.outputs.token) || '') || '' }}
-            ${{ inputs.extraSubstituters && format('extra-substituters = {0}', inputs.extraSubstituters) || '' }}
-            ${{ inputs.extraTrustedPublicKeys && format('extra-trusted-public-keys = {0}', inputs.extraTrustedPublicKeys) || '' }}
-            ${{ inputs.requireSigs && format('require-sigs = {0}', inputs.requireSigs) || '' }}
-            ${{ inputs.extraSubstituters && 'fallback = true' || '' }}
-            ${{ inputs.extraSubstituters && 'connect-timeout = 5' || '' }}
-
-      - name: Build image locally (scan-before-push gate)
-        if: inputs.scan-before-push
-        env:
-          IMAGE_ATTR: ${{ inputs.image-attr }}
-        run: nix build ".#${IMAGE_ATTR}" --print-build-logs
-
-      - name: Resolve the built store path (super-cache-save wants a store path)
-        id: built-store-path
-        if: inputs.scan-before-push && inputs.superCacheSaveEndpoint != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          p="$(readlink -f result)"
-          case "$p" in
-            /nix/store/*) ;;
-            *) echo "::error::resolved path is not a store path: $p"; exit 1;;
-          esac
-          echo "path=$p" >> "$GITHUB_OUTPUT"
-          echo "resolved result -> $p"
-
-      - name: Push built image to super-cache (sui)
-        if: inputs.scan-before-push && inputs.superCacheSaveEndpoint != ''
-        uses: pleme-io/actions/super-cache-save@main
-        with:
-          endpoint: ${{ inputs.superCacheSaveEndpoint }}
-          outputs: ${{ steps.built-store-path.outputs.path }}
-          key: ${{ inputs.image-attr }}
-
-      - name: Zero-tolerance CVE gate (pre-publish — scans the LOCAL tarball, never a pushed image)
-        if: inputs.scan-before-push
-        uses: pleme-io/actions/image-scan@main
-        with:
-          image-ref: ${{ inputs.scan-image-ref }}
-          local-archive: result
-          fail-on-severity: ${{ inputs.scan-fail-on-severity }}
-          ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
-          ignore-file: ${{ inputs.scan-ignore-file }}
-          vex: ${{ inputs.scan-vex-file }}
-
-      - name: Zero-tolerance CVE gate #2 (grype -- independent CVE database + matcher from trivy)
-        if: inputs.grype-scan
-        continue-on-error: ${{ inputs.grype-scan-advisory-only }}
-        env:
-          GRYPE_SCAN_APP: ${{ inputs.grype-scan-app }}
-        run: nix run ".#${GRYPE_SCAN_APP}"
-
-      - name: Restore vulnix NVD feed cache
-        if: inputs.vulnix-scan
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/vulnix
-          key: vulnix-nvd-${{ github.run_id }}
-          restore-keys: |
-            vulnix-nvd-
-
-      - name: Nix-closure CVE gate (vulnix -- covers what the trivy gate above structurally cannot)
-        if: inputs.vulnix-scan
-        continue-on-error: ${{ inputs.vulnix-scan-advisory-only }}
-        env:
-          VULNIX_SCAN_APP: ${{ inputs.vulnix-scan-app }}
-        run: nix run ".#${VULNIX_SCAN_APP}"
-
-      - name: Load image into Docker for boot-check
-        if: inputs.boot-check-cmd != '' || inputs.boot-check-still-running || inputs.boot-check-expect-log != ''
-        run: docker load -i result
-
-      - name: Correctness gate (boot-check — expected startup marker, non-daemon image)
-        if: inputs.boot-check-expect-log != ''
-        uses: pleme-io/actions/container-boot-check@main
-        with:
-          image: ${{ inputs.boot-check-image-ref }}
-          expect-log: ${{ inputs.boot-check-expect-log }}
-          env: ${{ inputs.boot-check-env }}
-
-      - name: Correctness gate (boot-check — exec-poll a health-cmd inside the container)
-        if: inputs.boot-check-cmd != '' && !inputs.boot-check-still-running && inputs.boot-check-expect-log == ''
-        uses: pleme-io/actions/container-boot-check@main
-        with:
-          image: ${{ inputs.boot-check-image-ref }}
-          health-cmd: ${{ inputs.boot-check-cmd }}
-          env: ${{ inputs.boot-check-env }}
-
-      - name: Correctness gate (boot-check — still-running, shell-less/distroless image)
-        if: inputs.boot-check-still-running && inputs.boot-check-expect-log == ''
-        uses: pleme-io/actions/container-boot-check@main
-        with:
-          image: ${{ inputs.boot-check-image-ref }}
-          health-cmd: ""
-          env: ${{ inputs.boot-check-env }}
-
-      - name: Registry login
-        uses: pleme-io/actions/registry-login@main
-        with:
-          registry: ${{ inputs.registry-host }}
-          client: docker
-          username: ${{ github.actor }}
-          bot-pat: ${{ steps.token.outputs.pat }}
-          ghcr-token: ${{ secrets.GHCR_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-
-      - name: Build + push image (idempotent — <arch>-<sha> + <arch>-latest tags)
-        env:
-          RELEASE_APP: ${{ inputs.release-app }}
-        run: nix run ".#${RELEASE_APP}"
-
-      - name: SBOM + cosign attest (supply-chain evidence for the pushed image)
-        if: inputs.sbom-attest
-        env:
-          SBOM_ATTEST_APP: ${{ inputs.sbom-attest-app }}
-          COSIGN_EXPERIMENTAL: "1"
-        run: nix run ".#${SBOM_ATTEST_APP}"
-
-      - name: Cosign sign (keyless, Fulcio + Rekor)
-        if: inputs.cosign-sign
-        env:
-          COSIGN_SIGN_APP: ${{ inputs.cosign-sign-app }}
-          COSIGN_EXPERIMENTAL: "1"
-        run: nix run ".#${COSIGN_SIGN_APP}"
-
-      - name: Build image closure info (cartorio SBOM source — local cache hit, no recompile)
-        if: inputs.cartorio-attest
-        env:
-          CARTORIO_CLOSURE_INFO_ATTR: ${{ inputs.cartorio-closure-info-attr }}
-        run: nix build ".#${CARTORIO_CLOSURE_INFO_ATTR}" --out-link cartorio-closure --print-build-logs
-      - name: Cartorio attest (BLAKE3 receipt + Nix-closure SBOM + SLSA provenance)
-        if: inputs.cartorio-attest
-        uses: pleme-io/actions/cartorio-attest@main
-        with:
-          subject: ${{ inputs.cartorio-subject }}
-          image-ref: ${{ inputs.scan-image-ref }}
-          nix-closure-info-path: cartorio-closure
-          sign: "false"
-          emit-outcome-chain: "false"
-      - name: Upload cartorio receipt + SBOM + SLSA provenance
-        if: inputs.cartorio-attest
-        uses: actions/upload-artifact@v4
-        with:
-          name: cartorio-${{ inputs.cartorio-subject }}
-          path: |
-            cartorio-receipt.json
-            cartorio-sbom.cdx.json
-            cartorio-slsa.json
-          if-no-files-found: warn
-
+    uses: ./.github/workflows/nix-image-auto-release.yml
+    with:
+      release-app: ${{ inputs.release-app }}
+      registry-host: ${{ inputs.registry-host }}
+      runner: ${{ inputs.runner }}
+      working-directory: ${{ inputs.working-directory }}
+      scan-before-push: ${{ inputs.scan-before-push }}
+      image-attr: ${{ inputs.image-attr }}
+      scan-image-ref: ${{ inputs.scan-image-ref }}
+      scan-fail-on-severity: ${{ inputs.scan-fail-on-severity }}
+      scan-ignore-unfixed: ${{ inputs.scan-ignore-unfixed }}
+      scan-ignore-file: ${{ inputs.scan-ignore-file }}
+      scan-vex-file: ${{ inputs.scan-vex-file }}
+      boot-check-cmd: ${{ inputs.boot-check-cmd }}
+      boot-check-image-ref: ${{ inputs.boot-check-image-ref }}
+      boot-check-env: ${{ inputs.boot-check-env }}
+      boot-check-still-running: ${{ inputs.boot-check-still-running }}
+      boot-check-expect-log: ${{ inputs.boot-check-expect-log }}
+      vulnix-scan: ${{ inputs.vulnix-scan }}
+      vulnix-scan-app: ${{ inputs.vulnix-scan-app }}
+      vulnix-scan-advisory-only: ${{ inputs.vulnix-scan-advisory-only }}
+      grype-scan: ${{ inputs.grype-scan }}
+      grype-scan-app: ${{ inputs.grype-scan-app }}
+      grype-scan-advisory-only: ${{ inputs.grype-scan-advisory-only }}
+      extraSubstituters: ${{ inputs.extraSubstituters }}
+      extraTrustedPublicKeys: ${{ inputs.extraTrustedPublicKeys }}
+      requireSigs: ${{ inputs.requireSigs }}
+      superCacheSaveEndpoint: ${{ inputs.superCacheSaveEndpoint }}
+      sbom-attest: ${{ inputs.sbom-attest }}
+      sbom-attest-app: ${{ inputs.sbom-attest-app }}
+      cosign-sign: ${{ inputs.cosign-sign }}
+      cosign-sign-app: ${{ inputs.cosign-sign-app }}
+      cartorio-attest: ${{ inputs.cartorio-attest }}
+      cartorio-subject: ${{ inputs.cartorio-subject }}
+      cartorio-closure-info-attr: ${{ inputs.cartorio-closure-info-attr }}
+      token-source: ${{ inputs.token-source }}
+    secrets: inherit

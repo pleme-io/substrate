@@ -325,7 +325,7 @@ jobs:
     # extend the near-miss, never re-implement it). That workflow already
     # carries the private-git-dependency credential wiring and the
     # magic-nix-cache removal.
-    uses: pleme-io/substrate/.github/workflows/nix-devshell-cargo-test.yml@main
+    uses: ./.github/workflows/nix-devshell-cargo-test.yml
     with:
       devshell: ${{ inputs.devshell }}
       test-args: ${{ inputs.test-args }}

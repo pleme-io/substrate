@@ -85,7 +85,7 @@ jobs:
     # Fully-qualified, not `./…`: this workflow is itself called from another
     # repo, and a relative path resolves against the CALLER's checkout, which
     # is not substrate. Matches the fleet's 109 other nested calls.
-    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
+    uses: ./.github/workflows/reusable-autoheal.yml
     secrets: inherit
     with:
       artifact: "Cargo.gen.lock"

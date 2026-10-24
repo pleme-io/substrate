@@ -150,7 +150,7 @@ jobs:
     name: 'rust-workspace · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'rust-workspace'
-    uses: pleme-io/substrate/.github/workflows/rust-auto-release.yml@main
+    uses: ./.github/workflows/rust-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -160,7 +160,7 @@ jobs:
     name: 'rust-single-crate · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'rust-single-crate'
-    uses: pleme-io/substrate/.github/workflows/cargo-auto-release.yml@main
+    uses: ./.github/workflows/cargo-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -172,7 +172,7 @@ jobs:
     if: needs.detect.outputs.repo-type == 'go'
     # FSM-MODULE: pull-model, tag-only — go-auto-release.yml's only publish
     # side effect is the tag push; proxy.golang.org indexes lazily.
-    uses: pleme-io/substrate/.github/workflows/go-auto-release.yml@main
+    uses: ./.github/workflows/go-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -182,7 +182,7 @@ jobs:
     name: 'npm · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'npm'
-    uses: pleme-io/substrate/.github/workflows/npm-auto-release.yml@main
+    uses: ./.github/workflows/npm-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -192,7 +192,7 @@ jobs:
     name: 'python · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'python'
-    uses: pleme-io/substrate/.github/workflows/python-auto-release.yml@main
+    uses: ./.github/workflows/python-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -202,7 +202,7 @@ jobs:
     name: 'helm · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'helm'
-    uses: pleme-io/substrate/.github/workflows/helm-auto-release.yml@main
+    uses: ./.github/workflows/helm-auto-release.yml
     with:
       bump-type: ${{ inputs.bump-type }}
       runner: ${{ inputs.runner }}
@@ -212,14 +212,14 @@ jobs:
     name: 'ansible-collection · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'ansible-collection'
-    uses: pleme-io/substrate/.github/workflows/ansible-collection-release.yml@main
+    uses: ./.github/workflows/ansible-collection-release.yml
     secrets: inherit
 
   github-action:
     name: 'github-action · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'github-action'
-    uses: pleme-io/substrate/.github/workflows/action-release.yml@main
+    uses: ./.github/workflows/action-release.yml
     secrets: inherit
 
   # caixa — a pure-tatara-lisp library (Biblioteca). Delivery is tag-only: a
@@ -232,7 +232,7 @@ jobs:
     name: 'caixa · release'
     needs: detect
     if: needs.detect.outputs.repo-type == 'caixa'
-    uses: pleme-io/substrate/.github/workflows/caixa-tlisp-auto-release.yml@main
+    uses: ./.github/workflows/caixa-tlisp-auto-release.yml
     secrets: inherit
 
   # Catch-all. MUST be a NEGATION of the dispatched set, never `== 'unknown'`.

@@ -177,7 +177,7 @@ jobs:
       fail-fast: false
       max-parallel: ${{ inputs.matrix-max-parallel > 0 && inputs.matrix-max-parallel || 256 }}
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    uses: pleme-io/substrate/.github/workflows/super-cache-ci-build.yml@main
+    uses: ./.github/workflows/super-cache-ci-build.yml
     with:
       svc: ${{ matrix.image }}
       arch: ${{ matrix.arch }}

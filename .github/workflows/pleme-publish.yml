@@ -59,7 +59,7 @@ jobs:
     # Keep these `with:` values identical to reusable-gen-spec.yml's. They are
     # duplicated only because the nesting cap forbids the extra hop; if that
     # cap ever lifts, collapse this back to a call of reusable-gen-spec.
-    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
+    uses: ./.github/workflows/reusable-autoheal.yml
     secrets: inherit
     with:
       artifact: "Cargo.gen.lock"

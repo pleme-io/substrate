@@ -33,7 +33,7 @@ jobs:
   caixa:
     needs: detect
     if: needs.detect.outputs.repo-type == 'caixa'
-    uses: pleme-io/substrate/.github/workflows/caixa-tlisp-auto-release.yml@main
+    uses: ./.github/workflows/caixa-tlisp-auto-release.yml
     secrets: inherit
   unsupported:
     needs: detect

@@ -58,6 +58,6 @@ jobs:
   publish:
     name: Publish to crates.io
     needs: derive-version
-    uses: pleme-io/substrate/.github/workflows/crates-publish.yml@main
+    uses: ./.github/workflows/crates-publish.yml
     secrets:
       CRATES_API_TOKEN: ${{ secrets.CRATES_API_TOKEN }}

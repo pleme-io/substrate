@@ -47,7 +47,7 @@ jobs:
     # reusable-gen-spec job in pleme-publish.yml.
     #
     # Keep these `with:` values identical to go-gen-spec.yml's.
-    uses: pleme-io/substrate/.github/workflows/reusable-autoheal.yml@main
+    uses: ./.github/workflows/reusable-autoheal.yml
     secrets: inherit
     with:
       artifact: "Go.gen.lock"
