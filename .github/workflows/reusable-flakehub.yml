@@ -6,6 +6,11 @@
 #       with:
 #         visibility: public  # or unlisted
 #         rolling: true      # branch-based versioning
+#
+# A blue project does not write this call by hand: blue's registry renders
+# it from the Bluefile (`registry(:flakehub, ...)`, visibility from
+# `package(name, version, visibility)`), gated fresh. See
+# pleme-io/blue docs/REGISTRY.md.
 
 name: Reusable FlakeHub Publish
 
@@ -13,7 +18,7 @@ on:
   workflow_call:
     inputs:
       visibility:
-        description: "Flake visibility (public or unlisted)"
+        description: "Flake visibility: public, unlisted, or private (private needs a paid FlakeHub org plan)"
         required: false
         type: string
         default: public
