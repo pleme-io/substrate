@@ -110,7 +110,7 @@ on:
         type: string
         required: true
       runner:
-        description: "Runner override. Empty uses ubuntu-latest — see the header."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       git-credentials:

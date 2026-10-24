@@ -88,6 +88,10 @@ name: cargo-ci
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       flake-args:
         description: >-
           Extra arguments appended to `nix flake check`. Empty by default, so
@@ -198,7 +202,7 @@ jobs:
   # correct: bootstrapping the resolver cannot call the resolver.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

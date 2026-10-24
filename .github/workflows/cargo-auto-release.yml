@@ -84,9 +84,8 @@ on:
       # (also honors an optional repo-committed .github/runner.yml, which
       # a bare ternary here never could).
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-latest) via runner-resolve."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        required: false
         default: ""
       token-source:
         description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing. use-bot-pat: true selects pat.'
@@ -142,7 +141,7 @@ jobs:
   # (bootstrapping the resolver can't call the resolver).
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

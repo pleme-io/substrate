@@ -30,6 +30,10 @@ name: cargo-publish-each-member-auto-release
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       bump-type:
         description: "patch | minor | major (per-member bump)"
         type: string
@@ -118,7 +122,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # Two clauses, two different jobs.
     #
     # (1) Skip when the bot itself pushed (avoids tag-push -> publish ->
@@ -208,7 +212,7 @@ jobs:
     # reusable workflow's runs-on bills the CALLER — the note on release's
     # runs-on records the day that exhausted the org's spending limit). The
     # ternary keeps even this two-step reporting job off metered hosted compute.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       contents: read
     steps:

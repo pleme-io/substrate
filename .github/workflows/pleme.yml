@@ -71,10 +71,9 @@ on:
         required: true
         type: string
       runner:
-        required: false
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
-
 jobs:
   # An unknown family or target must FAIL, not silently run nothing. Every arm
   # is `if:`-gated, so a typo would otherwise skip all of them and report a

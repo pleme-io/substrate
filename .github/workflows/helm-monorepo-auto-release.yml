@@ -46,7 +46,7 @@ on:
         type: string
         default: "release"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the job's runs-on."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       token-source:
@@ -77,7 +77,7 @@ jobs:
     # workflow-evaluation context, so a vars.*-based fallback silently
     # resolves empty there. Same idiom as rust-auto-release.yml/
     # python-auto-release.yml.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # Never re-trigger on the bot's own pushes (defensive; this workflow does not
     # itself push commits, but a consumer might add a bump step later).
     if: github.actor != 'github-actions[bot]'

@@ -97,11 +97,15 @@
 #                                      job-selection linter's resolution)
 # Both run in job-selection-selftest.yml.
 
-name: Rust binary release
+name: rust-binary-release
 
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       binary-name:
         type: string
         required: true
@@ -708,7 +712,7 @@ jobs:
     # Same billing rule as linux-baseline: a reusable workflow's `runs-on`
     # executes in the CALLER's context, so private callers route to their
     # own pool.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       # Tied to the merge's own result rather than written as a literal. Job
       # outputs are evaluated even when a step fails, and a literal name would

@@ -45,8 +45,9 @@ on:
         type: string
         default: "stable"
       runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
     secrets:
       STEAMPIPE_REGISTRY_TOKEN:
         description: "Reserved for future Steampipe Hub headless publish API"
@@ -65,7 +66,7 @@ jobs:
           - { goos: linux,  goarch: arm64,  suffix: linux-arm64 }
           - { goos: darwin, goarch: amd64,  suffix: darwin-amd64 }
           - { goos: darwin, goarch: arm64,  suffix: darwin-arm64 }
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -104,7 +105,7 @@ jobs:
   hub-publish:
     name: Steampipe Hub publish (notice)
     needs: build
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - name: Resolve org
         id: org

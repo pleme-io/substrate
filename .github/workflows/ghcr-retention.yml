@@ -31,6 +31,10 @@ name: ghcr-retention
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       packages:
         description: |
           Newline-separated container package names, as GHCR knows them
@@ -82,7 +86,7 @@ jobs:
     # every other substrate reusable uses, and the reason is on the record:
     # a metered label in this position exhausted the org's Actions spending
     # limit on 2026-08-08.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       packages: read
     outputs:
@@ -128,7 +132,7 @@ jobs:
   prune:
     needs: report
     if: inputs.apply
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       packages: write
     strategy:

@@ -13,11 +13,15 @@
 # upstream-watch and any other bot PRs). Requires repo Settings -> General ->
 # Pull Requests -> "Allow auto-merge" to be enabled (one-time human action).
 
-name: Ansible collection auto-merge
+name: ansible-collection-auto-merge
 
 on:
-  workflow_call: {}
-
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
 permissions:
   contents: write
   pull-requests: write
@@ -30,7 +34,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     if: contains(github.event.pull_request.labels.*.name, 'automated')
     steps:
       - uses: peter-evans/enable-pull-request-automerge@v3

@@ -22,7 +22,7 @@
 (defworkflow cargo-auto-release
   :file      "cargo-auto-release.yml"
   :pattern   rust-workspace
-  :inputs    (bump-type crate-path source-paths add-paths no-verify regenerate-cargo-nix runner)
+  :inputs    (use-bot-pat bump-type crate-path source-paths add-paths no-verify regenerate-cargo-nix runner token-source)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 362)
@@ -30,7 +30,7 @@
 (defworkflow reusable-autoheal
   :file      "reusable-autoheal.yml"
   :pattern   gen-spec
-  :inputs    (artifact paths repair regen detect fix-hint runner git-credentials nix toolchain)
+  :inputs    (token-source artifact paths repair regen detect fix-hint runner git-credentials nix toolchain)
   :outputs   ()
   ; ★ BOT_PAT is CONSUMED but NOT DECLARED. The workflow reads
   ; `secrets.BOT_PAT` at :202 and :208, yet its `workflow_call:` block declares
@@ -51,7 +51,7 @@
 (defworkflow reusable-gen-spec
   :file      "reusable-gen-spec.yml"
   :pattern   gen-spec
-  :inputs    (gen-ref runner)
+  :inputs    (token-source gen-ref runner)
   :outputs   ()
   :secrets   ()
   :consumers 337)
@@ -59,7 +59,7 @@
 (defworkflow pre-merge-gate
   :file      "pre-merge-gate.yml"
   :pattern   gate
-  :inputs    (run-rust-gate run-npm-gate run-python-gate run-tlisp-lint run-workflow-shim-lint run-publish-verify runner)
+  :inputs    (run-rust-gate run-npm-gate run-python-gate run-tlisp-lint run-workflow-shim-lint run-publishability-lint run-publish-verify runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN NPM_TOKEN PYPI_API_TOKEN BOT_PAT)
   :consumers 166)
@@ -67,7 +67,7 @@
 (defworkflow security-gate
   :file      "security-gate.yml"
   :pattern   gate
-  :inputs    (fail-on-severity license check-license-headers runner)
+  :inputs    (fail-on-severity license check-license-headers check-dependencies runner)
   :outputs   ()
   :secrets   ()
   :consumers 164)
@@ -75,7 +75,7 @@
 (defworkflow rust-auto-release
   :file      "rust-auto-release.yml"
   :pattern   rust
-  :inputs    (bump-type source-paths add-paths rename-prefix no-verify runner)
+  :inputs    (bump-type source-paths add-paths rename-prefix no-verify runner require-tests require-tests-waiver test-granularity test-devshell test-args token-source)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 51)
@@ -83,7 +83,7 @@
 (defworkflow go-auto-release
   :file      "go-auto-release.yml"
   :pattern   go
-  :inputs    (bump-type module-path changed-globs tag-glob go-version proxy-poll-attempts runner)
+  :inputs    (bump-type module-path changed-globs tag-glob go-version proxy-poll-attempts publish-from-private runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 45)
@@ -91,7 +91,7 @@
 (defworkflow nix-image-auto-release
   :file      "nix-image-auto-release.yml"
   :pattern   nix
-  :inputs    (release-app registry-host runner working-directory scan-before-push image-attr scan-image-ref scan-fail-on-severity scan-ignore-unfixed scan-ignore-file scan-vex-file boot-check-cmd boot-check-image-ref boot-check-env boot-check-still-running boot-check-expect-log vulnix-scan vulnix-scan-app vulnix-scan-advisory-only grype-scan grype-scan-app grype-scan-advisory-only extraSubstituters extraTrustedPublicKeys requireSigs superCacheSaveEndpoint sbom-attest sbom-attest-app cosign-sign cosign-sign-app cartorio-attest cartorio-subject cartorio-closure-info-attr)
+  :inputs    (release-app registry-host runner working-directory scan-before-push image-attr scan-image-ref scan-fail-on-severity scan-ignore-unfixed scan-ignore-file scan-vex-file scan-go-reachability boot-check-cmd boot-check-image-ref boot-check-env boot-check-still-running boot-check-expect-log vulnix-scan vulnix-scan-app vulnix-scan-advisory-only grype-scan grype-scan-app grype-scan-advisory-only extraSubstituters extraTrustedPublicKeys requireSigs superCacheSaveEndpoint sbom-attest sbom-attest-app cosign-sign cosign-sign-app cartorio-attest cartorio-subject cartorio-closure-info-attr token-source)
   :outputs   ()
   :secrets   (BOT_PAT GHCR_TOKEN ECR_TOKEN)
   :consumers 40)
@@ -99,7 +99,7 @@
 (defworkflow gem-auto-bump
   :file      "gem-auto-bump.yml"
   :pattern   ruby-gem
-  :inputs    (bump-type)
+  :inputs    (bump-type runner-labels token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 38)
@@ -107,7 +107,7 @@
 (defworkflow gem-ci
   :file      "gem-ci.yml"
   :pattern   ruby-gem
-  :inputs    ()
+  :inputs    (runner-labels token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 38)
@@ -123,7 +123,7 @@
 (defworkflow image-push
   :file      "image-push.yml"
   :pattern   container-image
-  :inputs    (imageAttr tag registry imageName flakeRef additionalTags runner buildCores maxJobs extraSubstituters extraTrustedPublicKeys netrcFile requireSigs superCacheSaveEndpoint scanBeforePush scanFailOnSeverity scanIgnoreUnfixed scanIgnoreFile)
+  :inputs    (genLockRegen allowPrivatePackage imageAttr tag autobumpArch registry imageName flakeRef additionalTags runner buildCores maxJobs extraSubstituters extraTrustedPublicKeys netrcFile requireSigs superCacheSaveEndpoint scanBeforePush scanFailOnSeverity scanIgnoreUnfixed scanIgnoreFile scanGoReachability token-source)
   :outputs   ()
   :secrets   (BOT_PAT GHCR_TOKEN ECR_TOKEN)
   :consumers 36)
@@ -131,7 +131,7 @@
 (defworkflow vendor-image-mirror
   :file      "vendor-image-mirror.yml"
   :pattern   container-image
-  :inputs    (ref zot-registry zot-repo zot-tag fail-on-severity ignore-file vex runner zot-username source-registry source-username)
+  :inputs    (ref zot-registry zot-repo zot-tag fail-on-severity ignore-file vex runner ca-cert-url zot-username source-registry source-username)
   :outputs   (admitted severity result zot-digest)
   :secrets   (ZOT_PASSWORD SOURCE_PASSWORD CA_CERT_TOKEN)
   :consumers 35)
@@ -139,7 +139,7 @@
 (defworkflow cargo-ci
   :file      "cargo-ci.yml"
   :pattern   rust-workspace
-  :inputs    (flake-args devshell test-args build-targets fmt-check devshell-args)
+  :inputs    (runner flake-args devshell test-args build-targets fmt-check devshell-args token-source)
   :outputs   ()
   :secrets   ()
   :consumers 24)
@@ -147,7 +147,7 @@
 (defworkflow reusable-flakehub
   :file      "reusable-flakehub.yml"
   :pattern   other
-  :inputs    (visibility rolling directory runner)
+  :inputs    (visibility rolling directory runner token-source)
   :outputs   ()
   :secrets   ()
   :consumers 22)
@@ -155,7 +155,7 @@
 (defworkflow cargo-publish-each-member-auto-release
   :file      "cargo-publish-each-member-auto-release.yml"
   :pattern   rust-workspace
-  :inputs    (bump-type dry-run no-verify skip-when-no-source-changes)
+  :inputs    (runner bump-type dry-run no-verify skip-when-no-source-changes publish-from-private token-source)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 14)
@@ -163,7 +163,7 @@
 (defworkflow cargo-gate-ci
   :file      "cargo-gate-ci.yml"
   :pattern   rust-workspace
-  :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain)
+  :inputs    (os-matrix fmt-args test-args clippy-advisory run-fmt rust-toolchain token-source)
   :outputs   ()
   :secrets   ()
   :consumers 13)
@@ -171,7 +171,7 @@
 (defworkflow crates-publish
   :file      "crates-publish.yml"
   :pattern   other
-  :inputs    ()
+  :inputs    (runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN)
   :consumers 10)
@@ -190,7 +190,7 @@
   ; matrix-include, linux-libc and BOT_PAT were already in the workflow and
   ; missing here; added with artifact-only (2026-09-19). artifact-name is set
   ; only in artifact-only mode and is empty otherwise.
-  :inputs    (binary-name features no-default-features matrix-include system-deps app-bundle app-name bundle-id icon-svg desktop-categories min-system-version linux-libc artifact-only)
+  :inputs    (runner binary-name package features no-default-features matrix-include system-deps app-bundle app-name bundle-id icon-svg desktop-categories min-system-version linux-libc artifact-only token-source)
   :outputs   (artifact-name)
   :secrets   (BOT_PAT)
   :consumers 7)
@@ -206,7 +206,7 @@
 (defworkflow caixa-validate
   :file      "caixa-validate.yml"
   :pattern   caixa-package
-  :inputs    (runner strict build strictPalavra caixaPath)
+  :inputs    (runner strict build strictPalavra caixaPath token-source)
   :outputs   ()
   :secrets   ()
   :consumers 3)
@@ -214,7 +214,7 @@
 (defworkflow helm-monorepo-auto-release
   :file      "helm-monorepo-auto-release.yml"
   :pattern   helm-chart
-  :inputs    (registry release-app runner)
+  :inputs    (registry release-app runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT GHCR_TOKEN)
   :consumers 3)
@@ -230,7 +230,7 @@
 (defworkflow action-pipeline
   :file      "action-pipeline.yml"
   :pattern   universal-composer
-  :inputs    (pipeline checkout-actions-ref runner)
+  :inputs    (pipeline checkout-actions-ref runner token-source)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -238,7 +238,7 @@
 (defworkflow ansible-collection-ansible-test
   :file      "ansible-collection-ansible-test.yml"
   :pattern   ansible-collection
-  :inputs    (namespace name python-version)
+  :inputs    (runner namespace name python-version)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -246,7 +246,7 @@
 (defworkflow ansible-collection-auto-bump
   :file      "ansible-collection-auto-bump.yml"
   :pattern   ansible-collection
-  :inputs    (bump-type)
+  :inputs    (runner bump-type token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 2)
@@ -254,7 +254,7 @@
 (defworkflow ansible-collection-auto-merge
   :file      "ansible-collection-auto-merge.yml"
   :pattern   ansible-collection
-  :inputs    ()
+  :inputs    (runner)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -262,7 +262,7 @@
 (defworkflow ansible-collection-ci
   :file      "ansible-collection-ci.yml"
   :pattern   ansible-collection
-  :inputs    (openapi-spec-url)
+  :inputs    (runner openapi-spec-url)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -270,7 +270,7 @@
 (defworkflow ansible-collection-docs-lint
   :file      "ansible-collection-docs-lint.yml"
   :pattern   ansible-collection
-  :inputs    (namespace name)
+  :inputs    (runner namespace name)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -278,7 +278,7 @@
 (defworkflow ansible-collection-integration-live
   :file      "ansible-collection-integration-live.yml"
   :pattern   ansible-collection
-  :inputs    ()
+  :inputs    (runner)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -294,7 +294,7 @@
 (defworkflow ansible-collection-published-install
   :file      "ansible-collection-published-install.yml"
   :pattern   ansible-collection
-  :inputs    (collection modules)
+  :inputs    (runner collection modules)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -302,7 +302,7 @@
 (defworkflow ansible-collection-release
   :file      "ansible-collection-release.yml"
   :pattern   ansible-collection
-  :inputs    ()
+  :inputs    (runner)
   :outputs   ()
   :secrets   (ANSIBLE_GALAXY_TOKEN)
   :consumers 2)
@@ -310,7 +310,7 @@
 (defworkflow ansible-collection-upstream-watch
   :file      "ansible-collection-upstream-watch.yml"
   :pattern   ansible-collection
-  :inputs    (upstream-spec-url spec-resources-repo)
+  :inputs    (runner upstream-spec-url spec-resources-repo)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -342,7 +342,7 @@
 (defworkflow nix-devshell-cargo-test
   :file      "nix-devshell-cargo-test.yml"
   :pattern   nix
-  :inputs    (runner devshell test-args fmt-check devshell-args)
+  :inputs    (token-source runner devshell test-args fmt-check manifest-path devshell-args)
   :outputs   ()
   :secrets   ()
   :consumers 2)
@@ -350,7 +350,7 @@
 (defworkflow action-release
   :file      "action-release.yml"
   :pattern   action-release
-  :inputs    (action-glob release-notes major-ref)
+  :inputs    (runner action-glob release-notes major-ref)
   :outputs   ()
   :secrets   ()
   :consumers 1)
@@ -358,7 +358,7 @@
 (defworkflow caixa-publish
   :file      "caixa-publish.yml"
   :pattern   caixa-package
-  :inputs    (caixaName registry runner tagPrefix pushLatest)
+  :inputs    (caixaName registry runner tagPrefix pushLatest token-source)
   :outputs   ()
   :secrets   (GHCR_TOKEN BOT_PAT)
   :consumers 1)
@@ -366,7 +366,7 @@
 (defworkflow crossplane-function-auto-release
   :file      "crossplane-function-auto-release.yml"
   :pattern   iac-provider
-  :inputs    (release-app tag registry-host runner extraSubstituters extraTrustedPublicKeys requireSigs)
+  :inputs    (release-app tag registry-host runner extraSubstituters extraTrustedPublicKeys requireSigs token-source)
   :outputs   ()
   :secrets   (GHCR_TOKEN BOT_PAT)
   :consumers 1)
@@ -382,7 +382,7 @@
 (defworkflow ai-stack
   :file      "ai-stack.yml"
   :pattern   stack-composition
-  :inputs    ()
+  :inputs    (runner hf-repo modal-entry posthog-event)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -390,7 +390,7 @@
 (defworkflow auto-release-min
   :file      "auto-release-min.yml"
   :pattern   other
-  :inputs    (bump-type)
+  :inputs    (runner bump-type)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -398,7 +398,7 @@
 (defworkflow auto-release-verify
   :file      "auto-release-verify.yml"
   :pattern   other
-  :inputs    ()
+  :inputs    (runner)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN NPM_TOKEN PYPI_API_TOKEN BOT_PAT)
   :consumers 0)
@@ -406,7 +406,7 @@
 (defworkflow caixa-auto-release
   :file      "caixa-auto-release.yml"
   :pattern   caixa-package
-  :inputs    (bump-type caixa-path)
+  :inputs    (runner bump-type caixa-path token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -414,7 +414,7 @@
 (defworkflow caixa-forge
   :file      "caixa-forge.yml"
   :pattern   caixa-package
-  :inputs    (spec outputs runner commitOnDrift branchPrefix)
+  :inputs    (spec outputs runner commitOnDrift branchPrefix token-source)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -422,7 +422,7 @@
 (defworkflow caixa-publish-tlisp
   :file      "caixa-publish-tlisp.yml"
   :pattern   caixa-package
-  :inputs    (caixaPath tagPrefix runner)
+  :inputs    (caixaPath tagPrefix runner token-source)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -430,7 +430,7 @@
 (defworkflow caixa-tlisp-auto-release
   :file      "caixa-tlisp-auto-release.yml"
   :pattern   caixa-package
-  :inputs    (bump-type source-paths manifest-glob runner)
+  :inputs    (bump-type source-paths manifest-glob runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -438,7 +438,7 @@
 (defworkflow cd-stack
   :file      "cd-stack.yml"
   :pattern   stack-composition
-  :inputs    (release chart namespace values-files reconcile-after reconcile-kind notify-slack)
+  :inputs    (runner release chart namespace values-files reconcile-after reconcile-kind notify-slack)
   :outputs   ()
   :secrets   (KUBECONFIG_B64 SLACK_WEBHOOK_URL)
   :consumers 0)
@@ -446,7 +446,7 @@
 (defworkflow comment-command-dispatch
   :file      "comment-command-dispatch.yml"
   :pattern   other
-  :inputs    (catalog-path command trigger min-permission trust-pr-author allowlist target-label target-workflow target-workflow-ref target-repository-dispatch-event target-repository-dispatch-repo)
+  :inputs    (runner catalog-path command trigger min-permission trust-pr-author allowlist target-label target-workflow target-workflow-ref target-repository-dispatch-event target-repository-dispatch-repo)
   :outputs   (dispatched outcome)
   :secrets   ()
   :consumers 0)
@@ -454,7 +454,7 @@
 (defworkflow compliance-attest
   :file      "compliance-attest.yml"
   :pattern   attestation
-  :inputs    ()
+  :inputs    (runner artifact-path image-ref fail-on-severity ignore-file)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -462,7 +462,7 @@
 (defworkflow container-stack
   :file      "container-stack.yml"
   :pattern   stack-composition
-  :inputs    (image tag platforms scan-fail-on sbom-format)
+  :inputs    (runner image tag platforms scan-fail-on sbom-format)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -470,7 +470,7 @@
 (defworkflow crossplane-provider-publish
   :file      "crossplane-provider-publish.yml"
   :pattern   iac-provider
-  :inputs    (provider-name registry org package-dir runner)
+  :inputs    (provider-name registry org package-dir runner token-source)
   :outputs   ()
   :secrets   (UPBOUND_TOKEN GHCR_TOKEN BOT_PAT)
   :consumers 0)
@@ -478,7 +478,7 @@
 (defworkflow cse-audit
   :file      "cse-audit.yml"
   :pattern   gate
-  :inputs    (workspace_root strict only)
+  :inputs    (runner workspace_root strict only token-source)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -486,7 +486,7 @@
 (defworkflow data-stack
   :file      "data-stack.yml"
   :pattern   stack-composition
-  :inputs    ()
+  :inputs    (runner dbt-profile dagster-asset)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -494,7 +494,7 @@
 (defworkflow esteira-rio-bump
   :file      "esteira-rio-bump.yml"
   :pattern   esteira
-  :inputs    (bump-type skip-paths runner)
+  :inputs    (bump-type skip-paths runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -510,7 +510,7 @@
 (defworkflow go-binary-release
   :file      "go-binary-release.yml"
   :pattern   go
-  :inputs    (binary-name main-path go-version homebrew-tap homebrew-description homepage cosign)
+  :inputs    (runner binary-name main-path go-version homebrew-tap homebrew-description homepage cosign)
   :outputs   ()
   :secrets   (HOMEBREW_TAP_TOKEN)
   :consumers 0)
@@ -518,7 +518,7 @@
 (defworkflow go-gen-spec
   :file      "go-gen-spec.yml"
   :pattern   go
-  :inputs    (gen-ref)
+  :inputs    (gen-ref runner)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -526,7 +526,7 @@
 (defworkflow helm-auto-release
   :file      "helm-auto-release.yml"
   :pattern   helm-chart
-  :inputs    (bump-type registry source-paths add-paths runner)
+  :inputs    (bump-type registry chart-path source-paths add-paths runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -534,7 +534,7 @@
 (defworkflow helm-publish
   :file      "helm-publish.yml"
   :pattern   helm-chart
-  :inputs    (chartPath registry version libChartDir libChartName runner)
+  :inputs    (chartPath registry version libChartDir libChartName runner token-source)
   :outputs   ()
   :secrets   (GHCR_TOKEN BOT_PAT)
   :consumers 0)
@@ -542,7 +542,7 @@
 (defworkflow ios-game-ci
   :file      "ios-game-ci.yml"
   :pattern   other
-  :inputs    (runner run-build-sim)
+  :inputs    (runner run-build-sim token-source)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -550,7 +550,7 @@
 (defworkflow npm-auto-release
   :file      "npm-auto-release.yml"
   :pattern   node-package
-  :inputs    (bump-type access source-paths add-paths runner)
+  :inputs    (bump-type access source-paths add-paths runner publish-from-private token-source)
   :outputs   ()
   :secrets   (NPM_TOKEN BOT_PAT)
   :consumers 0)
@@ -558,7 +558,7 @@
 (defworkflow observability-deploy
   :file      "observability-deploy.yml"
   :pattern   other
-  :inputs    ()
+  :inputs    (runner version service-name)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -646,7 +646,7 @@
 (defworkflow pleme-stack
   :file      "pleme-stack.yml"
   :pattern   stack-composition
-  :inputs    (build-container image)
+  :inputs    (runner build-container image)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -670,7 +670,7 @@
 (defworkflow python-auto-release
   :file      "python-auto-release.yml"
   :pattern   python-package
-  :inputs    (bump-type source-paths add-paths runner)
+  :inputs    (bump-type source-paths add-paths publish-from-private runner token-source)
   :outputs   ()
   :secrets   (PYPI_API_TOKEN BOT_PAT)
   :consumers 0)
@@ -686,7 +686,7 @@
 (defworkflow rust-binary-auto-release
   :file      "rust-binary-auto-release.yml"
   :pattern   rust
-  :inputs    (bump-type source-paths binary-name features no-default-features runner)
+  :inputs    (bump-type source-paths binary-name features no-default-features runner token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 0)
@@ -694,7 +694,7 @@
 (defworkflow rust-release
   :file      "rust-release.yml"
   :pattern   rust
-  :inputs    (crateName publishCrate bumpType runOnTag)
+  :inputs    (runner crateName publishCrate bumpType runOnTag)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN)
   :consumers 0)
@@ -710,7 +710,7 @@
 (defworkflow super-cache-ci-build-matrix
   :file      "super-cache-ci-build-matrix.yml"
   :pattern   build-cache
-  :inputs    (flake-ref image-base arches services exclude eval-system matrix-max-parallel runner sui-mode lang registry fail-on-severity enforce-posture require-build discover-runner)
+  :inputs    (flake-ref image-base arches services exclude eval-system matrix-max-parallel runner sui-mode lang registry fail-on-severity enforce-posture require-build discover-runner token-source)
   :outputs   ()
   :secrets   (GHCR_TOKEN BOT_PAT)
   :consumers 0)
@@ -734,7 +734,7 @@
 (defworkflow web3-stack
   :file      "web3-stack.yml"
   :pattern   stack-composition
-  :inputs    ()
+  :inputs    (runner tool network)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -747,7 +747,7 @@
 (defworkflow ghcr-retention
   :file      "ghcr-retention.yml"
   :pattern   other
-  :inputs    (packages min-versions-to-keep ignore-versions apply)
+  :inputs    (runner packages min-versions-to-keep ignore-versions apply token-source)
   :outputs   ()
   :secrets   (BOT_PAT)
   :consumers 1)
@@ -776,7 +776,7 @@
 (defworkflow nix-image-auto-release-slim
   :file      "nix-image-auto-release-slim.yml"
   :pattern   nix
-  :inputs    (release-app registry-host runner working-directory scan-before-push image-attr scan-image-ref scan-fail-on-severity scan-ignore-unfixed scan-ignore-file scan-vex-file boot-check-cmd boot-check-image-ref boot-check-env boot-check-still-running boot-check-expect-log vulnix-scan vulnix-scan-app vulnix-scan-advisory-only grype-scan grype-scan-app grype-scan-advisory-only extraSubstituters extraTrustedPublicKeys requireSigs superCacheSaveEndpoint sbom-attest sbom-attest-app cosign-sign cosign-sign-app cartorio-attest cartorio-subject cartorio-closure-info-attr)
+  :inputs    (release-app registry-host runner working-directory scan-before-push image-attr scan-image-ref scan-fail-on-severity scan-ignore-unfixed scan-ignore-file scan-vex-file boot-check-cmd boot-check-image-ref boot-check-env boot-check-still-running boot-check-expect-log vulnix-scan vulnix-scan-app vulnix-scan-advisory-only grype-scan grype-scan-app grype-scan-advisory-only extraSubstituters extraTrustedPublicKeys requireSigs superCacheSaveEndpoint sbom-attest sbom-attest-app cosign-sign cosign-sign-app cartorio-attest cartorio-subject cartorio-closure-info-attr token-source)
   :outputs   ()
   :secrets   ()
   :consumers 0)
@@ -784,7 +784,7 @@
 (defworkflow nix-fleet
   :file      "nix-fleet.yml"
   :pattern   nix
-  :inputs    (runner-labels system eval-checks advisory-checks nodes node-max-parallel node-max-silent-time node-eval-stack-kib node-attr-template lint canonical-check kijun-ref kijun-args kijun-fail-on-findings cache-push cache-url cache-store-path flake-update flake-update-inputs flake-update-verify token-source)
+  :inputs    (runner-labels eval-runner-labels system eval-checks advisory-checks nodes node-max-parallel node-max-silent-time node-eval-stack-kib node-attr-template lint canonical-check kijun-ref kijun-args kijun-fail-on-findings cache-push cache-url cache-store-path flake-update flake-update-inputs flake-update-verify token-source)
   :outputs   (node-count kijun-ran flake-update-reason flake-update-commit)
   :secrets   (BOT_PAT SUI_SIGNING_KEY)
   :consumers 1)

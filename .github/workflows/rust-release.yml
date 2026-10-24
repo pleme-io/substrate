@@ -31,6 +31,10 @@ name: rust-release
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       crateName:
         description: "Binary / crate name (used for `cargo build --bin` and artefact names)"
         type: string
@@ -112,7 +116,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       contents: write
     steps:
@@ -149,7 +153,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
 

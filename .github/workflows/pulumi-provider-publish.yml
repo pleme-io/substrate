@@ -49,8 +49,9 @@ on:
         type: string
         default: "20"
       runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
     secrets:
       PULUMI_ACCESS_TOKEN:
         description: "Pulumi Cloud access token for plugin upload"
@@ -68,7 +69,7 @@ permissions:
 jobs:
   build-provider:
     name: Build provider plugin binary
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -98,7 +99,7 @@ jobs:
   publish-python-sdk:
     name: Publish Python SDK to PyPI
     needs: build-provider
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       # Block form: unquoted `${{ }}` inside a flow mapping is invalid
@@ -135,7 +136,7 @@ jobs:
   publish-nodejs-sdk:
     name: Publish Node.js SDK to npm
     needs: build-provider
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -169,7 +170,7 @@ jobs:
   publish-plugin:
     name: Publish plugin to Pulumi Cloud registry
     needs: build-provider
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
       - name: Publish plugin (no-op if token unset)

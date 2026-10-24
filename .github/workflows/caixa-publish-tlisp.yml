@@ -32,9 +32,9 @@ on:
         type: string
         default: "v"
       runner:
-        description: "Runner label"
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       token-source:
         description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
         type: string
@@ -43,7 +43,7 @@ on:
 jobs:
   publish:
     name: Publish tlisp caixa
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       contents: write
     steps:

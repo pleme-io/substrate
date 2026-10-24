@@ -25,9 +25,9 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: "Runner label"
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
     secrets:
       CRATES_API_TOKEN:
         # required:false, deliberately — this is the same defect
@@ -48,7 +48,7 @@ on:
 jobs:
   derive-version:
     name: Derive crate version from tag
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       version: ${{ steps.derive.outputs.version }}
     steps:

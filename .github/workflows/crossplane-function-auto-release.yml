@@ -48,7 +48,7 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04) -- same self-routing idiom as nix-image-auto-release.yml's own resolve job. Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's runs-on."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       extraSubstituters:
@@ -93,7 +93,7 @@ jobs:
   # self-hosted builder pool this default exists to route to).
   resolve:
     name: Resolve runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

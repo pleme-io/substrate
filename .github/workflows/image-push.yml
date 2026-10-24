@@ -172,7 +172,7 @@ on:
         type: string
         default: "latest"
       runner:
-        description: "Explicit runner label override. Empty (default) routes through pleme-io/actions/runner-resolve's visibility-aware default -- private-repo callers land on the org's self-hosted pool, public-repo callers keep free GitHub-hosted minutes. Set this only when a caller genuinely needs something else (an arm64 pool, a macOS runner -- no self-hosted macOS capacity exists fleet-wide)."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       buildCores:
@@ -267,7 +267,7 @@ jobs:
   # not default to ubuntu-24.04 unconditionally.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

@@ -30,7 +30,7 @@ on:
         type: string
         default: "ghcr.io"
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-24.04). Do NOT put an expression in this default — workflow_call input defaults are static; the fallback lives in the resolve job's `default:` input to pleme-io/actions/runner-resolve, evaluated in its own job because runs-on: cannot read a same-job step output."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       working-directory:
@@ -257,7 +257,7 @@ jobs:
     # (the job STARTS, so continue-on-error correctly absorbs any step
     # failure), public -> ubuntu-latest (free hosted minutes, unchanged). Same
     # idiom, same file, same rationale as `resolve`.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # report-only advisory (fail-on-violation:false); the no-cve-suppression
     # tatara-script has a not-yet-root-caused runtime error, so it must never
     # false-red a consumer's release. Remove once the script bug is fixed.
@@ -296,7 +296,7 @@ jobs:
     # failing before it ever reached the self-hosted pool this whole routing
     # exists to reach -- the routing job was itself the one still paying for
     # GitHub-hosted minutes.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       runner: ${{ steps.resolve.outputs.runner }}
     steps:

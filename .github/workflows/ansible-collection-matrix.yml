@@ -15,7 +15,7 @@
 #   - py3.10 dropped from 2.18 (2.18 supports 3.11-3.13)
 #   - py3.13 dropped from 2.14/2.15 (those support up to 3.11)
 
-name: Ansible collection matrix
+name: ansible-collection-matrix
 
 on:
   workflow_call:

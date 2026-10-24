@@ -56,10 +56,9 @@ on:
       # plan doesn't share org vars/secrets into private repos' workflow
       # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
       runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        required: false
         default: ""
-
 permissions:
   contents: read
 

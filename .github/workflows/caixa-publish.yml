@@ -44,9 +44,9 @@ on:
         type: string
         default: "ghcr.io/pleme-io"
       runner:
-        description: "Runner label"
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       tagPrefix:
         description: "Git tag prefix for the version"
         type: string
@@ -70,7 +70,7 @@ on:
 jobs:
   publish:
     name: Publish caixa
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     # Only the two scopes the steps actually use:
     #   contents: write — git tag + push
     #   packages: write — ghcr.io image push

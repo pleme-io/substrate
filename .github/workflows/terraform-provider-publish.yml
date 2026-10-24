@@ -52,9 +52,9 @@ on:
         type: string
         default: ".goreleaser.yml"
       runner:
-        description: "Runner label"
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "ubuntu-24.04"
+        default: ""
     secrets:
       TF_REGISTRY_GPG_PRIVATE_KEY:
         description: "GPG private key (ASCII-armored) registered on Terraform Registry"
@@ -69,7 +69,7 @@ permissions:
 jobs:
   goreleaser:
     name: Build, sign & release Terraform provider
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
         with:

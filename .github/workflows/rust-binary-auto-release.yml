@@ -102,10 +102,9 @@ on:
       # plan doesn't share org vars/secrets into private repos' workflow
       # context. Same idiom as rust-auto-release.yml/python-auto-release.yml.
       runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        required: false
         default: ""
-        description: "Explicit runner label override; empty = route by caller repo visibility."
       token-source:
         description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, whose tag push triggers release-binaries.yml; pat presents BOT_PAT; none presents nothing. Without a token GITHUB_TOKEN pushes, and that does NOT trigger downstream.'
         type: string

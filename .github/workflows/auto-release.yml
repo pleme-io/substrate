@@ -41,9 +41,8 @@ on:
       # github.event.repository and fall open to hosted (documented edge).
       # Passed through verbatim to every per-language reusable below.
       runner:
-        description: "Explicit runner label override; empty = route by caller repo visibility (private → vars.PRIVATE_BUILDER_RUNNER, public → ubuntu-latest)."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        required: false
         default: ""
     secrets:
       # DECLARED EXPLICITLY, ALL OPTIONAL — this block is the fix for the

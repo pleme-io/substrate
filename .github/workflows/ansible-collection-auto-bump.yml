@@ -25,11 +25,15 @@
 #     succeeds and the tag still lands, but the release workflow must be
 #     triggered manually (`gh workflow run release.yml --ref vX.Y.Z`).
 
-name: Ansible collection auto-bump
+name: ansible-collection-auto-bump
 
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
       bump-type:
         type: string
         default: patch
@@ -57,7 +61,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     if: github.actor != 'github-actions[bot]'
     steps:
       - id: token

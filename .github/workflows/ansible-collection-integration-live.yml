@@ -19,11 +19,15 @@
 # secrets), swap this composite's `Start mock gateway` step for a `services:`
 # block on the akeyless image and the rest of the workflow stays identical.
 
-name: Ansible collection integration-live
+name: ansible-collection-integration-live
 
 on:
-  workflow_call: {}
-
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
 jobs:
   live:
     # A reusable workflow's `runs-on` executes in the CALLER's billing
@@ -32,7 +36,7 @@ jobs:
     # after which every private repo's release path failed INSTANTLY with
     # zero steps — which reads as "autobump/autorelease is broken" rather
     # than "billing blocked". Public callers keep the exact label they had.
-    runs-on: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
 

@@ -74,7 +74,7 @@ on:
         type: string
         default: ""
       runner:
-        description: "Explicit runner label override. Empty = the self-hosted builder pool (Zot is cluster-internal; there is no public-repo fallback for this workflow)."
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
       ca-cert-url:

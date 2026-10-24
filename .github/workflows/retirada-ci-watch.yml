@@ -45,13 +45,9 @@ on:
         type: string
         default: "retirada-ci-watch"
       runner:
-        required: false
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        # Empty = resolve from the org variable. A workflow_call input default
-        # must be STATIC, so the fallback cannot live here — it lives in the
-        # job's runs-on below.
         default: ""
-
 permissions:
   contents: read
   actions: write
