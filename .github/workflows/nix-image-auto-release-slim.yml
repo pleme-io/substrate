@@ -1,3 +1,4 @@
+# Reusable workflow: nix-image-auto-release with the same inputs, by one call to it (the experiment it was has no callers).
 name: nix-image-auto-release-slim
 on:
   workflow_call:
