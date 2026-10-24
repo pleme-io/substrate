@@ -118,11 +118,10 @@
       ];
     };
 
-  nixpkgsInstantiates = targetSystem:
-    (builtins.tryEval (import nixpkgs {
-      system = targetSystem;
-      config.allowDeprecatedx86_64Darwin = true;
-    })).success;
+  nixpkgsLib = nixpkgs.lib or (import "${nixpkgs}/lib");
+
+  x86_64DarwinInstantiates =
+    builtins.compareVersions nixpkgsLib.trivial.release "26.11" < 0;
 
   # Darwin target pkgs MUST use the same fenix toolchain as hostPkgs.
   # On native darwin (target arch == host arch — the common case for
@@ -136,7 +135,9 @@
   # macro deps mostly). Match the hostPkgs overlay stack here so
   # native = identical-by-construction.
   mkDarwinPkgs = targetSystem:
-    if fenix == null
+    if targetSystem == system
+    then hostPkgs
+    else if fenix == null
     then import nixpkgs { system = targetSystem; }
     else import nixpkgs {
       system = targetSystem;
@@ -167,7 +168,7 @@
       pkgs = mkDarwinPkgs "aarch64-darwin";
       isDarwin = true;
     };
-  } // (if nixpkgsInstantiates "x86_64-darwin" then {
+  } // (if x86_64DarwinInstantiates then {
     "x86_64-apple-darwin" = {
       pkgs = mkDarwinPkgs "x86_64-darwin";
       isDarwin = true;
