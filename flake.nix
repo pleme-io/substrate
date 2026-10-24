@@ -127,13 +127,12 @@
     # `gen-pin.json` (rev + sha256) is the single source of truth for
     # the gen pin — bump = edit those two fields, NO lock growth.
     genPin = builtins.fromJSON (builtins.readFile ./lib/build/gen-pin.json);
-    # FOD fetch — system-independent (content-addressed by sha256), so a
-    # single fetch serves every system.
-    genSrc = (import nixpkgs { system = builtins.head systems; }).fetchFromGitHub {
+    genSrc = builtins.fetchTree {
+      type = "github";
       owner = "pleme-io";
       repo = "gen";
       rev = genPin.rev;
-      sha256 = genPin.sha256;
+      narHash = genPin.sha256;
     };
     # Build gen the SAME way gen's own flake builds itself
     # (`substrate.mkRustToolFlake { src = ./.; member = "gen-cli"; }`),

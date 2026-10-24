@@ -218,6 +218,12 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: substrate's packages.<system>.gen evaluates on every system without building
+        run: |
+          for s in x86_64-linux aarch64-linux x86_64-darwin aarch64-darwin; do
+            nix eval --option allow-import-from-derivation false --raw ".#packages.$s.gen.drvPath"; echo
+          done
+
   go-package-graph:
     name: go — gen-gomod M1 per-package interpreter eval tests
     runs-on: ubuntu-latest
