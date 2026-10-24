@@ -86,6 +86,17 @@ name: image-push
 on:
   workflow_call:
     inputs:
+      genLockRegen:
+        description: >-
+          true: check Cargo.gen.lock by regenerating it with `gen build .` and
+          failing on any diff (this also fails a schema-1 delta whose ties hold,
+          because the regen migrates it to schema 2). false (default): `gen
+          confirm --if-present`, offline, which fails a stale lock tie or a
+          drifted manifest and accepts a schema-1 delta whose lock tie holds;
+          the next real `gen build` in the repo migrates it.
+        type: boolean
+        required: false
+        default: false
       allowPrivatePackage:
         description: >-
           A TYPED REASON to publish an image from a NON-PUBLIC repository.
@@ -738,6 +749,9 @@ jobs:
           # hermetic, which is what the comment above already claims this line
           # achieves. It also means a consumer's rust-toolchain.toml can no
           # longer reach out to the network from inside an image build.
+          if [ "${{ inputs.genLockRegen }}" != "true" ]; then
+            nix run github:pleme-io/substrate#gen -- confirm --if-present; exit $?
+          fi
           nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#git --command nix run github:pleme-io/substrate#gen -- build .
           if ! git diff --exit-code Cargo.gen.lock; then
             echo "::error::Cargo.gen.lock is stale relative to Cargo.lock. Run 'gen build .' locally, commit the regenerated Cargo.gen.lock, and push before this build can succeed."
