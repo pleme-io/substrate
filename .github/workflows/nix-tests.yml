@@ -383,6 +383,8 @@ jobs:
 
       - name: checks.source-policy (lib/build — which files a build reads)
         run: nix build --no-link -L '.#checks.x86_64-linux.source-policy'
+      - name: checks.rust-sibling-path-dep (lib/build/rust — a ../sibling path dep is refused per crate)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-sibling-path-dep'
 
       - name: checks.duckdb (lib — duckdb helper suite)
         run: nix build --no-link -L '.#checks.x86_64-linux.duckdb'
