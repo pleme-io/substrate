@@ -304,15 +304,28 @@ let
         crates = listToAttrs (map
           (k: { name = k; value = mkCrate k lockByKey.${k}; })
           (builtins.filter (k: builtins.hasAttr k lockByKey) resolvedKeys));
+        siblingPathKeys = builtins.filter
+          (k:
+            let m = builtins.match "(.*)-[0-9a-f]{40}" k;
+            in !(builtins.hasAttr k lockByKey) && m != null
+              && builtins.hasAttr (head m) lockByKey
+              && !(lockByKey.${head m} ? source))
+          resolvedKeys;
+        siblingPathsOk = siblingPathKeys == [ ] || throw ''
+          lockfile-delta: ${where}: Cargo.gen.lock keys ${lib.concatStringsSep ", " siblingPathKeys}
+          as git, but Cargo.lock has each as a path package (no source): a path
+          dependency outside the workspace (`path = "../<sibling>"`). A flake
+          source cannot contain a sibling, so the crate would drop out of the
+          build. Use a git or crates.io dependency, then `gen build`.'';
       in
-      seq d2ok (seq closedTop {
+      seq d2ok (seq siblingPathsOk (seq closedTop {
         version = 10;
         workspace = { root = toString src; members = [ ]; };
         inherit crates root_crate workspace_members;
         flake_metadata = contract.field topLevel delta where "flake_metadata";
         target_resolves = delta.target_resolves;
         cargo_lock_sha256 = contract.field topLevel delta where "cargo_lock_sha256";
-      });
+      }));
 in
 {
   inherit reconstruct mkSource expandMember;

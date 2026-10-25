@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "cargo_lock_sha256": "834ab343133d90adafd272f1f492f951a1b41001f531905eb220eb7e8954475f",
+  "per_crate": {},
+  "git_nar_sha256": {
+    "sib-0.1.0-eb2af782939479f72a7d9edcef1f62a24934285c": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  },
+  "target_resolves": {
+    "base": {
+      "app-0.1.0": {
+        "runtime_dependencies": [
+          {
+            "package_key": "sib-0.1.0-eb2af782939479f72a7d9edcef1f62a24934285c"
+          }
+        ]
+      },
+      "sib-0.1.0-eb2af782939479f72a7d9edcef1f62a24934285c": {}
+    },
+    "targets": {}
+  },
+  "flake_metadata": {}
+}

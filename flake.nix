@@ -350,6 +350,9 @@
           source-policy =
             (import ./lib/build/tests/source-policy-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
 
+          rust-sibling-path-dep =
+            (import ./lib/build/rust/tests/sibling-path-dep-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+
           # ── CLAUDE.md stays loadable (≤ 40,000 bytes) ───────────────────
           # Measured before the split: 84,727 B, so the file loaded nowhere.
           # NOT VACUOUS: `over-limit-throws` in the gate's own suite.
