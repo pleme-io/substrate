@@ -277,7 +277,7 @@ in {
 
     config.home.activation = mkIf (cfg != {}) {
       syncWorkspaceFlakes = hmLib.hm.dag.entryAfter ["writeBoundary"] ''
-        PATH="${makeBinPath (with pkgs; [ git nix ])}:$PATH"
+        PATH="${makeBinPath [ pkgs.git ]}:$PATH"
         ${concatMapStringsSep "\n" mkSyncCommand sortedTargets}
       '';
     };

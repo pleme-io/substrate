@@ -545,6 +545,29 @@ in runTests [
     (f.id == "custom-id" && f.apps ? deploy && f.apps ? tend-status)
     "mkOrgFragment should merge extraApps with tend-status")
 
+  (let
+    pkgs = {
+      git = "/store/git";
+      nix = "/store/cppnix";
+      nix-place = "/store/nix-place";
+      writeText = name: _: "/store/${name}";
+    };
+    hmLib = lib // { hm.dag.entryAfter = _: data: { inherit data; }; };
+    module = fragmentHelpers.mkFlakeFragmentModule { } {
+      inherit pkgs;
+      lib = hmLib;
+      config = {
+        home.homeDirectory = "/h";
+        blackmatter.flakeFragments."code" = [ (fragmentHelpers.mkFragment { id = "f"; }) ];
+      };
+    };
+    script = module.config.home.activation.content.syncWorkspaceFlakes.data;
+  in mkTest "fragment-sync-activation-puts-no-nix-on-path"
+    (lib.hasInfix "/store/git/bin" script
+      && !(lib.hasInfix "/store/cppnix" script)
+      && lib.hasInfix "/store/nix-place/bin/nix-place sync" script)
+    "the fragment sync activation runs nix-place, which runs only git, so no nix engine belongs on its PATH")
+
   # ════════════════════════════════════════════════════════════════════
   # nixos-service-helpers.nix — mkNixOSService
   # ════════════════════════════════════════════════════════════════════
