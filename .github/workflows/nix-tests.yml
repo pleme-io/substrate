@@ -613,3 +613,27 @@ jobs:
 
       - name: build/go/tests/package-builder-ferrite-test.nix (16 assertions)
         run: nix-instantiate --eval --strict --expr 'import ./lib/util/eval-suites.nix { only = "build/go/package-builder-ferrite"; }'
+
+  darwin-signature:
+    name: darwin — build-time code signatures
+    runs-on: macos-latest
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ vars.TOKEN_SOURCE || 'app' }}
+          pat: ${{ secrets.BOT_PAT }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      - name: checks.darwin-signature (lib/build/darwin — a substrate rust tool is validly signed when its build ends)
+        run: nix build --no-link -L '.#checks.aarch64-darwin.darwin-signature'
+
+      - name: checks.darwin-signature-negative-control (lib/build/darwin — the verifier rejects a tampered and an unsigned copy)
+        run: nix build --no-link -L '.#checks.aarch64-darwin.darwin-signature-negative-control'

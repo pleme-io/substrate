@@ -650,12 +650,40 @@
           checks-wired-test =
             (import ./lib/util/tests/checks-wired-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
           checks-wired =
-            (import ./lib/util/checks-wired.nix { inherit (nixpkgs) lib; }).check pkgs {
-              names = builtins.attrNames self.checks.x86_64-linux;
-              system = "x86_64-linux";
+            let
+              wired = import ./lib/util/checks-wired.nix { inherit (nixpkgs) lib; };
+              linuxNames = builtins.attrNames self.checks.x86_64-linux;
               workflowText = builtins.readFile ./.github/workflows/nix-tests.yml;
+            in
+            builtins.seq
+              (wired.check pkgs {
+                names = nixpkgs.lib.subtractLists linuxNames (builtins.attrNames self.checks.aarch64-darwin);
+                system = "aarch64-darwin";
+                inherit workflowText;
+              })
+              (wired.check pkgs {
+                names = linuxNames;
+                system = "x86_64-linux";
+                inherit workflowText;
+              });
+        } // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin (
+          let
+            signature = import ./lib/build/darwin/signature-check.nix;
+            fixture = (self.rust.tool { src = ./lib/build/rust/tests/fixtures/service-image; }).packages.${system}.default;
+          in
+          {
+            darwin-signature = signature.mkDarwinSignatureCheck {
+              inherit pkgs;
+              name = "rust-tool";
+              binaries = [ "${fixture}/bin/svc-fixture" ];
             };
-        });
+            darwin-signature-negative-control = signature.mkDarwinSignatureNegativeControl {
+              inherit pkgs;
+              name = "rust-tool";
+              binary = "${fixture}/bin/svc-fixture";
+            };
+          }
+        ));
 
         # ── The subject set for nix-devshell-cargo-test.yml's own gate ────
         #

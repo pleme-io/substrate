@@ -310,6 +310,9 @@ in rec {
   inherit ((import ./build/darwin/app-bundle.nix)) mkDarwinAppBundle;
   darwinAppBundleBuilder = ./build/darwin/app-bundle.nix;
 
+  inherit ((import ./build/darwin/signature-check.nix)) mkDarwinSignatureCheck mkDarwinSignatureNegativeControl;
+  darwinSignatureCheck = ./build/darwin/signature-check.nix;
+
   # ============================================================================
   # HEALTH SUPERVISOR BUILDER (from health-supervisor.nix)
   # ============================================================================

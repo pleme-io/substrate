@@ -158,6 +158,8 @@ Key differences from `rust-tool-release`:
 | Export | Source | Description |
 |--------|--------|-------------|
 | `mkDarwinBuildInputs` | `util/darwin.nix` | macOS SDK deps |
+| `mkDarwinSignatureCheck` | `build/darwin/signature-check.nix` | Check: each listed Mach-O passes `codesign --verify --strict` at build time (needs `/usr/bin/codesign` in the build, so sandbox off) |
+| `mkDarwinSignatureNegativeControl` | `build/darwin/signature-check.nix` | Check: the verifier rejects a tampered and an unsigned copy of a binary |
 | `mkRuntimeToolsEnv` | `util/config.nix` | Runtime tool env vars |
 | `mkVersionedOverlay` | `util/versioned-overlay.nix` | N-track overlay gen |
 | `repoFlakeBuilder` | `util/repo-flake.nix` | Universal flake builder |
