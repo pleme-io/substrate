@@ -788,3 +788,11 @@
   :outputs   (node-count kijun-ran flake-update-reason flake-update-commit)
   :secrets   (BOT_PAT SUI_SIGNING_KEY)
   :consumers 1)
+
+(defworkflow blue-project
+  :file      "blue-project.yml"
+  :pattern   blue
+  :inputs    (runner-labels system shift-floor blue-path blue-only max-builds cache-push cache-url token-source)
+  :outputs   ()
+  :secrets   (BOT_PAT SUI_SIGNING_KEY)
+  :consumers 0)
