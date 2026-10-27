@@ -28,7 +28,7 @@ let
         blue = cfg.blue;
         source = ''
           use("ukai", [:main])
-          main()
+          main
         '';
         extraPath = [ cfg.tailscalePackage ] ++ lib.optionals (platform == "nixos") [ pkgs.iproute2 ];
         env = environment;

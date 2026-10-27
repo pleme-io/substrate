@@ -40,6 +40,11 @@
 #              suffixed to PATH so a node's own copy wins.
 #   env        environment set on every run as a default (the caller's own
 #              environment wins where it sets the same name).
+#   checkAtBuild  run `blue check` on the program while building (default
+#              true). A store file is read-only, so a program blue's check
+#              stage rejects can never run: tehai and ukai exited 1 every
+#              15 s on ryn (B0012 on 2026-09-30, B0023 on 2026-10-27) while
+#              their packages built. With this, that program fails the build.
 { pkgs }:
 {
   name,
@@ -48,12 +53,24 @@
   source ? null,
   extraPath ? [ ],
   env ? { },
+  checkAtBuild ? true,
 }:
 assert pkgs.lib.assertMsg (pkgs ? blueLib)
   "mkBlueProgramPackage ${name}: pkgs has no blueLib; add blue's overlays.default (or overlays.bidamas) to this package set";
-pkgs.blueLib.mkBlueApp {
-  inherit name blue program source env;
-  # `blue` already carries its distribution; nothing to add on BLUE_PATH.
-  bidamas = { };
-  tools = extraPath;
-}
+let
+  app = pkgs.blueLib.mkBlueApp {
+    inherit name blue program source env;
+    # `blue` already carries its distribution; nothing to add on BLUE_PATH.
+    bidamas = { };
+    tools = extraPath;
+  };
+  file = if program != null then "${program}" else "$out/share/blue/${name}.b";
+in
+if checkAtBuild then
+  app.overrideAttrs (old: {
+    buildCommand = old.buildCommand + ''
+      HOME=$TMPDIR ${blue}/bin/blue check ${file} > $TMPDIR/blue-check.log 2>&1 || { cat $TMPDIR/blue-check.log; exit 1; }
+    '';
+  })
+else
+  app

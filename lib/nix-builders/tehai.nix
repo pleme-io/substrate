@@ -9,6 +9,10 @@
 # flips `enable` by hand for liveness again. The ssh Host blocks that carry each
 # builder's address and key stay where they are declared.
 #
+# `substituters` does the same for binary caches: the declared URLs go to
+# /etc/tehai/substituters, and only those whose nix-cache-info answers reach
+# nix, through an `!include`d `extra-substituters` fragment.
+#
 # Returns { darwinModule, nixosModule }. Both need a `blue` that resolves the
 # `tehai` bidama (the fleet's `pkgs.blue-with-bidamas`, blue's mkBlueWithBidamas).
 #
@@ -21,6 +25,8 @@ let
       helpers = import ../blue-service-helpers.nix { inherit lib; };
       mkBlueProgramPackage = import ../build/scripting/blue-program-package.nix { inherit pkgs; };
       live = "${cfg.stateDir}/machines";
+      liveSubstituters = "${cfg.stateDir}/substituters.conf";
+      checksSubstituters = cfg.substituters != [ ];
       environment = {
         TEHAI_DECLARED = cfg.declaredPath;
         TEHAI_LIVE = live;
@@ -30,6 +36,11 @@ let
         # names which one (`ssh` in state.json). macOS: /usr/bin/ssh, which
         # reads /etc/ssh/ssh_config like nix does.
         TEHAI_SSH = if platform == "nixos" then "${pkgs.openssh}/bin/ssh" else "/usr/bin/ssh";
+      } // lib.optionalAttrs checksSubstituters {
+        TEHAI_SUBSTITUTERS_DECLARED = "/etc/tehai/substituters";
+        TEHAI_SUBSTITUTERS_LIVE = liveSubstituters;
+        TEHAI_SUBSTITUTERS_STATE = "${cfg.stateDir}/substituters.json";
+        TEHAI_CURL = if platform == "nixos" then "${pkgs.curl}/bin/curl" else "/usr/bin/curl";
       };
       package = mkBlueProgramPackage {
         name = "tehai";
@@ -39,10 +50,10 @@ let
         # runs `blue run --quiet`, so the log holds only what tehai writes.
         source = ''
           use("tehai", [:main])
-          main()
+          main
         '';
         # macOS: /usr/bin/ssh, which reads /etc/ssh/ssh_config like nix does.
-        extraPath = lib.optionals (platform == "nixos") [ pkgs.openssh ];
+        extraPath = lib.optionals (platform == "nixos") [ pkgs.openssh pkgs.curl ];
         env = environment;
       };
     in
@@ -78,7 +89,19 @@ let
         steerNix = lib.mkOption {
           type = lib.types.bool;
           default = true;
-          description = "Point nix's `builders` at the live file. Off: tehai only observes.";
+          description = "Point nix's `builders` at the live file, and include the live substituters fragment. Off: tehai only observes.";
+        };
+        substituters = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = ''
+            Substituter URLs nix lists only while they answer. Each interval
+            tehai reads every one's `nix-cache-info` and writes the live ones
+            as an `extra-substituters` line to `<stateDir>/substituters.conf`,
+            which nix.conf includes. A peer cache that is down then costs no
+            narinfo lookup a connect timeout. Leave these out of the static
+            substituter list. Empty: no substituter is checked.
+          '';
         };
         package = lib.mkOption {
           type = lib.types.package;
@@ -94,6 +117,14 @@ let
           else helpers.mkBlueIntervalNixos { name = "tehai"; inherit package environment; intervalSeconds = cfg.intervalSeconds; })
         { environment.systemPackages = [ package ]; }
         (lib.mkIf cfg.steerNix { nix.settings.builders = lib.mkForce "@${live}"; })
+        (lib.mkIf checksSubstituters {
+          environment.etc."tehai/substituters".text = lib.concatLines cfg.substituters;
+        })
+        (lib.mkIf (cfg.steerNix && checksSubstituters) {
+          nix.extraOptions = ''
+            !include ${liveSubstituters}
+          '';
+        })
       ]);
     };
 in
