@@ -1071,4 +1071,60 @@ in runTests [
       true)).success)
     "an http server with no url should be eval-rejected rather than written as an entry the agent cannot connect")
 
+  # ════════════════════════════════════════════════════════════════════
+  # mcp-helpers.nix — the wrapper starts from a clean environment
+  # ════════════════════════════════════════════════════════════════════
+  # 2026-10-27: a grafana server started with basic_auth_set=true because it
+  # inherited the shell's GRAFANA_PASSWORD, a secret for another app.
+
+  (let
+    text = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; } "grafana" {
+      package = null; command = "mcp-grafana"; args = [ ];
+      env = { GRAFANA_URL = "https://g"; };
+      envFiles = { GRAFANA_SERVICE_ACCOUNT_TOKEN = "/t"; };
+    };
+  in mkTest "mcp-wrapper-clean-environment-by-default"
+    (lib.hasInfix "exec /stub/env -i " text
+      && lib.hasInfix ''''${GRAFANA_URL+"GRAFANA_URL=$GRAFANA_URL"}'' text
+      && lib.hasInfix ''''${GRAFANA_SERVICE_ACCOUNT_TOKEN+"GRAFANA_SERVICE_ACCOUNT_TOKEN=$GRAFANA_SERVICE_ACCOUNT_TOKEN"}'' text
+      && lib.hasInfix ''''${PATH+"PATH=$PATH"}'' text
+      && !(lib.hasInfix "GRAFANA_PASSWORD" text))
+    "the wrapper must exec the server under env -i with only the allowlist and its own env/envFiles; GRAFANA_PASSWORD must not cross")
+
+  (let
+    text = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; } "aws" {
+      package = null; command = "aws-mcp"; args = [ ];
+      env = { }; envFiles = { }; passEnvironment = [ "AWS_PROFILE" ];
+    };
+  in mkTest "mcp-wrapper-pass-environment"
+    (lib.hasInfix ''''${AWS_PROFILE+"AWS_PROFILE=$AWS_PROFILE"}'' text)
+    "passEnvironment must add its names to the clean environment")
+
+  (let
+    text = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; } "grafana" {
+      package = null; command = "mcp-grafana"; args = [ ];
+      env = { GRAFANA_URL = "https://g"; }; envFiles = { };
+      inheritEnvironment = true;
+    };
+  in mkTest "mcp-wrapper-inherit-environment-off-switch"
+    (!(lib.hasInfix "/stub/env" text) && lib.hasInfix "exec mcp-grafana" text)
+    "inheritEnvironment = true must restore the inheriting exec")
+
+  (let
+    stubPkgs = {
+      writeShellScript = n: t: "/nix/store/stub-${n}";
+      coreutils = "/stub/coreutils";
+    };
+    servers = {
+      bare = { enable = true; transport = "stdio"; command = "/bin/bare"; args = [ "--x" ];
+               package = null; env = { }; envFiles = { }; };
+      inheriting = { enable = true; transport = "stdio"; command = "/bin/inh"; args = [ ];
+                     package = null; env = { }; envFiles = { }; inheritEnvironment = true; };
+    };
+    resolved = mcpHelpers.mkResolvedServers stubPkgs servers;
+  in mkTest "mcp-wrapper-for-every-clean-server"
+    (resolved.bare.command == "/nix/store/stub-mcp-bare" && resolved.bare.args == [ ]
+      && resolved.inheriting.command == "/bin/inh")
+    "a server with no env still gets a wrapper so it starts clean; an inheriting one keeps the direct exec")
+
 ]

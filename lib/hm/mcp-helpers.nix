@@ -93,6 +93,24 @@ in rec {
         description = "Env vars resolved from files at runtime. Key = var name, value = file path.";
       };
 
+      inheritEnvironment = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          false: the wrapper starts the server from an empty environment plus
+          `baseEnvironment`, `passEnvironment`, and the server's own `env` and
+          `envFiles`. true: the server inherits the launching agent's whole
+          environment (the behaviour before 2026-10-27, when a grafana server
+          started with basic auth from a GRAFANA_PASSWORD meant for another app).
+        '';
+      };
+
+      passEnvironment = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        description = "Extra variable names passed through from the launching environment when inheritEnvironment = false.";
+      };
+
       package = mkOption {
         type = types.nullOr types.package;
         default = null;
@@ -166,15 +184,33 @@ in rec {
   };
 
   # ─── Wrapper Script Generator ──────────────────────────────────────
-  # Generates a shell wrapper for an MCP server needing env vars or
-  # file-based credential resolution. Returns null if neither env nor
-  # envFiles are configured (direct binary reference used instead).
+  # Generates a shell wrapper for an MCP server. With inheritEnvironment =
+  # false (the default) every stdio server gets one, so it starts from a
+  # clean environment. Returns null only for an inheriting server with no env
+  # and no envFiles (direct binary reference used instead).
   #
   # Requires pkgs for writeShellScript (passed as first arg, curried).
   #
   # Example:
   #   wrapper = mcpHelpers.mkMcpWrapper pkgs "github" serverCfg;
-  mkMcpWrapper = pkgs: name: server: let
+  # The variables every server keeps when inheritEnvironment = false: the
+  # process basics, locale, TLS trust and XDG directories.
+  baseEnvironment = [
+    "PATH" "HOME" "USER" "LOGNAME" "SHELL" "TMPDIR" "TERM" "TZ"
+    "LANG" "LC_ALL" "LC_CTYPE"
+    "SSL_CERT_FILE" "SSL_CERT_DIR" "NIX_SSL_CERT_FILE" "CURL_CA_BUNDLE"
+    "REQUESTS_CA_BUNDLE" "NODE_EXTRA_CA_CERTS"
+    "XDG_CONFIG_HOME" "XDG_CACHE_HOME" "XDG_DATA_HOME" "XDG_STATE_HOME" "XDG_RUNTIME_DIR"
+  ];
+
+  # The names a clean-environment wrapper passes to the server.
+  mcpAllowedEnvironment = server:
+    unique (baseEnvironment ++ (server.passEnvironment or [])
+      ++ attrNames (server.env or {}) ++ attrNames (server.envFiles or {}));
+
+  # The wrapper body, pure so it can be tested without pkgs. `envBin` is the
+  # absolute path of a coreutils `env`.
+  mkMcpWrapperText = { envBin }: name: server: let
     cmd = _mkCommandPath server;
 
     envFileExports = concatStringsSep "\n" (mapAttrsToList (var: path: ''
@@ -187,13 +223,26 @@ in rec {
       export ${var}=${escapeShellArg val}
     '') server.env);
 
-    needsWrapper = server.envFiles != {} || server.env != {};
+    cleanEnv = concatStringsSep " " (map (var: ''''${${var}+"${var}=''$${var}"}'')
+      (mcpAllowedEnvironment server));
 
-    script = pkgs.writeShellScript "mcp-${name}" ''
-      ${envFileExports}
-      ${staticExports}
-      exec ${escapeShellArg cmd} ${concatStringsSep " " (map escapeShellArg server.args)}
-    '';
+    launcher =
+      if server.inheritEnvironment or false then ""
+      else "${escapeShellArg envBin} -i ${cleanEnv} ";
+  in ''
+    ${envFileExports}
+    ${staticExports}
+    exec ${launcher}${escapeShellArg cmd} ${concatStringsSep " " (map escapeShellArg server.args)}
+  '';
+
+  mkMcpWrapper = pkgs: name: server: let
+    cmd = _mkCommandPath server;
+
+    needsWrapper = server.envFiles != {} || server.env != {}
+      || !(server.inheritEnvironment or false);
+
+    script = pkgs.writeShellScript "mcp-${name}"
+      (mkMcpWrapperText { envBin = "${pkgs.coreutils}/bin/env"; } name server);
   in
     if !needsWrapper then null
     # A wrapper whose inner exec does not exist still BUILDS, still deploys,
