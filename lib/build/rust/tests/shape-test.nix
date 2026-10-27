@@ -112,6 +112,15 @@ let
         (shape.explain { who = "x"; shape = "tool"; mode = "cargo-nix"; }))
       "on the crate2nix path the explanation must state that tests ARE emitted")
 
+    (testHelpers.mkTest "only-service-runs-cargo-tests-by-default"
+      (builtins.filter (s: (shape.resolve who s).cargoTestsByDefault) shape.known == [ "service" ])
+      "the service shape turns the cargo-vendored test runner on by default; the other shapes keep it opt-in")
+
+    (testHelpers.mkTest "explain-names-the-service-test-off-switch"
+      (lib.hasInfix "enable = false"
+        (shape.explain { who = "kensa"; shape = "service"; mode = "lockfile"; }))
+      "the explanation must name the typed off switch for the default service test check")
+
     (testHelpers.mkTest "explain-states-shape-does-not-route"
       (lib.hasInfix "does not select a builder"
         (shape.explain { who = "x"; shape = "tool"; mode = "lockfile"; }))

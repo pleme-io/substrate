@@ -93,7 +93,11 @@ workspace `[profile.*]` behave as on a laptop. lockfile-builder exposes it as
 `tests.cargo.runs = [ { args = [ "--workspace" … ]; } … ];`. **Opt-in only**:
 it compiles the whole graph again, uncached per crate, and a consumer that
 does not ask gets a byte-identical check set (pinned by
-`checks.rust-workspace-tests`). **Tier-honest:** it proves the tests pass under
+`checks.rust-workspace-tests`). **One exception (2026-10-27): the `service`
+shape runs it by default** (`cargoTestsByDefault` in
+`lib/build/rust/shape.nix`), because kensa's CI was green over 13 red
+attestation tests; `tests = { enable = false; reason = "…"; }` turns it off.
+**Tier-honest:** it proves the tests pass under
 cargo; it proves nothing about the buildRustCrate artifact, so it narrows
 `pending-rust-test-check` rather than closing it.
 

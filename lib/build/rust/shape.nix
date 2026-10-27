@@ -141,6 +141,16 @@ rec {
 
   imageShapes = [ "service" ];
 
+  # Shapes whose `checks.tests` is ON by default on the lockfile path, through
+  # the cargo-vendored runner (./workspace-tests.nix). Measured 2026-10-27 on
+  # pleme-io/kensa (`rust.service`, `member = "kensa"`): CI was green while 13
+  # attestation tests were red, because its flake checks were gen-confirm,
+  # project, repository-lock-fresh and the service images, and no `tests`.
+  # A service ships to a cluster, so it pays the second compile; the other
+  # shapes keep the opt-in. Off per consumer:
+  #   tests = { enable = false; reason = "<typed reason>"; };
+  cargoTestShapes = [ "service" ];
+
   # Validate a caller's `shape`, returning it unchanged or throwing.
   # `who` is the builder/consumer name, used only in the message.
   normalize = who: shape:
@@ -173,6 +183,7 @@ rec {
       builder = currentBuilder;
       selectsBuilder = false;
       emitsImages = builtins.elem s imageShapes;
+      cargoTestsByDefault = builtins.elem s cargoTestShapes;
       # Identity handed to test-check.nix, so its diagnostics name the shape.
       who = "rust-release[shape=${s}]/${who}";
     };
@@ -187,6 +198,10 @@ rec {
       + "builder — see lib/build/rust/shape.nix) on the ${mode} build path; "
       + (if mode == "cargo-nix"
          then "`checks.tests` emitted."
+         else if r.cargoTestsByDefault
+         then "`checks.tests` emitted by default through the cargo-vendored "
+              + "runner (lib/build/rust/workspace-tests.nix); off with "
+              + "`tests = { enable = false; reason = \"…\"; }`."
          else "`checks.tests` absent unless opted in — the lockfile path "
               + "carries no dev-dependency graph for buildRustCrate "
               + "(pending-rust-test-check: lockfile-dev-deps); "

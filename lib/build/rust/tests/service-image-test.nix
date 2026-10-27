@@ -11,6 +11,12 @@ let
   amd64Only = rust.service { inherit src; architectures = [ "amd64" ]; };
   imagesOff = rust.service { inherit src; architectures = [ ]; };
   tool = rust.tool { inherit src; };
+  testsOff = rust.service {
+    inherit src;
+    tests = { enable = false; reason = "fixture: the off switch"; };
+  };
+
+  checkNames = flake: system: lib.genAttrs (builtins.attrNames flake.checks.${system}) (_: true);
 
   namesOf = flake: system: builtins.attrNames flake.packages.${system};
   has = flake: system: attr: builtins.elem attr (namesOf flake system);
@@ -55,6 +61,24 @@ let
     (testHelpers.mkTest "tool-shape-emits-no-image"
       (!(has tool "x86_64-linux" "dockerImage-amd64"))
       "only the service shape emits images")
+
+    (testHelpers.mkTest "service-emits-checks-tests"
+      (checkNames service "x86_64-linux" ? tests
+       && lib.isDerivation service.checks.x86_64-linux.tests)
+      "substrate.rust.service must emit checks.<system>.tests; without it kensa's CI was green over 13 red attestation tests (2026-10-27)")
+
+    (testHelpers.mkTest "service-tests-configured-off"
+      (!(checkNames testsOff "x86_64-linux" ? tests)
+       && checkNames testsOff "x86_64-linux" ? build)
+      "tests = { enable = false; reason = …; } must turn checks.tests off and keep checks.build")
+
+    (testHelpers.mkTest "service-tests-off-without-reason-throws"
+      (throws (builtins.attrNames (rust.service { inherit src; tests.enable = false; }).checks.x86_64-linux))
+      "turning the service test gate off without a typed reason must fail at eval")
+
+    (testHelpers.mkTest "tool-shape-keeps-tests-opt-in"
+      (!(checkNames tool "x86_64-linux" ? tests))
+      "the tool shape keeps the cargo-vendored runner opt-in")
   ];
 
   result = testHelpers.runTests tests;

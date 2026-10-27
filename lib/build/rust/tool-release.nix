@@ -538,6 +538,14 @@ let
   shapeSpec = import ./shape.nix { inherit (hostPkgs) lib; };
   resolvedShape = shapeSpec.resolve toolName shape;
 
+  # A `cargoTestsByDefault` shape (./shape.nix) on the lockfile path starts
+  # from `{ cargo = { }; }`, so `checks.tests` exists unless the consumer
+  # turns it off. The consumer's declaration wins field by field.
+  effectiveTests =
+    (if resolvedShape.cargoTestsByDefault && effectiveMode == "lockfile"
+     then { cargo = { }; } else { })
+    // tests;
+
   serviceImages =
     if !resolvedShape.emitsImages then {}
     else import ./service-image.nix { inherit nixpkgs; } {
@@ -646,7 +654,8 @@ let
   #
   # Not the default, deliberately: it compiles the whole graph a second
   # time, uncached per crate, and ~280 consumers must not start paying for
-  # that without asking. And not a substitute for the buildRustCrate-native
+  # that without asking. The one exception is the `service` shape
+  # (`cargoTestsByDefault` in ./shape.nix, see `effectiveTests`). And not a substitute for the buildRustCrate-native
   # test leg: it proves the tests pass under cargo, never that the shipped
   # artifact behaves (see workspace-tests.nix, "WHAT IT DOES NOT PROVE").
   nativeLockfileBuilder = import ./lockfile-builder.nix { pkgs = hostPkgs; };
@@ -675,7 +684,7 @@ let
   # The build's own `nativeBuildInputs` (names) come along for the same reason:
   # what the derivation needs to compile the crate, a shell compiling that crate
   # needs too. `buildInputs` are already derivations, and are passed as-is.
-  cargoTestDecl = let decl = tests.cargo or { }; in
+  cargoTestDecl = let decl = effectiveTests.cargo or { }; in
     if builtins.isAttrs decl then decl else { };
   # The same resolver the runner uses, so one typo reads the same from either
   # side (./workspace-tests.nix, `byNameIn`).
@@ -881,7 +890,7 @@ in {
     # consumer reading a diagnostic can see it was built by the tool-release
     # builder, which is the fact that used to be invisible.
     who = resolvedShape.who;
-    decl = tests;
+    decl = effectiveTests;
     mode = effectiveMode;
     buildDrv = nativeBinary;
     mkTests = _: nativeBinary.override {
