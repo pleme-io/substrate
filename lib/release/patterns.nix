@@ -266,6 +266,34 @@
     };
   };
 
+  blue = {
+    blue-setup = {
+      uses = "pleme-io/actions/blue-setup@main";
+      backend = "nix";
+      role = "the pinned blue toolchain on PATH, substituted from sui when the runner has it";
+    };
+    blue-check = {
+      uses = "pleme-io/actions/blue-check@main";
+      backend = "blue";
+      role = "check stage and canonical form per .b file, each diagnostic an annotation at its span";
+    };
+    blue-test = {
+      uses = "pleme-io/actions/blue-test@main";
+      backend = "blue";
+      role = "blue test per target, failing tests annotated";
+    };
+    blue-shift = {
+      uses = "pleme-io/actions/blue-shift@main";
+      backend = "blue";
+      role = "blueshift rung per file against a floor (blue docs/BUILD-ASSURANCE.md 4)";
+    };
+    blue-build-plan = {
+      uses = "pleme-io/actions/blue-build-plan@main";
+      backend = "blue";
+      role = "nix dry-run plan: builds, fetches, Rust outside the toolchain, derivation budget";
+    };
+  };
+
   spec = {
     spec-watch = {
       uses = "pleme-io/actions/spec-watch@main";

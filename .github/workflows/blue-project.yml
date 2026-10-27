@@ -1,0 +1,92 @@
+# Adopt: jobs: { blue: { uses: pleme-io/substrate/.github/workflows/blue-project.yml@main, secrets: inherit } }
+# The sentence for a repo whose root has a Bluefile (blue docs/BUILD-ASSURANCE.md):
+# check and canonical form, tests, the blueshift floor, the build plan (blue-only
+# and the derivation budget), the project checks, and the push to sui.
+name: blue-project
+
+on:
+  workflow_call:
+    inputs:
+      runner-labels:
+        description: 'JSON list of runner labels.'
+        type: string
+        default: '["self-hosted","pleme-private"]'
+      system:
+        description: 'The system whose checks.<system>.project is planned, built and pushed.'
+        type: string
+        default: x86_64-linux
+      shift-floor:
+        description: 'The lowest blueshift rung every .b file must reach: dynamic, annotated, checked or restricted.'
+        type: string
+        default: dynamic
+      blue-path:
+        description: 'BLUE_PATH for the project''s own bidamas, colon-separated.'
+        type: string
+        default: ''
+      blue-only:
+        description: 'Fail when the plan would compile Rust outside the blue toolchain. Off only for a host service (a Bluefile service with host:).'
+        type: boolean
+        default: true
+      max-builds:
+        description: 'The most derivations the runner may build for checks.<system>.project. Empty is no budget.'
+        type: string
+        default: ''
+      cache-push:
+        description: 'Push the built checks to the sui cache.'
+        type: boolean
+        default: true
+      cache-url:
+        description: 'The sui origin. Empty uses the runner pool''s SUI_CACHE_URL.'
+        type: string
+        default: ''
+      token-source:
+        description: 'Where the job takes its GitHub token (pleme-io/actions/github-token): app, pat or none.'
+        type: string
+        default: 'app'
+    secrets:
+      BOT_PAT:
+        description: 'Presented only when token-source is pat.'
+        required: false
+      SUI_SIGNING_KEY:
+        description: 'Signing key for the sui push.'
+        required: false
+
+jobs:
+  blue:
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: pleme-io/actions/blue-setup@main
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+      - uses: pleme-io/actions/blue-check@main
+        with:
+          blue-path: ${{ inputs.blue-path }}
+      - uses: pleme-io/actions/blue-test@main
+        with:
+          blue-path: ${{ inputs.blue-path }}
+      - uses: pleme-io/actions/blue-shift@main
+        with:
+          floor: ${{ inputs.shift-floor }}
+          blue-path: ${{ inputs.blue-path }}
+      - uses: pleme-io/actions/blue-build-plan@main
+        with:
+          installable: .#checks.${{ inputs.system }}.project
+          blue-only: ${{ inputs.blue-only }}
+          max-builds: ${{ inputs.max-builds }}
+      - id: build
+        uses: pleme-io/actions/nix-build@main
+        with:
+          flake-ref: .#checks.${{ inputs.system }}.project
+          github-token: ${{ steps.token.outputs.token }}
+      - if: inputs.cache-push && steps.build.outputs.out-path != ''
+        uses: pleme-io/actions/sui-cache-push@main
+        with:
+          paths: ${{ steps.build.outputs.out-path }}
+          cache-url: ${{ inputs.cache-url }}
+          signing-key: ${{ secrets.SUI_SIGNING_KEY }}
