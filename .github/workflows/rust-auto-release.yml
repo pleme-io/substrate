@@ -142,6 +142,13 @@ on:
       BOT_PAT:
         required: false
         description: "Optional PAT with repo scope, presented only when token-source is pat."
+    outputs:
+      bumped:
+        description: "'true' when this run bumped, committed and pushed a v<new-version> tag; empty otherwise."
+        value: ${{ jobs.bump.outputs.bumped }}
+      new-version:
+        description: "The version this run tagged, without the leading v; empty when nothing was bumped."
+        value: ${{ jobs.bump.outputs.new-version }}
 
 permissions:
   contents: write

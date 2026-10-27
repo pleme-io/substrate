@@ -1,0 +1,133 @@
+
+(define workflows-dir ".github/workflows")
+
+(define (aget al key dflt)
+  (cond
+    ((not (list? al)) dflt)
+    ((null? al) dflt)
+    ((not (list? (car al))) dflt)
+    ((equal? (car (car al)) key) (nth 1 (car al)))
+    (else (aget (cdr al) key dflt))))
+
+(define (as-string v) (cond ((string? v) v) (else "")))
+
+(define (has-key? al key)
+  (and (list? al) (any? (lambda (pair) (and (list? pair) (equal? (car pair) key))) al)))
+
+(define (unwrap expr)
+  (let ((t (string-trim expr)))
+    (cond
+      ((and (string-starts-with? t "${{") (string-ends-with? t "}}"))
+        (string-trim (string-replace (string-replace t "${{" "") "}}" "")))
+      (else #f))))
+
+(define (unresolved-reason value jobs)
+  (let ((inner (unwrap (as-string value))))
+    (cond
+      ((not inner) "is not a single ${{ }} expression")
+      (else
+        (let ((parts (string-split inner ".")))
+          (cond
+            ((not (and (= (length parts) 4)
+                       (equal? (nth 0 parts) "jobs")
+                       (equal? (nth 2 parts) "outputs")))
+              (string-append "`" inner "` is not jobs.<job>.outputs.<output>"))
+            ((not (has-key? jobs (nth 1 parts)))
+              (string-append "names job `" (nth 1 parts) "`, which this file does not define"))
+            ((not (has-key? (aget (aget jobs (nth 1 parts) (list)) "outputs" (list)) (nth 3 parts)))
+              (string-append "names `" (nth 3 parts) "`, which job `" (nth 1 parts) "` does not declare"))
+            (else "")))))))
+
+(define fixture-jobs
+  (list
+    (list "bump" (list (list "outputs" (list (list "bumped" "x") (list "new-version" "y")))))
+    (list "test" (list (list "runs-on" "ubuntu-latest")))))
+
+(define self-check-cases
+  (list
+    (list "${{ jobs.bump.outputs.bumped }}" #t)
+    (list "${{jobs.bump.outputs.new-version}}" #t)
+    (list "${{ jobs.bump.outputs.tag }}" #f)
+    (list "${{ jobs.ship.outputs.bumped }}" #f)
+    (list "${{ jobs.test.outputs.bumped }}" #f)
+    (list "${{ steps.bump.outputs.bumped }}" #f)
+    (list "jobs.bump.outputs.bumped" #f)
+    (list "" #f)
+    (list "${{ jobs.bump.outputs.bumped || jobs.bump.outputs.new-version }}" #f)))
+
+(define (self-check-failures)
+  (filter
+    (lambda (c) (not (equal? (equal? (unresolved-reason (nth 0 c) fixture-jobs) "") (nth 1 c))))
+    self-check-cases))
+
+(define (workflow-outputs doc)
+  (let ((outs (aget (aget (aget doc "on" (list)) "workflow_call" (list)) "outputs" (list))))
+    (cond ((list? outs) outs) (else (list)))))
+
+(define (check-workflow path)
+  (let*
+    ((doc (yaml-read path))
+      (name (path-basename path))
+      (jobs (aget doc "jobs" (list)))
+      (outs (workflow-outputs doc))
+      (bad
+        (filter
+          (lambda (o) (not (equal? (nth 2 o) "")))
+          (map
+            (lambda (pair) (list (car pair) (aget (nth 1 pair) "value" "") (unresolved-reason (aget (nth 1 pair) "value" "") jobs)))
+            outs))))
+    (for-each
+      (lambda (o) (log-error (string-append name ": output `" (nth 0 o) "` " (nth 2 o))))
+      bad)
+    (log-info
+      (string-append
+        name ": " (string-format "{}" (length outs)) " output(s), "
+        (string-format "{}" (length bad)) " unresolved"))
+    (length bad)))
+
+(define (sum xs) (cond ((null? xs) 0) (else (+ (car xs) (sum (cdr xs))))))
+
+(define (main)
+  (let ((bad (self-check-failures)))
+    (cond
+      ((not (null? bad))
+        (for-each
+          (lambda (c)
+            (log-error
+              (string-append
+                "self-check: misjudged `" (nth 0 c) "` (expected "
+                (cond ((nth 1 c) "resolved") (else "unresolved")) ")")))
+          bad)
+        (log-error "workflow-outputs-resolve: the predicate is broken; refusing to judge any workflow with it")
+        (exit 2))
+      (else
+        (log-info
+          (string-append
+            "self-check: " (string-format "{}" (length self-check-cases))
+            " fixed values judged correctly")))))
+  (let ((targets (filter (lambda (p) (not (null? (workflow-outputs (yaml-read p)))))
+                   (glob (string-append workflows-dir "/*.yml")))))
+    (cond
+      ((null? targets)
+        (log-error
+          (string-append
+            "workflow-outputs-resolve: no workflow in " workflows-dir
+            " declares workflow_call outputs. A check that reads nothing does not pass."))
+        (exit 2))
+      (else #f))
+    (let ((total (sum (map check-workflow targets))))
+      (cond
+        ((= total 0)
+          (log-info
+            (string-append
+              "workflow-outputs-resolve: clean — " (string-format "{}" (length targets))
+              " workflow(s), every output names a declared job output"))
+          (exit 0))
+        (else
+          (log-error (string-append "workflow-outputs-resolve: " (string-format "{}" total) " unresolved output(s)"))
+          (exit 1))))))
+
+(cond
+  ((equal? (env-get "TLISP_TEST" "") "1")
+    (log-info "TLISP_TEST=1 — workflow-outputs-resolve helpers loaded; main skipped"))
+  (else (main)))

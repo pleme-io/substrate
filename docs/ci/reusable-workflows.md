@@ -106,6 +106,20 @@ about one layer down — "a composite action must DECLARE them or they stop at t
 action boundary and the caller sees nothing" — so the shape is now documented at
 both layers it occurs on.
 
+**The other side of the boundary is gated.** A declared output whose `value`
+names a job that does not exist, or an output that job does not declare, also
+evaluates to `""`. The caller's `if: needs.<call>.outputs.<name> == 'true'` is
+then false and its job is skipped on a green run.
+`tools/workflow-outputs-resolve.tlisp` (job `workflow-outputs-resolve` in
+`job-selection-selftest.yml`) refuses that. Every `on.workflow_call.outputs`
+value must be exactly `${{ jobs.<job>.outputs.<output> }}`, with both names
+declared in the same file. It finds its targets itself, fails when it finds
+none, and checks its own predicate against nine fixed cases first. Tier:
+CI-caught. First consumer (2026-10-27): `rust-auto-release.yml` exposes `bumped`
+and `new-version`, so a public caller on hosted runners can dispatch its
+tag-triggered binary release. A tag pushed with `GITHUB_TOKEN` fires no workflow,
+but `workflow_dispatch` is the exception.
+
 `pending-workflow-output-boundary: 13 job outputs unexposed and unreferenced.`
 Each needs a per-case judgement (expose, or delete as dead); a blanket sweep
 would expose values no caller asked for.
