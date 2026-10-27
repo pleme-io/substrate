@@ -70,6 +70,21 @@
           "does not pass app-token from a github-token step in its job (got `"
           (cond ((equal? got "") "(none)") (else got)) "`)")))))
 
+(define (condition-parts cond-str)
+  (let* ((t (string-trim (as-string cond-str)))
+         (e (or (unwrap t) t)))
+    (cond
+      ((string-contains? e "||") (list))
+      (else (map string-trim (string-split e "&&"))))))
+
+(define (publish-guarded? cond-str) (member? "inputs.publish" (condition-parts cond-str)))
+
+(define (publish-writer? step)
+  (or
+    (string-starts-with? (step-uses step) login-action)
+    (string-starts-with? (step-uses step) "pleme-io/actions/package-visibility-gate@")
+    (string-contains? (as-string (aget step "run" "")) "oci-push -- push")))
+
 (define fixture-token-ok
   (list
     (list "id" "token")
@@ -101,7 +116,13 @@
     (list "login: app rung wired" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.app-token }}") (list "token"))) #t)
     (list "login: no app rung" (lambda () (login-step-reason (list (list "uses" login-action)) (list "token"))) #f)
     (list "login: the pat rung instead" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.pat }}") (list "token"))) #f)
-    (list "login: another job's step" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.app-token }}") (list "mint"))) #f)))
+    (list "login: another job's step" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.app-token }}") (list "mint"))) #f)
+    (list "publish: bare guard" (lambda () (if (publish-guarded? "inputs.publish") "" "x")) #t)
+    (list "publish: wrapped conjunct" (lambda () (if (publish-guarded? "${{ inputs.publish && inputs.scanBeforePush }}") "" "x")) #t)
+    (list "publish: no if" (lambda () (if (publish-guarded? "") "" "x")) #f)
+    (list "publish: a disjunction" (lambda () (if (publish-guarded? "inputs.publish || always()") "" "x")) #f)
+    (list "publish: negated" (lambda () (if (publish-guarded? "!inputs.publish") "" "x")) #f)
+    (list "publish: a longer input name" (lambda () (if (publish-guarded? "inputs.publish-docs") "" "x")) #f)))
 
 (define fixture-jobs
   (list
@@ -153,10 +174,35 @@
               (list (list "secret PUBLISH_APP_ID" "is declared, but no registry-login step reads the App token it mints")))
             (else (list))))))))
 
+(define (call-inputs doc) (aget (aget (aget doc "on" (list)) "workflow_call" (list)) "inputs" (list)))
+
+(define (declares-publish? doc) (has-key? (call-inputs doc) "publish"))
+
+(define (publish-gate-problems doc)
+  (cond
+    ((not (declares-publish? doc)) (list))
+    (else
+      (let* ((jobs (as-list (aget doc "jobs" (list))))
+             (writers
+               (concat-all
+                 (map
+                   (lambda (pair)
+                     (map
+                       (lambda (s) (list (string-append "job `" (car pair) "` / " (as-string (aget s "name" (step-uses s)))) (aget s "if" "")))
+                       (filter publish-writer? (as-list (aget (nth 1 pair) "steps" (list))))))
+                   jobs))))
+        (cond
+          ((null? writers)
+            (list (list "input `publish`" "is declared, but no step writes to a registry; it gates nothing")))
+          (else
+            (map
+              (lambda (w) (list (nth 0 w) "writes to a registry but its if: has no top-level `inputs.publish` conjunct"))
+              (filter (lambda (w) (not (publish-guarded? (nth 1 w)))) writers))))))))
+
 (define (check-workflow path)
   (let* ((doc (yaml-read path))
          (name (path-basename path))
-         (bad (concat (output-problems doc) (publish-problems doc))))
+         (bad (concat (output-problems doc) (concat (publish-problems doc) (publish-gate-problems doc)))))
     (for-each (lambda (p) (log-error (string-append name ": " (nth 0 p) " " (nth 1 p)))) bad)
     (log-info
       (string-append
@@ -186,14 +232,16 @@
   (let* ((all (glob (string-append workflows-dir "/*.yml")))
          (with-outputs (filter (lambda (p) (not (null? (workflow-outputs (yaml-read p))))) all))
          (with-app (filter (lambda (p) (takes-publish-app? (yaml-read p))) all))
-         (targets (filter (lambda (p) (or (member? p with-outputs) (member? p with-app))) all)))
+         (with-publish (filter (lambda (p) (declares-publish? (yaml-read p))) all))
+         (targets (filter (lambda (p) (or (member? p with-outputs) (member? p with-app) (member? p with-publish))) all)))
     (cond
-      ((or (null? with-outputs) (null? with-app))
+      ((or (null? with-outputs) (null? with-app) (null? with-publish))
         (log-error
           (string-append
             "workflow-wiring: found " (string-format "{}" (length with-outputs))
             " workflow(s) with workflow_call outputs and " (string-format "{}" (length with-app))
-            " taking PUBLISH_APP_ID in " workflows-dir ". A rule that reads nothing does not pass."))
+            " taking PUBLISH_APP_ID and " (string-format "{}" (length with-publish))
+            " declaring a publish input in " workflows-dir ". A rule that reads nothing does not pass."))
         (exit 2))
       (else #f))
     (let ((total (sum (map check-workflow targets))))

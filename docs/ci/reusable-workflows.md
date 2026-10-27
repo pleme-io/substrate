@@ -131,6 +131,14 @@ Today `image-push.yml` takes the App. `helm-monorepo-auto-release.yml` and
 `nix-image-auto-release.yml` do not pass the App rung, and adding it changes
 which credential pushes for their private callers, so each needs its own opt-in.
 
+**Publishing is a typed input, configured off per caller.** `image-push.yml`
+takes `publish` (default `true`). With `false` it still builds, saves to the
+super-cache and runs the CVE gate, but no step writes to a registry: the image
+ships through nix only. sui runs this way since 2026-10-27. The same tool
+requires every registry-writing step (`registry-login`,
+`package-visibility-gate`, an `oci-push -- push` run) in a workflow that declares
+`publish` to carry `inputs.publish` as a top-level `&&` part of its `if:`.
+
 `pending-workflow-output-boundary: 13 job outputs unexposed and unreferenced.`
 Each needs a per-case judgement (expose, or delete as dead); a blanket sweep
 would expose values no caller asked for.
