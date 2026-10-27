@@ -335,6 +335,9 @@ jobs:
       - name: checks.kata (lib/kata — fleet vocabulary)
         run: nix build --no-link -L '.#checks.x86_64-linux.kata'
 
+      - name: checks.formatters (lib/formatters.nix — refusals + per-language round trips)
+        run: nix build --no-link -L '.#checks.x86_64-linux.formatters'
+
       - name: checks.go-minimal-image (lib/build/go — base-selection forcing-function)
         run: nix build --no-link -L '.#checks.x86_64-linux.go-minimal-image'
 
