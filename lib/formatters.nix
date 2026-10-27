@@ -103,7 +103,10 @@ let
       nix = {
         package = pkgs.nixfmt;
         exe = "nixfmt";
-        args = [ "--strict" ];
+        args = [
+          "--strict"
+          "-"
+        ];
         stdin = true;
         filetypes = [ "nix" ];
         suffixes = [ ".nix" ];

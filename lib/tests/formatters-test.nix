@@ -80,7 +80,10 @@ let
           exe = baseNameOf registry.nix.command;
         };
         expected = {
-          args = [ "--strict" ];
+          args = [
+            "--strict"
+            "-"
+          ];
           stdin = true;
           exe = "nixfmt";
         };
