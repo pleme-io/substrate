@@ -1,8 +1,10 @@
-{ self, ... }: {
-  perSystem = { pkgs, ... }: {
-    checks.nix-canonical = pkgs.runCommand "nix-canonical" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-      find ${self} -name '*.nix' -print0 | xargs -0 nixfmt --strict --check
-      touch $out
-    '';
+{ self, inputs, ... }: {
+  perSystem = { pkgs, system, ... }: {
+    checks.nix-canonical = inputs.substrate.formatterLib.mkCanonicalCheck {
+      inherit pkgs;
+      entry = inputs.substrate.formatters.${system}.nix;
+      root = self;
+      name = "nix-canonical";
+    };
   };
 }

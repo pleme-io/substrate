@@ -170,6 +170,14 @@
     # output does not depend on its own sibling attribute. Same pattern as
     # `genFor` above. The pin (version + every hash) is committed data in
     # lib/build/go/go-toolchain-pin.json — the fenix data/stable.json analogue.
+    formattersFor = system:
+      (import ./lib/formatters.nix { lib = nixpkgs.lib; }).mkFormatters {
+        pkgs = import nixpkgs { inherit system; };
+        rustToolchain = (import ./lib/build/rust/overlay.nix).getRustToolchain {
+          inherit fenix system;
+        };
+      };
+
     goToolchainFor = system:
       (import ./lib/build/go/overlay.nix).mkGoToolchain {
         pkgs = import nixpkgs { inherit system; };
@@ -215,6 +223,17 @@
         in {
           iroha =
             (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck pkgs;
+
+          # FORMATTERS — the registry's refusals plus one round trip per
+          # language: the editor argv applied twice is a fixed point, and the
+          # unformatted sample changes on the first pass (non-vacuity; red-run
+          # by an already-canonical html sample, which the guard refused).
+          formatters = import ./lib/tests/formatters-test.nix {
+            inherit pkgs;
+            rustToolchain = (import ./lib/build/rust/overlay.nix).getRustToolchain {
+              inherit fenix system;
+            };
+          };
           kata =
             (import ./lib/kata { lib = nixpkgs.lib; }).tests.asCheck pkgs;
 
@@ -806,6 +825,16 @@
         # fleet-wide compiler bump is a two-field diff here, not a lock bump and
         # not a resolution at eval.
         goToolchains = eachSystem (system: { stable = goToolchainFor system; });
+
+        # ── formatters — the one per-language formatter registry ────────────
+        # lib/formatters.nix. Built from SUBSTRATE's nixpkgs and the fleet
+        # fenix toolchain (the goToolchains reasoning: a consumer's own pin
+        # must not pick the tool), so every consumer that follows this
+        # substrate resolves the same store path for the same language. CI
+        # canonical checks (mkCanonicalCheck), blnvim's `ff` and escriba's
+        # format command all render from it.
+        formatters = eachSystem formattersFor;
+        formatterLib = import ./lib/formatters.nix { lib = nixpkgs.lib; };
 
         # Per-system library and overlay exports
         # Consumers access as: substrate.lib.${system}, substrate.rustOverlays.${system}.rust
