@@ -46,6 +46,9 @@
   release ? name,
   createNamespace ? false,
   includeCrds ? false,
+  # Objects appended after the chart's render, each one more YAML document
+  # (JSON). Default [] keeps the build script byte-identical.
+  extraObjects ? [ ],
 }:
 let
   lib = pkgs.lib;
@@ -75,5 +78,7 @@ pkgs.runCommand "${name}.yaml"
     ${vendor}
     helm template ${release} chart --namespace ${namespace}${lib.optionalString includeCrds " --include-crds"} -f "$valuesJsonPath" > rendered.yaml
     grep -q '^kind:' rendered.yaml || { echo "mkHelmRender ${name}: the chart rendered no objects" >&2; exit 1; }
-    cat ${lib.optionalString createNamespace "${namespaceDoc} "}rendered.yaml > "$out"
+    cat ${lib.optionalString createNamespace "${namespaceDoc} "}rendered.yaml > "$out"${lib.optionalString (extraObjects != [ ]) ''
+
+    printf '\n---\n%s\n' ${lib.escapeShellArg (lib.concatMapStringsSep "\n---\n" builtins.toJSON extraObjects)} >> "$out"''}
   ''

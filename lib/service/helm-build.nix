@@ -10,6 +10,7 @@
 #   mkHelmChart          - One chart -> one deterministic, hermetic .tgz
 #   mkHelmRepo           - Charts -> OCI image layouts (internal registry) + charts.json
 #   mkHelmRender         - Pinned chart + typed values -> rendered manifests
+#   mkHelmRelease        - Typed release declaration (module type) -> mkHelmRender
 #   mkHelmRenderTestApps - Pure-helm render tests: unittest + render-check apps
 {
   pkgs,
@@ -284,6 +285,10 @@ in
 
   # A pinned chart + typed values -> rendered manifests (lib/build/helm/render.nix).
   mkHelmRender = import ../build/helm/render.nix { inherit pkgs; };
+
+  # A typed release declaration (module type) + its render via mkHelmRender
+  # (lib/build/helm/release.nix): { type, check, render, renderDecl }.
+  mkHelmRelease = import ../build/helm/release.nix { inherit pkgs; };
 
   # Render-test apps for a repo's charts, wrapping a typed render-test binary
   # (the akeyless `charttest` keyway tool, or any cmd exposing the same

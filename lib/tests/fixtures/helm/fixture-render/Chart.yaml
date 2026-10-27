@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fixture-render
+description: mkHelmRender fixture (a library from a registry it never reaches, a values schema, a CRD).
+type: application
+version: 0.1.0
+dependencies:
+  - name: fixture-lib
+    version: "~0.2"
+    repository: oci://registry.invalid/pleme-io/charts

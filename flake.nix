@@ -245,6 +245,10 @@
             doca = self.packages.${system}.oci-push;
           };
 
+          # mkHelmRender / mkHelmRelease: offline library vendoring, values
+          # schema refusal (with its no-schema control), CRDs, extraObjects.
+          helm-render = import ./lib/tests/helm-render-test.nix { inherit pkgs; };
+
           # WORKFLOW-CATALOG — CATALOG REFLECTION for the 89 reusable
           # workflows, which were the one large substrate surface with no
           # catalog while lib/iroha and lib/util/eval-suites both had one.

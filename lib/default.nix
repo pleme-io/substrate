@@ -1572,6 +1572,7 @@ in rec {
     mkHelmChart
     mkHelmRepo
     mkHelmRender
+    mkHelmRelease
     mkHelmRenderTestApps;
   # Note: mkHelmLintApp/PackageApp/PushApp/ReleaseApp/TemplateApp were
   # listed historically but never defined in helm-build.nix; the typed

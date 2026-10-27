@@ -381,6 +381,9 @@ jobs:
       - name: checks.helm-chart-repo (mkHelmChart -> mkHelmRepo -> registry -> helm pull)
         run: nix build --no-link -L '.#checks.x86_64-linux.helm-chart-repo'
 
+      - name: checks.helm-render (mkHelmRender / mkHelmRelease — offline libraries, schema, CRDs, extraObjects)
+        run: nix build --no-link -L '.#checks.x86_64-linux.helm-render'
+
       - name: checks.source-policy (lib/build — which files a build reads)
         run: nix build --no-link -L '.#checks.x86_64-linux.source-policy'
       - name: checks.rust-sibling-path-dep (lib/build/rust — a ../sibling path dep is refused per crate)
