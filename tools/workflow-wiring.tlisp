@@ -1,0 +1,213 @@
+(define workflows-dir ".github/workflows")
+
+(define (aget al key dflt)
+  (cond
+    ((not (list? al)) dflt)
+    ((null? al) dflt)
+    ((not (list? (car al))) dflt)
+    ((equal? (car (car al)) key) (nth 1 (car al)))
+    (else (aget (cdr al) key dflt))))
+
+(define (as-string v) (cond ((string? v) v) (else "")))
+
+(define (as-list v) (cond ((list? v) v) (else (list))))
+
+(define (has-key? al key)
+  (and (list? al) (any? (lambda (pair) (and (list? pair) (equal? (car pair) key))) al)))
+
+(define (unwrap expr)
+  (let ((t (string-trim expr)))
+    (cond
+      ((and (string-starts-with? t "${{") (string-ends-with? t "}}"))
+        (string-trim (string-replace (string-replace t "${{" "") "}}" "")))
+      (else #f))))
+
+(define (concat-all xss)
+  (cond ((null? xss) (list)) (else (concat (car xss) (concat-all (cdr xss))))))
+
+(define (sum xs) (cond ((null? xs) 0) (else (+ (car xs) (sum (cdr xs))))))
+
+(define (unresolved-reason value jobs)
+  (let ((inner (unwrap (as-string value))))
+    (cond
+      ((not inner) "is not a single ${{ }} expression")
+      (else
+        (let ((parts (string-split inner ".")))
+          (cond
+            ((not (and (= (length parts) 4)
+                       (equal? (nth 0 parts) "jobs")
+                       (equal? (nth 2 parts) "outputs")))
+              (string-append "`" inner "` is not jobs.<job>.outputs.<output>"))
+            ((not (has-key? jobs (nth 1 parts)))
+              (string-append "names job `" (nth 1 parts) "`, which this file does not define"))
+            ((not (has-key? (aget (aget jobs (nth 1 parts) (list)) "outputs" (list)) (nth 3 parts)))
+              (string-append "names `" (nth 3 parts) "`, which job `" (nth 1 parts) "` does not declare"))
+            (else "")))))))
+
+(define token-action "pleme-io/actions/github-token@")
+
+(define login-action "pleme-io/actions/registry-login@")
+
+(define (step-uses step) (as-string (aget step "uses" "")))
+
+(define (token-step-reason step)
+  (let ((with (aget step "with" (list))))
+    (cond
+      ((not (equal? (as-string (aget with "app-id" "")) "${{ secrets.PUBLISH_APP_ID }}"))
+        "does not pass app-id: ${{ secrets.PUBLISH_APP_ID }}")
+      ((not (equal? (as-string (aget with "app-private-key" "")) "${{ secrets.PUBLISH_APP_KEY }}"))
+        "does not pass app-private-key: ${{ secrets.PUBLISH_APP_KEY }}")
+      ((not (equal? (as-string (aget with "app-permission-packages" "")) "write"))
+        "does not request app-permission-packages: write")
+      (else ""))))
+
+(define (login-step-reason step token-ids)
+  (let ((got (as-string (aget (aget step "with" (list)) "app-token" ""))))
+    (cond
+      ((any? (lambda (id) (equal? got (string-append "${{ steps." id ".outputs.app-token }}"))) token-ids) "")
+      (else
+        (string-append
+          "does not pass app-token from a github-token step in its job (got `"
+          (cond ((equal? got "") "(none)") (else got)) "`)")))))
+
+(define fixture-token-ok
+  (list
+    (list "id" "token")
+    (list "uses" "pleme-io/actions/github-token@main")
+    (list "with" (list
+                   (list "app-id" "${{ secrets.PUBLISH_APP_ID }}")
+                   (list "app-private-key" "${{ secrets.PUBLISH_APP_KEY }}")
+                   (list "app-permission-packages" "write")))))
+
+(define (fixture-login app-token)
+  (list
+    (list "uses" "pleme-io/actions/registry-login@main")
+    (list "with" (list (list "app-token" app-token)))))
+
+(define self-check-cases
+  (list
+    (list "output: jobs.bump.outputs.bumped" (lambda () (unresolved-reason "${{ jobs.bump.outputs.bumped }}" fixture-jobs)) #t)
+    (list "output: no spaces" (lambda () (unresolved-reason "${{jobs.bump.outputs.new-version}}" fixture-jobs)) #t)
+    (list "output: undeclared" (lambda () (unresolved-reason "${{ jobs.bump.outputs.tag }}" fixture-jobs)) #f)
+    (list "output: no such job" (lambda () (unresolved-reason "${{ jobs.ship.outputs.bumped }}" fixture-jobs)) #f)
+    (list "output: job without outputs" (lambda () (unresolved-reason "${{ jobs.test.outputs.bumped }}" fixture-jobs)) #f)
+    (list "output: a step, not a job" (lambda () (unresolved-reason "${{ steps.bump.outputs.bumped }}" fixture-jobs)) #f)
+    (list "output: not an expression" (lambda () (unresolved-reason "jobs.bump.outputs.bumped" fixture-jobs)) #f)
+    (list "output: empty" (lambda () (unresolved-reason "" fixture-jobs)) #f)
+    (list "output: a disjunction" (lambda () (unresolved-reason "${{ jobs.bump.outputs.bumped || jobs.bump.outputs.new-version }}" fixture-jobs)) #f)
+    (list "token: fully wired" (lambda () (token-step-reason fixture-token-ok)) #t)
+    (list "token: no key" (lambda () (token-step-reason (list (list "with" (list (list "app-id" "${{ secrets.PUBLISH_APP_ID }}")))))) #f)
+    (list "token: read-only packages" (lambda () (token-step-reason (list (list "with" (list (list "app-id" "${{ secrets.PUBLISH_APP_ID }}") (list "app-private-key" "${{ secrets.PUBLISH_APP_KEY }}")))))) #f)
+    (list "login: app rung wired" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.app-token }}") (list "token"))) #t)
+    (list "login: no app rung" (lambda () (login-step-reason (list (list "uses" login-action)) (list "token"))) #f)
+    (list "login: the pat rung instead" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.pat }}") (list "token"))) #f)
+    (list "login: another job's step" (lambda () (login-step-reason (fixture-login "${{ steps.token.outputs.app-token }}") (list "mint"))) #f)))
+
+(define fixture-jobs
+  (list
+    (list "bump" (list (list "outputs" (list (list "bumped" "x") (list "new-version" "y")))))
+    (list "test" (list (list "runs-on" "ubuntu-latest")))))
+
+(define (self-check-failures)
+  (filter
+    (lambda (c) (not (equal? (equal? ((nth 1 c)) "") (nth 2 c))))
+    self-check-cases))
+
+(define (call-secrets doc) (aget (aget (aget doc "on" (list)) "workflow_call" (list)) "secrets" (list)))
+
+(define (workflow-outputs doc)
+  (as-list (aget (aget (aget doc "on" (list)) "workflow_call" (list)) "outputs" (list))))
+
+(define (takes-publish-app? doc) (has-key? (call-secrets doc) "PUBLISH_APP_ID"))
+
+(define (output-problems doc)
+  (let ((jobs (aget doc "jobs" (list))))
+    (filter
+      (lambda (p) (not (equal? (nth 1 p) "")))
+      (map
+        (lambda (pair)
+          (list (string-append "output `" (car pair) "`") (unresolved-reason (aget (nth 1 pair) "value" "") jobs)))
+        (workflow-outputs doc)))))
+
+(define (job-publish-problems job-pair)
+  (let* ((steps (as-list (aget (nth 1 job-pair) "steps" (list))))
+         (tokens (filter (lambda (s) (string-starts-with? (step-uses s) token-action)) steps))
+         (logins (filter (lambda (s) (string-starts-with? (step-uses s) login-action)) steps))
+         (ids (map (lambda (s) (as-string (aget s "id" ""))) tokens))
+         (label (lambda (s) (string-append "job `" (car job-pair) "` / " (step-uses s)))))
+    (concat
+      (map (lambda (s) (list (label s) (token-step-reason s))) tokens)
+      (map (lambda (s) (list (label s) (login-step-reason s ids))) logins))))
+
+(define (publish-problems doc)
+  (cond
+    ((not (takes-publish-app? doc)) (list))
+    (else
+      (let* ((jobs (as-list (aget doc "jobs" (list))))
+             (all (concat-all (map job-publish-problems jobs)))
+             (logins (filter (lambda (p) (string-contains? (nth 0 p) login-action)) all)))
+        (concat
+          (filter (lambda (p) (not (equal? (nth 1 p) ""))) all)
+          (cond
+            ((null? logins)
+              (list (list "secret PUBLISH_APP_ID" "is declared, but no registry-login step reads the App token it mints")))
+            (else (list))))))))
+
+(define (check-workflow path)
+  (let* ((doc (yaml-read path))
+         (name (path-basename path))
+         (bad (concat (output-problems doc) (publish-problems doc))))
+    (for-each (lambda (p) (log-error (string-append name ": " (nth 0 p) " " (nth 1 p)))) bad)
+    (log-info
+      (string-append
+        name ": " (string-format "{}" (length (workflow-outputs doc))) " output(s)"
+        (cond ((takes-publish-app? doc) ", takes the publish App") (else ""))
+        ", " (string-format "{}" (length bad)) " problem(s)"))
+    (length bad)))
+
+(define (main)
+  (let ((bad (self-check-failures)))
+    (cond
+      ((not (null? bad))
+        (for-each
+          (lambda (c)
+            (log-error
+              (string-append
+                "self-check: misjudged `" (nth 0 c) "` (expected "
+                (cond ((nth 2 c) "clean") (else "a problem")) ")")))
+          bad)
+        (log-error "workflow-wiring: a predicate is broken; refusing to judge any workflow with it")
+        (exit 2))
+      (else
+        (log-info
+          (string-append
+            "self-check: " (string-format "{}" (length self-check-cases))
+            " fixed cases judged correctly")))))
+  (let* ((all (glob (string-append workflows-dir "/*.yml")))
+         (with-outputs (filter (lambda (p) (not (null? (workflow-outputs (yaml-read p))))) all))
+         (with-app (filter (lambda (p) (takes-publish-app? (yaml-read p))) all))
+         (targets (filter (lambda (p) (or (member? p with-outputs) (member? p with-app))) all)))
+    (cond
+      ((or (null? with-outputs) (null? with-app))
+        (log-error
+          (string-append
+            "workflow-wiring: found " (string-format "{}" (length with-outputs))
+            " workflow(s) with workflow_call outputs and " (string-format "{}" (length with-app))
+            " taking PUBLISH_APP_ID in " workflows-dir ". A rule that reads nothing does not pass."))
+        (exit 2))
+      (else #f))
+    (let ((total (sum (map check-workflow targets))))
+      (cond
+        ((= total 0)
+          (log-info
+            (string-append
+              "workflow-wiring: clean — " (string-format "{}" (length targets)) " workflow(s)"))
+          (exit 0))
+        (else
+          (log-error (string-append "workflow-wiring: " (string-format "{}" total) " problem(s)"))
+          (exit 1))))))
+
+(cond
+  ((equal? (env-get "TLISP_TEST" "") "1")
+    (log-info "TLISP_TEST=1 — workflow-wiring helpers loaded; main skipped"))
+  (else (main)))

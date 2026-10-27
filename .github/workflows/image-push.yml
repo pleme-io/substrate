@@ -234,6 +234,12 @@ on:
       GHCR_TOKEN:
         description: "Optional dedicated registry token. registry-login prefers the opt-in PAT (token-source pat), then this, then GITHUB_TOKEN."
         required: false
+      PUBLISH_APP_ID:
+        description: "Optional pleme-publish App ID. With PUBLISH_APP_KEY, a job on a hosted runner mints its own App token (packages write), which registry-login prefers over every other rung."
+        required: false
+      PUBLISH_APP_KEY:
+        description: "Optional pleme-publish App private key; used only with PUBLISH_APP_ID."
+        required: false
       ECR_TOKEN:
         description: >-
           Password for the SOURCE registry an image derivation PULLS FROM, when
@@ -298,6 +304,9 @@ jobs:
         with:
           source: ${{ inputs.token-source }}
           pat: ${{ secrets.BOT_PAT }}
+          app-id: ${{ secrets.PUBLISH_APP_ID }}
+          app-private-key: ${{ secrets.PUBLISH_APP_KEY }}
+          app-permission-packages: write
       # BEFORE the checkout and everything expensive after it: refuse a publish
       # that would bill the org's ONE shared storage allowance. This file
       # already treats repository visibility as load-bearing -- resolve-runner's
@@ -836,6 +845,7 @@ jobs:
           registry: ${{ inputs.registry }}
           client: docker
           username: ${{ github.actor }}
+          app-token: ${{ steps.token.outputs.app-token }}
           bot-pat: ${{ steps.token.outputs.pat }}
           ghcr-token: ${{ secrets.GHCR_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

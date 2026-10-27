@@ -110,15 +110,26 @@ both layers it occurs on.
 names a job that does not exist, or an output that job does not declare, also
 evaluates to `""`. The caller's `if: needs.<call>.outputs.<name> == 'true'` is
 then false and its job is skipped on a green run.
-`tools/workflow-outputs-resolve.tlisp` (job `workflow-outputs-resolve` in
+`tools/workflow-wiring.tlisp` (job `workflow-wiring` in
 `job-selection-selftest.yml`) refuses that. Every `on.workflow_call.outputs`
 value must be exactly `${{ jobs.<job>.outputs.<output> }}`, with both names
 declared in the same file. It finds its targets itself, fails when it finds
-none, and checks its own predicate against nine fixed cases first. Tier:
+none, and checks its predicates against fixed cases first. Tier:
 CI-caught. First consumer (2026-10-27): `rust-auto-release.yml` exposes `bumped`
 and `new-version`, so a public caller on hosted runners can dispatch its
 tag-triggered binary release. A tag pushed with `GITHUB_TOKEN` fires no workflow,
 but `workflow_dispatch` is the exception.
+
+**The publish App reaches the push.** A reusable that declares the
+`PUBLISH_APP_ID` secret (the `pleme-publish` App: contents and packages write,
+nothing else) must hand it to every `github-token` step it runs
+(`app-id`, `app-private-key`, `app-permission-packages: write`). Every
+`registry-login` step must also read `steps.<token>.outputs.app-token` from a
+`github-token` step in its own job. A hosted runner then mints its own App token,
+and registry-login prefers it over every other rung. The same tool gates this.
+Today `image-push.yml` takes the App. `helm-monorepo-auto-release.yml` and
+`nix-image-auto-release.yml` do not pass the App rung, and adding it changes
+which credential pushes for their private callers, so each needs its own opt-in.
 
 `pending-workflow-output-boundary: 13 job outputs unexposed and unreferenced.`
 Each needs a per-case judgement (expose, or delete as dead); a blanket sweep
