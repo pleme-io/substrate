@@ -251,6 +251,9 @@ in
           else if siblingOf l != null then [ (builtins.head (siblingOf l)) ]
           else throw "mkHelmChartPackages: ${toString dir}/Chart.yaml: `${l}` is a file:// dependency that is not a sibling (file://../<dir>); build that chart with mkHelmChart and vendor it explicitly"
         ) lines;
+      declaresLib = dir:
+        lib.any (l: builtins.match "[[:space:]]+(-[[:space:]]+)?[{]?[[:space:]]*name:[[:space:]]*[\"']?${libChartName}[\"']?[[:space:]]*([,}].*)?" l != null)
+          (lib.splitString "\n" (builtins.readFile (dir + "/Chart.yaml")));
       closure = builtins.genericClosure {
         startSet = map (c: { key = toString c.chartDir; dir = c.chartDir; }) charts;
         operator = n:
@@ -265,7 +268,7 @@ in
         lib.nameValuePair n.key (mkHelmChart {
           inherit name;
           chart = n.dir;
-          libraries = lib.optionalAttrs (builtins.elem libChartName deps) { ${libChartName} = libChartDir; };
+          libraries = lib.optionalAttrs (builtins.elem libChartName deps || declaresLib n.dir) { ${libChartName} = libChartDir; };
           vendoredDeps =
             lib.listToAttrs (map (d: lib.nameValuePair d nodes.${toString (sibling n.dir d)})
               (lib.filter (d: d != libChartName) deps))

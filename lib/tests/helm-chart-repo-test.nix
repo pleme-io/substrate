@@ -43,6 +43,11 @@ let
     libChartName = "fixture-lib";
   };
   app = packages.fixture-app;
+  ociDeclared = (mkHelmChartPackages {
+    charts = [ { name = "fixture-oci-app"; chartDir = fx + "/fixture-oci-app"; } ];
+    libChartDir = fx + "/fixture-lib";
+    libChartName = "fixture-lib";
+  }).fixture-oci-app;
   umbrella = packages.fixture-umbrella;
 
   # The same derivation recipe, built in a second derivation two seconds later.
@@ -129,6 +134,9 @@ pkgs.runCommand "helm-chart-repo-test"
     helm template t ${umbrella}/fixture-umbrella-0.3.0.tgz | grep -q 'greeting: "from-umbrella"' \
       || fail "umbrella does not render through its vendored subchart"
     pass "hermetic: library + nested sibling vendored, Chart.lock dropped, renders"
+    tar -tzf ${ociDeclared}/fixture-oci-app-0.1.0.tgz | grep -qx 'fixture-oci-app/charts/fixture-lib/Chart.yaml' \
+      || fail "a library declared from a registry was not vendored from libChartDir"
+    pass "hermetic: a library declared from a registry is vendored from libChartDir"
     grep -q 'dependencies not satisfied' ${unvendored}/testBuildFailure.log && grep -q 'fixture-lib.*missing' ${unvendored}/testBuildFailure.log \
       || fail "an unvendored dependency did not fail the build by name"
     grep -q 'fixture-lib.*wrong version' ${wrongVersion}/testBuildFailure.log \

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fixture-oci-app
+description: fixture-app with its library dependency declared from a registry, the shape a chart outside the library's own repo takes.
+type: application
+version: 0.1.0
+dependencies:
+  - name: fixture-lib
+    version: "~0.2"
+    repository: oci://registry.invalid/pleme-io/charts
