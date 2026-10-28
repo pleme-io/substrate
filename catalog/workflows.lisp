@@ -123,9 +123,9 @@
 (defworkflow image-push
   :file      "image-push.yml"
   :pattern   container-image
-  :inputs    (genLockRegen allowPrivatePackage imageAttr tag autobumpArch registry imageName flakeRef additionalTags runner buildCores maxJobs extraSubstituters extraTrustedPublicKeys netrcFile requireSigs superCacheSaveEndpoint scanBeforePush scanFailOnSeverity scanIgnoreUnfixed scanIgnoreFile scanGoReachability token-source)
+  :inputs    (genLockRegen allowPrivatePackage imageAttr tag autobumpArch registry imageName flakeRef additionalTags runner buildCores maxJobs extraSubstituters extraTrustedPublicKeys netrcFile requireSigs superCacheSaveEndpoint publish scanBeforePush scanFailOnSeverity scanIgnoreUnfixed scanIgnoreFile scanGoReachability token-source)
   :outputs   ()
-  :secrets   (BOT_PAT GHCR_TOKEN ECR_TOKEN)
+  :secrets   (BOT_PAT GHCR_TOKEN ECR_TOKEN PUBLISH_APP_ID PUBLISH_APP_KEY)
   :consumers 36)
 
 (defworkflow vendor-image-mirror
