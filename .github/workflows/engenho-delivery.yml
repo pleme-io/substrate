@@ -1,0 +1,151 @@
+# GitOps delivery of one nix-built service to engenho nodes through the fleet delivery repository, in two stages: the first stage takes every run, the second only a release the first recorded healthy.
+# jobs: { deliver: { uses: pleme-io/substrate/.github/workflows/engenho-delivery.yml@main, secrets: inherit, with: { app: kensa, attr: kensa, chart-path: deploy/kensa/chart, first-namespace: kensa, first-health-url: 'http://127.0.0.1:8423/health' } } }
+name: engenho-delivery
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: 'The application: the record directory <app>/<stage> in the delivery repository.'
+        type: string
+        required: true
+      attr:
+        description: 'The flake package built for each stage''s own system.'
+        type: string
+        required: true
+      chart-path:
+        description: 'The chart directory in this repository, recorded with the release.'
+        type: string
+        required: true
+      first-stage:
+        description: 'The first stage: every run delivers here, builds on its own runner and lands in that node''s own store.'
+        type: string
+        default: ryn
+      first-runner-labels:
+        description: 'JSON array of runner labels on the first stage''s node.'
+        type: string
+        default: '["self-hosted","ryn-private"]'
+      first-namespace:
+        description: 'Where the release runs on the first stage.'
+        type: string
+        required: true
+      first-health-url:
+        description: 'A URL on the first stage that must answer 2xx once the recorded closure runs. Empty: pod readiness alone.'
+        type: string
+        default: ''
+      second-stage:
+        description: 'The second stage, promoted to only from a healthy first stage.'
+        type: string
+        default: plo
+      second-runner-labels:
+        description: 'JSON array of runner labels on the second stage''s node. The closure is built there and pushed to the fleet origin with that node''s uploader key.'
+        type: string
+        default: '["self-hosted","pleme-private","plo"]'
+      second-system:
+        description: 'The second stage''s system.'
+        type: string
+        default: x86_64-linux
+      promote-on:
+        description: 'tag: a semver tag promotes to the second stage (default); main: every run does.'
+        type: string
+        default: tag
+      substituter:
+        description: 'The fleet origin the second stage substitutes from; the pushed closure is read back from it before it is recorded.'
+        type: string
+        default: 'http://rio:5000'
+      repository:
+        description: 'The delivery repository.'
+        type: string
+        default: pleme-io/fleet-delivery
+    outputs:
+      first-tag:
+        description: 'The delivery tag of the first stage''s health record.'
+        value: ${{ jobs.first.outputs.tag }}
+      second-tag:
+        description: 'The delivery tag of the promotion, empty when there was none.'
+        value: ${{ jobs.promote.outputs.tag }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engenho-delivery-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  first:
+    runs-on: ${{ fromJSON(inputs.first-runner-labels) }}
+    outputs:
+      tag: ${{ steps.health.outputs.tag }}
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+      - id: record
+        uses: pleme-io/actions/fleet-delivery@main
+        with:
+          mode: record
+          app: ${{ inputs.app }}
+          stage: ${{ inputs.first-stage }}
+          flake: github:${{ github.repository }}/${{ github.sha }}
+          attr: ${{ inputs.attr }}
+          chart-path: ${{ inputs.chart-path }}
+          repository: ${{ inputs.repository }}
+          token: ${{ steps.token.outputs.token }}
+      - id: health
+        uses: pleme-io/actions/fleet-delivery@main
+        with:
+          mode: health
+          app: ${{ inputs.app }}
+          stage: ${{ inputs.first-stage }}
+          namespace: ${{ inputs.first-namespace }}
+          health-url: ${{ inputs.first-health-url }}
+          repository: ${{ inputs.repository }}
+          token: ${{ steps.token.outputs.token }}
+
+  second-closure:
+    if: inputs.promote-on == 'main' || github.ref_type == 'tag'
+    runs-on: ${{ fromJSON(inputs.second-runner-labels) }}
+    outputs:
+      store-path: ${{ steps.closure.outputs.store-path }}
+      nar-hash: ${{ steps.closure.outputs.nar-hash }}
+    steps:
+      - id: closure
+        uses: pleme-io/actions/fleet-delivery@main
+        with:
+          mode: closure
+          flake: github:${{ github.repository }}/${{ github.sha }}
+          attr: ${{ inputs.attr }}
+      - uses: pleme-io/actions/sui-cache-push@main
+        with:
+          paths: ${{ steps.closure.outputs.store-path }}
+          cache-url: ${{ inputs.substituter }}
+          required: 'true'
+      - uses: pleme-io/actions/fleet-delivery@main
+        with:
+          mode: closure
+          flake: github:${{ github.repository }}/${{ github.sha }}
+          attr: ${{ inputs.attr }}
+          substituter: ${{ inputs.substituter }}
+
+  promote:
+    needs: [first, second-closure]
+    if: inputs.promote-on == 'main' || github.ref_type == 'tag'
+    runs-on: ${{ fromJSON(inputs.second-runner-labels) }}
+    outputs:
+      tag: ${{ steps.promote.outputs.tag }}
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+      - id: promote
+        uses: pleme-io/actions/fleet-delivery@main
+        with:
+          mode: promote
+          app: ${{ inputs.app }}
+          from-stage: ${{ inputs.first-stage }}
+          stage: ${{ inputs.second-stage }}
+          flake: github:${{ github.repository }}/${{ github.sha }}
+          system: ${{ inputs.second-system }}
+          store-path: ${{ needs.second-closure.outputs.store-path }}
+          nar-hash: ${{ needs.second-closure.outputs.nar-hash }}
+          repository: ${{ inputs.repository }}
+          token: ${{ steps.token.outputs.token }}
