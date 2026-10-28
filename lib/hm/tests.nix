@@ -1111,6 +1111,16 @@ in runTests [
     "inheritEnvironment = true must restore the inheriting exec")
 
   (let
+    text = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; } "fluxcd" {
+      package = "/nix/store/x-fluxcd-operator-mcp"; command = "/nix/store/y-kube-run-ryn/bin/kube-run-ryn";
+      args = [ ]; env = { }; envFiles = { };
+    };
+  in mkTest "mcp-wrapper-absolute-command-is-not-joined-to-package"
+    (lib.hasInfix "/nix/store/y-kube-run-ryn/bin/kube-run-ryn" text
+      && !(lib.hasInfix "x-fluxcd-operator-mcp/bin/" text))
+    "an absolute command runs as written; the package bin is joined only to a bare name")
+
+  (let
     stubPkgs = {
       writeShellScript = n: t: "/nix/store/stub-${n}";
       coreutils = "/stub/coreutils";

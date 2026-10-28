@@ -25,7 +25,7 @@ with lib;
 let
   # ─── Internal: resolve command path from server definition ──────────
   _mkCommandPath = server:
-    if server.package != null
+    if server.package != null && !(lib.hasPrefix "/" server.command)
     then "${server.package}/bin/${server.command}"
     else server.command;
 # rec needed: mkResolvedServers→mkMcpWrapper, mkMcpJson→mkFilterForAgent,
