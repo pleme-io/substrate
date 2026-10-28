@@ -212,6 +212,32 @@ let
        then "https://static.crates.io/crates/${name}/${name}-${version}.crate"
        else url;
 
+  memberLayoutsOf = name: [ name "crates/${name}" ];
+
+  githubTreeOf = spec:
+    let gh = githubOwnerRepo (stripUrlQuery spec.source.url); in
+    if spec.source.kind != "git" || gh == null then null
+    else builtins.fetchTree {
+      type = "github";
+      inherit (gh) owner repo;
+      rev = spec.source.rev;
+    };
+
+  gitMemberRootedOf = spec:
+    let full = githubTreeOf spec; in
+    if full == null then null
+    else
+      let
+        rel = lib.findFirst
+          (r: builtins.pathExists (full + "/${r}/Cargo.toml"))
+          null
+          (memberLayoutsOf spec.name);
+        declared =
+          if rel == null then [ ]
+          else ((builtins.fromTOML (builtins.readFile (full + "/${rel}/Cargo.toml"))).package.metadata.substrate.sources or [ ]);
+      in
+      if rel != null && declared != [ ] then { inherit full rel; } else null;
+
   # Tagged-enum dispatch on source.kind. URLs are pre-cleaned by gen
   # — `stripUrlQuery` is belt-and-suspenders for the documented gen
   # `?branch=main`-leak class.
@@ -246,12 +272,7 @@ let
         cleanUrl = stripUrlQuery spec.source.url;
         gh = githubOwnerRepo cleanUrl;
         full =
-          if gh != null then
-            builtins.fetchTree {
-              type = "github";
-              inherit (gh) owner repo;
-              rev = spec.source.rev;
-            }
+          if gh != null then githubTreeOf spec
           else
             fetchPkgs.fetchgit {
               url = cleanUrl;
@@ -263,16 +284,16 @@ let
         # tatara/escriba ship members at `<root>/<name>` (flat); ishou
         # ships them at `<root>/crates/<name>` (the "crates/" convention).
         # Tier 3+ repos can opt in by following one of these conventions.
-        candidates = [
-          (full + "/${spec.name}")
-          (full + "/crates/${spec.name}")
-        ];
+        candidates = map (r: full + "/${r}") (memberLayoutsOf spec.name);
         firstMatch = lib.findFirst
           (p: builtins.pathExists (p + "/Cargo.toml"))
           null
           candidates;
+        rooted = gitMemberRootedOf spec;
       in
-        if firstMatch != null
+        if rooted != null
+        then rooted.full
+        else if firstMatch != null
         then firstMatch
         else full
     else
@@ -885,7 +906,8 @@ let
       let
         srcKind = crate.source.kind or null;
         rel = crate.source.relative_path or "";
-        hasMember = srcKind == "path" && rel != "" && rel != ".";
+        hasMember = (srcKind == "path" && rel != "" && rel != ".")
+          || (srcKind == "git" && gitMemberRootedOf crate != null);
         hasNoLibTarget = (crate.lib_target or null) == null;
       in
         if hasMember && hasNoLibTarget
@@ -938,8 +960,11 @@ let
     # entries need a `<relative_path>/` prefix to compensate. Pure
     # string transform on the args attrset.
     prefixForMember = crate: args:
-      if crate.source.kind != "path" then args
-      else let rel = crate.source.relative_path or ""; in
+      let
+        rooted = if crate.source.kind == "git" then gitMemberRootedOf crate else null;
+      in
+      if crate.source.kind != "path" && rooted == null then args
+      else let rel = if rooted != null then rooted.rel else crate.source.relative_path or ""; in
         if rel == "" || rel == "." then args
         else let p = path: rel + "/" + path; in args
           // (if args ? libPath then { libPath = p args.libPath; } else {})
@@ -1449,4 +1474,6 @@ in {
   # Not part of the consumer-facing API; `mkProject` remains the only
   # supported entry point.
   inherit githubOwnerRepo;
+
+  inherit gitMemberRootedOf;
 }
