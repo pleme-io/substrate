@@ -75,7 +75,7 @@
 (defworkflow rust-auto-release
   :file      "rust-auto-release.yml"
   :pattern   rust
-  :inputs    (bump-type source-paths add-paths rename-prefix no-verify runner require-tests require-tests-waiver test-granularity test-devshell test-args token-source)
+  :inputs    (bump-type source-paths add-paths rename-prefix ride-budget-minutes no-verify runner require-tests require-tests-waiver test-granularity test-devshell test-args token-source)
   :outputs   ()
   :secrets   (CRATES_API_TOKEN BOT_PAT)
   :consumers 51)

@@ -61,6 +61,10 @@ on:
         type: string
         required: false
         default: "pleme-io-"
+      ride-budget-minutes:
+        description: "Minutes the push ship rides the crates.io publish limit before parking the rest (1..330, passed to rust-workspace-publish). Raise it when the workspace has more members than 30 minutes of refill admits."
+        type: string
+        default: "30"
       no-verify:
         description: "Skip cargo publish's verification compile step."
         type: string
@@ -539,6 +543,7 @@ jobs:
           no-verify: ${{ inputs.no-verify }}
           rename-prefix: ${{ inputs.rename-prefix }}
           publish-mode: full
+          ride-budget-minutes: ${{ inputs.ride-budget-minutes }}
         env:
           # Org-level secret name is CRATES_API_TOKEN; cargo reads
           # CARGO_REGISTRY_TOKEN. Bridge the names here.
