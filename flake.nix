@@ -589,6 +589,9 @@
           rust-git-source-ifd-free =
             (import ./lib/build/rust/tests/ifd-free-git-source-test.nix { inherit pkgs; }).asCheck pkgs;
 
+          rust-git-member-sources =
+            (import ./lib/build/rust/tests/git-member-sources-test.nix { inherit pkgs; }).asCheck pkgs;
+
           # ── Per-skill STRUCTURE gate ───────────────────────────────────
           # Wired 2026-07-27. Before this, skill-lint ran in exactly ONE repo
           # fleet-wide (blackmatter-pleme); the two skills substrate ships were
