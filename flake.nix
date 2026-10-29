@@ -528,6 +528,8 @@
             (import ./lib/build/rust/tests/build-script-receipt-test.nix { }).asCheck pkgs;
           rust-rlib-dep-retention =
             (import ./lib/build/rust/tests/rlib-dep-retention-test.nix { }).asCheck pkgs;
+          rust-wit-dir-order =
+            (import ./lib/build/rust/tests/wit-dir-order-test.nix { }).asCheck pkgs;
 
           # ── The linux ABI is now DERIVED, so the derivation needs a gate ──
           # gui-detect.nix decides, per crate, whether the linux artifact is

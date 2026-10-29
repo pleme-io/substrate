@@ -300,6 +300,9 @@ jobs:
       - name: checks.rust-git-member-sources (lib/build/rust — a git member that declares sources builds from the whole repository)
         run: nix build --no-link -L '.#checks.x86_64-linux.rust-git-member-sources'
 
+      - name: checks.rust-wit-dir-order (lib/build/rust — wit-parser reads a WIT directory in name order, not filesystem order)
+        run: nix build --no-link -L '.#checks.x86_64-linux.rust-wit-dir-order'
+
       # The lockfile path's opt-in `cargo test` runner (workspace-tests.nix).
       # The e2e and negative-control steps BUILD a tiny fixture workspace
       # (two members, one registry crate) with cargo in the sandbox — seconds,

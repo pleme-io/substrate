@@ -99,7 +99,20 @@ let
       notify = attrs: {
         features = stripAppleOnlyFeatures (attrs.features or []);
       };
+
+      wit-parser = attrs: {
+        postPatch = (attrs.postPatch or "") + ''
+          witParserUnsorted=$(grep -rlF ${unsortedWitDirRead} src) || {
+            echo "wit-parser: no unsorted directory read found; pleme-crate-overrides.nix no longer matches this version" >&2
+            exit 1
+          }
+          substituteInPlace $witParserUnsorted --replace-fail ${unsortedWitDirRead} ${sortedWitDirRead}
+        '';
+      };
     };
+
+  unsortedWitDirRead = "'path.read_dir().with_context(&cx)?'";
+  sortedWitDirRead = "'{ let mut entries = path.read_dir().with_context(&cx)?.collect::<Vec<_>>(); entries.sort_by_key(|e| e.as_ref().ok().map(|e| e.file_name())); entries }'";
 
   # Legacy attrset: empty triple → false isApple → strip behavior.
   # Identical to the pre-I5 unconditional strip. Existing external
