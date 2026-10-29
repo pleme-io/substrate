@@ -345,6 +345,46 @@ moduleEvalCases
     expected = true;
   };
 
+  hm-default-shape-is-darwin-serviceConfig = {
+    expr = builtins.attrNames (evalSeedHomeManager grafana [ ]).launchd.agents."grafana-admin-seed";
+    expected = [ "serviceConfig" ];
+  };
+
+  hm-home-manager-shape-is-enable-and-config = {
+    expr =
+      let
+        agent =
+          (evalSeedHomeManager (kata.mkSecretSeed {
+            name = "grafana-admin";
+            namespace = "monitoring";
+            k8sNamespace = "monitoring";
+            launchdShape = "home-manager";
+            data.admin-user.sopsPath = "monitoring/grafana-admin-user";
+          }) [ ]).launchd.agents."grafana-admin-seed";
+      in
+      {
+        keys = builtins.attrNames agent;
+        enable = agent.enable;
+        label = agent.config.Label;
+      };
+    expected = {
+      keys = [ "config" "enable" ];
+      enable = true;
+      label = "io.pleme.grafana-admin-seed";
+    };
+  };
+
+  hm-unknown-launchd-shape-throws = {
+    expr =
+      (builtins.tryEval (evalSeedHomeManager (kata.mkSecretSeed {
+        name = "x";
+        k8sNamespace = "ns";
+        launchdShape = "systemd";
+        data.k.sopsPath = "a/b";
+      }) [ ]).launchd.agents).success;
+    expected = false;
+  };
+
   hm-disabled-no-agent = {
     expr = (evalSeedHomeManager disabled [ ]).launchd.agents ? off-seed;
     expected = false;

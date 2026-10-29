@@ -277,6 +277,7 @@ let
         restartTriggers = map (k: sopsFile data.${k}.sopsPath) dataKeys;
         extraConfig.sops.secrets = sopsSecrets;
         inherit homeDirectory;
+        launchdShape = spec.launchdShape or "darwin";
       }
       // lib.optionalAttrs (homeDirectory != null) {
         homeManagerScript = hmScript;

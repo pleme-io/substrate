@@ -261,6 +261,7 @@ let
         # imports `.homeManager` — no cost, no behavior change for the many
         # nixos-only consumers (rio, camelot, …).
         inherit homeDirectory;
+        launchdShape = spec.launchdShape or "darwin";
       }
       // lib.optionalAttrs (homeDirectory != null) {
         homeManagerScript = hmScript;

@@ -173,6 +173,12 @@ let
       startLimitIntervalSec = spec.startLimitIntervalSec or 900;
       startLimitBurst = spec.startLimitBurst or 60;
       homeDirectory = spec.homeDirectory or null;
+      launchdShape =
+        let raw = spec.launchdShape or "darwin"; in
+        if builtins.elem raw [ "darwin" "home-manager" ] then
+          raw
+        else
+          throw "${errPrefix}`launchdShape` must be \"darwin\" or \"home-manager\" — got ${builtins.toJSON raw} for seed '${name}'.";
       logDir = spec.logDir or (if homeDirectory != null then "${homeDirectory}/Library/Logs" else "/var/log");
       meta = spec.meta or { };
 
@@ -363,7 +369,14 @@ let
           # touches either must supply the home-relative replacement here.
           config = lib.mkIf cfg.enable (
             lib.recursiveUpdate homeManagerExtraConfig {
-              launchd.agents.${unitName}.serviceConfig = rendered.serviceConfig;
+              launchd.agents.${unitName} =
+                if launchdShape == "home-manager" then
+                  {
+                    enable = true;
+                    config = rendered.serviceConfig;
+                  }
+                else
+                  { serviceConfig = rendered.serviceConfig; };
             }
           );
         };
