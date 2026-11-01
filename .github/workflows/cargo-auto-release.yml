@@ -258,9 +258,20 @@ jobs:
           # human wrote, and aborts. That stranded egaku-term at crates.io
           # 0.3.1 with its repo at 0.3.4: three bumps tagged and never shipped.
           # Declaring them regenerable lets the rebase resolve in favour of the
-          # bump; gen-spec re-runs on the resulting push and reconciles.
-          # A conflict in any AUTHORED file still aborts, and names the path.
+          # bump. A conflict in any AUTHORED file still aborts, and names the path.
+          #
+          # The bump's copy was generated on the OLD base, and nothing is sure
+          # to reconcile it after this push: a push made with GITHUB_TOKEN (the
+          # fallback above) triggers no workflow, so gen-spec does not re-run.
+          # blue 1c6f410 shipped a stale Cargo.gen.lock that way.
+          # regenerate-command reruns the bump's own `gen build .` (stdlib
+          # regen-gen-lock, the same nix invocation) on the rebased tree and
+          # amends the result into the bump. It is set only where
+          # ensure-gen-lock-fresh regenerates, a Cargo.gen.lock beside the
+          # crate, and only for crate-path '.', the one place the root-relative
+          # regenerable-paths can name; every other repo passes "".
           regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
+          regenerate-command: ${{ inputs.crate-path == '.' && hashFiles('Cargo.gen.lock') != '' && 'nix shell nixpkgs#cargo nixpkgs#rustc --command nix run github:pleme-io/substrate#gen -- build .' || '' }}
 
   ship:
     needs: [resolve-runner, bump]

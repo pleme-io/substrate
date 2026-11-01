@@ -283,9 +283,19 @@ jobs:
           # regenerable, git-push-with-token defaults to "" and ABORTS the
           # rebase on a conflict in a file no human wrote — stranding the
           # release after the tag already exists. Declaring them resolves in
-          # favour of the bump, which is correct: the bump's copy is the one
-          # generated against the version being released.
+          # favour of the bump, whose copy carries the version being released.
+          #
+          # That copy was generated on the OLD base, and nothing is sure to
+          # reconcile it after this push: a push made with GITHUB_TOKEN (the
+          # fallback above) triggers no workflow. blue run 41260276410 pushed
+          # 1c6f410 with a stale Cargo.gen.lock and no workflow ran on it.
+          # regenerate-command reruns the bump's own `gen build .` (stdlib
+          # regen-gen-lock, the same nix invocation) on the rebased tree and
+          # amends the result into the bump. It is set only where
+          # ensure-gen-lock-fresh regenerates, a repo with a root Cargo.gen.lock;
+          # every other repo passes "" and keeps today's push.
           regenerable-paths: "Cargo.lock Cargo.gen.lock Cargo.build-spec.json"
+          regenerate-command: ${{ hashFiles('Cargo.gen.lock') != '' && 'nix shell nixpkgs#cargo nixpkgs#rustc --command nix run github:pleme-io/substrate#gen -- build .' || '' }}
 
   waiver:
     name: Waiver check
