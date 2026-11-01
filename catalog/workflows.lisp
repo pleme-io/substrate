@@ -796,3 +796,11 @@
   :outputs   ()
   :secrets   (BOT_PAT SUI_SIGNING_KEY)
   :consumers 0)
+
+(defworkflow engenho-delivery
+  :file      "engenho-delivery.yml"
+  :pattern   nix
+  :inputs    (app attr chart-path first-stage first-runner-labels first-namespace first-health-url second-stage second-runner-labels second-system promote-on substituter repository)
+  :outputs   (first-tag second-tag)
+  :secrets   ()
+  :consumers 1)
