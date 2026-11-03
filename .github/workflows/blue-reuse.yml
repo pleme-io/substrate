@@ -1,0 +1,35 @@
+# blue-reuse — the reuse ratchet (pleme-io/actions/blue-reuse) on any repo; no .b file costs one git call.
+# Adopt, in .github/workflows/blue-reuse.yml:
+#   name: blue-reuse
+#   on: { push: { branches: [main], paths: ["**/*.b", reuse.baseline, .github/workflows/blue-reuse.yml] }, pull_request: { paths: ["**/*.b", reuse.baseline] }, workflow_dispatch: {} }
+#   jobs: { reuse: { uses: pleme-io/substrate/.github/workflows/blue-reuse.yml@main } }
+name: blue-reuse
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        default: ""
+      enforce:
+        description: 'Fail on a grown or new row, the only thing that can fail this flow. false reports it as a warning.'
+        type: boolean
+        default: true
+      blue-path:
+        description: 'BLUE_PATH for the project''s own bidamas, colon-separated.'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  reuse:
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/blue-reuse@main
+        with:
+          enforce: ${{ inputs.enforce }}
+          blue-path: ${{ inputs.blue-path }}

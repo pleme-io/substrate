@@ -282,6 +282,11 @@
       backend = "blue";
       role = "blue test per target, failing tests annotated";
     };
+    blue-reuse = {
+      uses = "pleme-io/actions/blue-reuse@main";
+      backend = "blue";
+      role = "the reuse ratchet: a grown or new package row fails, each copy named with its home; no .b file costs one git call";
+    };
     blue-shift = {
       uses = "pleme-io/actions/blue-shift@main";
       backend = "blue";

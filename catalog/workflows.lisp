@@ -797,6 +797,14 @@
   :secrets   (BOT_PAT SUI_SIGNING_KEY)
   :consumers 0)
 
+(defworkflow blue-reuse
+  :file      "blue-reuse.yml"
+  :pattern   blue
+  :inputs    (runner enforce blue-path)
+  :outputs   ()
+  :secrets   ()
+  :consumers 0)
+
 (defworkflow engenho-delivery
   :file      "engenho-delivery.yml"
   :pattern   nix

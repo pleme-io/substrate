@@ -172,6 +172,9 @@ jobs:
           args: ${{ inputs.kijun-args }}
           fail-on-findings: ${{ inputs.kijun-fail-on-findings }}
           github-token: ${{ steps.token.outputs.token }}
+      - uses: pleme-io/actions/blue-reuse@main
+        with:
+          github-token: ${{ steps.token.outputs.token }}
       - if: inputs.canonical-check != ''
         uses: pleme-io/actions/nix-build@main
         with:

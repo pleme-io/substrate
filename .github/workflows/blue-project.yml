@@ -1,6 +1,6 @@
 # Adopt: jobs: { blue: { uses: pleme-io/substrate/.github/workflows/blue-project.yml@main, secrets: inherit } }
 # The sentence for a repo whose root has a Bluefile (blue docs/BUILD-ASSURANCE.md):
-# check and canonical form, tests, the blueshift floor, the build plan (blue-only
+# check and canonical form, the reuse ratchet, tests, the blueshift floor, the build plan (blue-only
 # and the derivation budget), the project checks, and the push to sui.
 name: blue-project
 
@@ -68,6 +68,9 @@ jobs:
         with:
           github-token: ${{ steps.token.outputs.token }}
       - uses: pleme-io/actions/blue-check@main
+        with:
+          blue-path: ${{ inputs.blue-path }}
+      - uses: pleme-io/actions/blue-reuse@main
         with:
           blue-path: ${{ inputs.blue-path }}
       - uses: pleme-io/actions/blue-test@main
