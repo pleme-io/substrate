@@ -32,6 +32,7 @@ let
         TEHAI_LIVE = live;
         TEHAI_STATE = "${cfg.stateDir}/state.json";
         TEHAI_TIMEOUT_S = toString cfg.timeoutSeconds;
+        TEHAI_MAX_HANDSHAKE_MS = toString cfg.maxHandshakeMs;
         # By absolute path, so tehai runs the ssh nix itself uses and its state
         # names which one (`ssh` in state.json). macOS: /usr/bin/ssh, which
         # reads /etc/ssh/ssh_config like nix does.
@@ -75,6 +76,11 @@ let
           type = lib.types.ints.positive;
           default = 2;
           description = "ssh connect and keep-alive timeout for each check.";
+        };
+        maxHandshakeMs = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 0;
+          description = "A builder whose protocol handshake takes longer than this many milliseconds is written down, as a dead one is; 0 is no bound.";
         };
         declaredPath = lib.mkOption {
           type = lib.types.str;
