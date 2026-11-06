@@ -967,10 +967,14 @@ in rec {
 
     # Test existing AMI from SSM (re-run tests without rebuilding) — routed
     # through ami-forge's own `test-ami` subcommand (not raw packer calls)
-    # so the SAME GC-root guard protects this path too.
+    # so the SAME GC-root guard protects this path too. When no testTemplate
+    # is given, fall back to kindling's static checks (the documented null
+    # path; the unguarded interpolation used to break every such pipeline
+    # at eval — receipt: nix flake update 2026-11-06, ceu-ami-test).
     ami-test = app "ami-test" ''
       AMI_ID=$(aws ssm get-parameter --name "${ssmParameter}" --region "${region}" --query 'Parameter.Value' --output text)
-      ami-forge test-ami --template "${testTemplate}" --source-ami "$AMI_ID" --region "${region}"
+      ${pkgs.lib.optionalString (testTemplate != null) "ami-forge test-ami --template \"${testTemplate}\" --source-ami \"$AMI_ID\" --region \"${region}\""}
+      ${pkgs.lib.optionalString (testTemplate == null) "kindling ami-test"}
     '';
 
     # Show AMI status.
