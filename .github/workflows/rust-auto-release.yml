@@ -219,7 +219,7 @@ jobs:
     needs: [test, waiver]
     if: >-
       !cancelled()
-      && github.actor != 'github-actions[bot]'
+      && (github.actor != 'github-actions[bot]' || github.event_name == 'workflow_dispatch')
       && github.event_name != 'schedule'
       && (
         needs.test.result == 'success'
