@@ -214,6 +214,8 @@ jobs:
 
       - name: cargo fmt --check (inside .#${{ inputs.devshell }})
         if: ${{ inputs.fmt-check }}
+        env:
+          CARGO_HOME: ${{ runner.temp }}/cargo-home
         run: >-
           nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}"
           -c cargo fmt --all ${{ inputs.manifest-path != '' && format('--manifest-path {0}', inputs.manifest-path) || '' }} -- --check
@@ -225,4 +227,5 @@ jobs:
           # backend (which does not) -- same fix as release.yml's own
           # CARGO_NET_GIT_FETCH_WITH_CLI wiring.
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_HOME: ${{ runner.temp }}/cargo-home
         run: nix develop ${{ inputs.devshell-args }} ".#${{ inputs.devshell }}" -c cargo test ${{ inputs.manifest-path != '' && format('--manifest-path {0}', inputs.manifest-path) || '' }} ${{ inputs.test-args }}

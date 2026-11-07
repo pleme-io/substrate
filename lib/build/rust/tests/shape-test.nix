@@ -34,6 +34,7 @@ let
   # substrate/flake.nix, read as text. lib/build/rust/tests/ -> ../../../../
   flakeSrc = builtins.readFile ../../../../flake.nix;
   cargoCi = builtins.readFile ../../../../.github/workflows/cargo-ci.yml;
+  devshellCargoTest = builtins.readFile ../../../../.github/workflows/nix-devshell-cargo-test.yml;
   callSiteMarker = s: ''callShape "${s}"'';
   # Number of `callShape "` occurrences in flake.nix. splitString yields
   # (occurrences + 1) fragments.
@@ -133,6 +134,11 @@ let
         "uses: ./.github/workflows/nix-devshell-cargo-test.yml\n    with:\n      devshell: \${{ inputs.devshell }}\n      test-args: \${{ inputs.test-args }}\n      fmt-check: \${{ inputs.fmt-check }}\n      devshell-args: \${{ inputs.devshell-args }}\n      token-source: \${{ inputs.token-source }}\n      runner: \${{ inputs.runner }}\n"
         cargoCi)
       "a caller's `runner:` must reach the cargo-test job too")
+
+    (testHelpers.mkTest "devshell-cargo-steps-own-their-cargo-home"
+      (builtins.length (lib.filter (l: l == "          CARGO_HOME: \${{ runner.temp }}/cargo-home")
+        (lib.splitString "\n" devshellCargoTest)) == 2)
+      "cargo resolves `cargo fmt` from $CARGO_HOME/bin before PATH, so a rustup left in a self-hosted runner's home shadows the devShell; both cargo steps set a per-job CARGO_HOME")
 
     (testHelpers.mkTest "explain-states-shape-does-not-route"
       (lib.hasInfix "does not select a builder"
