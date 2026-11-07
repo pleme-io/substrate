@@ -92,6 +92,10 @@ on:
         description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
         default: ""
+      test-runner:
+        description: "Runner label for the cargo-test job alone. Empty uses `runner`. A self-hosted pool sized for nix builds (they run in nix-daemon) may not hold a cargo test, which compiles in the runner's own cgroup."
+        type: string
+        default: ""
       flake-args:
         description: >-
           Extra arguments appended to `nix flake check`. Empty by default, so
@@ -322,5 +326,5 @@ jobs:
       fmt-check: ${{ inputs.fmt-check }}
       devshell-args: ${{ inputs.devshell-args }}
       token-source: ${{ inputs.token-source }}
-      runner: ${{ inputs.runner }}
+      runner: ${{ inputs.test-runner != '' && inputs.test-runner || inputs.runner }}
     secrets: inherit

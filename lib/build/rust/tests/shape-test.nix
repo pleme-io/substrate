@@ -131,9 +131,9 @@ let
 
     (testHelpers.mkTest "cargo-ci-forwards-its-runner-to-cargo-test"
       (lib.hasInfix
-        "uses: ./.github/workflows/nix-devshell-cargo-test.yml\n    with:\n      devshell: \${{ inputs.devshell }}\n      test-args: \${{ inputs.test-args }}\n      fmt-check: \${{ inputs.fmt-check }}\n      devshell-args: \${{ inputs.devshell-args }}\n      token-source: \${{ inputs.token-source }}\n      runner: \${{ inputs.runner }}\n"
+        "uses: ./.github/workflows/nix-devshell-cargo-test.yml\n    with:\n      devshell: \${{ inputs.devshell }}\n      test-args: \${{ inputs.test-args }}\n      fmt-check: \${{ inputs.fmt-check }}\n      devshell-args: \${{ inputs.devshell-args }}\n      token-source: \${{ inputs.token-source }}\n      runner: \${{ inputs.test-runner != '' && inputs.test-runner || inputs.runner }}\n"
         cargoCi)
-      "a caller's `runner:` must reach the cargo-test job too")
+      "the cargo-test job takes `test-runner` when set, else the caller's `runner:`")
 
     (testHelpers.mkTest "devshell-cargo-steps-own-their-cargo-home"
       (builtins.length (lib.filter (l: l == "          CARGO_HOME: \${{ runner.temp }}/cargo-home")
