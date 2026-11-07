@@ -181,6 +181,14 @@ on:
         description: 'Where each job takes its GitHub token (pleme-io/actions/github-token): app (default) is the short-lived installation token the self-hosted runner host mints from the fleet App, absent on hosted runners, where GITHUB_TOKEN is presented instead; pat presents BOT_PAT; none presents nothing.'
         type: string
         default: 'app'
+      cargo-test:
+        description: 'Run the cargo-test job. false skips it, for a caller that accepts other evidence of the suite, such as a proof of a local run of the same tree.'
+        type: boolean
+        default: true
+      closure-artifact:
+        description: 'Name of an artifact of this run holding a nix binary cache (file://) and an out-path file, imported into the store before flake-check builds, so a closure another job built is a store hit. Empty imports nothing; a missing artifact or a refused import leaves the build as it was.'
+        type: string
+        default: ''
 
 jobs:
   # ── Runner resolution — the leg this workflow never had ────────────────
@@ -263,6 +271,23 @@ jobs:
           bot-pat: ${{ steps.token.outputs.token }}
           scope: system
 
+      - name: Install Nix to import ${{ inputs.closure-artifact }}
+        if: inputs.closure-artifact != ''
+        uses: pleme-io/actions/nix-setup@main
+        with:
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
+      - name: Download ${{ inputs.closure-artifact }}
+        if: inputs.closure-artifact != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.closure-artifact }}
+          path: ${{ runner.temp }}/closure
+      - name: Import ${{ inputs.closure-artifact }} into the store
+        if: inputs.closure-artifact != ''
+        continue-on-error: true
+        run: nix copy --from "file://$RUNNER_TEMP/closure" --no-check-sigs "$(cat "$RUNNER_TEMP/closure/out-path")"
+
       - uses: pleme-io/actions/nix-flake-check@main
         with:
           flake-args: ${{ inputs.flake-args }}
@@ -314,6 +339,7 @@ jobs:
            }'
 
   cargo-test:
+    if: ${{ inputs.cargo-test }}
     # Composes substrate's existing devShell test workflow rather than
     # re-inlining `nix develop -c cargo test` here (Operating Principle #1:
     # extend the near-miss, never re-implement it). That workflow already

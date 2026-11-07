@@ -135,6 +135,27 @@ let
         cargoCi)
       "the cargo-test job takes `test-runner` when set, else the caller's `runner:`")
 
+    (testHelpers.mkTest "cargo-ci-cargo-test-runs-unless-the-caller-turns-it-off"
+      (lib.hasInfix "      cargo-test:\n" cargoCi
+        && lib.hasInfix "        type: boolean\n        default: true\n      closure-artifact:\n" cargoCi
+        && lib.hasInfix "  cargo-test:\n    if: \${{ inputs.cargo-test }}\n" cargoCi)
+      "`cargo-test: false` skips the cargo-test job and nothing else; the default runs it, as every caller did before the input")
+
+    (testHelpers.mkTest "cargo-ci-imports-a-shared-closure-before-flake-check"
+      (let
+        beforeCheck = builtins.head (lib.splitString "      - uses: pleme-io/actions/nix-flake-check@main\n" cargoCi);
+      in
+        lib.hasInfix "          name: \${{ inputs.closure-artifact }}\n          path: \${{ runner.temp }}/closure\n" beforeCheck
+        && lib.hasInfix "run: nix copy --from \"file://$RUNNER_TEMP/closure\" --no-check-sigs \"$(cat \"$RUNNER_TEMP/closure/out-path\")\"\n" beforeCheck)
+      "flake-check downloads `closure-artifact` and copies it into the store before `nix flake check`, so the closure another job built is a store hit")
+
+    (testHelpers.mkTest "cargo-ci-closure-import-is-off-when-the-input-is-empty"
+      (builtins.length (lib.filter (l: l == "        if: inputs.closure-artifact != ''")
+        (lib.splitString "\n" cargoCi)) == 3
+        && builtins.length (lib.filter (l: l == "        continue-on-error: true")
+          (lib.splitString "\n" cargoCi)) == 2)
+      "every import step is gated on a non-empty `closure-artifact`, and a missing artifact or a refused import falls through to the build it replaced")
+
     (testHelpers.mkTest "devshell-cargo-steps-own-their-cargo-home"
       (builtins.length (lib.filter (l: l == "          CARGO_HOME: \${{ runner.temp }}/cargo-home")
         (lib.splitString "\n" devshellCargoTest)) == 2)
