@@ -33,6 +33,7 @@ let
   # ── The drift gate's raw material ─────────────────────────────────────
   # substrate/flake.nix, read as text. lib/build/rust/tests/ -> ../../../../
   flakeSrc = builtins.readFile ../../../../flake.nix;
+  cargoCi = builtins.readFile ../../../../.github/workflows/cargo-ci.yml;
   callSiteMarker = s: ''callShape "${s}"'';
   # Number of `callShape "` occurrences in flake.nix. splitString yields
   # (occurrences + 1) fragments.
@@ -120,6 +121,18 @@ let
       (lib.hasInfix "enable = false"
         (shape.explain { who = "kensa"; shape = "service"; mode = "lockfile"; }))
       "the explanation must name the typed off switch for the default service test check")
+
+    (testHelpers.mkTest "cargo-ci-forwards-its-runner-to-the-resolver"
+      (lib.hasInfix
+        "uses: pleme-io/actions/runner-resolve@main\n        with:\n          override: \${{ inputs.runner }}\n"
+        cargoCi)
+      "a caller's `runner:` must reach runner-resolve as `override`, or flake-check lands on the default runner while only the resolver job moves")
+
+    (testHelpers.mkTest "cargo-ci-forwards-its-runner-to-cargo-test"
+      (lib.hasInfix
+        "uses: ./.github/workflows/nix-devshell-cargo-test.yml\n    with:\n      devshell: \${{ inputs.devshell }}\n      test-args: \${{ inputs.test-args }}\n      fmt-check: \${{ inputs.fmt-check }}\n      devshell-args: \${{ inputs.devshell-args }}\n      token-source: \${{ inputs.token-source }}\n      runner: \${{ inputs.runner }}\n"
+        cargoCi)
+      "a caller's `runner:` must reach the cargo-test job too")
 
     (testHelpers.mkTest "explain-states-shape-does-not-route"
       (lib.hasInfix "does not select a builder"

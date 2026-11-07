@@ -209,6 +209,7 @@ jobs:
       - id: resolve
         uses: pleme-io/actions/runner-resolve@main
         with:
+          override: ${{ inputs.runner }}
           public-runner-default: "ubuntu-latest"
 
   flake-check:
@@ -321,4 +322,5 @@ jobs:
       fmt-check: ${{ inputs.fmt-check }}
       devshell-args: ${{ inputs.devshell-args }}
       token-source: ${{ inputs.token-source }}
+      runner: ${{ inputs.runner }}
     secrets: inherit
