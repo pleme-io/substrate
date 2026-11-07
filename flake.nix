@@ -515,6 +515,8 @@
           # the closed set and the `callShape` sites drifting apart.
           rust-shape =
             (import ./lib/build/rust/tests/shape-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
+          blue-service-release-workflow =
+            (import ./lib/ci/tests/blue-service-release-test.nix { inherit (nixpkgs) lib; }).asCheck pkgs;
           rust-service-image =
             (import ./lib/build/rust/tests/service-image-test.nix {
               inherit (nixpkgs) lib;

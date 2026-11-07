@@ -1,0 +1,15 @@
+# Case table for substrate/.github/workflows/blue-service-release.yml
+#
+# TAB-separated: <name> <context k=v;k=v> <expect-run csv> <expect-skip csv>
+#
+# release runs only for a push to main. chart and deploy run only after release
+# reports released=true; an EMPTY released models a skipped release, which must
+# skip both by needs-propagation. Row 2 is the loop guard: the release commit
+# restarts CI, bump sees its tag on HEAD (or that main moved past the run's
+# commit) and reports false, and nothing is published or deployed twice.
+
+push-main-released	github.event_name=push;github.ref=refs/heads/main;needs.release.outputs.released=true	release,chart,deploy
+release-commit-releases-nothing	github.event_name=push;github.ref=refs/heads/main;needs.release.outputs.released=false	release	chart,deploy
+pull-request-never-releases	github.event_name=pull_request;github.ref=refs/pull/1/merge;needs.release.outputs.released=		release,chart,deploy
+other-branch-never-releases	github.event_name=push;github.ref=refs/heads/feature;needs.release.outputs.released=		release,chart,deploy
+dispatch-never-releases	github.event_name=workflow_dispatch;github.ref=refs/heads/main;needs.release.outputs.released=		release,chart,deploy

@@ -1,0 +1,143 @@
+# Release a blue service after its CI, publish its chart, and ask the fleet to run it.
+# jobs: { release: { needs: checks, if: github.event_name == 'push' && github.ref == 'refs/heads/main', uses: pleme-io/substrate/.github/workflows/blue-service-release.yml@main, secrets: inherit, permissions: { contents: read, packages: write } } }
+name: blue-service-release
+
+on:
+  workflow_call:
+    inputs:
+      consumer-repo:
+        description: 'The repository whose flake runs the service; its flake-update.yml is dispatched.'
+        type: string
+        default: 'pleme-io/nix'
+      flake-input:
+        description: 'The consumer''s flake input for the service. Empty is the repository name.'
+        type: string
+        default: ''
+      bump:
+        description: 'The version part raised: patch, minor or major.'
+        type: string
+        default: 'patch'
+      regen:
+        description: 'The installable nix run regenerates the rendered tree with after the version changes. Empty: none.'
+        type: string
+        default: '.#regen'
+      chart-path:
+        description: 'The chart blue renders for the service. Empty is deploy/<package name>/chart.'
+        type: string
+        default: ''
+      chart-registry:
+        description: 'The OCI registry the chart is pushed to, without oci://.'
+        type: string
+        default: 'ghcr.io/pleme-io/charts'
+      runner-labels:
+        description: 'JSON array of runner labels. The default is the private self-hosted pool, whose host mints the fleet App token.'
+        type: string
+        default: '["self-hosted","pleme-private"]'
+      token-source:
+        description: 'Where the jobs take their GitHub token (pleme-io/actions/github-token): app, pat or none.'
+        type: string
+        default: 'app'
+    secrets:
+      BOT_PAT:
+        description: 'Presented only when token-source is pat.'
+        required: false
+    outputs:
+      released:
+        description: '"true" when this run released.'
+        value: ${{ jobs.release.outputs.released }}
+      version:
+        description: 'The released version.'
+        value: ${{ jobs.release.outputs.version }}
+      tag:
+        description: 'The released tag, vX.Y.Z.'
+        value: ${{ jobs.release.outputs.tag }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blue-service-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    outputs:
+      released: ${{ steps.bump.outputs.released }}
+      name: ${{ steps.bump.outputs.name }}
+      version: ${{ steps.tag.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token || github.token }}
+      - uses: pleme-io/actions/nix-setup@main
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+      - id: bump
+        uses: pleme-io/actions/blue-service-release@main
+        with:
+          mode: bump
+          bump: ${{ inputs.bump }}
+          regen: ${{ inputs.regen }}
+          expect-head: ${{ github.sha }}
+          token: ${{ steps.token.outputs.token }}
+      - id: tag
+        if: steps.bump.outputs.released == 'true'
+        uses: pleme-io/actions/blue-service-release@main
+        with:
+          mode: tag
+          version: ${{ steps.bump.outputs.version }}
+          token: ${{ steps.token.outputs.token }}
+
+  chart:
+    name: chart
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          token: ${{ steps.token.outputs.token || github.token }}
+      - uses: pleme-io/actions/helm-publish@main
+        with:
+          registry: ${{ inputs.chart-registry }}
+          chart-path: ${{ inputs.chart-path != '' && inputs.chart-path || format('deploy/{0}/chart', needs.release.outputs.name) }}
+        env:
+          GHCR_TOKEN: ${{ steps.token.outputs.pat || github.token }}
+
+  deploy:
+    name: deploy
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: pleme-io/actions/blue-service-release@main
+        with:
+          mode: request-deploy
+          consumer-repo: ${{ inputs.consumer-repo }}
+          flake-input: ${{ inputs.flake-input != '' && inputs.flake-input || github.event.repository.name }}
+          token: ${{ steps.token.outputs.token }}
