@@ -218,7 +218,7 @@ jobs:
           bot-pat: ${{ steps.token.outputs.token }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: pleme-io/actions/nix-setup@main
         if: inputs.nix
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}

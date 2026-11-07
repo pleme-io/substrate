@@ -213,7 +213,7 @@ jobs:
           token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # relver is invoked via `nix run` (below) — the runner needs nix.
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: pleme-io/actions/nix-setup@main
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 

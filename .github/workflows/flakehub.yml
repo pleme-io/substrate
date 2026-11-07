@@ -29,7 +29,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: pleme-io/actions/nix-setup@main
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 

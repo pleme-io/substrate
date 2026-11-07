@@ -47,7 +47,7 @@ jobs:
           source: ${{ inputs.token-source }}
           pat: ${{ secrets.BOT_PAT }}
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: pleme-io/actions/nix-setup@main
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action REMOVED 2026-08-14 — EOL'd upstream and broken

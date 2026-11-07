@@ -57,7 +57,7 @@ jobs:
     runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: pleme-io/actions/nix-setup@main
         if: runner.environment == 'github-hosted'
       - uses: Swatinem/rust-cache@v2
         with:

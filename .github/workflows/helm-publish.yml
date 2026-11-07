@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: pleme-io/actions/nix-setup@main
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Registry login

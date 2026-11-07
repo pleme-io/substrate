@@ -135,7 +135,7 @@ jobs:
           source: ${{ inputs.token-source }}
           pat: ${{ secrets.BOT_PAT }}
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: pleme-io/actions/nix-setup@main
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       # magic-nix-cache-action is EOL'd upstream (repo-scoped, can't carry a
