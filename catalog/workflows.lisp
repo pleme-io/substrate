@@ -139,7 +139,7 @@
 (defworkflow cargo-ci
   :file      "cargo-ci.yml"
   :pattern   rust-workspace
-  :inputs    (runner flake-args devshell test-args build-targets fmt-check devshell-args token-source)
+  :inputs    (runner test-runner flake-args devshell test-args build-targets fmt-check devshell-args token-source cargo-test closure-artifact flake-check-shards)
   :outputs   ()
   :secrets   ()
   :consumers 24)
@@ -811,4 +811,12 @@
   :inputs    (app attr chart-path first-stage first-runner-labels first-namespace first-health-url second-stage second-runner-labels second-system promote-on substituter repository)
   :outputs   (first-tag second-tag)
   :secrets   ()
+  :consumers 1)
+
+(defworkflow blue-service-release
+  :file      "blue-service-release.yml"
+  :pattern   blue
+  :inputs    (consumer-repo flake-input bump regen chart-path chart-registry runner-labels token-source)
+  :outputs   (released version tag)
+  :secrets   (BOT_PAT)
   :consumers 1)

@@ -437,6 +437,9 @@ jobs:
       - name: checks.checks-wired (every declared check has a step in this job)
         run: nix build --no-link -L '.#checks.x86_64-linux.checks-wired'
 
+      - name: checks.blue-service-release-workflow (the reusable blue service release)
+        run: nix build --no-link -L '.#checks.x86_64-linux.blue-service-release-workflow'
+
   # ══ Family C (see header) ══════════════════════════════════════════
   #
   # 22 report-returning suites, 830 assertions, none of which ran in any
