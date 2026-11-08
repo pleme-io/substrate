@@ -189,6 +189,10 @@ on:
         description: 'Name of an artifact of this run holding a nix binary cache (file://) and an out-path file, imported into the store before flake-check builds, so a closure another job built is a store hit. Empty imports nothing; a missing artifact or a refused import leaves the build as it was.'
         type: string
         default: ''
+      flake-check-shards:
+        description: 'Parallel flake-check jobs. 1 runs one `nix flake check`, as before. N > 1 lists the flake''s checks for the runner''s system, deals them round-robin into N groups and builds each group in its own job (nix-flake-check `only`), each importing closure-artifact; the flake-checks gate and build-targets run in the first. On a hosted runner the jobs run at once, so the check set takes about its longest group rather than its sum: blue''s 266 checks took 47 min in one job (land run 42506606488).'
+        type: number
+        default: 1
 
 jobs:
   # ── Runner resolution — the leg this workflow never had ────────────────
@@ -224,9 +228,39 @@ jobs:
           override: ${{ inputs.runner }}
           public-runner-default: "ubuntu-latest"
 
-  flake-check:
+  plan-flake-check:
+    name: plan flake-check shards
+    if: ${{ inputs.flake-check-shards > 1 }}
     needs: resolve-runner
     runs-on: ${{ needs.resolve-runner.outputs.runner }}
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
+        with:
+          source: ${{ inputs.token-source }}
+          pat: ${{ secrets.BOT_PAT }}
+      - uses: actions/checkout@v4
+      - uses: pleme-io/actions/nix-setup@main
+        with:
+          github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
+      - id: plan
+        env:
+          SHARDS: ${{ inputs.flake-check-shards }}
+        run: |
+          system=$(nix eval --raw --impure --expr builtins.currentSystem)
+          nix eval --json ".#checks.$system" --apply builtins.attrNames | jq -c --argjson n "$SHARDS" --arg s "$system" '[range($n) as $i | {index: ($i + 1), only: ([to_entries[] | select(.key % $n == $i) | ".#checks.\($s).\(.value)"] | join(" "))}] | "shards=\(tojson)"' -r >> "$GITHUB_OUTPUT"
+
+  flake-check:
+    name: ${{ inputs.flake-check-shards > 1 && format('flake-check {0}/{1}', matrix.shard.index, inputs.flake-check-shards) || 'flake-check' }}
+    needs: [resolve-runner, plan-flake-check]
+    if: ${{ !cancelled() && needs.resolve-runner.result == 'success' && needs.plan-flake-check.result != 'failure' }}
+    runs-on: ${{ needs.resolve-runner.outputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan-flake-check.outputs.shards || '[{"index":1,"only":""}]') }}
     steps:
       - id: token
         uses: pleme-io/actions/github-token@main
@@ -291,6 +325,7 @@ jobs:
       - uses: pleme-io/actions/nix-flake-check@main
         with:
           flake-args: ${{ inputs.flake-args }}
+          only: ${{ matrix.shard.only }}
           # Without this, a repo with a PRIVATE pleme-io git-crate dep fails
           # here on an HTTP 404 from api.github.com — nix's own GitHub fetcher
           # running anonymous. The sibling `cargo-test` leg never had this
@@ -310,7 +345,7 @@ jobs:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - name: nix build ${{ inputs.build-targets }}
-        if: ${{ inputs.build-targets != '' }}
+        if: ${{ inputs.build-targets != '' && matrix.shard.index == 1 }}
         env:
           # Same private-dep credential path as the flake-check step above:
           # nix's GitHub fetcher is separate from cargo's git, and runs
@@ -331,6 +366,7 @@ jobs:
       # `checks` absent entirely is handled by `or {}` in the caller here,
       # so the gate never has to classify a missing-attribute error.
       - name: Gate -- the flake must expose at least one check
+        if: ${{ matrix.shard.index == 1 }}
         run: >-
           nix eval --impure --raw --expr
           'import (builtins.getFlake "github:pleme-io/substrate").flakeChecksGatePath {
