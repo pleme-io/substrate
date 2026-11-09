@@ -217,3 +217,30 @@ This repo is PUBLIC. Never commit secrets, user-specific data, or private paths.
 
 ---
 
+
+## Runner placement and overflow (`runner-resolve.yml`)
+
+Five reusables place their jobs through one job, `runner-resolve.yml`:
+`cargo-ci`, `cargo-auto-release`, `image-push`,
+`crossplane-function-auto-release` and `nix-image-auto-release`. That job
+runs `pleme-io/actions/runner-resolve`, and every other job reads
+`needs.<resolve job>.outputs.runner`.
+
+The default is unchanged: a private repo runs on `pleme-private`, a public
+repo on a GitHub-hosted label. The overflow tier moves a public job to a
+self-hosted label when GitHub-hosted runners are busy. All of these must hold:
+
+| rule | why |
+|---|---|
+| the event is `push`, `workflow_dispatch` or `schedule` | only someone with write access starts these; no pull request overflows, from a fork or not |
+| the repo is public and the label came from the visibility default | an override, a committed runner file or an explicit default is the caller's choice |
+| `github.run_id` is inside the snapshot's lease `(from, until)` | the self-hosted side refreshes the lease; when it stops, new runs fall back to hosted |
+| the snapshot's `queued` reaches the threshold (default 10) | hosted capacity comes first |
+| `idle[<repo>][<label>]` is at least 1 | a repo-scoped runner of another repo cannot take the job |
+
+The snapshot is the organization variable `RUNNER_PRESSURE` (JSON). Tune with
+`RUNNER_OVERFLOW_THRESHOLD` and `RUNNER_OVERFLOW_RUNNER` (variables), or with
+the workflow's `overflow-threshold`, `overflow-runner` and `pressure` inputs.
+The resolve job itself uses the same rules, so in a busy hosted queue it does
+not wait there either. A malformed `RUNNER_PRESSURE` fails every public caller
+at `runs-on:`; only the publisher writes it.

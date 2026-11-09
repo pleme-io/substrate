@@ -296,16 +296,10 @@ jobs:
     # failing before it ever reached the self-hosted pool this whole routing
     # exists to reach -- the routing job was itself the one still paying for
     # GitHub-hosted minutes.
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
-    outputs:
-      runner: ${{ steps.resolve.outputs.runner }}
-    steps:
-      - name: Resolve runner
-        id: resolve
-        uses: pleme-io/actions/runner-resolve@main
-        with:
-          default: ${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-24.04' }}
-          override: ${{ inputs.runner }}
+    uses: ./.github/workflows/runner-resolve.yml
+    with:
+      runner: ${{ inputs.runner }}
+      public-runner-default: "ubuntu-24.04"
 
   publish:
     name: Build + push Nix image

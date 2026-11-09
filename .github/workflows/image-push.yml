@@ -277,14 +277,10 @@ jobs:
   # not default to ubuntu-24.04 unconditionally.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
-    outputs:
-      runner: ${{ steps.resolve.outputs.runner }}
-    steps:
-      - id: resolve
-        uses: pleme-io/actions/runner-resolve@main
-        with:
-          override: ${{ inputs.runner }}
+    uses: ./.github/workflows/runner-resolve.yml
+    with:
+      runner: ${{ inputs.runner }}
+      public-runner-default: "ubuntu-24.04"
 
   push:
     name: Build & push image

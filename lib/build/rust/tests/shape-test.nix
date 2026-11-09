@@ -35,6 +35,15 @@ let
   flakeSrc = builtins.readFile ../../../../flake.nix;
   cargoCi = builtins.readFile ../../../../.github/workflows/cargo-ci.yml;
   devshellCargoTest = builtins.readFile ../../../../.github/workflows/nix-devshell-cargo-test.yml;
+  runnerResolve = builtins.readFile ../../../../.github/workflows/runner-resolve.yml;
+  resolvingWorkflows = map (f: builtins.readFile (../../../../.github/workflows + "/${f}.yml")) [
+    "cargo-ci"
+    "cargo-auto-release"
+    "image-push"
+    "crossplane-function-auto-release"
+    "nix-image-auto-release"
+  ];
+  resolvePlacement = builtins.head (lib.splitString "    outputs:" (lib.last (lib.splitString "    runs-on: >-" runnerResolve)));
   callSiteMarker = s: ''callShape "${s}"'';
   # Number of `callShape "` occurrences in flake.nix. splitString yields
   # (occurrences + 1) fragments.
@@ -125,9 +134,34 @@ let
 
     (testHelpers.mkTest "cargo-ci-forwards-its-runner-to-the-resolver"
       (lib.hasInfix
-        "uses: pleme-io/actions/runner-resolve@main\n        with:\n          override: \${{ inputs.runner }}\n"
-        cargoCi)
+        "uses: ./.github/workflows/runner-resolve.yml\n    with:\n      runner: \${{ inputs.runner }}\n"
+        cargoCi
+        && lib.hasInfix "          override: \${{ inputs.runner }}\n" runnerResolve)
       "a caller's `runner:` must reach runner-resolve as `override`, or flake-check lands on the default runner while only the resolver job moves")
+
+    (testHelpers.mkTest "every-resolving-workflow-calls-the-one-resolve-workflow"
+      (lib.all (w:
+        lib.hasInfix "uses: ./.github/workflows/runner-resolve.yml\n" w
+        && !(lib.hasInfix "pleme-io/actions/runner-resolve@" w)) resolvingWorkflows)
+      "a resolve job written inline would place itself without the overflow lease and resolve without the pressure snapshot")
+
+    (testHelpers.mkTest "runner-resolve-places-only-trusted-public-events-on-overflow"
+      (lib.hasInfix "(github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')\n          && !github.event.repository.private\n" resolvePlacement
+        && !(lib.hasInfix "pull_request" resolvePlacement)
+        && !(lib.hasInfix "merge_group" resolvePlacement)
+        && !(lib.hasInfix "workflow_run" resolvePlacement))
+      "the resolve job reaches a self-hosted label only on push, workflow_dispatch or schedule of a public repo; a pull request, from a fork or not, stays hosted")
+
+    (testHelpers.mkTest "runner-resolve-placement-holds-the-lease-both-ways"
+      (lib.hasInfix "fromJSON(github.run_id) > fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').from\n" resolvePlacement
+        && lib.hasInfix "fromJSON(github.run_id) < fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').until\n" resolvePlacement)
+      "without the upper bound a dead publisher's last snapshot would hold every new run on a self-hosted label that no longer answers; without the lower bound an old re-run would")
+
+    (testHelpers.mkTest "runner-resolve-forwards-the-snapshot-and-overflow-config"
+      (lib.hasInfix "          pressure: \${{ inputs.pressure || vars.RUNNER_PRESSURE }}\n" runnerResolve
+        && lib.hasInfix "          overflow-runner: \${{ inputs.overflow-runner || vars.RUNNER_OVERFLOW_RUNNER || 'pleme-public-build' }}\n" runnerResolve
+        && lib.hasInfix "          overflow-threshold: \${{ inputs.overflow-threshold || vars.RUNNER_OVERFLOW_THRESHOLD || '10' }}\n" runnerResolve)
+      "the resolver decides the downstream jobs from the same snapshot, label and threshold that placed the resolve job")
 
     (testHelpers.mkTest "cargo-ci-forwards-its-runner-to-cargo-test"
       (lib.hasInfix

@@ -218,15 +218,10 @@ jobs:
   # correct: bootstrapping the resolver cannot call the resolver.
   resolve-runner:
     name: resolve build runner
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
-    outputs:
-      runner: ${{ steps.resolve.outputs.runner }}
-    steps:
-      - id: resolve
-        uses: pleme-io/actions/runner-resolve@main
-        with:
-          override: ${{ inputs.runner }}
-          public-runner-default: "ubuntu-latest"
+    uses: ./.github/workflows/runner-resolve.yml
+    with:
+      runner: ${{ inputs.runner }}
+      public-runner-default: "ubuntu-latest"
 
   plan-flake-check:
     name: plan flake-check shards

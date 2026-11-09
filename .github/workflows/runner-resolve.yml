@@ -1,0 +1,66 @@
+name: runner-resolve
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "An explicit runner label. It places this job and wins over every tier of the resolver."
+        type: string
+        default: ""
+      public-runner-default:
+        description: "The label a public caller resolves to when nothing else names one."
+        type: string
+        default: "ubuntu-latest"
+      overflow-runner:
+        description: "The self-hosted label a trusted public job overflows to. Empty reads vars.RUNNER_OVERFLOW_RUNNER, then pleme-public-build."
+        type: string
+        default: ""
+      overflow-threshold:
+        description: "The hosted backlog (queued runs) at which a trusted public job overflows. Empty reads vars.RUNNER_OVERFLOW_THRESHOLD, then 10."
+        type: string
+        default: ""
+      pressure:
+        description: "A runner-pressure snapshot (JSON) in place of vars.RUNNER_PRESSURE."
+        type: string
+        default: ""
+    outputs:
+      runner:
+        description: "The resolved runs-on label."
+        value: ${{ jobs.resolve.outputs.runner }}
+      provenance:
+        description: "The tier that won."
+        value: ${{ jobs.resolve.outputs.provenance }}
+      overflow:
+        description: "The overflow tier's verdict."
+        value: ${{ jobs.resolve.outputs.overflow }}
+
+jobs:
+  resolve:
+    name: resolve runner
+    runs-on: >-
+      ${{
+        inputs.runner != '' && inputs.runner
+        || (
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+          && !github.event.repository.private
+          && fromJSON(github.run_id) > fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').from
+          && fromJSON(github.run_id) < fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').until
+          && fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').queued >= fromJSON(inputs.overflow-threshold || vars.RUNNER_OVERFLOW_THRESHOLD || '10')
+          && fromJSON(inputs.pressure || vars.RUNNER_PRESSURE || '{}').idle[github.repository][inputs.overflow-runner || vars.RUNNER_OVERFLOW_RUNNER || 'pleme-public-build'] > 0
+        ) && (inputs.overflow-runner || vars.RUNNER_OVERFLOW_RUNNER || 'pleme-public-build')
+        || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest')
+      }}
+    outputs:
+      runner: ${{ steps.resolve.outputs.runner }}
+      provenance: ${{ steps.resolve.outputs.provenance }}
+      overflow: ${{ steps.resolve.outputs.overflow }}
+    steps:
+      - id: resolve
+        uses: pleme-io/actions/runner-resolve@main
+        with:
+          override: ${{ inputs.runner }}
+          private-runner-default: ${{ vars.PRIVATE_BUILDER_RUNNER || 'pleme-private' }}
+          public-runner-default: ${{ inputs.public-runner-default }}
+          pressure: ${{ inputs.pressure || vars.RUNNER_PRESSURE }}
+          overflow-runner: ${{ inputs.overflow-runner || vars.RUNNER_OVERFLOW_RUNNER || 'pleme-public-build' }}
+          overflow-threshold: ${{ inputs.overflow-threshold || vars.RUNNER_OVERFLOW_THRESHOLD || '10' }}
