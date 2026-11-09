@@ -105,8 +105,7 @@ let
         rev = elemAt parts 1;
         # Look up git_nar by the `name-version-rev` key first (post-migration
         # deltas; disambiguates two revs of one version) then fall back to the
-        # legacy `name-version` key (pre-migration deltas). TOOLCHAIN-FRESHNESS
-        # §X.4b.b.
+        # legacy `name-version` key (pre-migration deltas).
         revKey = "${name}-${version}-${rev}";
         legacyKey = "${name}-${version}";
       in

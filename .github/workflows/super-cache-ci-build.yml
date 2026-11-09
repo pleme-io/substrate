@@ -48,7 +48,7 @@
 #     workflow renders + threads + gates today; a stood-up sui-service is the gate.
 #
 # ── NOT build steps (named, out of this job) ────────────────────────────────
-#   • super-cache-report (feature §V.12/§IV co-opt loop) = design-stage (row 13):
+#   • super-cache-report (feature co-opt loop) = design-stage (row 13):
 #     the telemetry beat → PangeaDashboard + Viggy (defpromessa) so lapidar
 #     auto-tunes the MemoryBand. Wired once the promessa+lapidar controller ships.
 #   • crunkrun-stream = the infra declaration that STANDS UP this job's runner
