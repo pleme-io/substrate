@@ -63,7 +63,7 @@ jobs:
   release:
     name: release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       released: ${{ steps.bump.outputs.released }}
       name: ${{ steps.bump.outputs.name }}
@@ -103,7 +103,7 @@ jobs:
     name: chart
     needs: release
     if: needs.release.outputs.released == 'true'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     permissions:
       contents: read
       packages: write
@@ -128,7 +128,7 @@ jobs:
     name: deploy
     needs: release
     if: needs.release.outputs.released == 'true'
-    runs-on: ${{ fromJSON(inputs.runner-labels) }}
+    runs-on: ${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     steps:
       - id: token
         uses: pleme-io/actions/github-token@main
