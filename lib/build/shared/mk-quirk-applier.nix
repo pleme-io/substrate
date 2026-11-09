@@ -6,7 +6,5 @@
 # boundary*. New consumers SHOULD import
 # `./mk-typed-dispatcher.nix` directly. This shim exists so
 # v0.1 callers continue to work unchanged.
-#
-# See `theory/QUIRK-APPLIER.md` §IV-bis for context.
 { lib, helpers }:
 import ./mk-typed-dispatcher.nix { inherit lib helpers; }

@@ -12,7 +12,7 @@
 #      at the cached source.
 #
 # This is the canonical "package a tatara-lisp program as Nix" pattern.
-# Same content-addressing as theory/TATARA-PACKAGING.md describes,
+# Same content-addressing as tatara packaging,
 # but with the /nix/store cache instead of ~/.cache/tatara/sources.
 # Both caches coexist; either path produces the same BLAKE3.
 #

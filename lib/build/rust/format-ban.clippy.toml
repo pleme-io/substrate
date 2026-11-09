@@ -1,6 +1,5 @@
 # pleme-io typed-emission enforcement.
 #
-# Canonical: https://github.com/pleme-io/theory/blob/main/TYPED-EMISSION.md
 # Operationalized by: pleme-io/substrate/lib/build/rust/format-ban.nix
 #
 # `format!()` is banned across pleme-io Rust crates. Use:
@@ -31,4 +30,4 @@
 # repo whose CI never ran clippy simply carried a config that had never once
 # been parsed. Confirmed live 2026-07-26 in format-ban, the very repo that
 # enforces this rule fleet-wide.
-disallowed-macros = [{ path = "std::format", reason = "format!() is banned per pleme-io/theory/TYPED-EMISSION.md. Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer. Free-form string composition is a substrate gap; close it." }]
+disallowed-macros = [{ path = "std::format", reason = "format!() is banned (typed emission). Use write!() inside Display/Debug impls, tracing::* for logs, anyhow::anyhow!()/bail!() for errors, or a typed AST renderer. Free-form string composition is a substrate gap; close it." }]

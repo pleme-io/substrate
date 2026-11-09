@@ -108,7 +108,7 @@ repo/skill. This is navigation infrastructure; its presence is enforced by
 | **`forge`** | The Rust delivery binary that drives the four delivery FSMs (`forge tool {bump,release,upgrade,status}`, `forge image-{release,sign,sbom,scan,provenance,rescan}`, `forge action-release`). Installed via the substrate flake (`nix run .#release`/`.#bump`/etc.) and present on the devShell `PATH`. | `pleme-io/forge` |
 | **`forge tool status`** | The navigator-readable FSM state surface: prints the current FSM state of an artifact, the last gate verdict, and the owning rule of any refusal ([FSM-OBS](#fsm-status--observability)). | `pleme-io/forge` |
 | **`pleme-doc-gen`** | The generator that re-emits the generated surface of a repo (`flake.nix`, CI shim, nix module trio, CHANGELOG wiring) from `caixa.lisp`: `pleme-doc-gen caixa --source caixa.lisp --out .`. | `pleme-io/pleme-doc-gen` |
-| **Pillar** | One of the pleme-io platform's architectural pillars; a runtime lib's README states which Pillar / Rust sibling it mirrors. | `pleme-io/theory` |
+| **Pillar** | One of the pleme-io platform's architectural pillars; a runtime lib's README states which Pillar / Rust sibling it mirrors. | the runtime lib's README |
 | **Rust sibling** | The Rust crate of the same concept a `-go` lib mirrors (e.g. `shikumi` is the Rust sibling of `shikumi-go`). The `-go` suffix prevents the collision ([LAYOUT-01](#dimension-repo-layout-and-module-layout)). | per-concept repo |
 | **Biblioteca** | Caixa kind: an importable Go library, no `main`, public API from the module-root package. | `caixa.lisp` `:kind` |
 | **Binario** | Caixa kind: a one-shot CLI binary. | `caixa.lisp` `:kind` |

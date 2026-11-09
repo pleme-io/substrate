@@ -1,5 +1,5 @@
 # Reusable workflow: the reference SUPER-CACHE BUILD, composed PURELY from the
-# super-cache-ci action vocabulary (theory/SUPER-CACHE-CI.md). One job whose
+# super-cache-ci action vocabulary. One job whose
 # steps are the typed verbs of the default CI-authoring language for the
 # sui-service stack; a super-cache build is a THREADING of these verbs, not a
 # monolith (★★ CLOSED-LOOP MASS-SYNTHESIS rule 2 — small verbs, no orchestrator).
@@ -28,7 +28,7 @@
 #       with: { svc: akeyless-auth, arch: amd64 }
 #       secrets: inherit
 #
-# ── TIER-HONEST (theory/SUPER-CACHE-CI.md §X ledger; never round up) ─────────
+# ── TIER-HONEST (never round up) ─────────
 # The verbs pinned @main resolve today (the suite lives on pleme-io/actions
 # main); they promote to @v1 when AUTO-RELEASE cuts the suite into the v1 tag
 # (refs/tags/v1 currently lags the suite — pin @main until then).
@@ -111,7 +111,7 @@ on:
           Run the per-derivation security layers (L-sbom / L-sign / L-provenance
           / L-transparency) as live steps. The engines are the industry
           standards (syft / Sigstore cosign+rekor / SLSA-in-toto) turned on
-          over the AUTOBUMP artifact. See theory/SUPER-CACHE-CI-SECURITY.md.
+          over the AUTOBUMP artifact.
         type: boolean
         default: true
       cosign-key-ref:
@@ -230,7 +230,7 @@ jobs:
           sha: ${{ github.sha }}
           tarball: ${{ steps.image.outputs.tarball-amd64 }}
 
-      # ── PER-DERIVATION SECURITY LAYERS (theory/SUPER-CACHE-CI-SECURITY.md) ──
+      # ── PER-DERIVATION SECURITY LAYERS ──
       # OSS-first, TURN-ON (the verbs are authored; these are their first live
       # callers). Each verdict is content-addressed → build-once-reuse (PDC
       # clause 4: the cache key IS the attestation address). The enjulho

@@ -20,7 +20,7 @@ on:
         type: string
         default: "."
       scan-before-push:
-        description: "Zero-tolerance CVE gate (theory/SECURITY-LAYER.md §8's 'build-time pre-publish CVE gate'): build image-attr locally, scan the LOCAL tarball with pleme-io/actions/image-scan (trivy --input, no registry round-trip -- the image has never been pushed anywhere at this point), and only run release-app (the push) if the scan is clean. False (default) preserves every existing caller's exact atomic build+push behavior unchanged -- opt in per consumer."
+        description: "Zero-tolerance CVE gate (the 'build-time pre-publish CVE gate'): build image-attr locally, scan the LOCAL tarball with pleme-io/actions/image-scan (trivy --input, no registry round-trip -- the image has never been pushed anywhere at this point), and only run release-app (the push) if the scan is clean. False (default) preserves every existing caller's exact atomic build+push behavior unchanged -- opt in per consumer."
         type: boolean
         default: false
       image-attr:

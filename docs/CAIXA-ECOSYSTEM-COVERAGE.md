@@ -184,7 +184,7 @@ Identified by the survey:
 - **Code-not-data manifests** (M3.5): SwiftPM, Zig, Gradle KTS, Mix, Gemspec,
   Nimble — emitter produces syntactically valid host-language code via typed
   AST + per-language pretty-printer (the same `format!()`-ban pattern from
-  theory/TYPED-EMISSION.md).
+  typed emission).
 - **XML-shaped ecosystems** (M3.4): Maven pom + csproj share two-attribute
   (name+version) PackageReference/dependency shape. Renderer extracts shared
   `MvnCoord { group?, artifact, version, scope? }` emitter.

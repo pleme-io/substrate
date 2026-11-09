@@ -1,10 +1,10 @@
 # substrate/lib/infra/pangea-backend.nix
 #
 # Typed selection layer for Pangea's dual-backend execution model.
-# Per theory/MAGMA.md §II.11, Pangea supports two execution backends:
+# Pangea supports two execution backends:
 #
 #   - tofu  (historical default; current pleme-io fleet)
-#   - magma (pleme-io's Rust-native executor; theory/MAGMA.md)
+#   - magma (pleme-io's Rust-native executor)
 #
 # Both backends consume Pangea-rendered Terraform JSON. This helper
 # centralizes:
@@ -46,7 +46,7 @@
 # # Capability shape
 #
 # The Nix-level capability attrset mirrors the JSON manifest emitted by
-# `magma capabilities` (theory/MAGMA.md §II.11). tofu's capabilities
+# `magma capabilities`. tofu's capabilities
 # are hardcoded from the published surface; magma's are auto-derived
 # from the magma package's version when available.
 #

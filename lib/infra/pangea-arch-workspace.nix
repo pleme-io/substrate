@@ -158,7 +158,7 @@
   # to "magma" switches to the pleme-io Rust-native executor — Pangea
   # Ruby still synthesizes the JSON, magma consumes it. M0 path uses a
   # disk intermediary at `.pangea/rendered.tf.json`; the in-memory
-  # magnus-driven flow (theory/MAGMA.md §II.9) lands once magma's
+  # magnus-driven flow lands once magma's
   # `magnus` feature is wired into the helper.
   #
   # When executor == "magma", the consumer must thread the magma
@@ -311,7 +311,7 @@ let
   };
 
   # Magma executor app: Pangea Ruby synthesizes to a disk intermediary,
-  # magma consumes it. Per theory/MAGMA.md §VI.M5, this is the
+  # magma consumes it. This is the
   # workspace-level migration path — opt in workspace-by-workspace,
   # keep tofu as the fallback. In-memory magnus flow (no disk file)
   # lands once magma's `magnus` feature is consumed here.

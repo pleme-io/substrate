@@ -25,7 +25,7 @@
 #             the tag already exists, so re-runs are safe).
 #
 # Consumers pin caixa packages by `:fonte (:tipo git :tag "v<versao>")`,
-# matching the canonical store model in theory/TATARA-PACKAGING.md §III.
+# matching the canonical tatara store model.
 # The OCI image is the *artifact*; the git tag is the *manifest pin*.
 # Both come out of this one workflow, so a caixa repo's CI surface is
 # load-bearing in exactly one place.

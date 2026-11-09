@@ -401,7 +401,7 @@ in rec {
   # keeps the Nix layer as pure declaration + YAML config (the shikumi
   # pattern already documented above) and the orchestration/lifecycle
   # logic — including its safety mechanisms — in the typed Rust binary
-  # that actually owns the pipeline. Full analysis: theory/AMI-FORGE.md.
+  # that actually owns the pipeline.
   mkAmiApp = {
     name,
     script,

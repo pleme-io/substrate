@@ -132,6 +132,4 @@ the closure-info fix `hardened-base.nix`'s other builders already have.)
 ## Standing rule
 
 Every new or touched image-producing flake in pleme-io routes through this
-primitive (or the documented CI-runner/toolchain exception). See
-[`theory/SECURITY-LAYER.md`](https://github.com/pleme-io/theory/blob/main/SECURITY-LAYER.md)
-§8/§9 for the ledger + the org-wide standing rule this doc is cited from.
+primitive (or the documented CI-runner/toolchain exception).

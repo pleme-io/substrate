@@ -6,7 +6,6 @@ name: esteira-rio-bump
 # installs Nix redundantly on NixOS rio). Mirrors substrate's auto-bump.yml,
 # retargeted to the rio runner. Pushing the tag with a PAT triggers the repo's
 # esteira-rio-release caller (GITHUB_TOKEN-pushed tags do NOT trigger workflows).
-# See pleme-io/theory/ESTEIRA.md.
 
 on:
   workflow_call:

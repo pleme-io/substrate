@@ -1,6 +1,5 @@
 # pleme-io typed-emission enforcement substrate helper.
 #
-# Canonical: https://github.com/pleme-io/theory/blob/main/TYPED-EMISSION.md
 # Pillar 12 operationalized at the Rust language level.
 #
 # Surface (call via `import ./format-ban.nix { inherit pkgs; }`):
@@ -177,7 +176,7 @@ let
         if ! grep -q '"std::format"' $out/clippy.toml; then
           {
             echo ""
-            echo "# Appended by substrate's withFormatBan (pleme-io/theory/TYPED-EMISSION.md)."
+            echo "# Appended by substrate's withFormatBan."
             cat ${clippyTomlPath}
           } >> $out/clippy.toml
         fi
@@ -204,7 +203,7 @@ let
                 . 2>/dev/null | wc -l)
       files=$(wc -l < $out/per-file-counts.txt)
       {
-        echo "format!() audit (pleme-io/theory/TYPED-EMISSION.md)"
+        echo "format!() audit"
         echo "  Total call sites: $total"
         echo "  Files with at least one format!(): $files"
         echo ""

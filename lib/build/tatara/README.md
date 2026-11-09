@@ -11,8 +11,7 @@ substrate/lib/build/tatara/
 └── README.md
 ```
 
-Implements the
-[`theory/TATARA-PACKAGING.md`](https://github.com/pleme-io/theory/blob/main/TATARA-PACKAGING.md)
+Implements the tatara
 content-addressed packaging philosophy at the Nix layer. The /nix/store
 becomes the second cache tier (the first being
 `~/.cache/tatara/sources/` driven by `tatara-lisp-source`). Both caches
@@ -71,8 +70,6 @@ in the consumer flake.
 
 ## See also
 
-- [theory/TATARA-PACKAGING.md](https://github.com/pleme-io/theory/blob/main/TATARA-PACKAGING.md)
-  — the philosophy
 - [tatara-lisp-source](https://github.com/pleme-io/tatara-lisp/tree/main/tatara-lisp-source)
   — the host-side resolver (parallel cache)
 - [substrate/lib/build/rust/tool-image-flake.nix](../rust/tool-image-flake.nix)

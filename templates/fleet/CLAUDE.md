@@ -35,8 +35,7 @@ modules/pleme (typed surfaces)  →  profiles/ (composed)  →  nodes/<n>/ (iden
   the nixos, darwin and home-manager arms; an arm that cannot host it refuses
   with a typed reason. A registry concept names its renderers in
   `modules/pleme/{nixos,darwin}/<x>.nix`; `parts/<x>.nix` is its proof. The
-  examples are `site` (registry), `tools` (package) and `hello` (binary); the
-  law is `theory/MODULE-TRIO.md`. A concept a second fleet needs moves to the
+  examples are `site` (registry), `tools` (package) and `hello` (binary). A concept a second fleet needs moves to the
   vocabulary.
 - `parts/` wires the flake. Each renderer (`nixos`, `darwin`, `deploy`, every
   surface) has a proof under `checks`.

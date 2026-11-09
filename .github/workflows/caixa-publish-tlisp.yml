@@ -3,7 +3,7 @@
 #
 # Differs from caixa-publish.yml in that:
 #   - no OCI image is built / pushed (the runtime resolves source via
-#     git URL, per theory/WASM-PACKAGING.md §II)
+#     git URL)
 #   - publishing == git tag + push (Zig-style), nothing more
 #   - cse-lint + feira lint still gate the tag
 #

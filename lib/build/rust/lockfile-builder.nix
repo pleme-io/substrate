@@ -401,7 +401,7 @@ let
     # keep the parameter default self-contained.
     defaultCrateOverrides ? (pkgs.defaultCrateOverrides // (plemeCrateOverridesFor pkgs.stdenv.hostPlatform.rust.rustcTarget)),
     buildRustCrateForPkgs ? (p: p.buildRustCrate),
-    # Current-gen guarantee (theory/TOOLCHAIN-FRESHNESS.md §X.2.1): the
+    # Current-gen guarantee: the
     # build-time gen used for the IFD auto-regen is ALWAYS the pinned
     # gen from `gen-pin.json`, never the operator's profile/overlay
     # `pkgs.gen`. The overlay/profile gen drifts — a stale profile gen
@@ -412,8 +412,8 @@ let
     # IFD path invokes gen at all (fresh deltas reconstruct in pure Nix
     # via lockfile-delta.nix), so this strictly fixes the already-broken
     # path. A caller may still override by passing `gen` explicitly —
-    # this is only the default. Per the GEN TYPED-SPEC CONTRACT
-    # (`theory/GEN-TYPED-SPEC-CONTRACT.md`), regeneration is
+    # this is only the default. Per the GEN TYPED-SPEC CONTRACT,
+    # regeneration is
     # BACKGROUND TO REBUILD — never a manual step.
     gen ?
       let
@@ -859,8 +859,7 @@ let
       else builtins.replaceStrings [ "-" ] [ "_" ] crate.name;
 
     # I1 — Workspace-member lib_target synthesis (stale-spec defense).
-    # Per the GEN TYPED-SPEC CONTRACT (theory/GEN-TYPED-SPEC-CONTRACT.md,
-    # invariant I1), gen-cargo ≥ 09f6311 always emits lib_target for
+    # Per the GEN TYPED-SPEC CONTRACT (invariant I1), gen-cargo ≥ 09f6311 always emits lib_target for
     # workspace-member lib crates. Pre-09f6311 specs (still committed in
     # some downstream repos like ishou pre-regeneration) suppressed it
     # for default-named members → substrate would pass no libName/libPath

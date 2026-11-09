@@ -30,7 +30,7 @@ let
   # to the bundled tools.
   toolchainPath = ''export PATH="${cargo}/bin:${pkgs.cargo-edit}/bin:${pkgs.git}/bin:$PATH"'';
 
-  # TYPED EMISSION (pleme-io/theory/TYPED-EMISSION.md): a conf dir holding the
+  # TYPED EMISSION: a conf dir holding the
   # substrate format-ban clippy.toml (`disallowed-macros = ["std::format"]`).
   # Pointed at via CLIPPY_CONF_DIR so `cargo clippy` enforces the ban WITHOUT
   # the consumer repo committing the file — the substrate-side enforcement the

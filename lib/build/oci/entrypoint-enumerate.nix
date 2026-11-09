@@ -12,7 +12,7 @@
 # `textproc`) and declare `entrypointTools = [ those-bundles ]` on
 # `mkDistrolessImage`. The BOOT-CHECK (run the image, read the crash) is
 # the empirical confirm loop that closes any residual the static pass
-# missed — see the methodology in theory/NIX-HARDENING.md §III.4.
+# missed.
 #
 # This is a pure Nix function (no derivation, no IFD, no shell) — it reads
 # a script's text and reasons about it with string ops only, so it runs at

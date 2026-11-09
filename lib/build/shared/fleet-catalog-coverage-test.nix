@@ -2,8 +2,7 @@
 # the fleet-wide dispatcher catalog snapshot
 # (dispatcher-fleet-catalog.json).
 #
-# Catalog entries come from TWO consumer classes (★★ promoted, see
-# theory/QUIRK-APPLIER.md §V.1):
+# Catalog entries come from TWO consumer classes (★★ promoted):
 #
 #   - BUILD-TIME (Nix-dispatched): 9 gen.<eco>.<eco>-quirk entries
 #     consumed by substrate/lib/build/<ecosystem>/quirk-apply.nix.
@@ -60,7 +59,7 @@ let
     # ★★★ progression — third consumer class: wasm-platform's
     # runtime layer typed-cataloged. WASI capability surface +
     # WASM target triples. The "model side" of the unified
-    # computing model (theory/TYPED-ABSORPTION.md): the model
+    # computing model: the model
     # provides resources to programs as typed dispatcher entries.
     { label = "wasm-platform.wasi-capability"; count = 8; ecosystem = null; }
     { label = "wasm-platform.wasm-target";     count = 3; ecosystem = null; }

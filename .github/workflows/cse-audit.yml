@@ -1,8 +1,7 @@
 # Reusable CSE adherence audit workflow.
 #
 # Constructive Substrate Engineering (CSE) is the pleme-io fleet's
-# operating methodology — see
-# pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md.
+# operating methodology.
 # This workflow runs `cse-lint audit --strict` against the consumer
 # repo's workspace and fails the build if any CSE invariant is
 # violated. Adopting this gate prevents CSE regressions from landing.

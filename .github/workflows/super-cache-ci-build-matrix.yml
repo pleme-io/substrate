@@ -1,6 +1,6 @@
 # Reusable workflow: the ACROSS-IMAGES super-cache-ci build — build ALL of a
 # flake's (service × arch) image cells CONCURRENTLY on a self-hosted spot builder
-# pool (theory/SUPER-CACHE-CI.md; the max-parallel default). This is the
+# pool (the max-parallel default). This is the
 # across-images level of the two-level max-parallel contract; the per-cell verb
 # `super-cache-ci-build.yml` owns the within-derivation level (nix --max-jobs/
 # --cores auto-tuned to the box, via pleme-io/actions/nix-image).
@@ -30,7 +30,7 @@
 #       with: { arches: "amd64", image-base: "dockerImage" }
 #       secrets: inherit
 #
-# ── TIER-HONEST (theory/SUPER-CACHE-CI.md §X ledger; never round up) ─────────
+# ── TIER-HONEST (never round up) ─────────
 # * The fan is a REAL GHA matrix over the flake's real attrs (build-matrix is
 #   SHIPPABLE-NOW — honest per-service arch discovery, never a hardcoded pair).
 # * "wall-clock ≈ slowest-service, not the sum" is the DESIGN result of the

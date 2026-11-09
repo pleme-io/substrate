@@ -96,8 +96,7 @@ evaluator; sui-in-memory is the optimization target.
   is now `nix run github:pleme-io/substrate#oci-push -- push --backend
   native …`, mirroring `doca-selftest.yml`'s proven invocation exactly. A
   `/twin-reasoning` pass (2026-07-17) decisively chose finishing this crate
-  over building a separate `hakobi` crate for the same scope — see
-  `theory/HAKOBI.md`'s Decision section. Skopeo fallback (`--backend
+  over building a separate `hakobi` crate for the same scope. Skopeo fallback (`--backend
   skopeo`) stays wired as an escape hatch, not removed.
 - **Phase 2 — operations. DONE (core).** Subcommand CLI: `push` (native +
   skopeo) · `transfer` (registry→registry, native oci-client pull+push, reuses

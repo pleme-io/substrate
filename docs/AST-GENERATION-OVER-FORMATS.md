@@ -2,8 +2,7 @@
 
 > **Thesis.** The current 36-ecosystem caixa renderer uses
 > string-template emission (`format!()` / push_str). This is the
-> M3 fallback. The CORRECT shape per the typed-emission discipline
-> ([`theory/TYPED-EMISSION.md`](https://github.com/pleme-io/theory/blob/main/TYPED-EMISSION.md)):
+> M3 fallback. The CORRECT shape per the typed-emission discipline:
 > **typed AST per target syntax + per-AST pretty-printer**.
 >
 > Per the prime directive: `format!()` of any target syntax is

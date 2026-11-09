@@ -747,8 +747,7 @@ let
     # unchanged. Their bins land on /bin:/usr/bin via the PATH below.
     # Declare the minimum — every tool is closure the scanner sees. SEED
     # this list with the static enumerator (./entrypoint-enumerate.nix)
-    # then confirm minimal via the boot-check (theory/NIX-HARDENING.md
-    # §III.4).
+    # then confirm minimal via the boot-check.
     entrypointTools ? [],
     env ? [],
     exposedPorts ? {},

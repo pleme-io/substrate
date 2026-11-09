@@ -16,10 +16,7 @@
 #
 # Use anywhere a typed variant universe meets a Nix consumer.
 # Canonical instances at v0.1: 9 ecosystem `quirk-apply.nix`
-# files at `substrate/lib/build/<eco>/quirk-apply.nix`. See
-# `theory/QUIRK-APPLIER.md` §IV-bis for the redistribution surface
-# and `theory/QUIRK-APPLIER.md` §IV-bis.3 for the high-leverage
-# moves to expose this fully.
+# files at `substrate/lib/build/<eco>/quirk-apply.nix`.
 { lib, helpers }:
 let
   applyVariant = variant: attrs:

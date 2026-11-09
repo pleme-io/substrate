@@ -186,7 +186,7 @@
   # — a pure Nix function that lists the external commands an entrypoint
   # script bare-invokes, so `mkDistrolessImage`'s `entrypointTools` can be
   # SEEDED from a script deterministically (then confirmed by the
-  # boot-check). Needs only `lib`. See theory/NIX-HARDENING.md §III.4.
+  # boot-check). Needs only `lib`.
   entrypointEnumerate = import ./build/oci/entrypoint-enumerate.nix { inherit (pkgs) lib; };
 
   # CVE mitigation catalog + composition (lib/security/). Takes `lib`, not
@@ -2226,7 +2226,7 @@ in rec {
     nonrootUid
     nonrootGid;
 
-  # Distroless toolset-gathering surface (theory/NIX-HARDENING.md §III.4):
+  # Distroless toolset-gathering surface:
   #   distrolessToolset.bundles.<name>      — the named concern-bundles
   #   distrolessToolset.resolveTools sel    — expand bundle-names + raw pkgs
   #   enumerateDistrolessTools ./script     — static: bare-invoked commands

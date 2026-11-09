@@ -9,8 +9,7 @@
 #   let ws = (mkRustWorkspace { name = "myworkspace"; src = ./.; }) { inherit pkgs; };
 #   in ws.workspaceMembers.cli-tool
 #
-# Under the operator-surface doctrine (theory/COMMITTED-SPEC-FRESHNESS-GATE.md
-# + #76), Cargo.build-spec.json is no longer required at the consumer's
+# Under the operator-surface doctrine (#76), Cargo.build-spec.json is no longer required at the consumer's
 # source root. lockfile-builder's mkProject does the typed dispatch:
 # committed spec when present (fast path, no IFD), gen-driven IFD when
 # absent. The previous `assert pathExists ... // Cargo.build-spec.json`

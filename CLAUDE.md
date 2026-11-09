@@ -24,8 +24,7 @@ Cargo.toml/flake, or make it a per-crate `checks.<system>.*` build).
 > single-file umbrella. Before authoring a flow, check whether the shape is an
 > **input** to one that exists — and a new flow ships its `<flow>.cases.tsv` job
 > selection table or its job selection drifts unobserved. A flow holds no logic
-> of its own: every step is a `uses:` into `pleme-io/actions`. The ladder and the
-> homes: [`theory/PIPELINE-DELIVERY.md`](https://github.com/pleme-io/theory/blob/main/PIPELINE-DELIVERY.md).
+> of its own: every step is a `uses:` into `pleme-io/actions`.
 
 > **★★★ CSE / Knowable Construction.** Substrate is the *primary
 > rendering layer* of Constructive Substrate Engineering — the typed
@@ -34,8 +33,6 @@ Cargo.toml/flake, or make it a per-crate `checks.<system>.*` build).
 > environment. Per the Compounding Directive's renderer-reliability
 > requirements, every helper here ships with named contracts +
 > property-based tests + round-trip + differential + snapshot tests.
-> Canonical methodology spec:
-> [`pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md`](https://github.com/pleme-io/theory/blob/main/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md).
 > Operational directive: org-level pleme-io/CLAUDE.md ★★★ section.
 
 <!-- Blackmatter alignment: pillars 8, 9 -->

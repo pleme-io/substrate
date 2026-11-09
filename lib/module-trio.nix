@@ -226,7 +226,7 @@
 #                       };
 #                     Renders to options.<hmNamespace>.<name>.{appearance,storage}.* and serializes to YAML.
 #
-# ── Concept kinds (theory/MODULE-TRIO.md) ──────────────────────────────────
+# ── Concept kinds ──────────────────────────────────
 #
 #   kind              "binary" (default; every field above) | "package" |
 #                     "registry" | "service". The other kinds live in

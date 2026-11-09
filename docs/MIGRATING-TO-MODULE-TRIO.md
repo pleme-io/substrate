@@ -2,8 +2,7 @@
 
 > **★★★ CSE / Knowable Construction.** This guide is the canonical
 > playbook for porting a hand-rolled `module/default.nix` to the
-> trio macro. Methodology spec:
-> [`pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md`](https://github.com/pleme-io/theory/blob/main/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md).
+> trio macro.
 
 The trio macro at `substrate/lib/module-trio.nix` consumes a single
 typed spec and emits all three of `nixosModule`, `darwinModule`,

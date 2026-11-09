@@ -3,7 +3,7 @@ name: esteira-rio-release
 # esteira PRIVATE lane (closed-source) — release on the rio self-hosted ARC
 # runner, never a billable GitHub-hosted runner. The repo's own
 # `nix run .#<release-app>` does the build + GHCR push (skopeo/regclient ride
-# in the nix closure — rio has no docker). See pleme-io/theory/ESTEIRA.md.
+# in the nix closure — rio has no docker).
 #
 # Prereqs (operator, GitOps via FluxCD — never tofu/kubectl): the `rio`
 # gha-runner-scale-set on rio's k3s (pleme-io/k8s clusters/rio/infrastructure/arc/)

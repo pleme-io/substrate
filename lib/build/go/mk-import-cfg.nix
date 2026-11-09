@@ -1,7 +1,6 @@
 # mk-import-cfg.nix (Go) — synthesize a package node's `importcfg` lines.
 #
-# The core per-node wiring job of the gen-gomod M1 incremental interpreter
-# (theory/GEN-TYPED-SPEC-CONTRACT.md; grounded in the M1 build plan §5b).
+# The core per-node wiring job of the gen-gomod M1 incremental interpreter.
 #
 # `go build -x` reveals that, for every package, the toolchain writes an
 # `importcfg` file mapping each imported path → the on-disk `.a` archive, then

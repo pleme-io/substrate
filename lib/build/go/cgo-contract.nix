@@ -11,7 +11,7 @@
 #
 # ── THE DOCUMENTED MECHANISM IS WRONG. MEASURED 2026-08-08 ──────────────
 #
-# `theory/GEN-GO.md` §VI.6 proposed `builtins.functionArgs pkgs.buildGoModule`.
+# The earlier design proposed `builtins.functionArgs pkgs.buildGoModule`.
 # That ERRORS:
 #
 #     error: 'functionArgs' requires a function
