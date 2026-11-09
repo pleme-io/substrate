@@ -1,5 +1,11 @@
 # Substrate
 
+`pending-skopeo-callsites: 16 invocations / 9 files / 4 classes` — 1 converted (aresta, class 1, 2026-08-02). No doca enhancement needed, but conversion is not uniformly mechanical: class 4 (10 sites) must thread a --dest-ca-cert path it does not have today, or five live images lose the ability to verify the Zot's self-signed cert. Measurement: docs/skopeo-callsites.md.
+
+`pending-skopeo-callsites: 11 flake call sites → mkImageReleaseApp` — `lib/service/image-release.nix` already threads `ociPush` → `DOCA_BIN`, so these call sites hand-roll around a primitive that is already doca-based. Measurement: docs/skopeo-callsites.md.
+
+`pending-class4-endpoint: zot.alpha.1.k8s.quero.lol serves a 301, not /v2/` — establish whether it is retired, moved, or unprovisioned before converting the ten class-4 call sites that target it. Measurement: docs/skopeo-callsites.md.
+
 `pending-repro: i18n-embed-fl fl! HashMap order` — i18n-embed-fl 0.9.4's `fl!`
 emits macro args in HashMap order (src/lib.rs:69/86, emitted at :553), so every
 build of `age` 0.11.5 gets a different SVH (`nix build --rebuild`: may not be
