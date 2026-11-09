@@ -81,7 +81,7 @@
     };
     "caixa-publish" = {
       uses = "pleme-io/actions/caixa-publish@main";
-      backend = "shell";
+      backend = "tatara-lisp";
       role = "Publish caixa-rendered Helm chart to an OCI registry. Wraps helm-publish but consumes the caixa-render output dir.";
     };
     "caixa-publish-to-git" = {
@@ -91,8 +91,8 @@
     };
     "caixa-render" = {
       uses = "pleme-io/actions/caixa-render@main";
-      backend = "shell";
-      role = "Render cluster artifacts (Helm chart + Kubernetes manifests + Flux + CI workflows) from a (defcaixa ...) form via the `feira` CLI.";
+      backend = "tatara-lisp";
+      role = "Render a per-program Helm chart from a (defcaixa ...) form via `feira chart`. (Kubernetes manifests, Flux and CI workflows were promised by an earlier description and have never had a feira renderer — see mode=full and SUPERSEDED.md.)";
     };
     "caixa-render-pr" = {
       uses = "pleme-io/actions/caixa-render-pr@main";
@@ -168,7 +168,7 @@
     };
     "cloudflare-worker-deploy" = {
       uses = "pleme-io/actions/cloudflare-worker-deploy@main";
-      backend = "shell";
+      backend = "tatara-lisp";
       role = "Deploy a Cloudflare Worker via wrangler. Reads wrangler.toml at repo root or at the given path.";
     };
     "doctl-deploy" = {
@@ -220,7 +220,7 @@
     };
     "email-notify" = {
       uses = "pleme-io/actions/email-notify@main";
-      backend = "shell";
+      backend = "tatara-lisp";
       role = "Send a plain-text email via SMTP. Sibling of slack-notify / discord-notify for ops contexts where webhooks aren''t available.";
     };
     "matrix-notify" = {
@@ -273,7 +273,7 @@
     "buildkit-cache-warm" = {
       uses = "pleme-io/actions/buildkit-cache-warm@main";
       backend = "tatara-lisp";
-      role = "Pre-warm buildkit''s registry-mounted layer cache for an image. Useful for cold-start CD runners or fan-out builds.";
+      role = "RETIRED: pleme-io caching software is sui (use sui-dockerfile-node-cache); refuses unless allow-legacy is \"true\". Pre-warm buildkit''s registry-mounted layer cache for an image. Useful for cold-start CD runners or fan-out builds.";
     };
     "crane-mutate" = {
       uses = "pleme-io/actions/crane-mutate@main";
@@ -300,171 +300,6 @@
       backend = "tatara-lisp";
       role = "Build a container image with podman (rootless, daemonless alternative to docker).";
     };
-    # ── RETIRING THE ACTIONS DID NOT RETIRE THE BINARY ──────────────────────
-    # The two entries below are honestly measured and honestly worded, and put
-    # together they still mislead: they retire the two *actions*, and a reader
-    # scanning this catalog reasonably concludes skopeo is gone from the fleet.
-    # It is not. Measured 2026-08-01 across 951 pleme-io repos: SIXTEEN live
-    # `${pkgs.skopeo}/bin/skopeo copy` invocations in NINE files across five
-    # repos, none an action and none visible to this catalog —
-    #
-    #   aresta/flake.nix (1) · blackmatter-akeyless/flake.nix (1) ·
-    #   enxerto/flake.nix (1) · infrastructure/github-runner/…/flake.nix (3) ·
-    #   pangea-architectures/services/akeyless-{sra,csi-provider,ztwa,gateway,
-    #     secrets-injection}-image/flake.nix (2 each = 10)
-    #
-    # An earlier revision of this paragraph said ELEVEN and called the five
-    # pangea files "byte-identical". Both were wrong — they carry two copies
-    # each, not one. Left visible rather than silently rewritten, because the
-    # correction below is about exactly this failure mode.
-    #
-    # ── CORRECTED 2026-08-01, SAME DAY: "eleven, ONE class" was wrong twice ──
-    # The real figures, from reading all nine files rather than two: SIXTEEN
-    # executable `skopeo copy` invocations across NINE files in FIVE repos.
-    # (28 raw occurrences fleet-wide; the other 12 are prose in this catalog,
-    # hardened-images, substrate and tatara-infra. Control: `doca` returns 270
-    # on the same probe, so the count is real and not a dead grep.)
-    #
-    # And they are FOUR conversion classes, not one. This matters because the
-    # original note said "just use the primitive", and that is false for three
-    # of the four:
-    #
-    #   1. GHCR, no auth      aresta, enxerto            --insecure-policy
-    #   2. private + creds    blackmatter-akeyless       --dest-creds
-    #   3. runner, w/ retry   github-runner (x3)         --dest-creds --retry-times
-    #   4. Zot, OCI media     pangea-architectures (5x2) --dest-authfile --format oci
-    #
-    # ── AND THAT CLASS ANALYSIS WAS ALSO WRONG (measured 2026-08-01) ────────
-    # The paragraph above said only class 1 was convertible, that class 4's
-    # `--format oci` had no doca equivalent, and that converting it "would
-    # change the media types of five live images". EVERY PART OF THAT IS FALSE.
-    # Read from `tools/oci-push/src/main.rs`, not inferred:
-    #
-    #   --format oci    doca emits OCI media types UNCONDITIONALLY. Lines 74-76:
-    #                   MT_CONFIG/MT_LAYER_GZIP/MT_MANIFEST are all
-    #                   application/vnd.oci.image.*, and there are ZERO
-    #                   `vnd.docker.distribution.manifest` emission sites — doca
-    #                   has no docker-manifest push path to accidentally take.
-    #                   skopeo's `--format oci` is therefore a NO-OP equivalent,
-    #                   not a missing feature.
-    #   --dest-creds    dest-user / dest-pass inputs.
-    #   self-signed     dest-ca-cert + insecure (wired through `with:` 2026-07-29).
-    #   --retry-times   push_with_retry: 5 attempts, backoff 1s/2s/4s/8s, and the
-    #                   source says 5 was chosen to MATCH the skopeo call site it
-    #                   replaces. Strictly better than skopeo's: it retries only
-    #                   TRANSIENT failures, so a 401 or a malformed archive fails
-    #                   fast instead of burning the budget with backoff.
-    #
-    # ── CLASS 4's TARGET DOES NOT SERVE A REGISTRY TODAY (2026-08-02) ──────
-    # Before threading a CA path, probe the endpoint. All 10 class-4
-    # invocations push to ONE host -- `zot.alpha.1.k8s.quero.lol`, 15 textual
-    # references across the five flakes -- and it does not answer as a registry:
-    #
-    #   DNS      CNAME -> pixie.porkbun.com -> 207.207.210.229
-    #   TLS      curl: (60) SSL: no alternative certificate subject name
-    #            matches target hostname 'zot.alpha.1.k8s.quero.lol'
-    #   -k       HTTP 301 from openresty -- a generic ingress redirect, not a
-    #            /v2/ registry response
-    #
-    # CONTROL, AND IT CHANGED THE CONCLUSION: `grafana.quero.cloud` -- known
-    # live -- resolves to the SAME CNAME and the SAME IP. So pixie.porkbun.com
-    # is this fleet's shared ingress, NOT a parking page, and "the domain is
-    # dead" would have been wrong. What is true is narrower: the ingress has no
-    # cert covering this hostname and returns a generic 301 rather than a
-    # registry, so nothing is serving a Zot there right now.
-    #
-    # CONSEQUENCE FOR THE MIGRATION: the class-4 TLS question is unanswerable
-    # while the endpoint does not serve TLS for its own name. Whether doca needs
-    # --dest-ca-cert depends on what cert a RESTORED Zot presents, and that is
-    # not knowable from a 301. Converting these ten now would be writing
-    # untestable code against a host that cannot accept a push from skopeo
-    # either.
-    #
-    # So class 4 is not blocked on doca and not blocked on a CA path -- it is
-    # blocked on an endpoint. `pending-class4-endpoint: zot.alpha.1.k8s.quero.lol
-    #  serves a 301, not /v2/. Establish whether it is retired, moved, or
-    #  unprovisioned before converting the ten call sites that target it.`
-    #
-    # ── CLASS 4 IS NOT A DROP-IN — TLS TRUST DIFFERS (measured 2026-08-02) ──
-    # "Covered by doca" is true at the FEATURE level and still not a
-    # copy-paste conversion, because skopeo and doca trust different roots.
-    #
-    #   skopeo  uses the SYSTEM trust store. The five pangea-architectures
-    #           call sites pass NO ca flag at all, so the Zot's self-signed CA
-    #           must already be installed on the host — and it works.
-    #   doca    is oci-client with `default-features = false, features =
-    #           ["rustls-tls"]` (Cargo.toml) — webpki COMPILED-IN roots. Its
-    #           `ca_cert_path` builds `extra_root_certificates`, EXTRA on top
-    #           of that set, and the code comment says so explicitly: "pinning
-    #           a self-signed in-cluster cert". There is no system-store read.
-    #
-    # So converting class 4 by deleting the skopeo flags would leave doca
-    # unable to verify the Zot at all — five LIVE images failing on TLS, from
-    # a change that looks like pure simplification. `--dest-authfile` genuinely
-    # does map to nothing (doca reads $HOME/.docker/config.json ambiently,
-    # runner-verified), and `--format oci` genuinely maps to nothing (doca is
-    # OCI-only). Two of the three flags vanish and the third is load-bearing —
-    # which is the worst possible mix, because the first two teach you the
-    # pattern that breaks on the third.
-    #
-    # The correct conversion threads a CA path, exactly as the already-working
-    # doca consumers do: a hardened-images workflow passes
-    # `dest-ca-cert: /usr/local/share/ca-certificates/<registry>-ca.crt`, and
-    # actions/zot-pull-scan exposes src-ca-cert/dest-ca-cert for this reason.
-    # pangea-architectures' flakes have no such path today; supplying one is
-    # real work, not a flag rename.
-    #
-    # GENERAL RULE this is the second instance of: a flag that exists on the
-    # OLD tool and not the NEW one means one of two OPPOSITE things — the new
-    # tool does it unconditionally (--format oci), or the new tool does not do
-    # it at all (--dest-authfile's system-store cousin). Absence of a knob is
-    # not evidence either way. Read the source; the two look identical from the
-    # call site.
-    #
-    # So all four classes are covered by doca TODAY. The remaining work is
-    # mechanical conversion of 16 call sites, not a doca enhancement, and the
-    # `Backend::Skopeo` fallback was already deleted 2026-07-31.
-    #
-    # THREE CONSECUTIVE REVISIONS OF THIS NOTE WERE WRONG, and the direction
-    # flipped each time: under-count (11 for 16), then over-generalise (one
-    # class for four), then over-caution (four blockers for zero). The constant
-    # was reasoning about a tool from the SHAPE OF THE CALL SITE rather than
-    # from the tool's source. A skopeo flag existing does not imply doca needs
-    # a matching flag — it may already do that thing unconditionally, which is
-    # exactly what `--format oci` turned out to be. Read the replacement's
-    # source before pricing the replacement.
-    #
-    # WHY THE FIRST COUNT WAS WRONG, because the mechanism recurs: the original
-    # figure came from counting matching grep LINES, then reading two files and
-    # generalising the shape to the rest. Grouping by SYMPTOM ("they all call
-    # skopeo copy") silently asserts a shared FIX, which is a different and much
-    # stronger claim than a shared symptom. Both errors ran the same direction —
-    # under-count, over-generalise — and neither would have been caught by
-    # re-running the grep, only by opening every file.
-    #
-    # `pending-skopeo-callsites: 16 invocations / 9 files / 4 classes.
-    #  1 CONVERTED (aresta, class 1, 2026-08-02). No doca enhancement needed,
-    #  but conversion is NOT uniformly mechanical: class 4 (10 sites) must
-    #  thread a --dest-ca-cert path it does not have today, or five live
-    #  images lose the ability to verify the Zot's self-signed cert.`
-    #
-    # THE DESTINATION ALREADY EXISTS AND IS ALREADY CONVERTED. `lib/service/
-    # image-release.nix` (`mkImageReleaseApp`) threads `ociPush` → `DOCA_BIN`;
-    # forge's image_release.rs moved off skopeo. So these eleven are not blocked
-    # on a missing capability — they hand-roll around a primitive that is
-    # already doca-based (Operating Principle #1: use the primitive, don't
-    # re-implement its near-miss).
-    #
-    # HOW THE COUNT WAS NEARLY MISSED, because the trap generalizes: the first
-    # probe was `grep -rn --include=*.nix … .` from the pleme-io root and it
-    # returned 0 — the recorded org-root gitignore trap. A 0 with no control is
-    # indistinguishable from clean, and it was only caught because the same run
-    # probed a known-present string and got 0 for THAT too. Per-repo iteration
-    # (`for d in */; do grep -r "$d"`) returns 31 mentions / 16 uncommented / 11
-    # real. Always pair an absence claim with a positive control that must be
-    # non-zero, and never trust a fleet-wide grep issued from the org root.
-    #
-    # `pending-skopeo-callsites: 11 flake call sites → mkImageReleaseApp.`
     "skopeo-copy" = {
       uses = "pleme-io/actions/skopeo-copy@main";
       backend = "tatara-lisp";
@@ -673,6 +508,11 @@
       backend = "tatara-lisp";
       role = "Bump a Helm Chart.yaml version field via in-place yaml-edit. Sibling of cargo-bump for the Helm ecosystem.";
     };
+    "helm-ct-list-changed" = {
+      uses = "pleme-io/actions/helm-ct-list-changed@main";
+      backend = "tatara-lisp";
+      role = "Run chart-testing `ct list-changed` and emit the changed chart directories, with ct debug-trace (\">>> \") lines filtered out. A real ct failure aborts; an empty result does not.";
+    };
     "helm-mirror" = {
       uses = "pleme-io/actions/helm-mirror@main";
       backend = "tatara-lisp";
@@ -688,6 +528,21 @@
       backend = "tatara-lisp";
       role = "Publish a Helm chart to an OCI registry (default ghcr.io/pleme-io/helm); skip if (name, version) already exists.";
     };
+    "helm-release-cleanup" = {
+      uses = "pleme-io/actions/helm-release-cleanup@main";
+      backend = "tatara-lisp";
+      role = "Best-effort teardown of a namespace: uninstall every Helm release in it with a timeout, then delete leftover resources. Never fails the job — reports what failed instead of swallowing it.";
+    };
+    "helm-render-determinism" = {
+      uses = "pleme-io/actions/helm-render-determinism@main";
+      backend = "tatara-lisp";
+      role = "Render each declared ci/ values file twice with helm template and require the two renders to be byte-identical. A chart calling genCA / genSignedCert / randAlphaNum / uuidv4 / now renders differently every time, so a GitOps controller re-renders on every sync, sees drift, and rewrites the resource forever. Opt-in per chart via a fixtures conf file; no opted-in chart is a pass, not an error.";
+    };
+    "helm-unittest" = {
+      uses = "pleme-io/actions/helm-unittest@main";
+      backend = "tatara-lisp";
+      role = "Install the helm-unittest plugin at a pinned version and run its suites over a list of chart directories, emitting the parsed totals. Replaces the \"Set up helm-unittest\" + per-chart `while read` shell pair in a chart-test workflow.";
+    };
   };
   hygiene = {
     "branch-protect-sync" = {
@@ -702,8 +557,8 @@
     };
     "gh-team-sync" = {
       uses = "pleme-io/actions/gh-team-sync@main";
-      backend = "shell";
-      role = "Sync GitHub team membership from a declarative YAML spec via gh api. Source-of-truth for org RBAC.";
+      backend = "tatara-lisp";
+      role = "Reconcile GitHub team membership from a declarative JSON spec. Source-of-truth for org RBAC.";
     };
     "stale-issue-bot" = {
       uses = "pleme-io/actions/stale-issue-bot@main";
@@ -833,7 +688,7 @@
     };
     "wasm-build" = {
       uses = "pleme-io/actions/wasm-build@main";
-      backend = "shell";
+      backend = "tatara-lisp";
       role = "Build a Rust crate to wasm32 (wasm32-unknown-unknown / wasm32-wasi). Universal — wraps cargo + wasm-pack when needed.";
     };
     "xcodebuild" = {
@@ -914,22 +769,37 @@
     "nix-attic-push" = {
       uses = "pleme-io/actions/nix-attic-push@main";
       backend = "tatara-lisp";
-      role = "Push a built nix path to an Attic binary cache.";
+      role = "RETIRED: pleme-io caching software is sui (use sui-cache-push); attic was retired fleet-wide 2026-07-31. Refuses unless allow-legacy is \"true\"; then pushes a built nix path to an Attic binary cache.";
     };
     "nix-build" = {
       uses = "pleme-io/actions/nix-build@main";
       backend = "tatara-lisp";
-      role = "Build a flake output (universal). Optionally pushes to cachix/attic afterward.";
+      role = "Build a flake output (universal). With cache-push, pushes the built closure into a sui cache store on the runner afterward; a failed push is a warning, never a failed build.";
     };
     "nix-cachix-push" = {
       uses = "pleme-io/actions/nix-cachix-push@main";
       backend = "tatara-lisp";
-      role = "Push a built nix path to a Cachix binary cache.";
+      role = "RETIRED: pleme-io caching software is sui (use sui-cache-push). Refuses unless allow-legacy is \"true\"; then pushes a built nix path to a Cachix binary cache.";
     };
     "nix-image" = {
       uses = "pleme-io/actions/nix-image@main";
       backend = "tatara-lisp";
-      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and a multi-service image repo (dockerImage:<arch>:<svc>). Fan out over runs-on:[the private-builder estate,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
+      role = "Build native-arch nix OCI image tarballs via dockerTools (NO Dockerfile, NO QEMU), one per arch, resolving the flake attr from a typed {base}/{arch}/{svc} template — covers substrate mkImageReleaseApp (dockerImage-<arch>), mkGoDockerImage multi-service (dockerImage-<arch>-<svc>), and a colon-namespaced image flake (dockerImage:<arch>:<svc>). Fan out over runs-on:[self-hosted,<arch>] for a native build. Routes through the sui super-cache when SUI_ENDPOINT is set (LiveTODO); correct local nix build otherwise.";
+    };
+    "nix-node-matrix" = {
+      uses = "pleme-io/actions/nix-node-matrix@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
+    "nix-setup" = {
+      uses = "pleme-io/actions/nix-setup@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "nix-tool" = {
+      uses = "pleme-io/actions/nix-tool@main";
+      backend = "shell";
+      role = ">-";
     };
   };
   npm = {
@@ -1089,6 +959,16 @@
       backend = "tatara-lisp";
       role = "Publish each workspace member to crates.io at its own [package].version. For multi-crate workspaces WITHOUT a shared [workspace.package].version (rust-url / bindgen / dirs-next / ratatui pattern). Bumps each member individually, tags member-name-v-version, publishes per-member; rust-workspace-publish is for the engenho-style shared-version pattern.";
     };
+    "cargo-run-bin" = {
+      uses = "pleme-io/actions/cargo-run-bin@main";
+      backend = "tatara-lisp";
+      role = "Build a workspace binary and run it with arguments — the \"run the thing this repo just built\" primitive, so a repo whose CI exercises its own CLI can express that as a pipeline step instead of hand-authored shell.";
+    };
+    "rust-toolchain" = {
+      uses = "pleme-io/actions/rust-toolchain@main";
+      backend = "shell";
+      role = ">-";
+    };
   };
   sdlc = {
     "dependabot-trigger" = {
@@ -1109,7 +989,7 @@
     "nix-flake-update" = {
       uses = "pleme-io/actions/nix-flake-update@main";
       backend = "tatara-lisp";
-      role = "Run `nix flake update` + open PR if flake.lock changed. Idempotent — exits 0 with no PR when lock is current. Specific case of dependency-update for nix-only repos.";
+      role = ">-";
     };
     "onboard-auto-release" = {
       uses = "pleme-io/actions/onboard-auto-release@main";
@@ -1254,6 +1134,16 @@
     };
   };
   uncategorized = {
+    "action-pipeline" = {
+      uses = "pleme-io/actions/action-pipeline@main";
+      backend = "tatara-lisp";
+      role = "Run a DECLARED SEQUENCE of pleme-io actions from a typed spec. The workflow layer becomes data: a repo names which actions run, in what order, with which inputs — no hand-authored step list, and no shell from the caller.";
+    };
+    "advance-major-tag" = {
+      uses = "pleme-io/actions/advance-major-tag@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
     "airtable-record-create" = {
       uses = "pleme-io/actions/airtable-record-create@main";
       backend = "tatara-lisp";
@@ -1263,6 +1153,11 @@
       uses = "pleme-io/actions/aldrava-dispatch@main";
       backend = "tatara-lisp";
       role = "The typed knock: match a PR comment against a registered command catalog, resolve commenter trust, and dispatch the target (label relabel / workflow_dispatch / repository_dispatch) — never mutates on an untrusted knock.";
+    };
+    "aldrava-install" = {
+      uses = "pleme-io/actions/aldrava-install@main";
+      backend = "tatara-lisp";
+      role = "Install the aldrava binary at a PINNED tag, checksum-verified, onto PATH";
     };
     "aldrava-lint" = {
       uses = "pleme-io/actions/aldrava-lint@main";
@@ -1319,10 +1214,50 @@
       backend = "tatara-lisp";
       role = "Deploy an Auth0 Action/Rule.";
     };
+    "banned-tool-lint" = {
+      uses = "pleme-io/actions/banned-tool-lint@main";
+      backend = "tatara-lisp";
+      role = "Fail on a NEW call site of a banned external tool (today: skopeo, replaced fleet-wide by doca). Matches INVOCATIONS -- a quoted exec argument, `command -v <tool>`, `<tool> copy|inspect|login|delete|list-tags|sync`, or a `#<tool>` nix attr -- never a mention in prose or a comment. Existing call sites are baselined and reported every run; a new one fails. The baseline is checked in BOTH directions: a row matching no call site also fails, so a converted call site must drop its row in the same change and the migration can observe its own completion. Scope is pleme-io-owned repos; akeylesslabs/* and akeyless-community/* are deliberately out of scope.";
+    };
     "bigorna" = {
       uses = "pleme-io/actions/bigorna@main";
       backend = "tatara-lisp";
       role = "CI ENTRY: set up a buildx builder with NATIVE per-arch nodes (no QEMU) + a sui-store cache front, in one step. An unchanged `docker buildx build` afterward runs native-multi-arch + warm.";
+    };
+    "blue-build-plan" = {
+      uses = "pleme-io/actions/blue-build-plan@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-check" = {
+      uses = "pleme-io/actions/blue-check@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-reuse" = {
+      uses = "pleme-io/actions/blue-reuse@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-service-release" = {
+      uses = "pleme-io/actions/blue-service-release@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-setup" = {
+      uses = "pleme-io/actions/blue-setup@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-shift" = {
+      uses = "pleme-io/actions/blue-shift@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "blue-test" = {
+      uses = "pleme-io/actions/blue-test@main";
+      backend = "shell";
+      role = ">-";
     };
     "breathe-band-lint" = {
       uses = "pleme-io/actions/breathe-band-lint@main";
@@ -1332,7 +1267,7 @@
     "breathe-runner" = {
       uses = "pleme-io/actions/breathe-runner@main";
       backend = "tatara-lisp";
-      role = "Preflight posture gate for breathable spot runners — assert the job landed on a 100%-spot, scale-to-zero, taint-isolated in-cluster GHA runner (never rio) and arm the retirada drain->checkpoint hook. First verb of a super-cache-ci build.";
+      role = "Preflight posture gate for breathable spot runners — assert the job landed on a 100%-spot, scale-to-zero, taint-isolated in-cluster GHA runner and arm the retirada drain->checkpoint hook. First verb of a super-cache-ci build.";
     };
     "browserstack-test" = {
       uses = "pleme-io/actions/browserstack-test@main";
@@ -1364,6 +1299,16 @@
       backend = "tatara-lisp";
       role = "Run cdktf deploy for a CDK-for-Terraform app.";
     };
+    "checked-run" = {
+      uses = "pleme-io/actions/checked-run@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
+    "ci-triage" = {
+      uses = "pleme-io/actions/ci-triage@main";
+      backend = "tatara-lisp";
+      role = "Classify a CI failure log against the typed fleet failure-signature catalog. Matches on the LOG SIGNATURE, never the step name; an unmatched log reports `unclassified` rather than being folded into the nearest row.";
+    };
     "clickup-task-create" = {
       uses = "pleme-io/actions/clickup-task-create@main";
       backend = "tatara-lisp";
@@ -1382,7 +1327,7 @@
     "commitlint" = {
       uses = "pleme-io/actions/commitlint@main";
       backend = "tatara-lisp";
-      role = "Validate commit messages with commitlint.";
+      role = "Validate commit messages against Conventional Commits over a git range.";
     };
     "confluence-page-create" = {
       uses = "pleme-io/actions/confluence-page-create@main";
@@ -1429,6 +1374,11 @@
       backend = "tatara-lisp";
       role = "Run dbt build for a data warehouse model project.";
     };
+    "ddl-gate" = {
+      uses = "pleme-io/actions/ddl-gate@main";
+      backend = "tatara-lisp";
+      role = "Additive-only DDL gate for a committed model tree — refuses schema cuts (DROP, RENAME, type change, attribute drop, REVOKE) outright, refuses row removal unless the run declares sunset step 4 (drain), permits lock-taking statements with a warning, and refuses anything it cannot positively classify. Parses committed .sql only; never contacts a database. The fifth baseline-debt sibling of action-shell-lint / runtime-install-lint / no-cve-suppression / breathe-band-lint.";
+    };
     "deno-deploy" = {
       uses = "pleme-io/actions/deno-deploy@main";
       backend = "tatara-lisp";
@@ -1454,6 +1404,11 @@
       backend = "tatara-lisp";
       role = "Build an ESP-IDF project.";
     };
+    "exec-arg-budget-lint" = {
+      uses = "pleme-io/actions/exec-arg-budget-lint@main";
+      backend = "tatara-lisp";
+      role = "Fail when any action.yml or workflow passes tlisp through an input, env value or argument instead of a file, and warn when the shared stdlib nears the exec ceiling. An input, env value or argument is one exec string, and Linux caps one at MAX_ARG_STRLEN = 131072 bytes; over that, bash never starts and the run dies with \"Argument list too long\" attributed to the caller rather than to the stdlib commit that grew it (helmworks run 40631065859, after actions 491ac2c). Subjects: ./*/action.yml and .github/workflows/*.yml|yaml. Shapes refused: a heredoc that writes a script step output, a script input fed from a step output, a script step output used as an env value, and command substitution of a .tlisp file. The fix is always the same: write the unit to a file and pass `script-file:` (with `stdlib: \"true\"` for the shared stdlib). It also checks that tatara-script still carries the stdlib marker it uses to refuse an inline stdlib.";
+    };
     "fastly-cache-purge" = {
       uses = "pleme-io/actions/fastly-cache-purge@main";
       backend = "tatara-lisp";
@@ -1474,10 +1429,20 @@
       backend = "tatara-lisp";
       role = "WARM flake-input lever — pull a heavy flake input''s SOURCE FOD out of the super-cache into the local store BEFORE the build, so the in-flake locked eval reuses the content-addressed path and SKIPS the ~40s eval-time git clone. nix''s git/tarball fetcher never substitutes a source tree, so `substituters=<sui>` alone is a no-op for source — this explicit `nix copy --from` is the load-bearing form of the lever. Pairs with super-cache-save''s flake-inputs push. TIER-HONEST: a miss (endpoint down / source not yet pushed / path unresolvable) degrades to the clone and is reported, never faked; require=true fails loud.";
     };
+    "fleet-delivery" = {
+      uses = "pleme-io/actions/fleet-delivery@main";
+      backend = "shell";
+      role = ">-";
+    };
     "foundry-test" = {
       uses = "pleme-io/actions/foundry-test@main";
       backend = "tatara-lisp";
       role = "Run forge test.";
+    };
+    "gemset-gate" = {
+      uses = "pleme-io/actions/gemset-gate@main";
+      backend = "tatara-lisp";
+      role = "Tie gemset.nix to Gemfile.lock for a bundix-built Ruby repo — fails when the two lockfiles no longer name the same (gem, version) set, when one half exists without the other, or when either parses to nothing. Pure text comparison: no bundix, no network, no subprocess. The Ruby counterpart of the Cargo.gen.lock <-> Cargo.lock tie that ensure-gen-lock-fresh enforces for Rust.";
     };
     "gen-build-spec" = {
       uses = "pleme-io/actions/gen-build-spec@main";
@@ -1494,6 +1459,11 @@
       backend = "tatara-lisp";
       role = "Mirror push the repo to a Gitea instance.";
     };
+    "github-token" = {
+      uses = "pleme-io/actions/github-token@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
     "gitlab-mirror-push" = {
       uses = "pleme-io/actions/gitlab-mirror-push@main";
       backend = "tatara-lisp";
@@ -1508,6 +1478,11 @@
       uses = "pleme-io/actions/google-calendar-event-create@main";
       backend = "tatara-lisp";
       role = "Create a Google Calendar event via service account.";
+    };
+    "hardened-image-plan" = {
+      uses = "pleme-io/actions/hardened-image-plan@main";
+      backend = "tatara-lisp";
+      role = "Read a hardened-image CATALOG attrset out of a flake and emit the resolved GitHub Actions delivery matrices. The single-responsibility sibling of build-matrix: build-matrix fans a flake''s colon-triple image attrs across (service, arch); this verb reads a RICH per-component catalog (zot / harbor / publishName / base / scan posture) and resolves the delivery conditions — lane, only, stage, event, and tracked mirror-debt — into plain booleans on each row, so the calling workflow contains no per-component `if:` expression at all. A component is one catalog row; there is no per-component job. TIER: SHIPPABLE-NOW — deterministic `nix eval` over the real catalog, jq as the typed serializer (never hand-concatenated JSON), and a denominator carried INSIDE every output so a catalog that stops being discovered reports scanned=0 rather than a silently clean empty plan.";
     };
     "hardhat-deploy" = {
       uses = "pleme-io/actions/hardhat-deploy@main";
@@ -1534,6 +1509,11 @@
       backend = "tatara-lisp";
       role = "Run infracost on a Terraform plan + comment cost diff on PR.";
     };
+    "install-syft" = {
+      uses = "pleme-io/actions/install-syft@main";
+      backend = "shell";
+      role = ">-";
+    };
     "istio-apply" = {
       uses = "pleme-io/actions/istio-apply@main";
       backend = "tatara-lisp";
@@ -1543,6 +1523,11 @@
       uses = "pleme-io/actions/jira-issue-create@main";
       backend = "tatara-lisp";
       role = "Create a Jira issue via REST API.";
+    };
+    "job-selection-lint" = {
+      uses = "pleme-io/actions/job-selection-lint@main";
+      backend = "tatara-lisp";
+      role = ">-";
     };
     "jupyter-notebook-render" = {
       uses = "pleme-io/actions/jupyter-notebook-render@main";
@@ -1558,6 +1543,26 @@
       uses = "pleme-io/actions/keycloak-realm-import@main";
       backend = "tatara-lisp";
       role = "Import a Keycloak realm via kc.sh.";
+    };
+    "kijun-lint" = {
+      uses = "pleme-io/actions/kijun-lint@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
+    "kube-namespace-diagnostics" = {
+      uses = "pleme-io/actions/kube-namespace-diagnostics@main";
+      backend = "tatara-lisp";
+      role = "Dump everything a doomed namespace still knows — nodes, resources, helm releases, events, pod descriptions, and current + previous logs for every container including initContainers — grouped with ::group:: and ALWAYS exiting 0. Replaces the on-failure `|| true` shell dump that CI loses forever when the cluster is torn down.";
+    };
+    "kube-tls-fixture" = {
+      uses = "pleme-io/actions/kube-tls-fixture@main";
+      backend = "tatara-lisp";
+      role = "Mint self-signed TLS secrets into a namespace from a fixture conf. Replaces the openssl + kubectl loop chart-test workflows hand-roll; idempotent via apply semantics, no pipeline.";
+    };
+    "legacy-cache-guard" = {
+      uses = "pleme-io/actions/legacy-cache-guard@main";
+      backend = "tatara-lisp";
+      role = "Refuse a retired cache action unless the caller opts in. pleme-io caching software is sui; the refusal names the sui action that replaces it.";
     };
     "linear-issue-create" = {
       uses = "pleme-io/actions/linear-issue-create@main";
@@ -1604,10 +1609,15 @@
       backend = "tatara-lisp";
       role = "Send a New Relic deployment marker.";
     };
+    "next-tag" = {
+      uses = "pleme-io/actions/next-tag@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
     "no-cve-suppression" = {
       uses = "pleme-io/actions/no-cve-suppression@main";
       backend = "tatara-lisp";
-      role = "Fail on ANY CVE-suppression surface — .trivyignore / vulnix whitelist / grype ignore / VEX not_affected entries AND the workflow-YAML gate-weakeners (*-advisory-only:true, ignore-unfixed:true, scan-ignore-file). A CVE is remediated at cause, never suppressed — see theory/NIX-HARDENING.md §VII.6. The third baseline-debt sibling of action-shell-lint / runtime-install-lint.";
+      role = "Fail on ANY CVE-suppression surface — .trivyignore / vulnix whitelist / grype ignore / VEX not_affected entries AND the workflow-YAML gate-weakeners (*-advisory-only:true, ignore-unfixed:true, scan-ignore-file). A CVE is remediated at cause, never suppressed. The third baseline-debt sibling of action-shell-lint / runtime-install-lint.";
     };
     "notion-db-row-add" = {
       uses = "pleme-io/actions/notion-db-row-add@main";
@@ -1669,10 +1679,20 @@
       backend = "tatara-lisp";
       role = "Generate the two-boundary output contract for pleme-io/actions and gate it — byte-diffs the generated tatara-script outputs block + catalog against what is committed, and catches the wrapper-side gap the runtime gate cannot see.";
     };
+    "package-visibility-gate" = {
+      uses = "pleme-io/actions/package-visibility-gate@main";
+      backend = "shell";
+      role = ">-";
+    };
     "pangea-grafana-converge" = {
       uses = "pleme-io/actions/pangea-grafana-converge@main";
       backend = "tatara-lisp";
-      role = "MODEL-2 (remote-reconcile) FedRAMP observability executor — health-probe a remote Grafana REST endpoint (inbound-only + scoped SA token) then drive the shipped pangea rio-observability workspace + deployment-agnostic pangea-grafana provider + magma runner against it, converging the remote Grafana from our side. Reports the runner''s real status; the exact flake app attr is a named LiveTODO, never faked.";
+      role = "MODEL-2 (remote-reconcile) FedRAMP observability executor — health-probe a remote Grafana REST endpoint (inbound-only + scoped SA token) then drive the shipped pangea rio-observability workspace + deployment-agnostic pangea-grafana provider + magma runner against it, converging a remote Grafana from our side. Reports the runner''s real status; the exact flake app attr is a named LiveTODO, never faked.";
+    };
+    "paths-dirty" = {
+      uses = "pleme-io/actions/paths-dirty@main";
+      backend = "tatara-lisp";
+      role = ">-";
     };
     "pinecone-upsert" = {
       uses = "pleme-io/actions/pinecone-upsert@main";
@@ -1688,6 +1708,16 @@
       uses = "pleme-io/actions/posthog-event@main";
       backend = "tatara-lisp";
       role = "POST an event to PostHog for product analytics.";
+    };
+    "provide-cc" = {
+      uses = "pleme-io/actions/provide-cc@main";
+      backend = "shell";
+      role = ">-";
+    };
+    "publishability-lint" = {
+      uses = "pleme-io/actions/publishability-lint@main";
+      backend = "tatara-lisp";
+      role = ">-";
     };
     "pull-request-gate" = {
       uses = "pleme-io/actions/pull-request-gate@main";
@@ -1719,6 +1749,11 @@
       backend = "tatara-lisp";
       role = "Flush a Redis DB (use with extreme care).";
     };
+    "regen-drift" = {
+      uses = "pleme-io/actions/regen-drift@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
     "registry-login" = {
       uses = "pleme-io/actions/registry-login@main";
       backend = "tatara-lisp";
@@ -1739,25 +1774,30 @@
       backend = "tatara-lisp";
       role = "Trigger a Retool workflow.";
     };
+    "runner-policy" = {
+      uses = "pleme-io/actions/runner-policy@main";
+      backend = "tatara-lisp";
+      role = ">-";
+    };
     "runner-resolve" = {
       uses = "pleme-io/actions/runner-resolve@main";
       backend = "tatara-lisp";
-      role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> the org's self-hosted pool, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or an org self-hosted pool, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
-    };
-    "banned-tool-lint" = {
-      uses = "pleme-io/actions/banned-tool-lint@main";
-      backend = "tatara-lisp";
-      role = "Fail on a NEW call site of a banned external tool — today skopeo, replaced fleet-wide by doca (substrate#oci-push). Matches INVOCATIONS only (a quoted exec argument, `command -v <tool>`, `<tool> copy|inspect|login|delete|list-tags|sync`, a `#<tool>` nix attr), never a mention in prose or a comment: 299 files in the fleet mention skopeo and only a fraction execute it, so a mention-based rule would be nearly all false positives and would teach people to ignore the gate. A RATCHET like its siblings — existing call sites live in a baseline with a stated reason each and are reported every run, never silently accepted; only a new one fails, so the count can only go down. The banned set is one TAB-separated table (banned-tools.txt), so banning the next tool is a row, not code. A missing or empty table FAILS rather than passing vacuously. SCOPE: pleme-io-owned repos; akeylesslabs/* and akeyless-community/* are deliberately excluded (operator decision, 2026-08-01). The fifth baseline-debt sibling of action-shell-lint / runtime-install-lint / no-cve-suppression / breathe-band-lint. ★ MEASURED REACH 2026-08-01, and it is NOT the SCOPE line above: exactly ONE workflow step invokes this action fleet-wide — `actions/.github/workflows/ci.yml` as `uses: ./banned-tool-lint`, a SELF-lint of the repo that defines it. Counted over 950 repo checkouts; the four siblings measure 2/2/3/1 steps the same way. So `SCOPE: pleme-io-owned repos` states the rule's INTENT, not its enforcement: every repo below carries a LIVE skopeo invocation that this gate does not read — substrate itself (lib/util/config.nix `package = pkgs.skopeo`, lib/service/image-release.nix + product-sdlc.nix `SKOPEO_BIN`), forge (cli/src/tools.rs SKOPEO const), image-sync (src/main.rs, 2 `Command::new`), formigueiro (formigueiro-image/src/lib.rs), engenho (engenho-substrate/src/oci_renderer.rs `binary: skopeo`), batata-quente (flake.nix runtimeInputs). A ratchet that reads one repo cannot ratchet the other 949, so `pending-banned-tool-reach:` — adopt the step in the repos that actually execute skopeo, highest-value first (substrate, forge, image-sync), before treating the doca sweep as gated. ★★ TWO MEASUREMENT TRAPS, both hit while measuring THIS entry, both worth more than the finding: (1) THE CATALOG IS A PHANTOM CONSUMER. This file carries 339 `uses = \"pleme-io/actions/<name>@main\"` rows — one per catalogued action — so ANY adoption probe that greps for `actions/<name>@` returns >=1 for all 339 whether or not a workflow ever calls them. That is how this action first measured as `1 consumer: substrate` when substrate invokes it zero times; the sole hit was line 1743 of this very file. Adoption must be counted over `.github/workflows/**` and nothing else. (2) A CONTROL ONLY PROVES THE PROBE FINDS WHAT THE CONTROL LOOKS LIKE. The first step-level probe used `^\\s*uses:`, which cannot match the standard list-item form `- uses:` and therefore read the whole fleet as zero — and it was believed, because its two positive controls (oci-image-push, image-scan) both returned 3. Both happened to be the RARE dash-less continuation form, so a control chosen for being known-present validated a probe blind to the dominant syntax. A control must be sampled from the same shape distribution as the subject, or it certifies the blindness instead of catching it.";
+      role = "Resolve the runs-on label for a job via typed precedence: an explicit override > an optional repo-committed config file (.github/runner.yml) > the caller-supplied default > a visibility-aware billing-safe default (private repo -> an org self-hosted pool, public repo -> free GitHub-hosted minutes). GitHub Actions runs-on: cannot read a same-job step output, so every workflow adopting this action MUST call it as its OWN job and have every other job in the same workflow depend on it via needs.<job-id>.outputs.runner. The visibility-aware tier is the ONLY posture this action bakes in — it exists to make the org standing invariant (\"a CI path either flows through a genuinely public repo or an org self-hosted pool, never a metered GitHub-hosted runner on a private repo\") the default outcome of omitting `default`, not something every caller re-derives by hand. A caller that needs something else always wins via override/config-path/an explicit default.";
     };
     "runtime-install-lint" = {
       uses = "pleme-io/actions/runtime-install-lint@main";
       backend = "tatara-lisp";
-      role = "Fail on runtime tool installation (curl|tar, curl|sh, apt-get/apt/pip/npm/go/cargo install) in any action.yml or run.tlisp, AND per-job Nix installation (nix-installer-action / `nix shell nixpkgs#…`) in any .github/workflows/*.yml. The tool must ship as a Nix-hardened image / baked runner image instead — see theory/NIX-HARDENING.md §VI, §VI.1.";
+      role = "Fail on runtime tool installation (curl|tar, curl|sh, apt-get/apt/pip/npm/go/cargo install) in any action.yml or run.tlisp, AND per-job Nix installation (nix-installer-action / `nix shell nixpkgs#…`) in any .github/workflows/*.yml. The tool must ship as a Nix-hardened image / baked runner image instead.";
     };
     "salesforce-record-create" = {
       uses = "pleme-io/actions/salesforce-record-create@main";
       backend = "tatara-lisp";
       role = "Create a Salesforce record via REST API.";
+    };
+    "seed-pointer" = {
+      uses = "pleme-io/actions/seed-pointer@main";
+      backend = "tatara-lisp";
+      role = ">-";
     };
     "selenium-grid-test" = {
       uses = "pleme-io/actions/selenium-grid-test@main";
@@ -1804,9 +1844,14 @@
       backend = "tatara-lisp";
       role = "Send a Stripe webhook event from CLI for integration tests.";
     };
+    "sui-cache-push" = {
+      uses = "pleme-io/actions/sui-cache-push@main";
+      backend = "tatara-lisp";
+      role = "Push built store paths (and their closures) into a remote sui binary cache over HTTP, signed with the uploader key the origin trusts. The pleme-io cache plane is sui; this replaces nix-cachix-push and nix-attic-push. A failed push is a warning unless required is \"true\".";
+    };
     "sui-dockerfile-node-cache" = {
       uses = "pleme-io/actions/sui-dockerfile-node-cache@main";
-      backend = "shell";
+      backend = "tatara-lisp";
       role = ">-";
     };
     "sui-remote-build" = {
@@ -1839,6 +1884,11 @@
       backend = "tatara-lisp";
       role = "Persist a build''s outputs to the durable super-cache tiers, write-if-absent, content-addressed, no lock (the eliminate-the-shared-cell pattern; concurrent-runner coherence is free). TIER-HONEST: the durable Postgres/object tiers are a named LiveTODO behind sui''s shipped Store/StorageBackend traits; the now-path persists to a local content-addressed object tier and is an honest no-op when no tier is configured.";
     };
+    "suspend-blocker-lint" = {
+      uses = "pleme-io/actions/suspend-blocker-lint@main";
+      backend = "tatara-lisp";
+      role = "A parked declaration must name its blocker. Every `suspend: true` in a GitOps tree carries pleme.io/blocked-by, blocked-clearing and blocked-since, so the reason is machine-readable and the day it clears is a signal rather than something someone remembers. Parses committed YAML only; never contacts a cluster. The sixth baseline-debt sibling of action-shell-lint / runtime-install-lint / no-cve-suppression / breathe-band-lint / ddl-gate.";
+    };
     "syft-attest" = {
       uses = "pleme-io/actions/syft-attest@main";
       backend = "tatara-lisp";
@@ -1852,12 +1902,12 @@
     "tlisp-test" = {
       uses = "pleme-io/actions/tlisp-test@main";
       backend = "tatara-lisp";
-      role = "Discover + run every *.test.tlisp via tatara-script --test. Each test runs as the stdlib + the sibling unit (<base>.tlisp) + the test, with TLISP_TEST=1 so the unit defines its functions but skips its main. Fails if any (deftest ...) fails.";
+      role = "Discover + run every *.test.tlisp via tatara-script --test. Each test runs as the stdlib + the sibling unit (<base>.tlisp) + the test, with TLISP_TEST=1 so the unit defines its functions but skips its main. Fails if any (deftest ...) fails, AND fails if fewer than `min-files` tests are discovered so a discovery failure can never pass as a green suite.";
     };
     "trivy-fs-scan" = {
       uses = "pleme-io/actions/trivy-fs-scan@main";
       backend = "tatara-lisp";
-      role = "Run trivy fs scan on the repo source tree.";
+      role = ">-";
     };
     "turbo-build" = {
       uses = "pleme-io/actions/turbo-build@main";
@@ -1893,6 +1943,11 @@
       uses = "pleme-io/actions/woocommerce-product-sync@main";
       backend = "tatara-lisp";
       role = "Sync products to WooCommerce REST API.";
+    };
+    "workflow-shim-lint" = {
+      uses = "pleme-io/actions/workflow-shim-lint@main";
+      backend = "tatara-lisp";
+      role = "Report consumer workflows that are hand-authored instead of thin shims over a catalogued pleme-io/substrate reusable workflow. The consumer-side half of CATALOG REFLECTION.";
     };
     "zapier-webhook-trigger" = {
       uses = "pleme-io/actions/zapier-webhook-trigger@main";
