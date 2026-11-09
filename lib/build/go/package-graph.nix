@@ -7,7 +7,7 @@
 # is computed ONCE and reused by every dependent (the "shared internal package
 # compiled once, linked into every binary" win).
 #
-# ── The mockable Environment seam (TESTING-SUBSTRATE §IX) ────────────────────
+# ── The mockable Environment seam ───────────────────────────────────────────
 # This module owns ONLY the graph logic + the interpreter-side defensive
 # invariants (Go-I1/I3/I10/I11/I12). Everything with a side effect — realizing a
 # derivation, writing an importcfg/embedcfg file, building the std tree — is

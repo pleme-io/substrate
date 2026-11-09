@@ -78,8 +78,7 @@
 #   3. IT EXPLAINS ITSELF. `explain` states, per shape, which builder ran and
 #      what that means for the verification surface — the same
 #      derive-the-verdict-and-carry-the-witness discipline
-#      `flake-checks-gate.nix` applies to the check set
-#      (UNREPRESENTABILITY §II.4).
+#      `flake-checks-gate.nix` applies to the check set.
 #
 # ── THE ROUTING DESTINATION, NAMED (Operating Principle #0) ─────────────
 #

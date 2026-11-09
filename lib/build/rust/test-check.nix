@@ -29,7 +29,7 @@
 #                   faked: a check that cannot run tests is ABSENT, not
 #                   green-and-empty, because a green guard over an empty
 #                   subject set is the worst round-up available
-#                   (UNREPRESENTABILITY §II.3, tier ⊥).
+#                   (tier ⊥).
 #
 # ── AVAILABILITY IS A PROPERTY OF THE BUILD PATH, NOT A PREFERENCE ──────
 #

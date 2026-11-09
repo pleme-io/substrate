@@ -868,7 +868,7 @@ in {
   #     cannot be compiled here today. Emitting an always-green
   #     `checks.tests` that ran nothing would be strictly worse than
   #     emitting none — a guard over an empty subject set reports the
-  #     tier it does not have (UNREPRESENTABILITY §II.3, tier ⊥).
+  #     tier it does not have (tier ⊥).
   #     The load-bearing fix for a buildRustCrate-native test leg is
   #     UPSTREAM in gen-cargo (emit `dev_dependencies` edges into the spec,
   #     per the ★★ GEN TYPED-SPEC CONTRACT); a Nix-side re-derivation of

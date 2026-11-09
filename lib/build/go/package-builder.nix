@@ -436,7 +436,7 @@ in
   # Expose the pure graph builder for advanced/composed use.
   inherit (graph) mkGraph m1Kinds;
   # The real (side-effecting) Environment — exposed as a testability seam
-  # (TESTING-SUBSTRATE §IX: the injectable backend IS the seam). Lets an
+  # (the injectable backend IS the seam). Lets an
   # eval-time test inject a mock ferriteCheck (with/without passthru.pomsEmit)
   # and assert the REALIZED ferrite node shape (real -ferrite.poms-dir emit vs
   # the pending marker) without an IFD getFlake or a `nix build`.

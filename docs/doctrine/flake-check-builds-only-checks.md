@@ -71,7 +71,7 @@ externs and never runs them. **12 of 13 surveyed consumers declare
 `[dev-dependencies]`**, so a test target simply cannot be compiled there
 today. Emitting an always-green `checks.tests` that ran nothing would be
 strictly worse than emitting none — a guard over an empty subject set
-reports a tier it does not have (★★ UNREPRESENTABILITY §II.3, tier ⊥).
+reports a tier it does not have (a vacuous guard, tier ⊥).
 
 **The load-bearing fix is upstream in gen-cargo** (emit `dev_dependencies`
 edges into the spec, per the ★★ GEN TYPED-SPEC CONTRACT in

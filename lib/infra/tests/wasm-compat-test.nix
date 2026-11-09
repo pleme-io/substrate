@@ -21,7 +21,7 @@
 # manual `cargo build --target wasm32-unknown-unknown`. What is committed
 # here is the RESULT of that act transcribed as Nix, plus assertions that
 # the transcription equals itself. That is a record, not a test —
-# ★★ UNREPRESENTABILITY §II.3 tier ⊥, "vacuous" subclass.
+# tier ⊥, the "vacuous" subclass of an unrepresentability claim.
 #
 # WHAT WOULD MAKE IT REAL: the subject has to come from outside the file.
 # Either (a) derive the matrix from each crate's own Cargo.toml / flake

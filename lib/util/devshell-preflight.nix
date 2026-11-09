@@ -58,7 +58,7 @@
 # the unpinned accident silently, and a crate whose tests need the devShell's
 # hermetic inputs would then go green on the accident. A green whose subject
 # is not the thing it claims to verify is a fresh vacuous guard
-# (UNREPRESENTABILITY §II.3, tier ⊥) inside the gate meant to close one.
+# (tier ⊥) inside the gate meant to close one.
 #
 # ── WHY IT IS A NIX FILE AND NOT SHELL IN THE WORKFLOW ──────────────────
 #

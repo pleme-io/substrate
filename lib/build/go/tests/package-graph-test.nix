@@ -5,7 +5,7 @@
 # spec — node-per-package, correct importcfg wiring, cross-binary dedup of the
 # shared internal package, link-vs-compile dispatch, std routing, and every
 # interpreter-side defensive invariant (Go-I1/I3/I10/I11/I12) — using a MOCK
-# backend (the injected Environment, per TESTING-SUBSTRATE §IX) so the whole
+# backend (the injected Environment) so the whole
 # graph is verified with `nix-instantiate --eval --strict`, NO `nix build`.
 #
 #   nix-instantiate --eval --strict \

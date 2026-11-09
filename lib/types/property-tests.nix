@@ -145,7 +145,7 @@ in rec {
   # `leaked == []` holds BY CONSTRUCTION. Those seven assertions prove the
   # checker evaluates once per archetype; not one of them can detect a
   # leak, because none of them is given anything that could leak. That is
-  # the vacuous-guard shape (★★ UNREPRESENTABILITY §II.3, tier ⊥) — a
+  # the vacuous-guard shape (tier ⊥) — a
   # RuntimeCheck over zero subjects is an Assertion.
   #
   # The control below is what makes this suite mean anything, and it only

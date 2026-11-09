@@ -227,8 +227,8 @@ let
             (filter (p: !(p ? source)) pkgs));
 
         # Git packages are indexed under BOTH the rev-key (`name-version-rev`,
-        # the post-migration key that disambiguates two revs of one version —
-        # TOOLCHAIN-FRESHNESS §X.4b.b) AND the legacy `name-version` key (for
+        # the post-migration key that disambiguates two revs of one version)
+        # AND the legacy `name-version` key (for
         # deltas generated before the migration). Non-git: `name-version` only.
         # `resolvedKeys` (derived from the delta's edge package_keys) then
         # resolves under whichever convention the committed delta used.
@@ -295,7 +295,7 @@ let
         # `k` is the resolved key in the delta's own convention
         # (`name-version-rev` for git in post-migration deltas, `name-version`
         # otherwise). Use it for the per_crate lookup so it matches the delta's
-        # keying exactly — TOOLCHAIN-FRESHNESS §X.4b.b.
+        # keying exactly.
         mkCrate = k: pkg:
           crateDefaults // (perCrate.${k} or { }) // {
             inherit (pkg) name version;
