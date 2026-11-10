@@ -56,6 +56,11 @@ on:
         type: string
         required: false
         default: "Cargo.toml Cargo.lock Cargo.nix Cargo.gen.lock Cargo.build-spec.json"
+      release-ref-mode:
+        description: "main (default): the release commit (bumped Cargo.toml, Cargo.lock, Cargo.gen.lock) lands on main and its vX.Y.Z tag points at it. tag: the same commit is made beside main, reachable only by its vX.Y.Z tag; only the tag is pushed, ship publishes from that tag, drip publishes from the highest tag, the next version comes from the highest tag, and main receives no commit. Any other value stops bump before it writes."
+        type: string
+        required: false
+        default: main
       rename-prefix:
         description: "Prefix used when auto-renaming a conflicting crate at registry-publish time."
         type: string
@@ -262,6 +267,7 @@ jobs:
         with:
           bump-type: ${{ inputs.bump-type }}
           source-paths: ${{ inputs.source-paths }}
+          release-ref-mode: ${{ inputs.release-ref-mode }}
 
       - if: steps.bump.outputs.bumped == 'true'
         uses: pleme-io/actions/git-commit-tag@main
@@ -269,7 +275,13 @@ jobs:
           version: ${{ steps.bump.outputs.new-version }}
           add-paths: ${{ inputs.add-paths }}
 
-      - if: steps.bump.outputs.bumped == 'true'
+      - if: steps.bump.outputs.bumped == 'true' && inputs.release-ref-mode == 'tag'
+        uses: pleme-io/actions/git-push-with-token@main
+        with:
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
+          tag: ${{ format('v{0}', steps.bump.outputs.new-version) }}
+
+      - if: steps.bump.outputs.bumped == 'true' && inputs.release-ref-mode != 'tag'
         uses: pleme-io/actions/git-push-with-token@main
         with:
           token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
@@ -527,11 +539,12 @@ jobs:
         with:
           source: ${{ inputs.token-source }}
           pat: ${{ secrets.BOT_PAT }}
-      # Re-checkout to pick up the bumped Cargo.toml from main.
+      # Re-checkout to pick up the bumped Cargo.toml: from main, or from the
+      # release tag when release-ref-mode is tag.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ inputs.release-ref-mode == 'tag' && format('v{0}', needs.bump.outputs.new-version) || 'main' }}
           token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
       # Private git dependencies. checkout's token is scoped to THIS repo, so a
@@ -554,6 +567,7 @@ jobs:
           rename-prefix: ${{ inputs.rename-prefix }}
           publish-mode: full
           ride-budget-minutes: ${{ inputs.ride-budget-minutes }}
+          rename-push-ref: ${{ inputs.release-ref-mode != 'tag' && 'main' || '' }}
         env:
           # Org-level secret name is CRATES_API_TOKEN; cargo reads
           # CARGO_REGISTRY_TOKEN. Bridge the names here.
@@ -669,6 +683,17 @@ jobs:
           ref: main
           token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
 
+      - id: released
+        if: inputs.release-ref-mode == 'tag'
+        uses: pleme-io/actions/next-tag@main
+
+      - if: inputs.release-ref-mode == 'tag' && steps.released.outputs.previous != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ format('v{0}', steps.released.outputs.previous) }}
+          token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
+
       # Private git dependencies. checkout's token is scoped to THIS repo, so a
       # workspace whose members read a sibling PRIVATE pleme-io repo fails with
       # cargo's misleading "revision <sha> not found" — the fetch is denied, and
@@ -688,5 +713,6 @@ jobs:
           no-verify: ${{ inputs.no-verify }}
           rename-prefix: ${{ inputs.rename-prefix }}
           publish-mode: drip
+          rename-push-ref: ${{ inputs.release-ref-mode != 'tag' && 'main' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
