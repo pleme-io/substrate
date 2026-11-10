@@ -820,3 +820,11 @@
   :outputs   (released version tag)
   :secrets   (BOT_PAT)
   :consumers 1)
+
+(defworkflow runner-resolve
+  :file      "runner-resolve.yml"
+  :pattern   other
+  :inputs    (runner public-runner-default overflow-runner overflow-threshold pressure)
+  :outputs   (runner provenance overflow)
+  :secrets   ()
+  :consumers 8)
