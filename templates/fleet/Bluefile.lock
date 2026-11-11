@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "bluefile_b3": "b3:728c6a2abd9bada41a7251c06b3db1ba676e95797144c10a415cd641f169cc72",
+  "manifest": {
+    "schema": 1,
+    "name": "fleet-template",
+    "version": "0.1.0",
+    "needs": {},
+    "when": "anytime",
+    "sources": {
+      "sendan": {
+        "url": "github:pleme-io/bidama-sendan",
+        "dir": "bidamas"
+      }
+    },
+    "packages": [],
+    "runs": {},
+    "tools": [],
+    "checks": {},
+    "apps": {},
+    "catalog": null
+  },
+  "sources": {
+    "sendan": {
+      "url": "github:pleme-io/bidama-sendan",
+      "rev": "fa5621de266cb586902640e5f3f266f5f8b3e4d3",
+      "narHash": "sha256-gX4DFWAmz5H0jvpZ9j+NZdE+kVQnTBlOkFvhXM3Lu4g=",
+      "storePath": "/nix/store/7rm831922xcvldw1g8inlspc18d011b1-source"
+    }
+  }
+}

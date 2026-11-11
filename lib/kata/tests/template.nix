@@ -13,6 +13,8 @@ let
     "CLAUDE.md"
     "README.md"
     "kijun.b"
+    "Bluefile"
+    "Bluefile.lock"
     ".sops.yaml"
     ".gitignore"
     ".github/workflows/checks.yml"
@@ -204,6 +206,18 @@ in
   kijun-config-declares-fleet-repo-v1 = {
     expr = lib.hasInfix "fleet_repo(1)" (builtins.readFile (templateDir + "/kijun.b"));
     expected = true;
+  };
+  kijun-resolves-through-the-sendan-source = {
+    expr = {
+      source = lib.hasInfix ''source("sendan", "github:pleme-io/bidama-sendan", "bidamas")'' (
+        builtins.readFile (templateDir + "/Bluefile")
+      );
+      use = lib.hasInfix ''use("sendan/kakehashi/kijun"'' (builtins.readFile (templateDir + "/kijun.b"));
+    };
+    expected = {
+      source = true;
+      use = true;
+    };
   };
   claude-md-points-at-kijun-rules = {
     expr = lib.hasInfix "kijun rules" claude;

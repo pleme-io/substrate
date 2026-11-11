@@ -1,0 +1,2 @@
+package("fleet-template", "0.1.0")
+source("sendan", "github:pleme-io/bidama-sendan", "bidamas")
