@@ -1,0 +1,18 @@
+disallowed-methods = [
+    { path = "rand_core::SeedableRng::seed_from_u64", reason = "crypto-rng-ban: a u64 seed is not key material. Use rand_core::OsRng, or a keyed CSPRNG seeded from a caller secret.", allow-invalid = true },
+    { path = "rand::SeedableRng::seed_from_u64", reason = "crypto-rng-ban: a u64 seed is not key material. Use rand_core::OsRng, or a keyed CSPRNG seeded from a caller secret.", allow-invalid = true },
+    { path = "rand::rngs::SmallRng::from_entropy", reason = "crypto-rng-ban: SmallRng is not a CSPRNG.", allow-invalid = true },
+    { path = "u64::wrapping_mul", reason = "crypto-rng-ban: a hand-rolled LCG is not a CSPRNG. Use rand_core::OsRng." },
+    { path = "u32::wrapping_mul", reason = "crypto-rng-ban: a hand-rolled LCG is not a CSPRNG. Use rand_core::OsRng." },
+    { path = "u128::wrapping_mul", reason = "crypto-rng-ban: a hand-rolled LCG is not a CSPRNG. Use rand_core::OsRng." },
+]
+disallowed-types = [
+    { path = "rand::rngs::SmallRng", reason = "crypto-rng-ban: SmallRng is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "rand::rngs::mock::StepRng", reason = "crypto-rng-ban: StepRng is a counter. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "rand_xorshift::XorShiftRng", reason = "crypto-rng-ban: xorshift is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "rand_pcg::Pcg32", reason = "crypto-rng-ban: PCG is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "rand_pcg::Pcg64", reason = "crypto-rng-ban: PCG is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "fastrand::Rng", reason = "crypto-rng-ban: fastrand is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "oorandom::Rand32", reason = "crypto-rng-ban: oorandom is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+    { path = "oorandom::Rand64", reason = "crypto-rng-ban: oorandom is not a CSPRNG. Use rand_core::OsRng.", allow-invalid = true },
+]

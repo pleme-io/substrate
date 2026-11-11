@@ -1,0 +1,50 @@
+name: crypto-rng-gate
+
+# Fails when a Rust crate that holds crypto uses a non-crypto RNG: a seeded
+# u64 RNG, SmallRng, a mock or PCG/xorshift RNG, or a hand-rolled LCG.
+# The rules are lib/build/rust/crypto-rng-ban/clippy.toml. The gate runs only
+# the disallowed-methods and disallowed-types lints, so it does not collide
+# with a crate's own clippy posture.
+#
+# Consumer (.github/workflows/crypto-rng-gate.yml):
+#   on:
+#     push:
+#       branches: [main]
+#     pull_request:
+#   jobs:
+#     gate:
+#       uses: pleme-io/substrate/.github/workflows/crypto-rng-gate.yml@main
+
+on:
+  workflow_call:
+    inputs:
+      clippy-args:
+        description: "Arguments to cargo clippy before the lint flags."
+        type: string
+        required: false
+        default: "--all-features --all-targets"
+      runner:
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  gate:
+    name: crypto-rng-ban (clippy)
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: pleme-io/substrate
+          path: .crypto-rng-ban
+          sparse-checkout: lib/build/rust/crypto-rng-ban
+      - uses: pleme-io/actions/rust-toolchain@main
+        with:
+          toolchain: stable
+          components: clippy
+      - name: cargo clippy with the crypto-rng-ban rules
+        env:
+          CLIPPY_CONF_DIR: ${{ github.workspace }}/.crypto-rng-ban/lib/build/rust/crypto-rng-ban
+        run: cargo clippy ${{ inputs.clippy-args }} -- -A clippy::all -A clippy::pedantic -D clippy::disallowed_methods -D clippy::disallowed_types
