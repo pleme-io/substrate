@@ -331,6 +331,14 @@
   :secrets   ()
   :consumers 2)
 
+(defworkflow crypto-rng-gate
+  :file      "crypto-rng-gate.yml"
+  :pattern   gate
+  :inputs    (clippy-args runner)
+  :outputs   ()
+  :secrets   ()
+  :consumers 1)
+
 (defworkflow helm-chart-release
   :file      "helm-chart-release.yml"
   :pattern   helm-chart
