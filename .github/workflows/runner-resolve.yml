@@ -1,5 +1,11 @@
 name: runner-resolve
 
+# Reusable workflow: resolve the runs-on label for a job: an explicit label
+# wins, then the overflow tier (a trusted public job moves to a self-hosted
+# pool when the hosted backlog passes a threshold), then the public default.
+# Consumer usage: `uses: pleme-io/substrate/.github/workflows/runner-resolve.yml@main`
+# and read `needs.<job>.outputs.runner`.
+
 on:
   workflow_call:
     inputs:
