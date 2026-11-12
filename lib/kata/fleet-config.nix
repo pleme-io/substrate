@@ -26,7 +26,8 @@
 #   nodes          :: attrsOf nodeSpec          — mkHostMatrix node shape:
 #                     { class ("nixos"|"darwin"), system, hostname ?,
 #                       sshUser ?, tags ? [], status ? "live" ("live"|
-#                       "down"), statusReason ? "", profiles ? [str]
+#                       "down"), statusReason ? "", power ?
+#                       "always-on" ("always-on"|"sleeps"), profiles ? [str]
 #                       (names — resolved by the consumer's profile
 #                       table),
 #                       users ? attrsOf (listOf str) (HM module names),
@@ -94,6 +95,14 @@ let
         ];
         default = "live";
         description = "Node liveness. \"down\" = retired/offline/unreachable — the declaration stays, the deploy projections drop it.";
+      };
+      power = mkOption {
+        type = types.enum [
+          "always-on"
+          "sleeps"
+        ];
+        default = "always-on";
+        description = "Whether the machine is expected to answer at all times. \"sleeps\" = a laptop that sleeps and wakes by design: its silence, and the restarts its wake causes, are not faults.";
       };
       statusReason = core.mkField {
         type = "str";

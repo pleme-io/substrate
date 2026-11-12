@@ -302,7 +302,7 @@ let
         nodes = lib.mapAttrs (
           name: node:
           {
-            inherit (node) class system tags status statusReason;
+            inherit (node) class system tags status statusReason power;
             fqdn = if domains.locations or { } ? ${name} then domains.fqdn name else null;
             allFqdns = if domains.locations or { } ? ${name} then domains.allFqdns name else [ ];
             sshUser = if node.sshUser != null then node.sshUser else domains.sshUserFor name;

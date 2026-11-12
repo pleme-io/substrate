@@ -200,6 +200,10 @@ in
   };
 
   # ── Liveness: declarations stay, deploy projections drop ─────────────
+  report-carries-power = {
+    expr = f.report.nodes.rio.power;
+    expected = "always-on";
+  };
   report-carries-liveness = {
     expr = {
       rio = f.report.nodes.rio.status;

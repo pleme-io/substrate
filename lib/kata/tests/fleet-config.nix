@@ -110,6 +110,36 @@ in
       ).success;
     expected = false;
   };
+  node-power-defaults-always-on = {
+    expr = good.nodes.rio.power;
+    expected = "always-on";
+  };
+  node-power-sleeps-accepted = {
+    expr =
+      (kata.validateFleet {
+        name = "demo";
+        nodes.ryn = {
+          class = "darwin";
+          system = "aarch64-darwin";
+          power = "sleeps";
+        };
+      }).nodes.ryn.power;
+    expected = "sleeps";
+  };
+  bad-node-power-rejected = {
+    expr =
+      (builtins.tryEval
+        (kata.validateFleet {
+          name = "demo";
+          nodes.rio = {
+            class = "nixos";
+            system = "x86_64-linux";
+            power = "naps";
+          };
+        }).nodes.rio.power
+      ).success;
+    expected = false;
+  };
   name-required = {
     expr = (builtins.tryEval (kata.validateFleet { domains.tld = "x.io"; }).name).success;
     expected = false;
