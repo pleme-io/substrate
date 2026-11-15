@@ -2,6 +2,7 @@
   pkgs,
   lib ? pkgs.lib,
   blueRev ? "8922b04c13a44fe7220e614ed32bbebf8368f81f",
+  nymRev ? "1abb0cf1b92f135e71c84b738bcd19b97916a3eb",
 }:
 
 let
@@ -17,6 +18,19 @@ let
       rev = blueRev;
     };
   };
+
+  nymCrate = name: {
+    inherit name;
+    version = "2.0.1";
+    source = {
+      kind = "git";
+      url = "https://github.com/nymtech/nym";
+      rev = nymRev;
+    };
+  };
+  macroSrc = builder.mkSrcOf pkgs ./. (nymCrate "nym-http-api-client-macro");
+  sdkSrc = builder.mkSrcOf pkgs ./. (nymCrate "nym-sdk");
+  nameIn = src: (builtins.fromTOML (builtins.readFile "${src}/Cargo.toml")).package.name or null;
 
   declaring = gitCrate "blue-lang-pkg";
   undeclaring = gitCrate "blue-lang-runtime";
@@ -39,6 +53,12 @@ let
         && has undeclaringSrc "Cargo.toml"
         && !(has undeclaringSrc "bidamas"))
       "blue-lang-runtime declares no sources, so its source must stay narrowed to crates/blue-lang-runtime")
+
+    (testHelpers.mkTest "a-member-outside-the-conventional-layouts-is-found-by-the-workspace-member-list"
+      (nameIn macroSrc == "nym-http-api-client-macro"
+        && has macroSrc "build.rs"
+        && nameIn sdkSrc == "nym-sdk")
+      "nym-http-api-client-macro lives at common/http-api-client-macro and nym-sdk at sdk/rust/nym-sdk; a source left at the repository root builds with no build.rs (caligo run 43657075195)")
   ];
 
   result = testHelpers.runTests tests;

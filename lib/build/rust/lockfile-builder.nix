@@ -214,6 +214,41 @@ let
 
   memberLayoutsOf = name: [ name "crates/${name}" ];
 
+  workspaceMemberOf = full: name:
+    let
+      root = full + "/Cargo.toml";
+      members =
+        if builtins.pathExists root
+        then (builtins.fromTOML (builtins.readFile root)).workspace.members or [ ]
+        else [ ];
+      expand = m:
+        if lib.hasSuffix "/*" m then
+          let
+            dir = lib.removeSuffix "/*" m;
+            at = full + "/${dir}";
+          in
+          if builtins.pathExists at
+          then map (n: "${dir}/${n}")
+            (lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir at)))
+          else [ ]
+        else [ m ];
+      nameAt = rel:
+        let manifest = full + "/${rel}/Cargo.toml"; in
+        if builtins.pathExists manifest
+        then (builtins.fromTOML (builtins.readFile manifest)).package.name or null
+        else null;
+    in
+    lib.findFirst (rel: nameAt rel == name) null (lib.concatMap expand members);
+
+  memberDirOf = full: name:
+    let
+      conventional = lib.findFirst
+        (r: builtins.pathExists (full + "/${r}/Cargo.toml"))
+        null
+        (memberLayoutsOf name);
+    in
+    if conventional != null then conventional else workspaceMemberOf full name;
+
   githubTreeOf = spec:
     let gh = githubOwnerRepo (stripUrlQuery spec.source.url); in
     if spec.source.kind != "git" || gh == null then null
@@ -228,10 +263,7 @@ let
     if full == null then null
     else
       let
-        rel = lib.findFirst
-          (r: builtins.pathExists (full + "/${r}/Cargo.toml"))
-          null
-          (memberLayoutsOf spec.name);
+        rel = memberDirOf full spec.name;
         declared =
           if rel == null then [ ]
           else ((builtins.fromTOML (builtins.readFile (full + "/${rel}/Cargo.toml"))).package.metadata.substrate.sources or [ ]);
@@ -290,11 +322,16 @@ let
           null
           candidates;
         rooted = gitMemberRootedOf spec;
+        member =
+          if gh == null then null
+          else workspaceMemberOf full spec.name;
       in
         if rooted != null
         then rooted.full
         else if firstMatch != null
         then firstMatch
+        else if member != null
+        then full + "/${member}"
         else full
     else
       # Path source — two cases:
@@ -1474,5 +1511,5 @@ in {
   # supported entry point.
   inherit githubOwnerRepo;
 
-  inherit gitMemberRootedOf;
+  inherit gitMemberRootedOf workspaceMemberOf;
 }
