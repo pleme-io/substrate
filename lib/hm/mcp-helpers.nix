@@ -164,6 +164,12 @@ in rec {
         example = ".cursor/mcp.json";
       };
 
+      remoteUrlKey = mkOption {
+        type = types.str;
+        default = "url";
+        description = "Key an mcpjson agent reads a remote server's URL from (Antigravity CLI: serverUrl).";
+      };
+
       configFormat = mkOption {
         type = types.enum [ "mcpjson" "claude" "opencode" ];
         default = "mcpjson";
@@ -440,10 +446,15 @@ in rec {
   #     agentName = "cursor";
   #     extraServers = agent.extraServers;
   #   };
-  mkMcpJson = { serverDefs, resolvedServers, agentName, extraServers ? {} }:
-    let filtered = mkFilterForAgent serverDefs resolvedServers agentName;
+  mkMcpJson = { serverDefs, resolvedServers, agentName, extraServers ? {}, remoteUrlKey ? "url" }:
+    let
+      filtered = mkFilterForAgent serverDefs resolvedServers agentName;
+      rekey = srv:
+        if remoteUrlKey != "url" && srv ? url
+        then removeAttrs srv [ "url" ] // { ${remoteUrlKey} = srv.url; }
+        else srv;
     in builtins.toJSON {
-      mcpServers = filtered // extraServers;
+      mcpServers = mapAttrs (_: rekey) (filtered // extraServers);
     };
 
   # ─── Agent Config Deployment ───────────────────────────────────────
@@ -464,6 +475,7 @@ in rec {
         "${agent.configPath}".text = mkMcpJson {
           inherit serverDefs resolvedServers agentName;
           extraServers = agent.extraServers;
+          remoteUrlKey = agent.remoteUrlKey or "url";
         };
       }
     ) agents);

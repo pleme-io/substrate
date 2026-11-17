@@ -1092,6 +1092,24 @@ in runTests [
     "the wrapper must exec the server under env -i with only the allowlist and its own env/envFiles; GRAFANA_PASSWORD must not cross")
 
   (let
+    defs = { remote = { agents = [ ]; }; local = { agents = [ ]; }; };
+    resolved = {
+      remote = { type = "http"; url = "https://r/mcp"; };
+      local = { type = "stdio"; command = "/bin/l"; args = [ ]; };
+    };
+    json = key: builtins.fromJSON (mcpHelpers.mkMcpJson {
+      serverDefs = defs; resolvedServers = resolved; agentName = "a"; remoteUrlKey = key;
+    });
+    renamed = json "serverUrl";
+    plain = json "url";
+  in mkTest "mcp-json-remote-url-key"
+    (renamed.mcpServers.remote.serverUrl == "https://r/mcp"
+      && !(renamed.mcpServers.remote ? url)
+      && renamed.mcpServers.local.command == "/bin/l"
+      && plain.mcpServers.remote.url == "https://r/mcp")
+    "an agent's remoteUrlKey must name the remote URL field (Antigravity CLI reads serverUrl); the default keeps url")
+
+  (let
     clean = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; caBundle = "/stub/ca.crt"; } "datadog" {
       package = null; command = "mcp-datadog"; args = [ ]; env = { }; envFiles = { };
     };
