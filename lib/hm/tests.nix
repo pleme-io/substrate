@@ -1092,6 +1092,20 @@ in runTests [
     "the wrapper must exec the server under env -i with only the allowlist and its own env/envFiles; GRAFANA_PASSWORD must not cross")
 
   (let
+    clean = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; caBundle = "/stub/ca.crt"; } "datadog" {
+      package = null; command = "mcp-datadog"; args = [ ]; env = { }; envFiles = { };
+    };
+    inheriting = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; caBundle = "/stub/ca.crt"; } "datadog" {
+      package = null; command = "mcp-datadog"; args = [ ]; env = { }; envFiles = { };
+      inheritEnvironment = true;
+    };
+  in mkTest "mcp-wrapper-clean-environment-carries-ca-bundle"
+    (lib.hasInfix ''export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-/stub/ca.crt}"'' clean
+      && lib.hasInfix ''export SSL_CERT_FILE="''${SSL_CERT_FILE:-/stub/ca.crt}"'' clean
+      && !(lib.hasInfix "/stub/ca.crt" inheriting))
+    "a clean-environment server must get a CA bundle when the parent sets none; nix node then failed TLS with UNABLE_TO_GET_ISSUER_CERT_LOCALLY")
+
+  (let
     text = mcpHelpers.mkMcpWrapperText { envBin = "/stub/env"; } "aws" {
       package = null; command = "aws-mcp"; args = [ ];
       env = { }; envFiles = { }; passEnvironment = [ "AWS_PROFILE" ];

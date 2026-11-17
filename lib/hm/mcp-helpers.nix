@@ -210,8 +210,15 @@ in rec {
 
   # The wrapper body, pure so it can be tested without pkgs. `envBin` is the
   # absolute path of a coreutils `env`.
-  mkMcpWrapperText = { envBin }: name: server: let
+  mkMcpWrapperText = { envBin, caBundle ? null }: name: server: let
     cmd = _mkCommandPath server;
+
+    clean = !(server.inheritEnvironment or false);
+
+    trustDefaults = optionalString (clean && caBundle != null) ''
+      export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-${caBundle}}"
+      export SSL_CERT_FILE="''${SSL_CERT_FILE:-${caBundle}}"
+    '';
 
     envFileExports = concatStringsSep "\n" (mapAttrsToList (var: path: ''
       if [ -f ${escapeShellArg path} ]; then
@@ -227,11 +234,12 @@ in rec {
       (mcpAllowedEnvironment server));
 
     launcher =
-      if server.inheritEnvironment or false then ""
-      else "${escapeShellArg envBin} -i ${cleanEnv} ";
+      if clean then "${escapeShellArg envBin} -i ${cleanEnv} "
+      else "";
   in ''
     ${envFileExports}
     ${staticExports}
+    ${trustDefaults}
     exec ${launcher}${escapeShellArg cmd} ${concatStringsSep " " (map escapeShellArg server.args)}
   '';
 
@@ -242,7 +250,10 @@ in rec {
       || !(server.inheritEnvironment or false);
 
     script = pkgs.writeShellScript "mcp-${name}"
-      (mkMcpWrapperText { envBin = "${pkgs.coreutils}/bin/env"; } name server);
+      (mkMcpWrapperText {
+        envBin = "${pkgs.coreutils}/bin/env";
+        caBundle = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+      } name server);
   in
     if !needsWrapper then null
     # A wrapper whose inner exec does not exist still BUILDS, still deploys,
