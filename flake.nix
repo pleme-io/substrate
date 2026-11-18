@@ -209,6 +209,10 @@
 
         moduleTrio = import ./lib/module-trio.nix { lib = nixpkgs.lib; };
 
+        # The blue builders (bidamas, programs, projects), taking `blue` as an
+        # argument: `blueBuilders.bidamas { lib; runCommand; symlinkJoin; ...; blue }`.
+        blueBuilders = import ./lib/build/blue { };
+
         templates.fleet = {
           path = ./templates/fleet;
           description = "kata-standard private fleet repo — fill in fleet.nix, node hardware, secrets; all behavior from the vocabulary";
@@ -223,6 +227,10 @@
         in {
           iroha =
             (import ./lib/iroha { lib = nixpkgs.lib; }).tests.asCheck pkgs;
+
+          # BLUE BUILDERS — the bidama builder family evaluates over a stub
+          # toolchain and refuses what it cannot work without.
+          blue-builders = import ./lib/tests/blue-builders-test.nix { inherit pkgs; };
 
           # FORMATTERS — the registry's refusals plus one round trip per
           # language: the editor argv applied twice is a fixed point, and the
