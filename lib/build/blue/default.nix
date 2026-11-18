@@ -10,4 +10,5 @@
 { }:
 {
   bidamas = args: import ./bidamas.nix args;
+  toolchain = args: import ./toolchain.nix args;
 }

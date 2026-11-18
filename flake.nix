@@ -231,6 +231,7 @@
           # BLUE BUILDERS — the bidama builder family evaluates over a stub
           # toolchain and refuses what it cannot work without.
           blue-builders = import ./lib/tests/blue-builders-test.nix { inherit pkgs; };
+          blue-toolchain = import ./lib/tests/blue-toolchain-test.nix { inherit pkgs; };
 
           # FORMATTERS — the registry's refusals plus one round trip per
           # language: the editor argv applied twice is a fixed point, and the
