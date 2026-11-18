@@ -343,6 +343,8 @@ jobs:
 
       - name: checks.formatters (lib/formatters.nix — refusals + per-language round trips)
         run: nix build --no-link -L '.#checks.x86_64-linux.formatters'
+      - name: checks.blue-builders (lib/build/blue — the bidama builders over a stub toolchain)
+        run: nix build --no-link -L '.#checks.x86_64-linux.blue-builders'
 
       - name: checks.go-minimal-image (lib/build/go — base-selection forcing-function)
         run: nix build --no-link -L '.#checks.x86_64-linux.go-minimal-image'
