@@ -49,10 +49,15 @@ on:
         description: "OCI registry URL (oci:// scheme)"
         type: string
         default: "oci://ghcr.io/pleme-io/charts"
+      # A PUBLIC caller must pin this to a runner registered to its own
+      # repository (scope.repo): org runner groups answer
+      # allows_public_repositories=false, so the route's ubuntu-latest and
+      # the org pools can never take its jobs (helmworks pins
+      # pleme-helmworks-release for exactly this reason, 2026-11-20).
       runner:
-        description: "Runner label for the publish job; a self-hosted label enables the App-token rung"
+        description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        default: "pleme-private"
+        default: ""
       token-source:
         description: "github-token source for helm-publish (app | pat | none)"
         type: string
