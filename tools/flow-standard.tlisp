@@ -1,0 +1,177 @@
+(define FLOWS ".github/workflows")
+(define CATALOG "catalog/workflows.lisp")
+(define NATIVE (list "substrate-parity.yml" "flow-standard.yml"))
+(define MIN-FLOWS 40)
+
+(define ROUTE "${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}")
+
+(define RUNNER-INPUT
+  (list "      runner:"
+        "        description: \"Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest.\""
+        "        type: string"
+        "        default: \"\""))
+
+(define ROUTE-EXCEPTIONS
+  (list
+    (list "ansible-collection-matrix.yml" "${{ matrix.os }}" "matrix fan-out over operating systems")
+    (list "cargo-gate-ci.yml" "${{ matrix.os }}" "matrix fan-out over operating systems")
+    (list "go-binary-release.yml" "${{ matrix.os }}" "matrix fan-out over build hosts")
+    (list "rust-binary-release.yml" "${{ matrix.os }}" "matrix fan-out over build hosts")
+    (list "rust-release.yml" "${{ matrix.runner }}" "matrix fan-out over build hosts")
+    (list "rust-binary-release.yml" "${{ github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-22.04' }}" "the oldest supported glibc, on purpose")
+    (list "esteira-rio-bump.yml" "${{ inputs.runner }}" "platform pin: rio")
+    (list "esteira-rio-release.yml" "${{ inputs.runner }}" "platform pin: rio")
+    (list "mac-autobump-release.yml" "${{ inputs.runner }}" "platform pin: rio")
+    (list "ios-game-ci.yml" "${{ inputs.runner }}" "platform pin: macos")
+    (list "blue-service-release.yml" "${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}" "a label array, then the route")
+    (list "gem-auto-bump.yml" "${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}" "a label array, then the route")
+    (list "gem-ci.yml" "${{ inputs.runner-labels != '' && fromJSON(inputs.runner-labels) || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}" "a label array, then the route")
+    (list "nix-fleet.yml" "${{ fromJSON(inputs.runner-labels) }}" "a label array")
+    (list "nix-fleet.yml" "${{ fromJSON(inputs.eval-runner-labels != '' && inputs.eval-runner-labels || inputs.runner-labels) }}" "a label array")
+    (list "super-cache-ci-build.yml" "${{ fromJSON(inputs.runner) }}" "a label array")
+    (list "blue-project.yml" "${{ fromJSON(inputs.runner-labels) }}" "a label array")
+    (list "engenho-delivery.yml" "${{ fromJSON(inputs.first-runner-labels) }}" "a label array: the first stage builds on its own node")
+    (list "engenho-delivery.yml" "${{ fromJSON(inputs.second-runner-labels) }}" "a label array: the second stage builds on its own node")
+    (list "super-cache-ci-build-matrix.yml" "${{ inputs.discover-runner != '' && inputs.discover-runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}" "the discover job takes its own runner, then the route")
+    (list "hardened-image-pipeline.yml" "${{ fromJSON(inputs.spec).runner }}" "the runner comes from the image spec")
+    (list "runner-resolve.yml" ">-" "the resolver itself: its own output routes every other job, so it cannot route by a needs output")))
+
+(define PERMISSIONS-LEDGER-FILE "tools/permissions-ledger.txt")
+
+(define (second xs) (car (cdr xs)))
+(define (lines-of p) (string-split (read-file p) "\n"))
+(define (non-empty xs) (filter (fn (s) (> (string-length (string-trim s)) 0)) xs))
+(define (indent-of l) (string-length (or (re-find "^ *" l) "")))
+(define (blank-or-comment? l) (or (= (string-length (string-trim l)) 0) (string-starts-with? (string-trim l) "#")))
+(define (native? n) (member? n NATIVE))
+(define (stem n) (re-replace "\\.yml$" n ""))
+(define (fail-line msg) (print-line msg) 1)
+(define (sum xs) (reduce (fn (a b) (+ a b)) 0 xs))
+(define (take-while-inside ls depth)
+  (cond ((null? ls) (list))
+        ((or (blank-or-comment? (car ls)) (> (indent-of (car ls)) depth)) (cons (car ls) (take-while-inside (cdr ls) depth)))
+        (else (list))))
+(define (after-line ls target)
+  (cond ((null? ls) (list))
+        ((equal? (car ls) target) (cdr ls))
+        (else (after-line (cdr ls) target))))
+(define (block ls key depth) (take-while-inside (after-line ls key) depth))
+
+(define (declared-inputs ls)
+  (map (fn (l) (re-replace "^      ([A-Za-z0-9_-]+):.*$" l "$1"))
+       (filter (fn (l) (re-match? "^      [A-Za-z0-9_-]+:" l))
+               (block (block ls "  workflow_call:" 2) "    inputs:" 4))))
+
+(define (route-ok? n v)
+  (or (equal? v ROUTE)
+      (re-match? "^\\$\\{\\{ needs\\.[a-z0-9-]+\\.outputs\\.runner \\}\\}$" v)
+      (> (length (filter (fn (e) (and (equal? (car e) n) (equal? (second e) v))) ROUTE-EXCEPTIONS)) 0)))
+
+(define (check-routes n ls)
+  (sum (map (fn (l)
+              (let ((v (string-trim (re-replace "^    runs-on: " l ""))))
+                (if (route-ok? n v) 0 (fail-line (string-append "ROUTE   " n ": runs-on " v " is not the route and not a listed exception")))))
+            (filter (fn (l) (string-starts-with? l "    runs-on: ")) ls))))
+
+(define (check-runner-input n ls)
+  (if (and (> (length (filter (fn (l) (equal? l (string-append "    runs-on: " ROUTE))) ls)) 0)
+           (not (string-contains? (string-join "\n" ls) (string-join "\n" RUNNER-INPUT))))
+      (fail-line (string-append "INPUT   " n ": routes by inputs.runner but its runner input is not the standard one"))
+      0))
+
+(define (check-name n ls)
+  (let ((names (filter (fn (l) (string-starts-with? l "name: ")) ls)))
+    (if (and (= (length names) 1) (equal? (car names) (string-append "name: " (stem n))))
+        0
+        (fail-line (string-append "NAME    " n ": the one top-level name: must be " (stem n))))))
+
+(define (take-n xs k) (if (or (null? xs) (= k 0)) (list) (cons (car xs) (take-n (cdr xs) (- k 1)))))
+
+(define (check-summary n ls)
+  (let ((heads (filter (fn (l) (re-match? "^#.+" l)) (take-n ls 12))))
+    (if (and (not (null? heads)) (>= (string-length (string-trim (re-replace "^#\\s*" (car heads) ""))) 10))
+        0
+        (fail-line (string-append "SUMMARY " n ": no column-0 # summary of 10+ characters in the first 12 lines")))))
+
+(define (check-self-refs n ls)
+  (sum (map (fn (l) (fail-line (string-append "SELFREF " n ": " (string-trim l) " — a flow calls a sibling as ./.github/workflows/<flow>.yml")))
+            (filter (fn (l) (re-match? "^\\s+uses: pleme-io/(substrate|flows)/\\.github/workflows/" l)) ls))))
+
+(define (check-call n ls)
+  (if (member? "  workflow_call:" ls) 0 (fail-line (string-append "CALL    " n ": declares no workflow_call: at indent 2"))))
+
+(define ledger (non-empty (map string-trim (if (path-exists? PERMISSIONS-LEDGER-FILE) (lines-of PERMISSIONS-LEDGER-FILE) (list)))))
+
+(define (check-permissions n ls)
+  (let ((has (member? "permissions:" ls)) (listed (member? n ledger)))
+    (cond ((and has listed) (fail-line (string-append "PERMS   " n ": declares permissions: now; remove it from " PERMISSIONS-LEDGER-FILE)))
+          ((or has listed) 0)
+          (else (fail-line (string-append "PERMS   " n ": declares no top-level permissions:"))))))
+
+(define (plist-get xs k)
+  (cond ((or (null? xs) (null? (cdr xs))) (list))
+        ((equal? (car xs) k) (second xs))
+        (else (plist-get (cdr xs) k))))
+
+(define rows
+  (map (fn (f) (list (plist-get f :file) (map (fn (s) (string-format "{}" s)) (plist-get f :inputs))))
+       (filter (fn (f) (and (list? f) (not (null? f)) (equal? (string-format "{}" (car f)) "defworkflow")))
+               (read-all (read-file CATALOG)))))
+
+(define (row-of n) (filter (fn (r) (equal? (car r) n)) rows))
+(define (same-set? a b) (and (= (length a) (length b)) (null? (filter (fn (x) (not (member? x b))) a))))
+
+(define (check-catalog n ls)
+  (let ((r (row-of n)))
+    (cond ((null? r) (fail-line (string-append "CATALOG " n ": no (defworkflow …) row in " CATALOG)))
+          ((same-set? (second (car r)) (declared-inputs ls)) 0)
+          (else (fail-line (string-append "CATALOG " n ": row :inputs (" (string-join " " (second (car r))) ") differ from the declared inputs (" (string-join " " (declared-inputs ls)) ")"))))))
+
+(define (concurrency-group ls)
+  (let ((gs (filter (fn (l) (string-starts-with? l "  group: ")) (block ls "concurrency:" 0))))
+    (if (null? gs) "" (string-trim (re-replace "^  group: " (car gs) "")))))
+
+(define (callees ls)
+  (map (fn (l) (re-replace "^\\s+uses: \\./\\.github/workflows/([A-Za-z0-9._-]+\\.yml).*$" l "$1"))
+       (filter (fn (l) (re-match? "^\\s+uses: \\./\\.github/workflows/[A-Za-z0-9._-]+\\.yml" l)) ls)))
+
+(define (flow-lines n)
+  (let ((p (string-append FLOWS "/" n)))
+    (if (path-exists? p) (lines-of p) (list))))
+
+(define (reachable todo seen)
+  (cond ((null? todo) seen)
+        ((member? (car todo) seen) (reachable (cdr todo) seen))
+        (else (reachable (append (cdr todo) (callees (flow-lines (car todo)))) (cons (car todo) seen)))))
+
+(define (check-deadlock n ls)
+  (let ((g (concurrency-group ls)))
+    (if (equal? g "")
+        0
+        (sum (map (fn (c) (fail-line (string-append "DEADLK  " n ": concurrency group " g " is also the group of " c ", which it calls; the callee waits on its caller and GitHub cancels it")))
+                  (filter (fn (c) (equal? (concurrency-group (flow-lines c)) g)) (reachable (callees ls) (list))))))))
+
+(define flows (filter (fn (p) (not (native? (path-basename p)))) (glob (string-append FLOWS "/*.yml"))))
+
+(when (< (length flows) MIN-FLOWS)
+  (print-line (string-append "FATAL: found " (string-format "{}" (length flows)) " flows, expected at least " (string-format "{}" MIN-FLOWS)))
+  (exit 3))
+
+(define (check-flow p)
+  (let ((n (path-basename p)) (ls (lines-of p)))
+    (+ (check-call n ls) (check-name n ls) (check-summary n ls) (check-routes n ls) (check-runner-input n ls)
+       (check-self-refs n ls) (check-permissions n ls) (check-catalog n ls) (check-deadlock n ls))))
+
+(define names (map path-basename flows))
+(define orphans (filter (fn (r) (not (member? (car r) names))) rows))
+(define stale-ledger (filter (fn (n) (not (member? n names))) ledger))
+
+(define findings
+  (+ (sum (map check-flow flows))
+     (sum (map (fn (r) (fail-line (string-append "CATALOG " (car r) ": row names no flow"))) orphans))
+     (sum (map (fn (n) (fail-line (string-append "PERMS   " n ": ledger names no flow"))) stale-ledger))))
+
+(print-line (string-append "flows checked: " (string-format "{}" (length flows))
+                           ", findings: " (string-format "{}" findings)
+                           ", permissions ledger: " (string-format "{}" (length ledger))))
+(exit (if (> findings 0) 1 0))

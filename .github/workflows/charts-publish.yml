@@ -35,6 +35,9 @@
 
 name: charts-publish
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:
@@ -58,7 +61,7 @@ on:
 jobs:
   changes:
     name: Changed charts
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.event.repository.private && (vars.PRIVATE_BUILDER_RUNNER || 'pleme-private') || 'ubuntu-latest') }}
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
@@ -88,12 +91,12 @@ jobs:
       fail-fast: false
       matrix:
         chart: ${{ fromJson(needs.changes.outputs.matrix) }}
-    # Full ref, never './': a local reusable-workflow reference inside a
-    # reusable workflow resolves against the CALLER's repo, where this file
-    # does not exist — the matrix job would die at dispatch with "workflow
-    # not found" (caught 2026-11-20; the pipeline had never run far enough
-    # to reach it).
-    uses: pleme-io/flows/.github/workflows/helm-publish.yml@main
+    # Sibling call by './' (the house standard): a reusable workflow's
+    # local ref resolves against the repository it lives in — this file's
+    # own repo — exactly like every sibling call in auto-release.yml. The
+    # full pleme-io/flows ref works too but fetches @main at run time and
+    # can desync mid-run from the charts-publish that was called.
+    uses: ./.github/workflows/helm-publish.yml
     with:
       chartPath: ./${{ inputs.chartsPath }}/${{ matrix.chart }}
       registry: ${{ inputs.registry }}

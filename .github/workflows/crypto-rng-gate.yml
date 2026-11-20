@@ -1,5 +1,8 @@
 name: crypto-rng-gate
 
+permissions:
+  contents: read
+
 # Fails when a Rust crate that holds crypto uses a non-crypto RNG: a seeded
 # u64 RNG, SmallRng, a mock or PCG/xorshift RNG, or a hand-rolled LCG.
 # The rules are lib/build/rust/crypto-rng-ban/clippy.toml. The gate runs only
@@ -26,7 +29,6 @@ on:
       runner:
         description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
-        required: false
         default: ""
 
 jobs:
