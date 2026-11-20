@@ -1,0 +1,102 @@
+# Reusable workflow: publish every chart whose files changed in the push.
+#
+# The repo-facing half of the fleet's chart delivery pattern (helm-publish.yml
+# is the per-chart half): detect which chart directories under `charts/`
+# moved, publish exactly those through helm-publish, skip the rest. A
+# consumer repo's whole trigger is:
+#
+#   on:
+#     push:
+#       branches: [main]
+#       paths: ["charts/**"]
+#   jobs:
+#     publish:
+#       uses: pleme-io/flows/.github/workflows/charts-publish.yml@main
+#       secrets: inherit
+#
+# Chain depth: consumer(1) -> this(2) -> helm-publish(3) — legal at 4; do NOT
+# route this through the pleme-helm family composer, which would make it 5.
+#
+# Changed-only: a chart whose files did not move is not re-pushed, so a docs
+# commit cannot resurrect an old version over the registry's.
+#
+# Credential shape (measured 2026-11-20): the push credential is the CALLING
+# repo's own GITHUB_TOKEN (helm-publish sets permissions: packages: write)
+# — ghcr.io rejects GitHub App installation tokens outright (login OK, every
+# registry op 403 "denied"; community discussions 171423 + 24636), so no App
+# token and no PAT exists anywhere in the publish path. Packages this repo
+# creates inherit its access (org default ON); pre-existing ones need a
+# one-time Connect Repository link. Pull-side, chart packages are public —
+# pulls are anonymous and credential-free.
+#
+# NOTE: a chart package's first publish creates it linked to the calling
+# repo but PRIVATE by default; flip it public once on the package settings
+# page (Danger Zone → Change visibility) so nodes pull anonymously.
+
+name: charts-publish
+
+on:
+  workflow_call:
+    inputs:
+      chartsPath:
+        description: "Directory holding one subdirectory per chart"
+        type: string
+        default: "charts"
+      registry:
+        description: "OCI registry URL (oci:// scheme)"
+        type: string
+        default: "oci://ghcr.io/pleme-io/charts"
+      runner:
+        description: "Runner label for the publish job; a self-hosted label enables the App-token rung"
+        type: string
+        default: "pleme-private"
+      token-source:
+        description: "github-token source for helm-publish (app | pat | none)"
+        type: string
+        default: "app"
+
+jobs:
+  changes:
+    name: Changed charts
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: set
+        run: |
+          set -euo pipefail
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            before="HEAD~1"
+          fi
+          base="${{ inputs.chartsPath }}"
+          dirs=$(git diff --name-only "$before" "${{ github.sha }}" -- "$base/" \
+            | cut -d/ -f2 | sort -u \
+            | while read -r d; do [ -f "$base/$d/Chart.yaml" ] && echo "$d"; done)
+          matrix=$(printf '%s\n' "$dirs" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "publishing: $matrix"
+
+  publish:
+    name: Publish
+    needs: changes
+    if: needs.changes.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJson(needs.changes.outputs.matrix) }}
+    # Full ref, never './': a local reusable-workflow reference inside a
+    # reusable workflow resolves against the CALLER's repo, where this file
+    # does not exist — the matrix job would die at dispatch with "workflow
+    # not found" (caught 2026-11-20; the pipeline had never run far enough
+    # to reach it).
+    uses: pleme-io/flows/.github/workflows/helm-publish.yml@main
+    with:
+      chartPath: ./${{ inputs.chartsPath }}/${{ matrix.chart }}
+      registry: ${{ inputs.registry }}
+      runner: ${{ inputs.runner }}
+      token-source: ${{ inputs.token-source }}
+    secrets: inherit

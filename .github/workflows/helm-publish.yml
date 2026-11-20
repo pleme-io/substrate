@@ -11,12 +11,17 @@
 #         version: ""                       # optional; parsed from Chart.yaml
 #         libChartDir: ""                   # optional, for file:// deps (e.g. pleme-lib)
 #       secrets:
-#         GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+#         BOT_PAT: ${{ secrets.BOT_PAT }}   # only if token-source is pat
 #
 # Strategy:
 #   - Prefers `forge helm release` (lint + package + push as one transaction).
 #   - Falls back to `helm lint && helm package && helm push` for repos that
 #     don't yet have forge available in their flake.
+#
+# Registry credential (ghcr): the job's own GITHUB_TOKEN, with
+# `permissions: packages: write`. App installation tokens CANNOT talk to
+# ghcr (see the Registry login step). Chart packages are public — pulls are
+# anonymous, so there is no pull-side credential at all.
 #
 # Expected chart layout: a directory containing a `Chart.yaml`. If the chart
 # depends on a sibling library chart (file://...), pass libChartDir.
@@ -55,9 +60,6 @@ on:
         type: string
         default: 'app'
     secrets:
-      GHCR_TOKEN:
-        description: "Token with write:packages on the target registry. Falls back to GITHUB_TOKEN."
-        required: false
       BOT_PAT:
         description: "Long-lived PAT for the Nix installer's GitHub API calls, presented only when token-source is pat."
         required: false
@@ -82,15 +84,26 @@ jobs:
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Registry login
-        env:
-          REGISTRY: ${{ inputs.registry }}
-          TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN || github.token }}
-        run: |
-          set -euo pipefail
-          host="${REGISTRY#oci://}"
-          host="${host%%/*}"
-          echo "$TOKEN" | nix shell nixpkgs#kubernetes-helm --command \
-            helm registry login "$host" --username "${{ github.actor }}" --password-stdin
+        # ghcr.io accepts PATs and the calling repo's own GITHUB_TOKEN — and
+        # NOTHING else: GitHub App installation tokens are rejected by the
+        # registry even with packages:write (login succeeds, every registry
+        # operation 403s "denied"; measured 2026-11-20, community
+        # discussions 171423 + 24636). The earlier "measured working
+        # 2026-08-22" receipt was a LOGIN-only probe — the exact trap. So
+        # this caller passes no app-token rung: the job's GITHUB_TOKEN
+        # (permissions: packages: write above) is the push credential, and
+        # the target package must be linked to this repository — org default
+        # "inherit access from source repository" is ON (measured
+        # 2026-11-20), so packages this repo creates are linked at birth;
+        # pre-existing ones need the one-time link (package page → Connect
+        # Repository). docker client: helm-oci-publish reads
+        # ~/.docker/config.json, not helm's own config.
+        uses: pleme-io/actions/registry-login@main
+        with:
+          registry: ${{ inputs.registry }}
+          client: docker
+          username: ${{ github.actor }}
+          github-token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Lint, package & push chart
         uses: pleme-io/actions/helm-oci-publish@main

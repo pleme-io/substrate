@@ -544,8 +544,16 @@
   :pattern   helm-chart
   :inputs    (chartPath registry version libChartDir libChartName runner token-source)
   :outputs   ()
-  :secrets   (GHCR_TOKEN BOT_PAT)
+  :secrets   (BOT_PAT)
   :consumers 0)
+
+(defworkflow charts-publish
+  :file      "charts-publish.yml"
+  :pattern   helm-chart
+  :inputs    (chartsPath registry runner token-source)
+  :outputs   ()
+  :secrets   ()
+  :consumers 1)
 
 (defworkflow ios-game-ci
   :file      "ios-game-ci.yml"
