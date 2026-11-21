@@ -96,12 +96,12 @@ jobs:
       fail-fast: false
       matrix:
         chart: ${{ fromJson(needs.changes.outputs.matrix) }}
-    # Sibling call by './' (the house standard): a reusable workflow's
-    # local ref resolves against the repository it lives in — this file's
-    # own repo — exactly like every sibling call in auto-release.yml. The
-    # full pleme-io/flows ref works too but fetches @main at run time and
-    # can desync mid-run from the charts-publish that was called.
-    uses: ./.github/workflows/helm-publish.yml
+    # Full self-ref, on purpose (measured 2026-11-21, helmworks probe run
+    # 44861052761): a './' sibling ref inside a CALLED reusable resolves
+    # against the ROOT caller's repository — helmworks, which has no
+    # helm-publish.yml, so the matrix job startup_fails before any runner.
+    # The SELFREF standard rule exempts this file for exactly this reason.
+    uses: pleme-io/flows/.github/workflows/helm-publish.yml@main
     with:
       chartPath: ./${{ inputs.chartsPath }}/${{ matrix.chart }}
       registry: ${{ inputs.registry }}
