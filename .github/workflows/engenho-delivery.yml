@@ -109,12 +109,15 @@ jobs:
       store-path: ${{ steps.closure.outputs.store-path }}
       nar-hash: ${{ steps.closure.outputs.nar-hash }}
     steps:
+      - id: token
+        uses: pleme-io/actions/github-token@main
       - id: closure
         uses: pleme-io/actions/fleet-delivery@main
         with:
           mode: closure
           flake: github:${{ github.repository }}/${{ github.sha }}
           attr: ${{ inputs.attr }}
+          token: ${{ steps.token.outputs.token }}
       - uses: pleme-io/actions/sui-cache-push@main
         with:
           paths: ${{ steps.closure.outputs.store-path }}
@@ -126,6 +129,7 @@ jobs:
           flake: github:${{ github.repository }}/${{ github.sha }}
           attr: ${{ inputs.attr }}
           substituter: ${{ inputs.substituter }}
+          token: ${{ steps.token.outputs.token }}
 
   promote:
     needs: [first, second-closure]
