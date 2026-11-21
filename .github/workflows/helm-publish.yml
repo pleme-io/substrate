@@ -88,20 +88,17 @@ jobs:
         with:
           github-token: ${{ steps.token.outputs.token || secrets.GITHUB_TOKEN }}
       - name: Registry login
-        # ghcr.io accepts PATs and the calling repo's own GITHUB_TOKEN — and
-        # NOTHING else: GitHub App installation tokens are rejected by the
-        # registry even with packages:write (login succeeds, every registry
-        # operation 403s "denied"; measured 2026-11-20, community
-        # discussions 171423 + 24636). The earlier "measured working
-        # 2026-08-22" receipt was a LOGIN-only probe — the exact trap. So
-        # this caller passes no app-token rung: the job's GITHUB_TOKEN
-        # (permissions: packages: write above) is the push credential, and
-        # the target package must be linked to this repository — org default
-        # "inherit access from source repository" is ON (measured
-        # 2026-11-20), so packages this repo creates are linked at birth;
-        # pre-existing ones need the one-time link (package page → Connect
-        # Repository). docker client: helm-oci-publish reads
-        # ~/.docker/config.json, not helm's own config.
+        # The App installation token is the push credential, and it is
+        # PROVEN by a green run: helmworks chart-publish 5aa3471
+        # (2026-11-20 15:52Z) pushed charts/pleme-microservice with the
+        # app-token rung (package updated_at moved, run green). The
+        # GITHUB_TOKEN rung 403s write_package on org packages even with
+        # permissions: packages: write, on existing linked packages and
+        # both runner classes (runs 44863902145..44905378868) — org
+        # package Actions-access is the gap the App's installation-level
+        # packages:write sidesteps. Keep client: helm (the nix lane's bare
+        # helm push reads helm's own config; a docker-client login is
+        # invisible to it — that 403 was an ANONYMOUS push, run 44863902145).
         uses: pleme-io/actions/registry-login@main
         with:
           registry: ${{ inputs.registry }}
@@ -112,6 +109,7 @@ jobs:
           # 44863902145 — not a token-permission wall at all).
           client: helm
           username: ${{ github.actor }}
+          app-token: ${{ steps.token.outputs.app-token }}
           github-token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - name: Lint, package & push chart
