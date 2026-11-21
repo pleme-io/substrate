@@ -105,7 +105,12 @@ jobs:
         uses: pleme-io/actions/registry-login@main
         with:
           registry: ${{ inputs.registry }}
-          client: docker
+          # client: helm — the nix publish lane calls bare `helm push`,
+          # which reads helm's OWN registry config, not ~/.docker/config.json;
+          # with client: docker the push went out ANONYMOUS and ghcr answered
+          # 403 permission_denied: write_package (measured 2026-11-21, run
+          # 44863902145 — not a token-permission wall at all).
+          client: helm
           username: ${{ github.actor }}
           github-token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
