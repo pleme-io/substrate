@@ -51,6 +51,10 @@ on:
         description: "Library chart name (passed through to forge helm release)"
         type: string
         default: "pleme-lib"
+      charts:
+        description: "Newline-separated chart names under chartPath to publish (the changed-only list from actions/changed-charts); empty publishes the single chart at chartPath. The loop lives in the action because GitHub startup_fails a job combining uses: with strategy.matrix (measured 2026-11-21)."
+        type: string
+        default: ""
       runner:
         description: "Runner label. Empty routes by caller visibility: a private caller to vars.PRIVATE_BUILDER_RUNNER or pleme-private, a public caller to ubuntu-latest."
         type: string
@@ -113,6 +117,7 @@ jobs:
           version:        ${{ inputs.version }}
           lib-chart-dir:  ${{ inputs.libChartDir }}
           lib-chart-name: ${{ inputs.libChartName }}
+          charts:         ${{ inputs.charts }}
           # The nix backend runs run.tlisp and takes helm from nixpkgs: a
           # pure-nix self-hosted runner has no docker for a container
           # action (measured 2026-11-21, the helmworks-release pool's
