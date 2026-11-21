@@ -113,3 +113,8 @@ jobs:
           version:        ${{ inputs.version }}
           lib-chart-dir:  ${{ inputs.libChartDir }}
           lib-chart-name: ${{ inputs.libChartName }}
+          # The nix backend runs run.tlisp and takes helm from nixpkgs: a
+          # pure-nix self-hosted runner has no docker for a container
+          # action (measured 2026-11-21, the helmworks-release pool's
+          # first job — "docker: command not found" pulling the image).
+          backend:        nix
