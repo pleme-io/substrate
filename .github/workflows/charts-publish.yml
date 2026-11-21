@@ -1,3 +1,9 @@
+# RETIRED (2026-11-21): no caller. GitHub startup_fails a job that combines
+# `uses:` with `strategy.matrix` (measured, helmworks runs 44862261383 and
+# 44862322663 — matrix-free single-`uses:` jobs run fine), so a detect-then-
+# matrix-publish reusable cannot exist on GitHub today. The live shape is the
+# flat caller: actions/changed-charts (detect) + one helm-publish call whose
+# `charts` input loops INSIDE the action. Kept as the record of why.
 # Reusable workflow: publish every chart whose files changed in the push.
 #
 # The repo-facing half of the fleet's chart delivery pattern (helm-publish.yml
