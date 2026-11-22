@@ -17,6 +17,8 @@ let
         UKAI_TAILSCALE = tailscaleExe;
         UKAI_DRY_RUN = if cfg.dryRun then "1" else "0";
         UKAI_STATE = "${cfg.stateDir}/state.json";
+        UKAI_BEAT = "${cfg.stateDir}/beat.json";
+        UKAI_INTERVAL = toString cfg.refreshIntervalSeconds;
       } // lib.optionalAttrs (platform == "nixos") {
         UKAI_IP = "${pkgs.iproute2}/bin/ip";
         UKAI_GETENT = "${lib.getBin pkgs.glibc}/bin/getent";
@@ -91,7 +93,7 @@ let
         stateDir = lib.mkOption {
           type = lib.types.str;
           default = if platform == "darwin" then "/var/run/ukai" else "/run/ukai";
-          description = "Where state.json (last outcome, planned and failed commands, the hosts ukai installed) is written.";
+          description = "Where state.json (last outcome, planned and failed commands, the hosts ukai installed) and beat.json (the overlay's verdict for plantao's inbox: ok, degraded or failed, with when and why) are written.";
         };
         policyRouting = {
           table = lib.mkOption {
