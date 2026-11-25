@@ -149,7 +149,7 @@ jobs:
         # crossplane then reads.
         run: |
           set -euo pipefail
-          echo "$TOKEN" | docker login "$HOST" -u "${{ github.actor }}" --password-stdin
+          echo "$TOKEN" | nix run nixpkgs#docker-client -- login "$HOST" -u "${{ github.actor }}" --password-stdin
 
       - name: Build + push Function xpkg (Nix-built runtime image embedded)
         env:
