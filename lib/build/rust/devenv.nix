@@ -20,6 +20,7 @@ let
   darwinBuildInputs = (import ../../util/darwin.nix).mkDarwinBuildInputs pkgs;
   fenixToolchain = pkgs.fenixRustToolchain or null;
   hasToolchain = fenixToolchain != null;
+  testRuntimeLibs = import ./test-runtime-libs.nix { inherit pkgs; };
 in {
   # Build a Rust development shell with optional tool sets.
   #
@@ -39,6 +40,7 @@ in {
     withKubernetes ? false,
     withDocker ? false,
     withProtobuf ? false,
+    withTestRuntimeLibs ? false,
   }: pkgs.mkShell {
     nativeBuildInputs = with pkgs;
       # Core Rust toolchain
@@ -58,5 +60,7 @@ in {
     env = lib.optionalAttrs hasToolchain {
       RUST_SRC_PATH = "${fenixToolchain}/lib/rustlib/src/rust/library";
     } // extraEnv;
+
+    shellHook = lib.optionalString withTestRuntimeLibs testRuntimeLibs.prependHook;
   };
 }

@@ -221,6 +221,25 @@
         # Aggregate-before-assert eval-test derivations for the vocabulary.
         checks = eachSystem (system: let
           pkgs = import nixpkgs { inherit system; };
+          # The class receipt (2026-11-26): a dev shell built a test binary
+          # it could not run — liblzma.so.5 missing at load (sui run
+          # 45892858314). testRuntimeLibs.path must satisfy the loader for a
+          # binary linked against one of its libs, built OUTSIDE the path.
+          testRuntimeLibs = import ./lib/build/rust/test-runtime-libs.nix { inherit pkgs; };
+          testRuntimeLibsCheck = pkgs.runCommand "test-runtime-libs" { nativeBuildInputs = [ pkgs.gcc ]; } ''
+            cat > probe.c <<'EOF2'
+#include <lzma.h>
+#include <stdio.h>
+int main(void) { printf("lzma %s\n", lzma_version_string()); return 0; }
+EOF2
+            # shellcheck disable=SC2154
+            mkdir -p "$out"
+            gcc probe.c -o probe -I${pkgs.xz.dev}/include -L${pkgs.xz.out}/lib -llzma
+            # The link used the store path directly; the RUN must come from
+            # LD_LIBRARY_PATH alone, as it does inside the shell.
+            export LD_LIBRARY_PATH="${testRuntimeLibs.path}"
+            ./probe | tee "$out/ran"
+          '';
           # Imported once: three checks below read three faces of one suite.
           rustWorkspaceTests =
             import ./lib/build/rust/tests/workspace-tests-test.nix { inherit pkgs; };
@@ -430,6 +449,7 @@
           # The negative control is itself a standing red run: it fails the
           # build unless cargo's exit 101 reaches the builder.
           rust-workspace-tests = rustWorkspaceTests.asCheck pkgs;
+          test-runtime-libs = testRuntimeLibsCheck;
           rust-workspace-tests-e2e = rustWorkspaceTests.e2e;
           rust-workspace-tests-negative-control = rustWorkspaceTests.negativeControl;
 
@@ -750,6 +770,7 @@
         # inflicted. The devenv arm is covered by
         # `checks.<system>.devshell-preflight`'s `devenv-backed-throws`.
         devShells = eachSystem (system: let
+          testRuntimeLibs = import ./lib/build/rust/test-runtime-libs.nix { pkgs = nixpkgs.legacyPackages.${system}; };
           pkgs = import nixpkgs { inherit system; };
         in {
           selftest-cargo = pkgs.mkShell {
@@ -797,8 +818,13 @@
           # `rust-version = 1.97`, so its release had failed since 2026-08-08
           # on the gate alone, a red the builders would never have produced.
           release-gate = pkgs.mkShell {
-            packages = [ self.packages.${system}.rustToolchain pkgs.pkg-config pkgs.protobuf ];
-            buildInputs = [ pkgs.openssl ];
+            packages = [
+              self.packages.${system}.rustToolchain
+              pkgs.pkg-config
+              pkgs.protobuf
+            ];
+            buildInputs = [ pkgs.openssl ] ++ testRuntimeLibs.libs;
+            env.LD_LIBRARY_PATH = testRuntimeLibs.path;
           };
         });
 

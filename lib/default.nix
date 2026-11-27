@@ -1594,6 +1594,11 @@ in rec {
   #   };
   inherit (rustDevenvModule) mkRustDevShell;
 
+  # The native libs a cargo-built test binary can link in a dev shell, plus
+  # the loader path that lets it RUN (lib/build/rust/test-runtime-libs.nix).
+  # `testRuntimeLibs pkgs` answers { libs, path, prependHook }.
+  testRuntimeLibs = import ./build/rust/test-runtime-libs.nix;
+
   # ============================================================================
   # GO LIBRARY CHECK BUILDER (standalone import path)
   # ============================================================================
