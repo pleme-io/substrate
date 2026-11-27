@@ -780,7 +780,13 @@ in {
     extraPackages = builtins.map (name: hostPkgs.${name}) devShellPackages;
     shellHook = devShellHook;
     # Both lists include what `tests.cargo` declared — see devShellSystemInputs.
-    inherit (devShellSystemInputs) buildInputs nativeBuildInputs;
+    # The test-runtime lib set rides buildInputs so the shell's own
+    # LD_LIBRARY_PATH derivation (shared/devshell.nix) puts it on the loader
+    # path: a cargo-built test binary must RUN in this shell, not only link
+    # (sui's gate, run 45892858314). Operator-directed default, 2026-11-27.
+    buildInputs = devShellSystemInputs.buildInputs
+      ++ (import ../rust/test-runtime-libs.nix { pkgs = hostPkgs; }).libs;
+    inherit (devShellSystemInputs) nativeBuildInputs;
   };
 
   apps = {
