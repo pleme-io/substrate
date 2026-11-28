@@ -19,6 +19,7 @@ let
         UKAI_STATE = "${cfg.stateDir}/state.json";
       } // lib.optionalAttrs (platform == "nixos") {
         UKAI_IP = "${pkgs.iproute2}/bin/ip";
+        UKAI_SYSTEMCTL = "${config.systemd.package}/bin/systemctl";
         UKAI_GETENT = "${lib.getBin pkgs.glibc}/bin/getent";
         UKAI_TABLE = toString cfg.policyRouting.table;
         UKAI_PRIORITY = toString cfg.policyRouting.priority;
